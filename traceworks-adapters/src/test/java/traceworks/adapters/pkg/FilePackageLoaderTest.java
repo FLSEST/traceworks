@@ -95,8 +95,8 @@ class FilePackageLoaderTest {
 
         assertThatThrownBy(() -> loader.load(dir)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Cannot read " + dir.resolve("workflow.json") + ": the definition has both default_context"
-                        + " and defaultContext, two spellings of one key — keep default_context and remove the other"
-                        + " (duplicate-key-spelling)");
+                        + " and defaultContext, two spellings of one key — keep the name with the underscore and"
+                        + " remove the other (duplicate-key-spelling)");
     }
 
     @Test

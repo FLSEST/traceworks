@@ -9,6 +9,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,14 +31,14 @@ public final class WorkflowJson {
     /** The rule a definition with both spellings of one key breaks. */
     public static final String DUPLICATE_RULE = "duplicate-key-spelling";
 
-    /** The top-level keys with two spellings: the earlier name and the name. */
-    public static final Map<String, String> TOP_LEVEL = Map.of(
+    /** The top-level keys with two spellings: the earlier name and the name, in the order a refusal names them. */
+    public static final Map<String, String> TOP_LEVEL = ordered(
             "formatVersion", "format_version",
             "defaultContext", "default_context",
             "modelChoices", "model_choices");
 
-    /** The keys of {@code metadata.audit} with two spellings: the earlier name and the name. */
-    public static final Map<String, String> AUDIT = Map.of(
+    /** The keys of {@code metadata.audit} with two spellings: the earlier name and the name, in that order too. */
+    public static final Map<String, String> AUDIT = ordered(
             "reportBlock", "report_block",
             "schemaVersion", "schema_version");
 
@@ -63,16 +67,25 @@ public final class WorkflowJson {
                     "No content to map due to end-of-input");
         }
         if (root instanceof ObjectNode definition) {
-            rename(definition, TOP_LEVEL, "");
+            List<String> twice = new ArrayList<>();
+            rename(definition, TOP_LEVEL, "", twice);
             if (definition.path("metadata").path("audit") instanceof ObjectNode audit) {
-                rename(audit, AUDIT, "metadata.audit.");
+                rename(audit, AUDIT, "metadata.audit.", twice);
+            }
+            if (!twice.isEmpty()) {
+                throw JsonMappingException.from((com.fasterxml.jackson.core.JsonParser) null, "the definition has "
+                        + String.join(", ", twice) + ", two spellings of one key — keep the name with the underscore"
+                        + " and remove the other (" + DUPLICATE_RULE + ")");
             }
         }
         return JSON.treeToValue(root, WorkflowDefinition.class);
     }
 
-    private static void rename(ObjectNode node, Map<String, String> names, String where)
-            throws JsonMappingException {
+    /**
+     * Renames the earlier names of {@code node} and adds every key that stands there in both spellings to
+     * {@code twice}, as {@code both <name> and <earlier name>}, in the order of {@code names}.
+     */
+    private static void rename(ObjectNode node, Map<String, String> names, String where, List<String> twice) {
         for (Map.Entry<String, String> twin : names.entrySet()) {
             String earlier = twin.getKey();
             String name = twin.getValue();
@@ -80,11 +93,18 @@ public final class WorkflowJson {
                 continue;
             }
             if (node.has(name)) {
-                throw JsonMappingException.from((com.fasterxml.jackson.core.JsonParser) null, "the definition has both "
-                        + where + name + " and " + where + earlier + ", two spellings of one key — keep " + where
-                        + name + " and remove the other (" + DUPLICATE_RULE + ")");
+                twice.add("both " + where + name + " and " + where + earlier);
+            } else {
+                node.set(name, node.remove(earlier));
             }
-            node.set(name, node.remove(earlier));
         }
+    }
+
+    private static Map<String, String> ordered(String... pairs) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (int i = 0; i < pairs.length; i += 2) {
+            map.put(pairs[i], pairs[i + 1]);
+        }
+        return Collections.unmodifiableMap(map);
     }
 }

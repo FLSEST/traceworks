@@ -93,6 +93,21 @@ class WorkflowJsonTest {
                 .hasMessageContaining("both " + name + " and " + earlier);
     }
 
+    /** Every key that stands there twice is named, in one fixed order, whatever the order in the file. */
+    @Test
+    void severalKeysInBothSpellings_areAllNamed_inAFixedOrder() {
+        String both = UNDERSCORE
+                .replace("\"model_choices\":", "\"modelChoices\": {}, \"model_choices\":")
+                .replace("\"format_version\": 1,", "\"format_version\": 1, \"formatVersion\": 1,")
+                .replace("\"report_block\": \"report\",", "\"report_block\": \"report\", \"reportBlock\": \"r\",");
+
+        assertThatThrownBy(() -> read(both)).isInstanceOf(JsonProcessingException.class)
+                .hasMessageStartingWith("the definition has both format_version and formatVersion, both model_choices"
+                        + " and modelChoices, both metadata.audit.report_block and metadata.audit.reportBlock, two"
+                        + " spellings of one key — keep the name with the underscore and remove the other"
+                        + " (duplicate-key-spelling)");
+    }
+
     /** Only the keys of the definition have two spellings: a key of the same letters elsewhere stays as written. */
     @Test
     void otherKeys_stayAsWritten() throws Exception {
