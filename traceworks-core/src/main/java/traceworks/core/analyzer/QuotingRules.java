@@ -4,9 +4,12 @@ import traceworks.core.analyzer.AnalyzerFinding.Severity;
 import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
 import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
 import traceworks.core.analyzer.ShellQuoteScanner.Quote;
+import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.engine.NestedBlocks;
 import traceworks.core.engine.StepModes;
 import traceworks.core.model.BlockDefinition;
+import traceworks.core.model.WorkflowDefinition;
+import traceworks.core.port.WorkflowResolver;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,9 +27,9 @@ import java.util.regex.Pattern;
  *   <li>{@code quoted-placeholder}: a placeholder for free text stands inside quotes. Without escaping, an apostrophe
  *       in the value ends the quotes ({@code '; id} runs {@code id}); where the resolver quotes the value itself
  *       (outside text always, every output of a tainted run, every value with {@code shell_escape_variables}) the two
- *       pairs cancel out ({@code ''x; id''}). {@code ERROR} for outside text, {@code WARNING} for block outputs; in a
- *       block with {@code shell_escape_variables} also {@code WARNING} for any other placeholder in single
- *       quotes.</li>
+ *       pairs cancel out ({@code ''x; id''}). {@code ERROR} for outside text and for what a model wrote (below),
+ *       {@code WARNING} for the other block outputs; in a block with {@code shell_escape_variables} also
+ *       {@code WARNING} for any other placeholder in single quotes.</li>
  *   <li>{@code placeholder-self-compare}: {@code [ "$X" = '{{ x }}' ]} after {@code X='{{ x }}'} is meant to tell
  *       whether x was passed. The resolver substitutes the comparison too, so without escaping the check is always
  *       true once x is set, and the passed value gets overwritten.</li>
@@ -34,18 +37,26 @@ import java.util.regex.Pattern;
  *       leaves out because quotes mean nothing there. What counts is what reads the body: an interpreter that takes it
  *       as its program ({@code python3 - <<'PY'}, {@link HeredocReader}) turns the value into code ({@code ERROR}); an
  *       unquoted delimiter lets the shell run {@code $(…)} in the value ({@code ERROR} for outside text,
- *       {@code WARNING} for block outputs); a quoted heredoc whose reader takes the body as input
+ *       {@code WARNING} for the other block outputs); a quoted heredoc whose reader takes the body as input
  *       ({@code cat > file}, {@code python3 tool.py}) is fine. In a block with {@code shell_escape_variables} every
  *       placeholder in a body is a {@code WARNING}: the resolver quotes it there too and the quotes land in the
- *       text.</li>
- *   <li>{@code unquoted-ai-output}: the output of an AI step ({@code simple}, {@code agentic}, {@code compress-ai}, a
- *       wrapper in AI mode, a block with AI steps nested in it) stands without quotes in shell code of a block without
- *       {@code shell_escape_variables}. The resolver inserts it as it is unless the run carries untrusted input, so a
- *       {@code $(…)} or {@code ;} in a model's answer runs as a command, and a model can be steered by what it reads
- *       (the workspace, say). {@code WARNING}. The step is found through {@code block.<name>.output},
- *       {@code previous_output} in the block's own fields, and {@code step_N_output} while no wrapper before it draws
- *       further step indices; the output of a sub-workflow is not followed.</li>
+ *       text. What a model wrote is an {@code ERROR} in every body: the run quotes it there, and a line of it that
+ *       equals the delimiter ends the body.</li>
+ *   <li>{@code unquoted-ai-output}: what a model wrote stands in shell code of a block without
+ *       {@code shell_escape_variables}, outside quotes and heredoc bodies. A model reads the workspace, and what it
+ *       reads can steer its answer, so a run quotes what a model wrote in every shell line
+ *       ({@code ExecutionContextTaint}); the command would not run as its author wrote it, and a workflow behaves
+ *       as written or is refused. {@code ERROR}.</li>
  * </ul>
+ *
+ * <p><b>What a model wrote</b>, as far as the block list tells: the output of a block that asks a model
+ * ({@code simple}, {@code agentic}, {@code compress-ai}, a wrapper in AI mode, a block with AI steps nested in it, a
+ * step an AI actor decides, and a {@code sub-workflow} or {@code foreach} whose child workflow has such a block, when
+ * the analyzer can find the child), and the output of every block after the first of them, because the run quotes
+ * those too: a later step can print what the model wrote without naming it. The block is found through
+ * {@code block.<name>.output}, {@code previous_output} in the block's own fields, and {@code step_N_output} while no
+ * wrapper before it draws further step indices. What the list does not tell (a loop item, a variable, a child whose
+ * reference is a placeholder) the run quotes all the same.
  *
  * <p>The TODO and goal variables ({@code todo_title}, {@code open_todos}, {@code goal_status}, ...) are no outside
  * text: Traceworks does not provide them. A run input of the same name is used as is (never
@@ -89,70 +100,113 @@ final class QuotingRules {
     private record ShellText(String code, boolean escaped, boolean own) {}
 
     static void apply(List<BlockDefinition> blocks, List<AnalyzerFinding> out) {
+        apply(blocks, null, out);
+    }
+
+    /**
+     * @param children finds the workflows of {@code sub-workflow} and {@code foreach} blocks, to see whether one
+     *                 asks a model; {@code null} looks into none
+     */
+    static void apply(List<BlockDefinition> blocks, WorkflowResolver children, List<AnalyzerFinding> out) {
+        ModelSteps model = ModelSteps.of(blocks, children);
         for (int i = 0; i < blocks.size(); i++) {
             BlockDefinition block = blocks.get(i);
             if (block == null) continue;
             List<ShellText> texts = shellTexts(block, i);
             if (texts.isEmpty()) continue;
-            quoted(texts, i, block.getName(), out);
+            quoted(model, texts, i, block.getName(), out);
             selfCompare(texts, i, block.getName(), out);
-            heredoc(texts, i, block.getName(), out);
-            unquotedAiOutput(blocks, texts, i, out);
+            heredoc(model, texts, i, block.getName(), out);
+            unquotedAiOutput(model, texts, i, out);
         }
     }
 
-    private static void unquotedAiOutput(List<BlockDefinition> blocks, List<ShellText> texts, int i,
-                                         List<AnalyzerFinding> out) {
+    private static void unquotedAiOutput(ModelSteps model, List<ShellText> texts, int i, List<AnalyzerFinding> out) {
         Set<String> placeholders = new LinkedHashSet<>();
-        Set<String> steps = new LinkedHashSet<>();
+        Set<String> sources = new LinkedHashSet<>();
         for (ShellText text : texts) {
             if (text.escaped()) continue;
             for (Placeholder placeholder : ShellQuoteScanner.scan(text.code())) {
                 if (placeholder.quote() != Quote.NONE) continue;
-                String step = aiStep(blocks, i, placeholder.name().strip(), text.own());
-                if (step != null) {
+                String source = model.sourceOf(i, placeholder.name().strip(), text.own());
+                if (source != null) {
                     placeholders.add("{{ " + placeholder.name() + " }}");
-                    steps.add(step);
+                    sources.add(source);
                 }
             }
         }
         if (placeholders.isEmpty()) return;
-        out.add(AnalyzerFinding.of("unquoted-ai-output", Severity.WARNING, i, blocks.get(i).getName(),
-                "puts " + String.join(", ", placeholders) + " into shell code without quotes, the output of the AI"
-                        + " step " + String.join(", ", steps) + " — the resolver inserts a model's answer as it is"
-                        + " unless the run carries untrusted input, so a $(…) or ; in it runs as a command, and what"
-                        + " the model reads can steer its answer; correct: shell_escape_variables: true on this block,"
-                        + " which quotes every value"));
+        out.add(AnalyzerFinding.of("unquoted-ai-output", Severity.ERROR, i, model.blocks().get(i).getName(),
+                "puts " + String.join(", ", placeholders) + " into shell code without shell_escape_variables, "
+                        + String.join(", ", sources) + " — a model reads the workspace, and what it reads can steer"
+                        + " its answer, so a run quotes what a model wrote in every shell line and this command would"
+                        + " not run as written; Traceworks refuses the workflow. Correct: shell_escape_variables: true"
+                        + " on this block, which quotes every value; to hand the text on as standard input or as a"
+                        + " file, write printf '%s\\n' " + placeholders.iterator().next() + " | tool, or > file"));
     }
 
-    /** The label of the AI step whose output {@code name} stands for in block {@code i}, or null. */
-    private static String aiStep(List<BlockDefinition> blocks, int i, String name, boolean own) {
-        BlockDefinition source = null;
-        Matcher byName = BLOCK_OUTPUT.matcher(name);
-        Matcher byIndex = STEP_OUTPUT.matcher(name);
-        if (byName.matches()) {
-            source = named(blocks, byName.group(1));
-        } else if ("previous_output".equals(name)) {
-            source = own && i > 0 ? blocks.get(i - 1) : null;
-        } else if (byIndex.matches()) {
-            source = atStepIndex(blocks, Integer.parseInt(byIndex.group(1)), i);
+    /** A block a placeholder stands for, and the position of the top-level block it is, or is nested in. */
+    private record Source(BlockDefinition block, int position) {}
+
+    /**
+     * The blocks of a workflow that ask a model, as far as the definition tells, and with them what a run quotes as
+     * text a model wrote: the output of such a block, and the output of every block after the first of them.
+     *
+     * @param first the position of the first top-level block that asks a model; -1 for a workflow without one
+     */
+    private record ModelSteps(List<BlockDefinition> blocks, WorkflowResolver children, int first) {
+
+        static ModelSteps of(List<BlockDefinition> blocks, WorkflowResolver children) {
+            int first = -1;
+            for (int j = 0; j < blocks.size() && first < 0; j++) {
+                if (blocks.get(j) != null && asksModel(blocks.get(j), children)) first = j;
+            }
+            return new ModelSteps(blocks, children, first);
         }
-        if (source == null || !writesAiText(source)) return null;
-        return source.getName() != null && !source.getName().isBlank() ? source.getName() : source.getType();
+
+        /**
+         * What {@code name} stands for in block {@code i}, when the run quotes it as text a model wrote, as the
+         * words a finding says it with; null otherwise.
+         */
+        String sourceOf(int i, String name, boolean own) {
+            if (first < 0) return null;
+            Source source = null;
+            Matcher byName = BLOCK_OUTPUT.matcher(name);
+            Matcher byIndex = STEP_OUTPUT.matcher(name);
+            if (byName.matches()) {
+                source = named(blocks, byName.group(1));
+            } else if ("previous_output".equals(name)) {
+                source = own && i > 0 && blocks.get(i - 1) != null ? new Source(blocks.get(i - 1), i - 1) : null;
+            } else if (byIndex.matches()) {
+                source = atStepIndex(blocks, Integer.parseInt(byIndex.group(1)), i);
+            }
+            if (source == null) return null;
+            if (asksModel(source.block(), children)) return "the output of the AI step " + label(source.block());
+            if (source.position() > first) {
+                return "the output of the step " + label(source.block()) + ", which runs after the AI step "
+                        + label(blocks.get(first)) + " and may hold what the model wrote";
+            }
+            return null;
+        }
+
+        private static String label(BlockDefinition block) {
+            return block.getName() != null && !block.getName().isBlank() ? block.getName() : block.getType();
+        }
     }
 
     /** The block of that name: a top-level one first, else a nested one. */
-    private static BlockDefinition named(List<BlockDefinition> blocks, String name) {
-        for (BlockDefinition block : blocks) {
-            if (block != null && name.equals(block.getName())) return block;
+    private static Source named(List<BlockDefinition> blocks, String name) {
+        for (int j = 0; j < blocks.size(); j++) {
+            if (blocks.get(j) != null && name.equals(blocks.get(j).getName())) return new Source(blocks.get(j), j);
         }
-        List<BlockDefinition> nested = new ArrayList<>();
-        for (BlockDefinition block : blocks) {
-            if (block == null) continue;
-            NestedBlocks.visit(block.getConfig(), inner -> {
+        List<Source> nested = new ArrayList<>();
+        for (int j = 0; j < blocks.size(); j++) {
+            if (blocks.get(j) == null) continue;
+            int position = j;
+            NestedBlocks.visit(blocks.get(j).getConfig(), inner -> {
                 if (name.equals(inner.name())) {
-                    nested.add(BlockDefinition.builder().type(inner.type()).name(inner.name())
-                            .config(inner.config() != null ? inner.config() : Map.of()).build());
+                    nested.add(new Source(BlockDefinition.builder().type(inner.type()).name(inner.name())
+                            .config(inner.config() != null ? inner.config() : Map.of()).build(), position));
                 }
             });
         }
@@ -160,12 +214,40 @@ final class QuotingRules {
     }
 
     /** The block at position {@code index}, before {@code i}, while no block before it draws further indices. */
-    private static BlockDefinition atStepIndex(List<BlockDefinition> blocks, int index, int i) {
+    private static Source atStepIndex(List<BlockDefinition> blocks, int index, int i) {
         if (index >= i) return null;
         for (int j = 0; j < index; j++) {
             if (blocks.get(j) == null || INDEX_DRAWING.contains(blocks.get(j).getType())) return null;
         }
-        return blocks.get(index);
+        return blocks.get(index) == null ? null : new Source(blocks.get(index), index);
+    }
+
+    /** Whether a run of the block asks a model: the block writes AI text itself, or its child workflow does. */
+    private static boolean asksModel(BlockDefinition block, WorkflowResolver children) {
+        return writesAiText(block) || childAsksModel(block, children);
+    }
+
+    /**
+     * Whether the workflow the block runs by a literal {@code workflow_id}, or one that workflow reaches, has a block
+     * that writes AI text. A reference with a placeholder or one that names no workflow is not followed, and neither
+     * is any without a resolver: the run quotes such a child's output when the child asked a model.
+     */
+    private static boolean childAsksModel(BlockDefinition block, WorkflowResolver children) {
+        String ref = children == null ? null : ChildWorkflows.literalRef(block.getType(), block.getConfig());
+        if (ref == null) return false;
+        WorkflowDefinition child;
+        try {
+            child = children.resolve(ref);
+        } catch (RuntimeException e) {
+            return false;   // a reference that names no workflow fails at run time, with its own message
+        }
+        if (child == null) return false;
+        for (ChildWorkflows.Reached reached : ChildWorkflows.reached(child, children.forChild(child))) {
+            for (BlockDefinition inner : reached.definition().blocks()) {
+                if (inner != null && writesAiText(inner)) return true;
+            }
+        }
+        return false;
     }
 
     /** Whether the block's output is text a model wrote: it calls an AI itself, or a block nested in it does. */
@@ -182,14 +264,17 @@ final class QuotingRules {
         return nestedAi[0];
     }
 
-    private static void quoted(List<ShellText> texts, int i, String name, List<AnalyzerFinding> out) {
+    private static void quoted(ModelSteps model, List<ShellText> texts, int i, String name,
+                               List<AnalyzerFinding> out) {
         Set<String> severe = new LinkedHashSet<>();
         Set<String> other = new LinkedHashSet<>();
         for (ShellText text : texts) {
             for (Placeholder placeholder : ShellQuoteScanner.scan(text.code())) {
                 if (placeholder.quote() == Quote.NONE) continue;
                 String shown = "{{ " + placeholder.name() + " }}";
-                if (outsideText(placeholder.name())) {
+                // What a model wrote is quoted by every run, so inside the author's quotes it always breaks out
+                if (outsideText(placeholder.name())
+                        || model.sourceOf(i, placeholder.name().strip(), text.own()) != null) {
                     severe.add(shown);
                 } else if (OUTPUT.matcher(placeholder.name()).matches()
                         || (text.escaped() && placeholder.quote() == Quote.SINGLE)) {
@@ -220,9 +305,12 @@ final class QuotingRules {
         final Set<String> expandedOther = new LinkedHashSet<>();
         final Set<String> delimiters = new LinkedHashSet<>();
         final Set<String> escaped = new LinkedHashSet<>();
+        final Set<String> modelText = new LinkedHashSet<>();
+        final Set<String> modelSources = new LinkedHashSet<>();
     }
 
-    private static void heredoc(List<ShellText> texts, int i, String name, List<AnalyzerFinding> out) {
+    private static void heredoc(ModelSteps model, List<ShellText> texts, int i, String name,
+                                List<AnalyzerFinding> out) {
         HeredocHits hits = new HeredocHits();
         for (ShellText text : texts) {
             for (Heredoc heredoc : ShellQuoteScanner.read(text.code()).heredocs()) {
@@ -230,13 +318,18 @@ final class QuotingRules {
                 String reader = HeredocReader.sourceReader(heredoc.command(), heredoc.rest());
                 for (String placeholder : heredoc.placeholders()) {
                     String shown = "{{ " + placeholder + " }}";
+                    String modelSource = model.sourceOf(i, placeholder.strip(), text.own());
                     boolean free = outsideText(placeholder) || OUTPUT.matcher(placeholder).matches();
                     if (free && reader != null) {
                         hits.source.add(shown);
                         hits.readers.add(reader);
                     } else if (free && !heredoc.quoted()) {
-                        (outsideText(placeholder) ? hits.expandedSevere : hits.expandedOther).add(shown);
+                        boolean severe = outsideText(placeholder) || modelSource != null;
+                        (severe ? hits.expandedSevere : hits.expandedOther).add(shown);
                         hits.delimiters.add(heredoc.delimiter());
+                    } else if (modelSource != null) {
+                        hits.modelText.add(shown);
+                        hits.modelSources.add(modelSource);
                     } else if (text.escaped()) {
                         hits.escaped.add(shown);
                     }
@@ -245,7 +338,19 @@ final class QuotingRules {
         }
         if (!hits.source.isEmpty()) out.add(programSource(hits, i, name));
         if (!hits.expandedSevere.isEmpty() || !hits.expandedOther.isEmpty()) out.add(shellExpanded(hits, i, name));
+        if (!hits.modelText.isEmpty()) out.add(modelTextInBody(hits, i, name));
         if (!hits.escaped.isEmpty()) out.add(quotesInBody(hits, i, name));
+    }
+
+    private static AnalyzerFinding modelTextInBody(HeredocHits hits, int i, String name) {
+        String names = String.join(", ", hits.modelText);
+        return AnalyzerFinding.of("heredoc-placeholder", Severity.ERROR, i, name,
+                "puts " + names + " into the body of a heredoc, " + String.join(", ", hits.modelSources) + " — a run"
+                        + " quotes what a model wrote wherever it stands in shell code, so the quotes land in the"
+                        + " text, and a line of the value that equals the delimiter ends the body and the rest runs"
+                        + " as commands; Traceworks refuses the workflow. Correct: pass the value outside the body"
+                        + " with shell_escape_variables: true, e.g. printf '%s\\n' " + hits.modelText.iterator().next()
+                        + " > file instead of cat <<'EOF'");
     }
 
     private static AnalyzerFinding programSource(HeredocHits hits, int i, String name) {

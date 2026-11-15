@@ -220,7 +220,7 @@ public final class WorkflowAnalyzer {
             BlockShapeRules.apply(blocks, findings);
             MountRules.apply(blocks, findings);
             SecretRules.apply(blocks, findings);
-            QuotingRules.apply(blocks, findings);
+            QuotingRules.apply(blocks, children, findings);
             WorkspaceRules.apply(workflow, findings);
             TraceworksRules.apply(blocks, metadata, registry.knownTypes(), findings);
             ParkingRules.apply(blocks, children, findings);

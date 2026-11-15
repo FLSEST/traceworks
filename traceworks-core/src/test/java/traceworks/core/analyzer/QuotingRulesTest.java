@@ -278,15 +278,118 @@ class QuotingRulesTest {
     }
 
     @Test
-    void should_reportTheBareOutputOfAnAiStepInShellCode_asWarning() {
+    void should_reportTheBareOutputOfAnAiStepInShellCode_asError() {
         assertThat(unquotedAi(REVIEW, shell("printf '%s' {{ block.review.output }} | ./report")))
                 .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.WARNING);
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
                     assertThat(f.blockIndex()).isEqualTo(1);
-                    assertThat(f.detail()).startsWith("puts {{ block.review.output }} into shell code without quotes,"
-                            + " the output of the AI step review");
-                    assertThat(f.detail()).contains("shell_escape_variables: true");
+                    assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into shell code without"
+                            + " shell_escape_variables, the output of the AI step review — a model reads the"
+                            + " workspace, and what it reads can steer its answer, so a run quotes what a model wrote"
+                            + " in every shell line and this command would not run as written; Traceworks refuses"
+                            + " the workflow. Correct: shell_escape_variables: true on this block, which quotes"
+                            + " every value; to hand the text on as standard input or as a file, write"
+                            + " printf '%s\\n' {{ block.review.output }} | tool, or > file");
                 });
+    }
+
+    /**
+     * In the author's quotes the run's quotes cancel out, in a block that escapes every value too: an error for what a
+     * model wrote, where the output of a step of a workflow without AI stays a warning.
+     */
+    @Test
+    void should_reportTheOutputOfAnAiStepInsideQuotes_asError_withOrWithoutEscaping() {
+        for (BlockDefinition use : List.of(shell("echo \"{{ block.review.output }}\""),
+                shell("X='{{ previous_output }}'"), escapedShell("echo \"{{ step_0_output }}\""))) {
+            assertThat(rule("quoted-placeholder", apply(REVIEW, use))).as(BlockText.joined(use)).singleElement()
+                    .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
+            assertThat(unquotedAi(REVIEW, use)).isEmpty();
+        }
+        assertThat(rule("quoted-placeholder", apply(named("shell", "review", Map.of("command", "make")),
+                shell("echo \"{{ block.review.output }}\"")))).singleElement()
+                .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.WARNING));
+    }
+
+    /**
+     * No heredoc body takes what a model wrote: the run quotes it there too, and a line of it that equals the
+     * delimiter ends the body. A quoted heredoc that only stores the output of a step without AI stays fine.
+     */
+    @Test
+    void should_reportTheOutputOfAnAiStepInAnyHeredocBody_asError() {
+        for (BlockDefinition use : List.of(shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"),
+                escapedShell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"),
+                shell("cat > out.md <<EOF\n{{ block.review.output }}\nEOF"),
+                shell("python3 - <<'PY'\nprint('''{{ block.review.output }}''')\nPY"))) {
+            assertThat(rule("heredoc-placeholder", apply(REVIEW, use))).as(BlockText.joined(use)).singleElement()
+                    .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
+        }
+        assertThat(rule("heredoc-placeholder", apply(REVIEW,
+                shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF")))).singleElement()
+                .satisfies(f -> assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into the body of a"
+                        + " heredoc, the output of the AI step review — a run quotes what a model wrote wherever it"
+                        + " stands in shell code, so the quotes land in the text, and a line of the value that equals"
+                        + " the delimiter ends the body and the rest runs as commands; Traceworks refuses the"
+                        + " workflow. Correct: pass the value outside the body with shell_escape_variables: true,"
+                        + " e.g. printf '%s\\n' {{ block.review.output }} > file instead of cat <<'EOF'"));
+        assertThat(apply(named("shell", "review", Map.of("command", "make")),
+                shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"))).isEmpty();
+    }
+
+    /**
+     * From its first AI step on a run quotes every output: a later shell step can print what the model wrote without
+     * naming it. So the output of a step after the AI step is refused the same way, and one before it is not.
+     */
+    @Test
+    void should_reportTheOutputOfAStepAfterAnAiStep_andLeaveTheStepsBeforeIt() {
+        BlockDefinition list = named("shell", "list", Map.of("command", "ls"));
+        BlockDefinition build = named("shell", "build", Map.of("command", "make"));
+
+        assertThat(unquotedAi(list, REVIEW, build, shell("for f in {{ block.list.output }}; do echo; done")))
+                .isEmpty();
+        assertThat(unquotedAi(list, REVIEW, build, shell("echo {{ block.build.output }}"))).singleElement()
+                .satisfies(f -> {
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                    assertThat(f.detail()).startsWith("puts {{ block.build.output }} into shell code without"
+                            + " shell_escape_variables, the output of the step build, which runs after the AI step"
+                            + " review and may hold what the model wrote — ");
+                });
+        assertThat(rule("quoted-placeholder", apply(list, REVIEW, build, shell("echo \"{{ previous_output }}\""))))
+                .singleElement().satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
+        assertThat(unquotedAi(list, REVIEW, build, escapedShell("echo {{ block.build.output }}"))).isEmpty();
+    }
+
+    /** A child workflow that asks a model hands its answer on as the step's output; one that asks none does not. */
+    @Test
+    void should_followAChildWorkflow_toItsAiSteps_whenTheAnalyzerCanFindIt() {
+        traceworks.core.testing.MapWorkflowResolver children = new traceworks.core.testing.MapWorkflowResolver()
+                .add("judge", workflow("judge", REVIEW))
+                .add("outer", workflow("outer", named("sub-workflow", "inner", Map.of("workflow_id", "judge"))))
+                .add("plain", workflow("plain", named("shell", "build", Map.of("command", "make"))));
+        BlockDefinition use = shell("echo {{ block.child.output }}");
+
+        for (String asking : List.of("judge", "outer")) {
+            List<AnalyzerFinding> out = new ArrayList<>();
+            QuotingRules.apply(List.of(named("sub-workflow", "child", Map.of("workflow_id", asking)), use), children,
+                    out);
+            assertThat(rule("unquoted-ai-output", out)).as(asking).singleElement()
+                    .satisfies(f -> assertThat(f.detail()).contains("the output of the AI step child"));
+        }
+        List<AnalyzerFinding> out = new ArrayList<>();
+        QuotingRules.apply(List.of(named("sub-workflow", "child", Map.of("workflow_id", "plain")), use,
+                named("foreach", "each", Map.of("items", List.of("a"), "workflow_id", "judge")),
+                shell("echo {{ block.each.output }}")), children, out);
+        assertThat(rule("unquoted-ai-output", out)).singleElement()
+                .satisfies(f -> assertThat(f.blockIndex()).isEqualTo(3));
+        assertThat(unquotedAi(named("sub-workflow", "child", Map.of("workflow_id", "judge")), use))
+                .as("without a resolver the child is not looked into: the run quotes").isEmpty();
+        assertThat(rule("unquoted-ai-output", new WorkflowAnalyzer().analyze(workflow("parent",
+                named("sub-workflow", "child", Map.of("workflow_id", "judge")), use), children)))
+                .as("the analyzer hands its resolver on").hasSize(1);
+    }
+
+    private static traceworks.core.model.WorkflowDefinition workflow(String id, BlockDefinition... blocks) {
+        return new traceworks.core.model.WorkflowDefinition(id, id, null, List.of(blocks), null, null, null, null,
+                Map.of(), Map.of(), null, null, null);
     }
 
     /** previous_output and step_N_output name the AI step too, and every AI type counts. */
@@ -307,7 +410,7 @@ class QuotingRulesTest {
         assertThat(unquotedAi(REVIEW, escapedShell("printf '%s' {{ block.review.output }} | ./report"))).isEmpty();
     }
 
-    /** Quotes and heredoc bodies have their own rules (quoted-placeholder, heredoc-placeholder). */
+    /** Quotes and heredoc bodies have their own rules (quoted-placeholder, heredoc-placeholder), errors too. */
     @Test
     void should_leaveQuotesAndHeredocBodies_toTheirOwnRules() {
         assertThat(unquotedAi(REVIEW, shell("echo '{{ block.review.output }}'"))).isEmpty();
