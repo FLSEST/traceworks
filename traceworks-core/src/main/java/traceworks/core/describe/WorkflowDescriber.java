@@ -147,7 +147,7 @@ public final class WorkflowDescriber {
         Map<?, ?> raw = metadata.get("audit") instanceof Map<?, ?> map ? map : Map.of();
         return new Audit(raw.get("key") instanceof String key ? key : null,
                 raw.get("category") instanceof String category ? category : null,
-                raw.get("reportBlock") instanceof String block ? block : null, problems);
+                raw.get("report_block") instanceof String block ? block : null, problems);
     }
 
     /**
@@ -271,7 +271,7 @@ public final class WorkflowDescriber {
                         + (others.isEmpty() ? " (it has no other option)" : " " + String.join(" or ", others));
             }
         }
-        return "model choice " + reference + ": not declared in modelChoices";
+        return "model choice " + reference + ": not declared in model_choices";
     }
 
     private static void timeout(List<String> facts, BlockSettings settings, Map<String, Object> config) {

@@ -189,7 +189,7 @@ final class RunPreparation {
         return own.picks();
     }
 
-    /** The inputs a run of {@code root} starts with: its {@code defaultContext} under its inputs. */
+    /** The inputs a run of {@code root} starts with: its {@code default_context} under its inputs. */
     private static Map<String, Object> startedWith(WorkflowDefinition root, Map<String, ?> inputs) {
         Map<String, Object> started = new java.util.HashMap<>(root.defaultContext());
         if (inputs != null) {

@@ -32,7 +32,7 @@ class RunServicesModelChoiceTest {
 
     private static final String CHOICES = """
             "requires": ["ai.model_choice"],
-            "modelChoices": {"judge": {"default": "fable", "options": {
+            "model_choices": {"judge": {"default": "fable", "options": {
               "fable": {"provider": "CLAUDE", "model": "claude-fable-5-2"},
               "astra": {"provider": "PI", "model": "openai/gpt-6-astra"}}}},""";
 

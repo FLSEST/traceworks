@@ -15,21 +15,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FilePackageLoaderTest {
 
-    /** A {@code modelChoices} that is no object is refused with words of Traceworks that name the key. */
+    /** A {@code model_choices} that is no object is refused with words of Traceworks that name the key. */
     @org.junit.jupiter.api.Test
     void aModelChoicesThatIsNoObject_isRefused_namingTheKey(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir)
             throws java.io.IOException {
         for (String wrong : java.util.List.of("[]", "\"judge\"", "5", "true")) {
             java.nio.file.Files.writeString(dir.resolve("workflow.json"), "{\"id\": \"wf\", \"name\": \"n\","
-                    + " \"blocks\": [], \"modelChoices\": " + wrong + "}");
+                    + " \"blocks\": [], \"model_choices\": " + wrong + "}");
 
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> new FilePackageLoader().load(dir)).as(wrong)
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Cannot read " + dir.resolve("workflow.json") + ": modelChoices must be an object"
+                    .hasMessage("Cannot read " + dir.resolve("workflow.json") + ": model_choices must be an object"
                             + " that maps the name of each model choice to its default and options"
                             + " (invalid-model-choice; docs/cli.md, \"Model choices\")");
         }
-        // What a key this build does not know gives: the parser's words, as an older build says of modelChoices
+        // What a key this build does not know gives: the parser's words, as an older build says of model_choices
         java.nio.file.Files.writeString(dir.resolve("workflow.json"), "{\"id\": \"wf\", \"blocks\": [], \"nope\": {}}");
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new FilePackageLoader().load(dir))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -57,6 +57,46 @@ class FilePackageLoaderTest {
     private Path pkg() throws IOException {
         Files.writeString(dir.resolve("workflow.json"), WORKFLOW);
         return dir;
+    }
+
+    /** The earlier camel-case names of the keys stay valid (docs/workflow-format.md, "Key names"). */
+    @Test
+    void load_readsTheKeysInEitherSpelling() throws IOException {
+        String underscore = "{\"id\": \"wf\", \"format\": \"traceworks-workflow\", \"format_version\": 1,"
+                + " \"default_context\": {\"a\": \"b\"}, \"model_choices\": {\"judge\": {\"default\": \"x\"}},"
+                + " \"metadata\": {\"audit\": {\"enabled\": true, \"key\": \"k\", \"category\": \"c\","
+                + " \"report_block\": \"r\", \"schema_version\": 1}}, \"blocks\": []}";
+        String camelCase = underscore.replace("format_version", "formatVersion")
+                .replace("default_context", "defaultContext").replace("model_choices", "modelChoices")
+                .replace("report_block", "reportBlock").replace("schema_version", "schemaVersion");
+        assertThat(camelCase).contains("formatVersion", "defaultContext", "modelChoices", "reportBlock",
+                "schemaVersion");
+
+        Files.writeString(dir.resolve("workflow.json"), underscore);
+        LoadedPackage withUnderscores = loader.load(dir);
+        Files.writeString(dir.resolve("workflow.json"), camelCase);
+        LoadedPackage inCamelCase = loader.load(dir);
+
+        assertThat(withUnderscores.definition().formatVersion()).isEqualTo(1);
+        assertThat(withUnderscores.definition().defaultContext()).containsEntry("a", "b");
+        assertThat(withUnderscores.definition().modelChoices()).containsKey("judge");
+        assertThat(traceworks.core.model.AuditConfig.of(withUnderscores.definition().metadata())).isPresent();
+        assertThat(inCamelCase.definition()).isEqualTo(withUnderscores.definition());
+        assertThat(inCamelCase.workflowJson()).as("the bytes are the file's, as written")
+                .isEqualTo(camelCase.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(inCamelCase.digest()).as("the digest is over the file as it is, so the spelling changes it")
+                .isNotEqualTo(withUnderscores.digest());
+    }
+
+    @Test
+    void load_refusesBothSpellingsOfOneKey() throws IOException {
+        Files.writeString(dir.resolve("workflow.json"), "{\"id\": \"wf\", \"blocks\": [],"
+                + " \"default_context\": {}, \"defaultContext\": {\"a\": \"b\"}}");
+
+        assertThatThrownBy(() -> loader.load(dir)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Cannot read " + dir.resolve("workflow.json") + ": the definition has both default_context"
+                        + " and defaultContext, two spellings of one key — keep default_context and remove the other"
+                        + " (duplicate-key-spelling)");
     }
 
     @Test

@@ -437,7 +437,7 @@ final class AppFixture {
             }
             byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
             try {
-                WorkflowDefinition definition = MAPPER.readValue(bytes, WorkflowDefinition.class);
+                WorkflowDefinition definition = traceworks.core.model.WorkflowJson.read(bytes);
                 String catalog = catalogs.get(dir.normalize());
                 String script = files.get(dir.normalize());
                 String digest = EventChain.sha256Hex(script == null ? bytes

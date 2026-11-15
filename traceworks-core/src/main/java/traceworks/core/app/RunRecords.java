@@ -239,7 +239,7 @@ final class RunRecords {
 
     static WorkflowDefinition definition(String runId, byte[] workflowJson) {
         try {
-            return DEFINITIONS.readValue(workflowJson, WorkflowDefinition.class);
+            return traceworks.core.model.WorkflowJson.read(workflowJson);
         } catch (IOException e) {
             throw new RecordDamagedException("The recorded workflow definition of run " + runId + " cannot be read: "
                     + e.getMessage() + RecordDamagedException.seeVerify(runId));

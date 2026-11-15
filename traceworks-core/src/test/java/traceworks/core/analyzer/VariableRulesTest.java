@@ -56,7 +56,7 @@ class VariableRulesTest {
             assertThat(f.blockIndex()).isEqualTo(1);
             assertThat(f.blockName()).isEqualTo("greet");
             assertThat(f.detail()).startsWith("{{ nme }}, {{ target }} — ")
-                    .contains("defaultContext", "--input", "stays literal")
+                    .contains("default_context", "--input", "stays literal")
                     .contains("did you mean {{ name }} for {{ nme }}?");
         });
     }
@@ -160,9 +160,9 @@ class VariableRulesTest {
 
         assertThat(VariableRules.unreadInputs(workflow, List.of("nme", "payload", "name", "colour")))
                 .containsExactly(
-                        "input \"nme\" is read by no block and is not in defaultContext, so it changes nothing"
+                        "input \"nme\" is read by no block and is not in default_context, so it changes nothing"
                                 + " in this run; did you mean \"name\"?",
-                        "input \"colour\" is read by no block and is not in defaultContext, so it changes nothing"
+                        "input \"colour\" is read by no block and is not in default_context, so it changes nothing"
                                 + " in this run");
     }
 

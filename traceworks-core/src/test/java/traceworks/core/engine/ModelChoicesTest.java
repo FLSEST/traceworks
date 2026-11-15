@@ -134,22 +134,22 @@ class ModelChoicesTest {
         codex.put("options", Map.of("a", Map.of("provider", "codex", "model", "{{ m }}")));
 
         assertThat(messages(workflow(Map.of("judge", noDefault), Map.of())))
-                .containsExactly("modelChoices.judge.default \"gpt\" is none of the options (fable, opus, astra)");
+                .containsExactly("model_choices.judge.default \"gpt\" is none of the options (fable, opus, astra)");
         assertThat(messages(workflow(Map.of("judge", extraKey), Map.of())))
-                .containsExactly("modelChoices.judge has the unknown key \"fallback\" (known: default, options)");
+                .containsExactly("model_choices.judge has the unknown key \"fallback\" (known: default, options)");
         assertThat(messages(workflow(Map.of("judge", badOption), Map.of()))).hasSize(1).first().asString()
-                .startsWith("modelChoices.judge.options.a.model must be a text");
+                .startsWith("model_choices.judge.options.a.model must be a text");
         assertThat(messages(workflow(Map.of("judge", codex), Map.of()))).hasSize(2)
-                .anyMatch(m -> m.startsWith("modelChoices.judge.options.a.provider codex: Codex is not supported"))
-                .anyMatch(m -> m.startsWith("modelChoices.judge.options.a.model holds a placeholder"));
+                .anyMatch(m -> m.startsWith("model_choices.judge.options.a.provider codex: Codex is not supported"))
+                .anyMatch(m -> m.startsWith("model_choices.judge.options.a.model holds a placeholder"));
         assertThat(messages(workflow(Map.of("judge", "fable"), Map.of())))
-                .containsExactly("modelChoices.judge must be an object with default and options");
+                .containsExactly("model_choices.judge must be an object with default and options");
         assertThat(messages(workflow(Map.of("model", judge()), Map.of()))).hasSize(1).first().asString()
-                .startsWith("modelChoices.model: a run sets a variable of this name itself");
+                .startsWith("model_choices.model: a run sets a variable of this name itself");
         assertThat(messages(workflow(Map.of("the judge", judge()), Map.of()))).hasSize(1).first().asString()
                 .contains("must be a plain name");
         assertThat(messages(workflow(Map.of("judge", judge()), Map.of("judge", "opus")))).hasSize(1).first()
-                .asString().startsWith("modelChoices.judge: defaultContext sets \"judge\" too");
+                .asString().startsWith("model_choices.judge: default_context sets \"judge\" too");
     }
 
     @Test
@@ -164,13 +164,13 @@ class ModelChoicesTest {
         assertThat(problems).extracting(RunRequirements.Problem::blockIndex).containsExactly(0, 1, 2);
         assertThat(problems).allMatch(p -> p.refuses() && p.rule().equals("invalid-model-choice"));
         assertThat(problems.get(0).message())
-                .isEqualTo("model_choice \"jugde\" is not declared in modelChoices (declared: judge)");
+                .isEqualTo("model_choice \"jugde\" is not declared in model_choices (declared: judge)");
         assertThat(problems.get(1).message()).startsWith("model_choice \"judge\" next to model");
         assertThat(ModelChoices.resolve(workflow, null).definition()).as("nothing is replaced in a definition"
                 + " with a problem: the admission refuses it").isSameAs(workflow);
         assertThat(messages(workflow(null, Map.of(),
                 block("simple", "none", Map.of("command", "Ask", "model_choice", "judge")))))
-                .containsExactly("model_choice \"judge\" is not declared in modelChoices (the workflow declares"
+                .containsExactly("model_choice \"judge\" is not declared in model_choices (the workflow declares"
                         + " none)");
     }
 
@@ -222,7 +222,7 @@ class ModelChoicesTest {
                 .anyMatch(m -> m.contains("\"user_input\""));
     }
 
-    /** Two choices may not share a variable, and neither {@code defaultContext} nor an input may name one. */
+    /** Two choices may not share a variable, and neither {@code default_context} nor an input may name one. */
     @Test
     void namesThatCollide_areProblems_andAnInputNamedLikeAVariableOfAChoiceIsRefused() {
         Map<String, Object> options = Map.of("a", Map.of("provider", "CLAUDE", "model", "m"));
@@ -231,14 +231,14 @@ class ModelChoicesTest {
         both.put("x", choice);
         both.put("x_model", choice);
 
-        assertThat(messages(workflow(both, Map.of()))).containsExactly("modelChoices.x_model: the run sets the"
+        assertThat(messages(workflow(both, Map.of()))).containsExactly("model_choices.x_model: the run sets the"
                 + " variable \"x_model\" for the model choice \"x\" too — give one of the two choices another name");
         assertThat(messages(workflow(Map.of("judge", judge()), Map.of("judge_model", "m", "judge_provider", "p"))))
                 .containsExactlyInAnyOrder(
-                        "modelChoices.judge: defaultContext sets \"judge_model\", which the run sets for the choice"
-                                + " itself — remove the defaultContext entry",
-                        "modelChoices.judge: defaultContext sets \"judge_provider\", which the run sets for the"
-                                + " choice itself — remove the defaultContext entry");
+                        "model_choices.judge: default_context sets \"judge_model\", which the run sets for the choice"
+                                + " itself — remove the default_context entry",
+                        "model_choices.judge: default_context sets \"judge_provider\", which the run sets for the"
+                                + " choice itself — remove the default_context entry");
         WorkflowDefinition judging = workflow(Map.of("judge", judge()), Map.of(),
                 block("simple", "verdict", Map.of("command", "Judge", "model_choice", "judge")));
         ModelChoices.Resolution resolved = ModelChoices.resolve(judging, Map.of("judge", "astra", "judge_model",

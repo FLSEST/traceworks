@@ -23,7 +23,7 @@ import java.util.List;
  *       {@code unknown-provider}.</li>
  *   <li>{@code unsupported-mcp-servers} ({@code ERROR}, refused): {@code mcp_servers} other than {@code []},
  *       {@code user_mcp_servers: true}.</li>
- *   <li>{@code invalid-model-choice} ({@code ERROR}, refused): a {@code modelChoices} declaration that is not
+ *   <li>{@code invalid-model-choice} ({@code ERROR}, refused): a {@code model_choices} declaration that is not
  *       understood completely, a default that is none of the options, a block whose {@code model_choice} names no
  *       declared choice or stands next to {@code provider} or {@code model}.</li>
  *   <li>{@code placeholder-in-model} ({@code ERROR}, refused): a {@code model} with a placeholder, which no run

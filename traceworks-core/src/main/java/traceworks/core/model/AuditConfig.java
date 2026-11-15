@@ -9,7 +9,8 @@ import java.util.regex.Pattern;
 /**
  * What {@code metadata.audit} of a workflow says: the workflow feeds a register. Understood completely, or named
  * as problems: Traceworks refuses a workflow with a broken block, because an audit that silently stops feeding its
- * register is worse than a refused run (docs/workflow-format.md).
+ * register is worse than a refused run (docs/workflow-format.md). The keys are the ones {@link WorkflowJson} hands
+ * on: {@code report_block} and {@code schema_version}, whichever spelling the file has.
  *
  * @param key         the register's key, a path segment ({@link #KEY})
  * @param category    the audit's category, free text
@@ -21,7 +22,7 @@ public record AuditConfig(String key, String category, String reportBlock, int s
     public static final String KEY = "[a-z0-9][a-z0-9._-]{0,127}";
 
     private static final Pattern KEY_PATTERN = Pattern.compile(KEY);
-    private static final List<String> REQUIRED = List.of("key", "category", "reportBlock");
+    private static final List<String> REQUIRED = List.of("key", "category", "report_block");
 
     /** The config of an enabled audit block without problems; empty otherwise. */
     public static Optional<AuditConfig> of(Map<String, Object> metadata) {
@@ -30,12 +31,12 @@ public record AuditConfig(String key, String category, String reportBlock, int s
             return Optional.empty();
         }
         return Optional.of(new AuditConfig((String) audit.get("key"), (String) audit.get("category"),
-                (String) audit.get("reportBlock"), 1));
+                (String) audit.get("report_block"), 1));
     }
 
     /**
      * What is wrong with {@code metadata.audit}: nothing without the block or with {@code enabled} absent or false;
-     * else each missing, blank or non-string required field, a key that is no path segment, a {@code schemaVersion}
+     * else each missing, blank or non-string required field, a key that is no path segment, a {@code schema_version}
      * other than the number 1, and an {@code enabled} that is no boolean.
      */
     public static List<String> problems(Map<String, Object> metadata) {
@@ -69,9 +70,9 @@ public record AuditConfig(String key, String category, String reportBlock, int s
         if (audit.get("key") instanceof String key && !key.isBlank() && !KEY_PATTERN.matcher(key).matches()) {
             problems.add("metadata.audit.key '" + key + "' is no register key: it must match " + KEY);
         }
-        Object version = audit.get("schemaVersion");
+        Object version = audit.get("schema_version");
         if (version != null && !(version instanceof Number n && n.doubleValue() == 1)) {
-            problems.add("metadata.audit.schemaVersion is " + describe(version) + "; Traceworks reads version 1");
+            problems.add("metadata.audit.schema_version is " + describe(version) + "; Traceworks reads version 1");
         }
         return problems;
     }

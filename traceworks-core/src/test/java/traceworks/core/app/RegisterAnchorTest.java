@@ -26,7 +26,7 @@ class RegisterAnchorTest {
     RegisterAnchorTest() {
         fixture.packages.put(AUDIT, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.commands.on("./report", "# Report\n\n<!-- traceworks:audit-result:v1\n{\"snapshotComplete\":true,"

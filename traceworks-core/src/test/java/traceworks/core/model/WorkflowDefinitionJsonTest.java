@@ -36,10 +36,10 @@ class WorkflowDefinitionJsonTest {
               "provider": "CLAUDE",
               "effort": "high",
               "metadata": {"gate": {"expected": true}},
-              "defaultContext": {"branch": "main"},
+              "default_context": {"branch": "main"},
               "requires": ["container.network"],
               "format": "traceworks-workflow",
-              "formatVersion": 1
+              "format_version": 1
             }
             """;
 
@@ -59,7 +59,8 @@ class WorkflowDefinitionJsonTest {
     /** The declaration is kept as written, and a definition without one is written without the key. */
     @Test
     void modelChoices_areReadAsWritten_andSurviveTheRoundTrip() throws Exception {
-        String json = WORKFLOW_JSON.replace("\"formatVersion\": 1", "\"formatVersion\": 1, \"modelChoices\": {\"judge\":"
+        String json = WORKFLOW_JSON.replace("\"format_version\": 1", "\"format_version\": 1,"
+                + " \"model_choices\": {\"judge\":"
                 + " {\"default\": \"a\", \"options\": {\"a\": {\"provider\": \"CLAUDE\", \"model\": \"m\"}}}}");
 
         WorkflowDefinition definition = mapper.readValue(json, WorkflowDefinition.class);
@@ -69,7 +70,7 @@ class WorkflowDefinitionJsonTest {
         assertThat(mapper.readTree(mapper.writeValueAsString(definition))).isEqualTo(mapper.readTree(json));
         WorkflowDefinition without = mapper.readValue(WORKFLOW_JSON, WorkflowDefinition.class);
         assertThat(without.modelChoices()).isEmpty();
-        assertThat(mapper.readTree(mapper.writeValueAsString(without)).has("modelChoices"))
+        assertThat(mapper.readTree(mapper.writeValueAsString(without)).has("model_choices"))
                 .as("a definition without a choice is written without the key").isFalse();
     }
 

@@ -1,7 +1,7 @@
 package traceworks.core.model;
 
 /**
- * The option a run picked of one model choice its workflow declares ({@code modelChoices}): what the steps that
+ * The option a run picked of one model choice its workflow declares ({@code model_choices}): what the steps that
  * refer to the choice run with.
  *
  * @param choice     the name of the choice, which is also the name of the run input that picks

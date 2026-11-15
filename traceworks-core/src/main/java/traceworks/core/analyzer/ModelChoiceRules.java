@@ -12,7 +12,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * The options of a workflow's model choices ({@code modelChoices}), judged like the provider and model a step names
+ * The options of a workflow's model choices ({@code model_choices}), judged like the provider and model a step names
  * itself, for every option, since a run may pick any of them:
  * <ul>
  *   <li>{@code unknown-provider} ({@code ERROR}): an option's {@code provider} is none of the providers Traceworks
@@ -37,7 +37,7 @@ final class ModelChoiceRules {
                 .collect(Collectors.toSet());
         for (ModelChoices.Choice choice : ModelChoices.declared(workflow)) {
             for (ModelChoices.Option option : choice.options()) {
-                String where = "modelChoices." + choice.name() + ".options." + option.name();
+                String where = "model_choices." + choice.name() + ".options." + option.name();
                 if (RunRequirements.isCodex(option.provider())) {
                     continue;   // refused by the admission, as invalid-model-choice
                 }
@@ -60,7 +60,7 @@ final class ModelChoiceRules {
                 }
             }
             if (!used.contains(choice.name())) {
-                out.add(AnalyzerFinding.of("unused-model-choice", Severity.WARNING, -1, null, "modelChoices."
+                out.add(AnalyzerFinding.of("unused-model-choice", Severity.WARNING, -1, null, "model_choices."
                         + choice.name() + " is declared, but no block refers to it with " + ModelChoices.KEY + ": \""
                         + choice.name() + "\" — a pick of it changes nothing; refer to it, or remove it"));
             }

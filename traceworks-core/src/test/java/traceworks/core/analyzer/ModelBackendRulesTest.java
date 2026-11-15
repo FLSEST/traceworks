@@ -85,7 +85,7 @@ class ModelBackendRulesTest {
                 .singleElement().satisfies(f -> {
                     assertThat(f.severity()).isEqualTo(Severity.ERROR);
                     assertThat(f.detail()).startsWith("model \"{{ model }}\" holds a placeholder, which no run"
-                            + " resolves").contains("modelChoices").endsWith("; Traceworks refuses the workflow");
+                            + " resolves").contains("model_choices").endsWith("; Traceworks refuses the workflow");
                 });
         assertThat(findings(analyzer, workflow(null, null,
                 simple("ask", Map.of("command", "Say hi", "provider", "PI", "model", "{{ model }}")),

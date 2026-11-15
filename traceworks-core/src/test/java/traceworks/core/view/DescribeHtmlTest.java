@@ -10,9 +10,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DescribeHtmlTest {
 
     private static final String SAMPLE = """
-            {"id":"wf-1","name":"Deploy","description":"Builds and ships.","defaultContext":{"target":"staging"},
+            {"id":"wf-1","name":"Deploy","description":"Builds and ships.","default_context":{"target":"staging"},
              "requires":["container.network"],
-             "metadata":{"audit":{"enabled":true,"key":"deploys","category":"ops","reportBlock":"report"}},
+             "metadata":{"audit":{"enabled":true,"key":"deploys","category":"ops","report_block":"report"}},
              "blocks":[
               {"type":"shell","name":"build","config":{"command":"make build","network":true,
                "secrets":["DEPLOY_TOKEN"]}},
@@ -61,10 +61,10 @@ class DescribeHtmlTest {
         String json = """
                 {"id":"wf<script>alert(1)</script>","name":"N<script>alert(1)</script>",
                  "description":"D<script>alert(1)</script>",
-                 "defaultContext":{"k<script>alert(1)</script>":"v<script>alert(1)</script>"},
+                 "default_context":{"k<script>alert(1)</script>":"v<script>alert(1)</script>"},
                  "requires":["r<script>alert(1)</script>"],
                  "metadata":{"audit":{"enabled":true,"key":"k","category":"c<script>alert(1)</script>",
-                  "reportBlock":"b<script>alert(1)</script>"}},
+                  "report_block":"b<script>alert(1)</script>"}},
                  "blocks":[
                   {"type":"shell<script>alert(1)</script>","name":"<script>alert(1)</script>",
                    "config":{"command":"echo <script>alert(1)</script>","secrets":["<script>alert(1)</script>"],

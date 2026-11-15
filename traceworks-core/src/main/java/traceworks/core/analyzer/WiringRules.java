@@ -177,7 +177,8 @@ final class WiringRules {
                 if (PlaceholderSyntax.keysIn(texts.get(i)).contains(name)) {
                     out.add(AnalyzerFinding.of("audit-only-placeholder", Severity.WARNING, i, nameOf(blocks.get(i)),
                             "{{ " + name + " }} is only set in an audit workflow (metadata.audit with enabled, "
-                                    + "key, category and reportBlock); here the literal placeholder ends up in the prompt"));
+                                    + "key, category and report_block); here the literal placeholder ends up in the"
+                                    + " prompt"));
                 }
             }
         }
@@ -185,7 +186,7 @@ final class WiringRules {
 
     /**
      * Whether the metadata carry an enabled, complete audit block: {@code enabled: true}, {@code key},
-     * {@code category} and {@code reportBlock} set, {@code schemaVersion} 1 or absent. Only such a
+     * {@code category} and {@code report_block} set, {@code schema_version} 1 or absent. Only such a
      * workflow gets {@code audit_findings}.
      */
     static boolean auditWorkflow(Map<String, Object> metadata) {

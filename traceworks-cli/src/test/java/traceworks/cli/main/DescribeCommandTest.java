@@ -44,7 +44,7 @@ class DescribeCommandTest {
     private Path pkg(String name, String blocks) throws IOException {
         Path dir = Files.createDirectories(temp.resolve(name));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"" + name + "\",\"name\":\"" + name
-                + " flow\",\"description\":\"Says hello.\",\"defaultContext\":{\"who\":\"world\"},\"blocks\":["
+                + " flow\",\"description\":\"Says hello.\",\"default_context\":{\"who\":\"world\"},\"blocks\":["
                 + blocks + "]}");
         return dir;
     }

@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
 
 /**
  * The model choices of a workflow: the workflow names the model of an AI step, and it may open the choice. A
- * definition declares a choice under {@code modelChoices}: a name, a {@code default} and the {@code options}, each a
+ * definition declares a choice under {@code model_choices}: a name, a {@code default} and the {@code options}, each a
  * {@code provider} and {@code model} pair. A block refers to it with {@value #KEY} instead of naming
  * {@code provider} and {@code model}. Whoever starts the run picks one option by its name, as the run input of the
  * choice's name; without a pick the default holds; anything else is refused.
@@ -160,7 +160,7 @@ public final class ModelChoices {
     /**
      * What is wrong with the declaration and with the blocks that refer to it, as problems the run admission refuses
      * the workflow for ({@value #RULE}): a declaration that is not understood completely, a default that is none of
-     * the options, a name a run sets itself, a {@code defaultContext} entry of a choice's name or of one of its two
+     * the options, a name a run sets itself, a {@code default_context} entry of a choice's name or of one of its two
      * other variables, two choices that would set the same variable, a block that sets a variable of a choice, a
      * block that refers to a choice that is not declared, and a block that names {@code provider} or {@code model}
      * next to {@value #KEY}.
@@ -176,7 +176,7 @@ public final class ModelChoices {
                 String owner = owners.get(variable);
                 // Only a choice named like another one's provider or model variable can collide
                 if (!owner.equals(name)) {
-                    problems.add(new RunRequirements.Problem(RULE, true, -1, null, "modelChoices." + owner
+                    problems.add(new RunRequirements.Problem(RULE, true, -1, null, "model_choices." + owner
                             + ": the run sets the variable \"" + variable + "\" for the model choice \"" + name
                             + "\" too — give one of the two choices another name"));
                 }
@@ -294,12 +294,12 @@ public final class ModelChoices {
         }
         if (!(value instanceof String name) || name.isBlank()) {
             problems.add(new RunRequirements.Problem(RULE, true, index, nested, KEY + " must be the name of a choice"
-                    + " declared in modelChoices, a text"));
+                    + " declared in model_choices, a text"));
             return;
         }
         if (!declared.contains(name)) {
             problems.add(new RunRequirements.Problem(RULE, true, index, nested, KEY + " \"" + name + "\" is not"
-                    + " declared in modelChoices" + (declared.isEmpty() ? " (the workflow declares none)"
+                    + " declared in model_choices" + (declared.isEmpty() ? " (the workflow declares none)"
                     : " (declared: " + String.join(", ", declared) + ")")));
         }
         for (String own : List.of(BlockAiSettings.PROVIDER_KEY, BlockAiSettings.MODEL_KEY)) {
@@ -312,7 +312,7 @@ public final class ModelChoices {
 
     private static List<String> declarationProblems(WorkflowDefinition definition, String name, Object raw) {
         List<String> problems = new ArrayList<>();
-        String where = "modelChoices." + name;
+        String where = "model_choices." + name;
         if (name == null || !CHOICE_NAME.matcher(name).matches()) {
             problems.add(where + ": the name of a choice is the name of the run input that picks, so it must be a"
                     + " plain name (letters, digits and _, not starting with a digit)");
@@ -320,13 +320,13 @@ public final class ModelChoices {
             problems.add(where + ": a run sets a variable of this name itself — give the choice another name");
         }
         if (definition.defaultContext().containsKey(name)) {
-            problems.add(where + ": defaultContext sets \"" + name + "\" too — the default of a choice stands in its"
-                    + " declaration; remove the defaultContext entry");
+            problems.add(where + ": default_context sets \"" + name + "\" too — the default of a choice stands in its"
+                    + " declaration; remove the default_context entry");
         }
         for (String variable : List.of(name + PROVIDER_SUFFIX, name + MODEL_SUFFIX)) {
             if (definition.defaultContext().containsKey(variable)) {
-                problems.add(where + ": defaultContext sets \"" + variable + "\", which the run sets for the choice"
-                        + " itself — remove the defaultContext entry");
+                problems.add(where + ": default_context sets \"" + variable + "\", which the run sets for the choice"
+                        + " itself — remove the default_context entry");
             }
         }
         if (!(raw instanceof Map<?, ?> choice)) {

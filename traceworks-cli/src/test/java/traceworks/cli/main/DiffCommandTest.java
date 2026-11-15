@@ -397,7 +397,7 @@ class DiffCommandTest {
                 + "'{\"snapshotComplete\":true,\"findings\":[" + findings + "]}' '-->'";
         Path dir = Files.createDirectories(temp.resolve("audit"));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
-                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;

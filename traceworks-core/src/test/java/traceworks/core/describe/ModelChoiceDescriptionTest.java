@@ -14,7 +14,7 @@ class ModelChoiceDescriptionTest {
 
     private static final String JUDGING = """
             {"id":"wf-1","name":"Judging","requires":["ai.model_choice"],
-             "modelChoices":{"judge":{"default":"fable","options":{
+             "model_choices":{"judge":{"default":"fable","options":{
                "fable":{"provider":"CLAUDE","model":"claude-fable-5-2"},
                "astra":{"provider":"PI","model":"openai/gpt-6-astra"}}},
                "spare":{"default":"a","options":{"a":{"provider":"CLAUDE","model":"m"}}}},
