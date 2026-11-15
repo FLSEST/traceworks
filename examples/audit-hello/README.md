@@ -12,7 +12,7 @@ The smallest audit: three shell steps, no AI, and a register that keeps the find
 `workflow.json` declares the audit:
 
 ```json
-"audit": {"enabled": true, "key": "hello", "category": "example", "reportBlock": "report"}
+"audit": {"enabled": true, "key": "hello", "category": "example", "report_block": "report"}
 ```
 
 and `catalog.json` names its one rule, `long-file`, with the severities it may state. The evidence of every finding

@@ -5,7 +5,7 @@ question, takes an answer, resumes, and leaves a record you can verify.
 
 | Block | Type | What it does |
 |---|---|---|
-| `greet` | `shell` | prints `Hello, world` (the name comes from `defaultContext`; override it with `--input name=Anna`) |
+| `greet` | `shell` | prints `Hello, world` (the name comes from `default_context`; override it with `--input name=Anna`) |
 | `count` | `shell` | runs `scripts/count-files.sh`, which counts the files in the workspace and reports a green gate |
 | `publish` | `approval` | asks `Publish the greeting "Hello, world"?` with the options `Yes` and `No` |
 | `done` | `shell` | prints `Published: Hello, world` |

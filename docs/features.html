@@ -480,7 +480,7 @@ verified
       the provider is <code>CLAUDE</code> with its default model. Two command line tools are configured, each in its
       own built-in image: Claude Code (provider <code>CLAUDE</code>) and Pi (provider <code>PI</code>). Pi reaches the
       backend its model names, such as <code>google/…</code>, <code>openai/…</code> or <code>openrouter/…</code>. A
-      workflow can also open the choice: it declares <code>modelChoices</code>, a name with a default and a list of
+      workflow can also open the choice: it declares <code>model_choices</code>, a name with a default and a list of
       options, each a provider and model pair, and a block refers to it with <code>model_choice</code>. Whoever
       starts the run picks one option with the input of that name; without it the default holds, and a value that is
       not in the list refuses the run before it starts. The operator can narrow which models run in a home
@@ -489,7 +489,7 @@ verified
       <code>read</code>, <code>write</code> or <code>shell</code>. The record names the option that was picked, the
       model that was asked for and the model that answered, with tokens and cost.</dd></div>
     <div><dt>Where you see it</dt><dd><pre><span class="c"># from examples/self-audit/security/workflow.json: the choice, and the verdict step that refers to it</span>
-"modelChoices": {"judge": {"default": "fable", "options": {
+"model_choices": {"judge": {"default": "fable", "options": {
   "fable": {"provider": "CLAUDE", "model": "claude-fable-5-2"},
   "opus":  {"provider": "CLAUDE", "model": "claude-opus-5-5"},
   "astra": {"provider": "PI", "model": "openai/gpt-6-astra"}}}}
