@@ -285,6 +285,14 @@ public final class RunSnapshotJson {
         taintNode.put("previous_output_tainted", taint.previousOutputTainted());
         taintNode.put("platform_used_in_shell", taint.platformUsedInShell());
         taintNode.put("platform_in_prompt", taint.platformInPrompt());
+        ContextState.ModelText model = taint.modelText();
+        if (model.asked()) {
+            // Only for a run that asked a model, so the checkpoint of a run without AI is what it always was
+            ObjectNode modelNode = taintNode.putObject("model_text");
+            modelNode.set("variables", names(model.variables()));
+            modelNode.set("outputs", names(model.outputs()));
+            modelNode.put("previous_output", model.previousOutput());
+        }
         node.set("block_outputs", references(context.blockOutputs(), texts));
         node.set("previous_output", reference(context.previousOutput(), texts));
         ObjectNode sourceSteps = node.putObject("source_steps");
@@ -296,6 +304,16 @@ public final class RunSnapshotJson {
         node.set("run_metadata", values(context.runMetadata()));
         node.set("remembered_approvals", values(context.rememberedApprovals()));
         return node;
+    }
+
+    /** {@code taint.model_text}: absent for a run that asked no model, and in a checkpoint written before it existed. */
+    private static ContextState.ModelText modelText(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return ContextState.ModelText.NONE;
+        }
+        object(node);
+        return new ContextState.ModelText(true, names(required(node, "variables")),
+                names(required(node, "outputs")), bool(required(node, "previous_output")));
     }
 
     /**
@@ -317,7 +335,8 @@ public final class RunSnapshotJson {
                         names(required(taint, "tainted_outputs")),
                         bool(required(taint, "previous_output_tainted")),
                         bool(required(taint, "platform_used_in_shell")),
-                        bool(required(taint, "platform_in_prompt"))),
+                        bool(required(taint, "platform_in_prompt")),
+                        modelText(taint.get("model_text"))),
                 map(required(node, "block_outputs"), text),
                 text.apply(required(node, "previous_output")),
                 new ContextState.SourceSteps(byName, names(required(sourceSteps, "ambiguous")),

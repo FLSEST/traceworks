@@ -4,6 +4,7 @@ import traceworks.core.record.RunSnapshotJson;
 import traceworks.core.blocks.CoreBlocks;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.model.BlockDefinition;
+import traceworks.core.model.ContextState;
 import traceworks.core.model.RunSnapshot;
 import traceworks.core.model.RunStatus;
 import traceworks.core.model.StepResult;
@@ -186,6 +187,36 @@ class WorkflowEngineResumeTest {
      * {@code substitutedIntoPrompt}): the run from the checkpoint after that step sees the same taint as the run that
      * went on, and its shell line quotes the output and the platform data the same way.
      */
+    /**
+     * A run that asked a model keeps that across a resume: the answer recorded before the checkpoint is quoted in
+     * the shell line of the resumed run, as in the run that went on, and so is an output the resumed run records.
+     */
+    @Test
+    void resume_keepsWhatAModelWrote_quoted() {
+        WorkflowDefinition workflow = workflow("wf-model-text",
+                block("shell", "before", Map.of("command", "list")),
+                block("simple", "ask", Map.of("command", "Name the files")),
+                block("shell", "after", Map.of("command", "cat")),
+                block("shell", "use", Map.of("command", "echo {{ block.before.output }} {{ block.ask.output }}"
+                        + " {{ step_1_output }} {{ block.after.output }}")));
+        Session uninterrupted = new Session();
+        uninterrupted.claude.answers("a; rm -rf ~");
+        uninterrupted.commands.on("list", "one two").on("cat", "three four").on("echo ", "done");
+        RunOutcome went = uninterrupted.run(workflow);
+
+        Session resumed = new Session();
+        resumed.commands.on("cat", "three four").on("echo ", "done");
+        RunOutcome back = resumed.resume(workflow, uninterrupted.checkpoint(2));
+
+        assertThat(went.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(back.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(uninterrupted.checkpoint(2).snapshot().context().taint().modelText())
+                .isEqualTo(new ContextState.ModelText(true, Set.of("step_1_output"), Set.of("ask"), true));
+        assertThat(resumed.commands.commands())
+                .containsExactly("cat", "echo one two 'a; rm -rf ~' 'a; rm -rf ~' 'three four'");
+        assertThat(uninterrupted.commands.commands()).endsWith(resumed.commands.commands().getLast());
+    }
+
     @Test
     void resume_keepsTheTaint() {
         WorkflowDefinition workflow = workflow("wf-taint",

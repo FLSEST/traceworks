@@ -70,6 +70,31 @@ class RunSnapshotJsonTest {
         }
     }
 
+    private static RunSnapshot withTaint(ContextState.Taint taint) {
+        ContextState c = context(Map.of("x", "1"));
+        return new RunSnapshot(new ContextState(c.variables(), taint, c.blockOutputs(), c.previousOutput(),
+                c.sourceSteps(), c.nextStepIndex(), c.runMetadata(), c.rememberedApprovals()), List.of(), Map.of());
+    }
+
+    /** What may hold text a model wrote comes back; a run that asked no model writes nothing about it. */
+    @Test
+    void read_givesBackTheModelText_andARunWithoutAModelWritesNone() throws Exception {
+        ContextState.Taint asked = new ContextState.Taint(Set.of(), Set.of(), Set.of(), false, false, false,
+                new ContextState.ModelText(true, Set.of("step_1_output", "item"), Set.of("ask"), true));
+        byte[] written = RunSnapshotJson.write(withTaint(asked), texts);
+
+        assertThat(RunSnapshotJson.read(written, texts).context().taint()).isEqualTo(asked);
+        assertThat(JSON.readTree(written).at("/context/taint/model_text").toString())
+                .isEqualTo("{\"variables\":[\"item\",\"step_1_output\"],\"outputs\":[\"ask\"],"
+                        + "\"previous_output\":true}");
+
+        ContextState.Taint none = new ContextState.Taint(Set.of(), Set.of(), Set.of(), false, false, false);
+        byte[] without = RunSnapshotJson.write(withTaint(none), texts);
+        assertThat(JSON.readTree(without).at("/context/taint").has("model_text")).isFalse();
+        assertThat(RunSnapshotJson.read(without, texts).context().taint().modelText())
+                .isEqualTo(ContextState.ModelText.NONE);
+    }
+
     @Test
     void read_keepsTheOrderOfAValue() {
         Map<String, Object> form = new LinkedHashMap<>();
@@ -322,6 +347,9 @@ class RunSnapshotJsonTest {
         damages.put("a taint flag as a number", root -> taint(root).put("platform_in_prompt", 1));
         damages.put("a taint name as a number", root -> taint(root).putArray("untrusted_variables").add(1));
         damages.put("taint names as an object", root -> taint(root).putObject("tainted_outputs"));
+        damages.put("the model text as a flag", root -> taint(root).put("model_text", true));
+        damages.put("the model text without its outputs",
+                root -> taint(root).putObject("model_text").put("previous_output", true).putArray("variables"));
         damages.put("the step counter as text", root -> context(root).put("next_step_index", "7"));
         damages.put("the step counter as a fraction", root -> context(root).put("next_step_index", 7.5));
         damages.put("a block output as a number", root -> context(root).putObject("block_outputs").put("b", 5));

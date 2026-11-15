@@ -186,10 +186,14 @@ final class ExecutionContextFactory {
         ExecutionContext context = builder(seed).build();
 
         Set<String> untrustedKeys = reservedNames(inputContext, ExecutionContext.UNTRUSTED_KEYS_VARIABLE);
+        Set<String> modelKeys = reservedNames(inputContext, ExecutionContext.MODEL_KEYS_VARIABLE);
         inputContext.forEach((name, value) -> {
             if (!readsFromInput(name)) return;
             if (untrustedKeys.contains(name)) {
                 context.setUntrustedVariable(name, value);
+            } else if (modelKeys.contains(name)) {
+                // Derived from an output of the parent run after it asked a model: quoted in a shell line here too
+                context.setModelVariable(name, value);
             } else if (CHAIN_OUTPUT.equals(name)) {
                 // The last output of another run: escaped like platform data and a taint source once it reaches a
                 // shell line or a prompt; the chain marks it as untrusted input when that run was tainted.
@@ -207,6 +211,11 @@ final class ExecutionContextFactory {
         if (Boolean.parseBoolean(String.valueOf(inputContext.get(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE)))) {
             context.markPlatformUsedInShell();
         }
+        // The parent run asked a model: what it handed over as model text stays that, and so does what this run records
+        if (Boolean.parseBoolean(String.valueOf(inputContext.get(ExecutionContext.MODEL_ASKED_VARIABLE)))) {
+            context.markModelAsked();
+        }
+        reservedNames(inputContext, ExecutionContext.MODEL_OUTPUTS_VARIABLE).forEach(context::markOutputModelText);
         if (seed.resumePreviousOutput() != null) {
             context.setPreviousOutput(seed.resumePreviousOutput());
         } else if (inputContext.get("previous_output") != null) {

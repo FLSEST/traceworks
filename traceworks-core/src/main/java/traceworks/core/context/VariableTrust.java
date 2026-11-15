@@ -7,8 +7,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Trust label per context variable. Two classes of not-to-be-trusted values exist, and they differ
- * only in whether they taint the run:
+ * Trust label per context variable. Three classes of values a shell line quotes exist, and they differ
+ * in whether they make the run one that carries untrusted input:
  *
  * <ul>
  *   <li><b>external</b> ({@link ExecutionContext#setUntrustedVariable}) — a webhook payload and the
@@ -20,6 +20,9 @@ import java.util.concurrent.ConcurrentHashMap;
  *       block output of such a run and change the meaning of long-standing shell commands; instead the run is tainted
  *       the moment such a placeholder is really substituted into a shell command line
  *       ({@link ExecutionContextTaint#substitutedIntoShell}).</li>
+ *   <li><b>model text</b> ({@link ExecutionContext#setDerivedVariable} in a run that asked a model) — a step's
+ *       output or a loop item that may hold what a model wrote: always shell-escaped, and never a reason to count
+ *       the run as one with untrusted input ({@link ExecutionContextTaint}).</li>
  * </ul>
  *
  * <p>The classes are exclusive: the last write for a name wins, {@link ExecutionContext#setVariable}
@@ -29,24 +32,35 @@ final class VariableTrust {
 
     private final Set<String> external = ConcurrentHashMap.newKeySet();
     private final Set<String> platform = ConcurrentHashMap.newKeySet();
+    private final Set<String> model = ConcurrentHashMap.newKeySet();
 
     void markUntrusted(String name) {
         platform.remove(name);
+        model.remove(name);
         external.add(name);
     }
 
     void markPlatform(String name) {
         external.remove(name);
+        model.remove(name);
         platform.add(name);
+    }
+
+    /** The value may hold what a model wrote: quoted in a shell line, no untrusted input. */
+    void markModel(String name) {
+        external.remove(name);
+        platform.remove(name);
+        model.add(name);
     }
 
     /** Back to trusted — the value now comes from the platform itself (workflow default, system value). */
     void clear(String name) {
         external.remove(name);
         platform.remove(name);
+        model.remove(name);
     }
 
-    /** True for both classes: the value is shell-escaped wherever it lands in a command line. */
+    /** True for a value from outside the run, external input or platform data; model text is not one. */
     boolean isUntrusted(String name) {
         return external.contains(name) || platform.contains(name);
     }
@@ -61,8 +75,16 @@ final class VariableTrust {
         return !external.isEmpty();
     }
 
-    /** Names that must be shell-escaped — both classes. */
+    /** Names that must be shell-escaped — every class. */
     Set<String> escapedNames() {
+        if (model.isEmpty()) return untrustedNames();
+        Set<String> all = new HashSet<>(untrustedNames());
+        all.addAll(model);
+        return Set.copyOf(all);
+    }
+
+    /** Names of values from outside the run — external input and platform data, not model text. */
+    Set<String> untrustedNames() {
         if (platform.isEmpty()) return Set.copyOf(external);
         Set<String> all = new HashSet<>(external);
         all.addAll(platform);
@@ -79,11 +101,18 @@ final class VariableTrust {
         return Set.copyOf(platform);
     }
 
-    /** Replaces both classes with those of a run's state ({@link ExecutionContextTaint#restore}). */
-    void restore(Set<String> externalNames, Set<String> platformNames) {
+    /** Names of the variables that may hold model text — part of the run's state ({@link ContextState.Taint}). */
+    Set<String> modelNames() {
+        return Set.copyOf(model);
+    }
+
+    /** Replaces every class with those of a run's state ({@link ExecutionContextTaint#restore}). */
+    void restore(Set<String> externalNames, Set<String> platformNames, Set<String> modelNames) {
         external.clear();
         external.addAll(externalNames);
         platform.clear();
         platform.addAll(platformNames);
+        model.clear();
+        model.addAll(modelNames);
     }
 }

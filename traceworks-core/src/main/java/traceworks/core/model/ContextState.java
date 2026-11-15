@@ -51,14 +51,46 @@ public record ContextState(Map<String, Object> variables, Taint taint, Map<Strin
      * @param previousOutputTainted whether {@code previous_output} is derived from untrusted input
      * @param platformUsedInShell   whether platform data reached a shell line
      * @param platformInPrompt      whether platform data reached the prompt of a block whose output is not recorded yet
+     * @param modelText             what of the run may hold text a model wrote
      */
     public record Taint(Set<String> untrustedVariables, Set<String> platformVariables, Set<String> taintedOutputs,
-                        boolean previousOutputTainted, boolean platformUsedInShell, boolean platformInPrompt) {
+                        boolean previousOutputTainted, boolean platformUsedInShell, boolean platformInPrompt,
+                        ModelText modelText) {
 
         public Taint {
             untrustedVariables = untrustedVariables == null ? Set.of() : Set.copyOf(untrustedVariables);
             platformVariables = platformVariables == null ? Set.of() : Set.copyOf(platformVariables);
             taintedOutputs = taintedOutputs == null ? Set.of() : Set.copyOf(taintedOutputs);
+            modelText = modelText != null ? modelText : ModelText.NONE;
+        }
+
+        /** The taint of a run that asked no model. */
+        public Taint(Set<String> untrustedVariables, Set<String> platformVariables, Set<String> taintedOutputs,
+                     boolean previousOutputTainted, boolean platformUsedInShell, boolean platformInPrompt) {
+            this(untrustedVariables, platformVariables, taintedOutputs, previousOutputTainted, platformUsedInShell,
+                    platformInPrompt, ModelText.NONE);
+        }
+    }
+
+    /**
+     * What of a run may hold text a model wrote: a shell line quotes it, and the run does not count as one with
+     * untrusted input for it (see {@code ExecutionContextTaint}).
+     *
+     * @param asked          whether the run asked a model, itself or through a child workflow: from then on every
+     *                       output and every variable derived from one is model text
+     * @param variables      the variables derived from an output since then, such as {@code step_N_output} and loop
+     *                       items
+     * @param outputs        the named block outputs recorded since then
+     * @param previousOutput whether {@code previous_output} was recorded since then
+     */
+    public record ModelText(boolean asked, Set<String> variables, Set<String> outputs, boolean previousOutput) {
+
+        /** A run that asked no model. */
+        public static final ModelText NONE = new ModelText(false, null, null, false);
+
+        public ModelText {
+            variables = variables == null ? Set.of() : Set.copyOf(variables);
+            outputs = outputs == null ? Set.of() : Set.copyOf(outputs);
         }
     }
 

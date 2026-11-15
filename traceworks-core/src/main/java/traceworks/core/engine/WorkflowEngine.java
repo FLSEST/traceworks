@@ -227,7 +227,7 @@ public final class WorkflowEngine {
             }
         }
         try {
-            return new Executed(finish(run, context, events), thrown);
+            return new Executed(finish(run, context, events), thrown, context != null && context.modelAsked());
         } finally {
             budget.releaseTo(held);   // a child's steps are dropped now: its parent keeps only its output
         }
@@ -249,8 +249,9 @@ public final class WorkflowEngine {
      *
      * @param logFailure the {@link EventLogException} that ended the run by being thrown (a record write that
      *                   bypassed the run's sink, such as an AI call's {@code ai.*} events); {@code null} otherwise
+     * @param modelAsked whether the run asked a model, itself or through a child workflow
      */
-    private record Executed(RunOutcome outcome, EventLogException logFailure) { }
+    private record Executed(RunOutcome outcome, EventLogException logFailure, boolean modelAsked) { }
 
     /** The context of a fresh run, or the one its checkpoint kept for a resumed run. */
     private ExecutionContext context(WorkflowDefinition definition, ResumePoint point, RunState run,
@@ -301,7 +302,8 @@ public final class WorkflowEngine {
                 parentEvents.fail(executed.logFailure());
             }
             RunOutcome outcome = executed.outcome();
-            return new ChildRuns.ChildRun(childRunId, outcome.status(), outcome.steps(), outcome.error());
+            return new ChildRuns.ChildRun(childRunId, outcome.status(), outcome.steps(), outcome.error(),
+                    executed.modelAsked());
         };
     }
 

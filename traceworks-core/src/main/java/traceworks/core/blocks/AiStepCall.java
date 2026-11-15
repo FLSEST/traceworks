@@ -58,6 +58,7 @@ class AiStepCall {
         step.setStatus(StepStatus.RUNNING);
         try {
             AiProvider provider = context.getAiProviders().resolve(request.providerId());
+            context.markModelAsked();
             AiProvider.ActionResult result = provider.executeAction(actionRequest(request));
             step.setOutput(result.text());
             step.setStatus(result.exitCode() == 0 ? StepStatus.COMPLETED : StepStatus.FAILED);
@@ -90,6 +91,7 @@ class AiStepCall {
         } catch (IllegalArgumentException e) {
             throw new ProviderNotAvailable(e);
         }
+        context.markModelAsked();
         try {
             AiProvider.ActionResult result = provider.executeAction(actionRequest(request));
             return new Answer(result.text(), result.exitCode(), callMetadata(request, provider, result));

@@ -141,6 +141,10 @@ class SubWorkflowLauncher {
             }
             name = child.name();
             ChildRun run = context.getChildRuns().run(child, childContext(context, parentIds, workflowId));
+            if (run.modelAsked()) {
+                // The child's output, and what it left in the workspace, may hold text a model wrote
+                context.markModelAsked();
+            }
             RunStatus end = run.status();
             return new Outcome(workflowId, name, run.runId(), end, buildOutput(run, context.secretValues()),
                     end == RunStatus.COMPLETED || end == RunStatus.COMPLETED_WITH_ERRORS);

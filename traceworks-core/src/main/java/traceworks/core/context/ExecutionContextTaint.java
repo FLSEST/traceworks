@@ -4,8 +4,11 @@ import traceworks.core.model.ContextState;
 
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -31,7 +34,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ({@link #consumePlatformPrompt}), which is therefore escaped in later shell command lines. The run
  * itself stays clean until an output is really recorded — a prompt alone changes nothing.
  *
- * <p>The flag itself is exported as {@link ExecutionContext#PLATFORM_IN_SHELL_VARIABLE}, so a segment resumed before
+ * <p><b>Text a model wrote is quoted, and is no untrusted input.</b> A model reads the workspace, which may hold
+ * text that steers its answer, so its answer never reaches a shell line as code. From the moment a run asks a model
+ * ({@link #markModelAsked}, set where a block resolves its provider, and for a child workflow that asked one) every
+ * output recorded and every variable derived from one (a {@code step_N_output}, a loop item, an answer an AI actor
+ * gave) is kept as model text, and {@link #snapshot} names it next to the untrusted values, so every shell line
+ * quotes it. It stays for the rest of the run, as untrusted input does and for the same reason: a later shell step
+ * can print what the model wrote, or read a file the model wrote, without naming a placeholder. What was recorded
+ * before the first call stays as it was, and so does a run that asks no model. Model text is not untrusted input:
+ * {@link #hasUntrustedInput} does not count it, so an approval's {@code actor} and {@code mode} read as before. It
+ * travels in the checkpoint ({@link #state}) and, to a child workflow, in reserved keys ({@link #export}).
+ *
+ * <p>The platform flag itself is exported as {@link ExecutionContext#PLATFORM_IN_SHELL_VARIABLE}, so a segment resumed before
  * any output was recorded starts tainted instead of clean — {@code ExecutionContextFactory} re-raises it via
  * {@link ExecutionContext#markPlatformUsedInShell()}.
  */
@@ -41,6 +55,9 @@ final class ExecutionContextTaint {
     private final OutputTaint outputs = new OutputTaint();
     private final AtomicBoolean platformUsedInShell = new AtomicBoolean(false);
     private final AtomicBoolean platformInPrompt = new AtomicBoolean(false);
+    /** The outputs recorded since the run asked a model; kept apart, because they are no untrusted input. */
+    private final OutputTaint modelOutputs = new OutputTaint();
+    private final AtomicBoolean modelAsked = new AtomicBoolean(false);
 
     /** Back to trusted — the value now comes from the platform itself (workflow default, system value). */
     void markTrusted(String name) {
@@ -57,6 +74,32 @@ final class ExecutionContextTaint {
 
     boolean isUntrusted(String name) {
         return variables.isUntrusted(name);
+    }
+
+    /** The run asks a model now, or a child workflow of it did: what it records from here on is model text. */
+    void markModelAsked() {
+        modelAsked.set(true);
+    }
+
+    /** Whether the run asked a model, so that its outputs may hold text a model wrote. */
+    boolean modelAsked() {
+        return modelAsked.get();
+    }
+
+    /** A variable derived from an output of a run that asked a model. */
+    void markModelVariable(String name) {
+        variables.markModel(name);
+    }
+
+    /** The output just written by a run that asked a model: {@code previous_output}, plus the block name if named. */
+    void markModelOutput(String blockName) {
+        modelOutputs.mark(blockName);
+    }
+
+    /** Re-applies one exported name of an output that is model text ({@code previous_output} or a block name). */
+    void markModelOutputName(String name) {
+        if (ExecutionContext.PREVIOUS_OUTPUT_NAME.equals(name)) modelOutputs.markPreviousOutput();
+        else modelOutputs.markBlockOutput(name);
     }
 
     /** Names persisted as run taint ({@code __untrusted_keys}) — external input only. */
@@ -81,18 +124,41 @@ final class ExecutionContextTaint {
         outputs.markBlockOutput(blockName);
     }
 
-    /** Snapshot for {@link TemplateResolver#resolveShell} — escaped variable names plus tainted outputs. */
+    /**
+     * Snapshot for {@link TemplateResolver#resolveShell} — escaped variable names plus the outputs a shell line
+     * quotes, the tainted ones and those that are model text.
+     */
     TemplateResolver.Taint snapshot() {
-        return outputs.snapshot(variables.escapedNames());
+        Set<String> escaped = variables.escapedNames();
+        if (modelOutputs.isEmpty()) return outputs.snapshot(escaped);
+        Set<String> names = new HashSet<>(outputs.outputNames());
+        names.addAll(modelOutputs.outputNames());
+        return new TemplateResolver.Taint(escaped, Set.copyOf(names),
+                outputs.isPreviousOutputTainted() || modelOutputs.isPreviousOutputTainted());
+    }
+
+    /**
+     * The values from outside the run alone, without model text: what a place with no shell to quote in refuses
+     * ({@link TemplateResolver#namesEscapedValue}). Model text is one argument there, as it always was.
+     */
+    TemplateResolver.Taint untrustedSnapshot() {
+        return outputs.snapshot(variables.untrustedNames());
     }
 
     /** Taint as reserved input-context keys for persistence and hand-over; empty for a clean run. */
     Map<String, Object> export() {
         Map<String, Object> exported = outputs.export(variables.externalNames());
-        if (!platformUsedInShell.get()) return exported;
-        Map<String, Object> withPlatformFlag = new HashMap<>(exported);
-        withPlatformFlag.put(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE, true);
-        return withPlatformFlag;
+        if (!platformUsedInShell.get() && !modelAsked.get()) return exported;
+        Map<String, Object> withFlags = new HashMap<>(exported);
+        if (platformUsedInShell.get()) withFlags.put(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE, true);
+        if (modelAsked.get()) {
+            withFlags.put(ExecutionContext.MODEL_ASKED_VARIABLE, true);
+            withFlags.put(ExecutionContext.MODEL_KEYS_VARIABLE, variables.modelNames().stream().sorted().toList());
+            Set<String> names = new TreeSet<>(modelOutputs.outputNames());
+            if (modelOutputs.isPreviousOutputTainted()) names.add(ExecutionContext.PREVIOUS_OUTPUT_NAME);
+            withFlags.put(ExecutionContext.MODEL_OUTPUTS_VARIABLE, List.copyOf(names));
+        }
+        return withFlags;
     }
 
     /** Re-applies an exported {@link ExecutionContext#PLATFORM_IN_SHELL_VARIABLE} flag (resume, sub-workflow hand-over). */
@@ -103,13 +169,18 @@ final class ExecutionContextTaint {
     /** The whole taint, for a checkpoint: unlike {@link #export}, it keeps the platform data and both flags. */
     ContextState.Taint state() {
         return new ContextState.Taint(variables.externalNames(), variables.platformNames(), outputs.outputNames(),
-                outputs.isPreviousOutputTainted(), platformUsedInShell.get(), platformInPrompt.get());
+                outputs.isPreviousOutputTainted(), platformUsedInShell.get(), platformInPrompt.get(),
+                new ContextState.ModelText(modelAsked.get(), variables.modelNames(), modelOutputs.outputNames(),
+                        modelOutputs.isPreviousOutputTainted()));
     }
 
     /** Replaces the whole taint with the one of a checkpoint. */
     void restore(ContextState.Taint state) {
-        variables.restore(state.untrustedVariables(), state.platformVariables());
+        ContextState.ModelText model = state.modelText();
+        variables.restore(state.untrustedVariables(), state.platformVariables(), model.variables());
         outputs.restore(state.taintedOutputs(), state.previousOutputTainted());
+        modelOutputs.restore(model.outputs(), model.previousOutput());
+        modelAsked.set(model.asked());
         platformUsedInShell.set(state.platformUsedInShell());
         platformInPrompt.set(state.platformInPrompt());
     }
