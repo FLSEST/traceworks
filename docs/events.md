@@ -276,7 +276,7 @@ grows with the number of steps and variables, not with the size of their texts:
 | `context.text_variables` | the run's variables that hold a text, each as a blob reference: the inputs and run variables that are texts, the texts steps set (an answer, a `foreach` item) and `step_<n>_output` (the output of step n) |
 | `context.block_outputs` | the output of each named block, each as a blob reference |
 | `context.previous_output` | the output of the last block as a blob reference, or `null` |
-| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context |
+| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context. `context.taint.model_text` is there once the run asked a model: the `variables` and `outputs` that may hold what a model wrote, and whether `previous_output` does; a shell line quotes them |
 | `steps` | the top-level steps so far; each one's `input` and `output` is a blob reference or `null`, its status, times and `metadata` are written inline |
 | `input_context` | the variables the run started with, inline |
 

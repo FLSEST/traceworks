@@ -287,12 +287,33 @@ content, and no blob is written through one.
   With shell tools it can no longer send it anywhere: its container reaches the provider's hosts only (above). It can
   still send it there, under another account. Give AI steps a key you can limit and revoke, and keep `tools: none`
   for steps whose prompt carries content you do not trust.
-- **A model's answer in a shell command.** A shell field inserts `{{ block.<name>.output }}`, `{{ previous_output }}`
-  or `{{ step_N_output }}` as it is, unless the run carries untrusted input or the block sets
-  `shell_escape_variables: true`. A model's answer counts as trusted, but what the model reads (the workspace, a
-  file in it) can steer it, so a `$(…)` or `;` in the answer would run as a command. `traceworks check` warns about
-  such a placeholder without quotes (`unquoted-ai-output`); give the block `shell_escape_variables: true`, the boolean:
-the text `"true"` is refused (the block fails, and `check` reports `invalid-config-value`), not read as off.
+- **A model's answer in a shell command.** A model reads the workspace, and what it reads (a file, a page) can
+  steer its answer, so the output of an AI step never reaches a shell line as code: it is always quoted there, as
+  one literal argument, whatever `$(…)`, `;`, quote or line break it holds.
+  - **The run quotes.** From the first call of a model on (a `simple` or `agentic` step, a wrapper in AI mode,
+    `compress-ai`, a step an AI actor decides, a child workflow that asks one), a shell line single-quotes every
+    step output recorded since and every variable made from one: `{{ block.<name>.output }}`,
+    `{{ previous_output }}`, `{{ step_N_output }}`, a `foreach` item from an `items_command`, an AI actor's answer
+    to a `human-input`. That holds in a `command`, an `items_command`, a `run_if` test and a shell `condition`, in
+    a child workflow the values are handed to, and after a resume. It covers the outputs of the shell steps after
+    the call too, because such a step can print what the model wrote, or a file the model wrote, without naming a
+    placeholder. What a step recorded before the first call is inserted as before, and a run that asks no model
+    runs as it always did.
+  - **`check` refuses what would not run as written.** Where the workflow shows that such an output stands in
+    shell code of a block without `shell_escape_variables: true`, `traceworks check` reports the error
+    `unquoted-ai-output`, and `traceworks run` starts no run. Inside the author's own quotes
+    (`quoted-placeholder`) and in the body of a heredoc (`heredoc-placeholder`) it is an error with or without the
+    setting: the quotes of the run cancel out against the author's, and a line of the answer that equals the
+    heredoc's delimiter ends the body. Write the placeholder bare in a block with `shell_escape_variables: true`
+    (the boolean: the text `"true"` is refused, the block fails and `check` reports `invalid-config-value`), and
+    hand the text on as standard input or as a file with `printf '%s\n' {{ block.<name>.output }} | tool` or
+    `> file`.
+  - **What stays.** Quoting keeps the text from running as shell code; it does not make the text true or safe to
+    act on. A command that takes the text as an argument or reads it from a file still decides what it does with
+    it (`sh -c`, `eval`, a path to delete). A tool step's `container_args` and a `mounts` entry take a model's
+    answer as it is, as one argument, since no shell reads them. A run recorded by a version before this rule and
+    resumed now knows nothing of the calls before its checkpoint: what they wrote is inserted as before, until the
+    resumed run asks a model itself.
 - **A gate from an AI step.** A `simple` or `agentic` step can set the run's gate with a `gate_status:` line, since a
   report step delivers its verdict that way; a model steered by what it reads can therefore set a gate too. Keep the
   verdict in a step that checks the model's work, as `examples/self-audit/security` does. The output of a wrapper in
