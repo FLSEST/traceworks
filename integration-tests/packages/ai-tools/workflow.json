@@ -1,0 +1,80 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "b167e3e3-a18a-473a-8c6c-47c8a9283b4b",
+  "name": "IT ai-tools",
+  "description": "A simple AI step with each tools value for Claude and for Pi: the fake CLI reports the arguments it got.",
+  "requires": [
+    "ai.tools"
+  ],
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "claude_none",
+      "config": {
+        "command": "Report your arguments.",
+        "tools": "none"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "claude_read",
+      "config": {
+        "command": "Report your arguments.",
+        "tools": "read"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "claude_write",
+      "config": {
+        "command": "Report your arguments.",
+        "tools": "write"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "claude_shell",
+      "config": {
+        "command": "Report your arguments.",
+        "tools": "shell"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_none",
+      "config": {
+        "command": "Report your arguments.",
+        "provider": "PI",
+        "tools": "none"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_read",
+      "config": {
+        "command": "Report your arguments.",
+        "provider": "PI",
+        "tools": "read"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_write",
+      "config": {
+        "command": "Report your arguments.",
+        "provider": "PI",
+        "tools": "write"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_shell",
+      "config": {
+        "command": "Report your arguments.",
+        "provider": "PI",
+        "tools": "shell"
+      }
+    }
+  ]
+}

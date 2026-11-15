@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "rules": {
+    "layer-violation": {"severity": {"min": "HIGH", "max": "CRITICAL"}},
+    "forbidden-io": {"severity": {"min": "HIGH", "max": "CRITICAL"}},
+    "package-cycle": {"severity": {"min": "HIGH", "max": "CRITICAL"}},
+    "verdict-split": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "verdict-move": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true}
+  }
+}

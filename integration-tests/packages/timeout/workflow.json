@@ -1,0 +1,14 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "086aaf8b-0c2b-47d9-bb85-ab13e916b370",
+  "name": "IT timeout",
+  "description": "A step that sleeps far longer than its timeout_seconds is stopped at the timeout.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "sleepy",
+      "config": {"command": "echo going to sleep; sleep 120; echo woke up", "timeout_seconds": 3}
+    }
+  ]
+}

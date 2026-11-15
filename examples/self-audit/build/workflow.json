@@ -1,0 +1,87 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "0c79c7c2-1de6-4bfc-a96d-c970bbede754",
+  "name": "Build and dependencies self-audit",
+  "description": "Audits the build of the Maven project in the workspace against the rule file rules/build.rules, with deterministic steps only: what the POMs and Dockerfiles pin, the dependencies as Maven resolves them, newer versions in the registries, and known vulnerabilities in the resolved dependencies. A broken rule turns the gate RED; an update, a conflict or anything not measured turns it YELLOW.",
+  "requires": [
+    "package.images",
+    "container.network"
+  ],
+  "metadata": {
+    "gate": {
+      "expected": true
+    }
+  },
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "offline",
+      "config": {
+        "container_image": "./images/facts",
+        "command": "set -euo pipefail; facts offline --rules {{ package_dir }}/rules/build.rules --root . --out {{ scratch_dir }}/build-offline.json",
+        "timeout_seconds": 300
+      }
+    },
+    {
+      "type": "shell",
+      "name": "maven",
+      "config": {
+        "container_image": "./images/facts",
+        "network": true,
+        "command": "set -euo pipefail; facts maven --rules {{ package_dir }}/rules/build.rules --root . --out {{ scratch_dir }}/build-maven.json --sbom-runtime {{ scratch_dir }}/build-sbom-runtime.cdx.json --sbom-test {{ scratch_dir }}/build-sbom-test.cdx.json --timeout 900",
+        "timeout_seconds": 1200,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "registries",
+      "config": {
+        "container_image": "./images/facts",
+        "network": true,
+        "command": "set -euo pipefail; facts registries --rules {{ package_dir }}/rules/build.rules --offline {{ scratch_dir }}/build-offline.json --out {{ scratch_dir }}/build-registries.json",
+        "timeout_seconds": 900,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "vulns_runtime",
+      "config": {
+        "container_image": "aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c",
+        "container_args": ["sbom", "--scanners", "vuln", "--cache-dir", "/cache", "--skip-version-check", "--disable-telemetry", "--no-progress", "--format", "sarif", "--output", "/out/trivy.sarif", "/scratch/build-sbom-runtime.cdx.json"],
+        "output_format": "sarif",
+        "fact_prefix": "vulns_runtime",
+        "cache_dir": "/cache",
+        "network": true,
+        "timeout_seconds": 900,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "vulns_test",
+      "config": {
+        "container_image": "aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c",
+        "container_args": ["sbom", "--scanners", "vuln", "--cache-dir", "/cache", "--skip-version-check", "--disable-telemetry", "--no-progress", "--format", "sarif", "--output", "/out/trivy.sarif", "/scratch/build-sbom-test.cdx.json"],
+        "output_format": "sarif",
+        "fact_prefix": "vulns_test",
+        "cache_dir": "/cache",
+        "network": true,
+        "timeout_seconds": 900,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "report",
+      "config": {
+        "container_image": "./images/facts",
+        "command": "set -euo pipefail; printf '%s' {{ block.vulns_runtime.output }} > /tmp/vulns-runtime.txt; printf '%s' {{ block.vulns_test.output }} > /tmp/vulns-test.txt; facts report --rules {{ package_dir }}/rules/build.rules --offline {{ scratch_dir }}/build-offline.json --maven {{ scratch_dir }}/build-maven.json --registries {{ scratch_dir }}/build-registries.json --vulns-runtime /tmp/vulns-runtime.txt --vulns-test /tmp/vulns-test.txt --out {{ scratch_dir }}/build-report.md",
+        "timeout_seconds": 300,
+        "shell_escape_variables": true
+      }
+    }
+  ]
+}

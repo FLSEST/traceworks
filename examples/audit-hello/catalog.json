@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "rules": {
+    "long-file": {"severity": {"min": "LOW", "max": "MEDIUM"}}
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "4f0836fd-9da5-4024-acd4-9f8e823bb3e8",
+  "name": "IT pause-loop",
+  "description": "A loop of four slow items, each of which notes its start in the workspace, then one more step: for a pause, a cancel and an interrupt inside the loop.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "slow_items",
+      "config": {
+        "execution_mode": "shell",
+        "items": ["one", "two", "three", "four"],
+        "command": "echo {{ item }} >> /workspace/ran.txt; sleep 4; echo did {{ item }}",
+        "workspace_writable": true
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo after the loop"
+      }
+    }
+  ]
+}

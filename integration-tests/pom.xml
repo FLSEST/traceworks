@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.flsest</groupId>
+        <artifactId>traceworks-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>traceworks-integration-tests</artifactId>
+    <name>Traceworks integration tests</name>
+    <description>Black-box tests of traceworks.jar against a real container runtime, with small workflow packages and, for the
+        AI blocks, fake CLIs in fake images: no model is ever called. They run only with -Pit (mvn -Pit verify). Not part of traceworks.jar.</description>
+
+    <properties>
+        <!-- The suite runs only with the profile "it"; a plain mvn verify skips it and stays as fast as before. -->
+        <traceworks.it.skip>true</traceworks.it.skip>
+        <!-- The jar under test: the shaded jar of traceworks-cli, which the reactor builds before this module. -->
+        <traceworks.it.jar>${project.basedir}/../traceworks-cli/target/traceworks.jar</traceworks.it.jar>
+        <!-- Nothing to install or deploy: the module only holds tests. -->
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <dependencies>
+        <!-- Test scope only, so the dependency gate does not change: the tests read the run folder's JSON with
+             Jackson and reach no class of Traceworks. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- The module has no main code: no empty jar (and maven.install.skip, maven.deploy.skip above). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <skipIfEmpty>true</skipIfEmpty>
+                </configuration>
+            </plugin>
+            <!-- Surefire, not Failsafe: the tests start the jar of another module, so they need no package phase of
+                 their own and no post-integration-test clean-up phase (each test removes what it made), and the
+                 build keeps the plugins it already has. Only *IT classes run, one JVM for the whole suite, so the
+                 images are built once; a suite that hangs is stopped after 30 minutes. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skip>${traceworks.it.skip}</skip>
+                    <includes>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <forkedProcessTimeoutInSeconds>1800</forkedProcessTimeoutInSeconds>
+                    <systemPropertyVariables combine.children="append">
+                        <traceworks.it.jar>${traceworks.it.jar}</traceworks.it.jar>
+                        <traceworks.it.packages>${project.basedir}/packages</traceworks.it.packages>
+                        <traceworks.it.fakeai>${project.basedir}/fake-ai</traceworks.it.fakeai>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- mvn -Pit verify: runs the suite. A missing container runtime or image then fails it; nothing is skipped. -->
+        <profile>
+            <id>it</id>
+            <properties>
+                <traceworks.it.skip>false</traceworks.it.skip>
+            </properties>
+        </profile>
+    </profiles>
+</project>

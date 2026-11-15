@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "fdbe0ef0-4ca0-4a55-a5cb-c717157d4892",
+  "name": "IT limits",
+  "description": "Prints the limits the container's cgroup carries (memory, processes, CPUs) and what the container may do as a process.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "cgroup",
+      "config": {"command": "echo memory=$(cat /sys/fs/cgroup/memory.max) pids=$(cat /sys/fs/cgroup/pids.max) cpu=$(cat /sys/fs/cgroup/cpu.max | tr ' ' /)"}
+    },
+    {
+      "type": "shell",
+      "name": "process",
+      "config": {"command": "echo uid=$(id -u) gid=$(id -g) caps=$(grep CapEff /proc/self/status | cut -f2) nnp=$(grep NoNewPrivs /proc/self/status | cut -f2); touch /root-probe 2>/dev/null && echo root-writable || echo root-read-only; touch /tmp/probe && echo tmp-writable"}
+    }
+  ]
+}

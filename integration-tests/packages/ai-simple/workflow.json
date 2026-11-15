@@ -1,0 +1,27 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "c1f12b5d-f901-4bbd-b85f-d14537107665",
+  "name": "IT ai-simple",
+  "description": "One simple AI step with Claude and one with Pi: the prompt reaches the CLI, the answer is the step's output.",
+  "defaultContext": {
+    "name": "world"
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "claude_say",
+      "config": {
+        "command": "Say hello to {{ name }}"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_say",
+      "config": {
+        "command": "Say hello to {{ name }}",
+        "provider": "PI"
+      }
+    }
+  ]
+}

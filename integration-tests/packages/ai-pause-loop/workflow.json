@@ -1,0 +1,18 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "eafc67cf-dd50-4d2f-a6d6-248362d11e4a",
+  "name": "IT ai-pause-loop",
+  "description": "A loop of three slow AI calls: a pause inside it must cost no call a second time.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "judged",
+      "config": {
+        "execution_mode": "ai",
+        "items": ["one", "two", "three"],
+        "command": "[fake:sleep=4] Judge {{ item }}"
+      }
+    }
+  ]
+}

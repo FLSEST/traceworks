@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "rules": {
+    "class-without-test": {"severity": {"min": "LOW", "max": "MEDIUM"}},
+    "test-without-assertion": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "disabled-test": {"severity": {"min": "LOW", "max": "LOW"}},
+    "command-without-integration-test": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "uncaught-mutation": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true}
+  }
+}

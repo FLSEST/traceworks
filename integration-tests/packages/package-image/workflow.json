@@ -1,0 +1,20 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "591b2bf1-f9d6-4a81-bf47-2d5fe7ac677d",
+  "name": "IT package image",
+  "description": "A step runs in the package's own image ./images/probe, which traceworks images build builds.",
+  "requires": ["package.images"],
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "in_package_image",
+      "config": {"command": "cat /opt/it/marker.txt", "container_image": "./images/probe"}
+    },
+    {
+      "type": "shell",
+      "name": "in_shell_image",
+      "config": {"command": "test ! -e /opt/it/marker.txt && echo no marker in the shell image"}
+    }
+  ]
+}

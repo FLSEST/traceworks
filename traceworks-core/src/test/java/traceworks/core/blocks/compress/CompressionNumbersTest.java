@@ -1,0 +1,27 @@
+package traceworks.core.blocks.compress;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class CompressionNumbersTest {
+
+    @Test
+    void fmtUsesStableEnglishThousandsSeparators() {
+        assertThat(CompressionNumbers.fmt(740_808)).isEqualTo("740,808");
+        assertThat(CompressionNumbers.fmt(-4_102)).isEqualTo("-4,102");
+    }
+
+    @Test
+    void signedCharsDistinguishesGrowthShrinkageAndNoChange() {
+        assertThat(CompressionNumbers.signedChars(1_234)).isEqualTo("+1,234 chars");
+        assertThat(CompressionNumbers.signedChars(-1_234)).isEqualTo("−1,234 chars");
+        assertThat(CompressionNumbers.signedChars(0)).isEqualTo("−0 chars");
+    }
+
+    @Test
+    void removalLabelsUseTheTypographicMinusAndCorrectUnit() {
+        assertThat(CompressionNumbers.chars(12)).isEqualTo("−12 chars");
+        assertThat(CompressionNumbers.lines(2_000)).isEqualTo("−2,000 lines");
+    }
+}

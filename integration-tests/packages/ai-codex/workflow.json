@@ -1,0 +1,17 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "87586927-7134-4ed4-bbc9-b09d93527e90",
+  "name": "IT ai-codex",
+  "description": "A workflow that names Codex as its provider: Traceworks refuses it.",
+  "provider": "CODEX",
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "ask",
+      "config": {
+        "command": "Say hello"
+      }
+    }
+  ]
+}

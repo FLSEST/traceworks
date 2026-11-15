@@ -1,0 +1,280 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.flsest</groupId>
+    <artifactId>traceworks-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+
+    <name>Traceworks</name>
+    <description>Repeatable, traceable workflows: deterministic steps, optional AI with any model, tools in containers.</description>
+
+    <licenses>
+        <license>
+            <name>GPL-3.0-only</name>
+            <url>https://www.gnu.org/licenses/gpl-3.0.txt</url>
+        </license>
+    </licenses>
+
+    <modules>
+        <module>traceworks-core</module>
+        <module>traceworks-adapters</module>
+        <module>traceworks-cli</module>
+        <!-- After traceworks-cli: the suite starts the jar that module builds. It runs only with -Pit. -->
+        <module>integration-tests</module>
+        <module>image-tests</module>
+        <module>examples/self-audit/tests</module>
+        <module>examples/self-audit/tests-architecture</module>
+        <module>examples/self-audit/tests-build</module>
+        <module>examples/self-audit/tests-functionality</module>
+        <module>examples/self-audit/tests-testing</module>
+    </modules>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- A fixed time for every entry of the jars, so two builds of one commit give the same traceworks.jar and a
+             published jar can be checked by rebuilding it. A release sets it to its own date. -->
+        <project.build.outputTimestamp>2026-11-07T00:00:00Z</project.build.outputTimestamp>
+
+        <jackson.version>2.22.4</jackson.version>
+        <junit.version>6.1.3</junit.version>
+        <assertj.version>3.27.7</assertj.version>
+        <mockito.version>5.24.0</mockito.version>
+        <!-- Mockito's byte-buddy and byte-buddy-agent at one version: AssertJ brings a newer byte-buddy than Mockito,
+             and the agent (the -javaagent of the tests) would otherwise stay at Mockito's older one. Test scope only. -->
+        <byte-buddy.version>1.18.17</byte-buddy.version>
+
+        <!-- Empty by default; a coverage agent (JaCoCo's prepare-agent) sets it, and the Surefire argLine keeps it. -->
+        <argLine/>
+
+        <!-- Containers start only on purpose. A test that starts a container, builds or pulls an image or creates a
+             network carries the JUnit tag "container", and the default build leaves that tag out in every module:
+             mvn verify starts nothing. The profiles "containers" and "it" below empty this property and set the
+             next one, so the tagged tests run, and fail instead of skip when a runtime or an image is missing
+             (ContainerPrecondition). ContainerTagGuardTest fails the build when a test class reaches the runtime
+             without the tag. -->
+        <traceworks.test.excludedGroups>container</traceworks.test.excludedGroups>
+        <traceworks.containers.required>false</traceworks.containers.required>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.assertj</groupId>
+                <artifactId>assertj-core</artifactId>
+                <version>${assertj.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-core</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mockito</groupId>
+                <artifactId>mockito-junit-jupiter</artifactId>
+                <version>${mockito.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.bytebuddy</groupId>
+                <artifactId>byte-buddy-agent</artifactId>
+                <version>${byte-buddy.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.flsest</groupId>
+                <artifactId>traceworks-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.github.flsest</groupId>
+                <artifactId>traceworks-core</artifactId>
+                <version>${project.version}</version>
+                <type>test-jar</type>
+            </dependency>
+            <dependency>
+                <groupId>io.github.flsest</groupId>
+                <artifactId>traceworks-adapters</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.15.0</version>
+                    <configuration>
+                        <compilerArgs>
+                            <arg>-parameters</arg>
+                        </compilerArgs>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.6</version>
+                    <configuration>
+                        <!-- @{argLine}: what other plugins add (a coverage agent) comes first.
+                             Mockito as a Java agent, so the JVM does not self-attach it (a warning on current JDKs).
+                             -Xshare:off: with an agent, class data sharing prints a warning on every test JVM. -->
+                        <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+                        <!-- "container" unless a profile asked for the container tests; see the property. -->
+                        <excludedGroups>${traceworks.test.excludedGroups}</excludedGroups>
+                        <systemPropertyVariables>
+                            <traceworks.containers.required>${traceworks.containers.required}</traceworks.containers.required>
+                            <!-- Expected warnings from tests (invalid config on purpose) stay out of the build output.
+                                 The empty .mvn directory marks the project root, so the path also holds when Maven
+                                 runs inside a module. -->
+                            <java.util.logging.config.file>${maven.multiModuleProjectDirectory}/config/test-logging.properties</java.util.logging.config.file>
+                        </systemPropertyVariables>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-dependency-plugin</artifactId>
+                    <version>3.8.1</version>
+                </plugin>
+                <!-- Filters traceworks-version.properties and copies images/ into the adapters jar, so it shapes
+                     traceworks.jar: pinned, or its version would come from the Maven that runs the build. -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>3.3.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.5.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>3.6.3</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+
+        <plugins>
+            <!-- Resolves the path of the Mockito jar into ${org.mockito:mockito-core:jar} for the Surefire argLine. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>mockito-agent-path</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>properties</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Few dependencies: any compile, runtime, provided or system dependency besides Jackson and our own
+                 modules fails the build. Each allowed dependency has a written reason in docs/architecture.md. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>allowed-dependencies</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[21,)</version>
+                                </requireJavaVersion>
+                                <bannedDependencies>
+                                    <searchTransitive>true</searchTransitive>
+                                    <excludes>
+                                        <exclude>*:*:*:*:compile</exclude>
+                                        <exclude>*:*:*:*:runtime</exclude>
+                                        <exclude>*:*:*:*:provided</exclude>
+                                        <exclude>*:*:*:*:system</exclude>
+                                    </excludes>
+                                    <includes>
+                                        <include>com.fasterxml.jackson.core:*</include>
+                                        <include>io.github.flsest:*</include>
+                                    </includes>
+                                    <message>Only Jackson is allowed outside the test scope. See docs/architecture.md.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- mvn -Pcontainers verify: the default build plus the tests tagged "container" of traceworks-adapters and
+             traceworks-cli, which start real containers through docker or podman. A missing runtime or image fails
+             them. A profile and not a bare property: it sets the two properties together, and it reads like -Pit. -->
+        <profile>
+            <id>containers</id>
+            <properties>
+                <traceworks.test.excludedGroups/>
+                <traceworks.containers.required>true</traceworks.containers.required>
+            </properties>
+        </profile>
+        <!-- mvn -Pit verify: everything. The same as "containers" here, and the module integration-tests adds its
+             suite under the same profile id. -->
+        <profile>
+            <id>it</id>
+            <properties>
+                <traceworks.test.excludedGroups/>
+                <traceworks.containers.required>true</traceworks.containers.required>
+            </properties>
+        </profile>
+    </profiles>
+</project>

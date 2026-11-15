@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Traceworks key features</title>
+<style>
+/* Layout: one column of sections, as docs/audit-loop.html. Every feature is one card with the same four parts. */
+:root {
+  --bg: #f6f8fa; --surface: #ffffff; --line: #d0d7de; --line-strong: #8c959f;
+  --text: #1f2328; --muted: #59636e; --accent: #0969da;
+  --clean: #1baf7a; --decided: #2a78d6; --open: #eb6834;
+  --ai: #6250d6; --ai-fill: #ecebfb; --old: #8c959f;
+  --pkg: #9a6700; --pkg-fill: #fff8c5; --frame-fill: #ddf4ff;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #161b22; --line: #30363d; --line-strong: #6e7681;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --clean: #199e70; --decided: #3987e5; --open: #d95926;
+    --ai: #9085e9; --ai-fill: #25224a; --old: #6e7681;
+    --pkg: #d29922; --pkg-fill: #3a2d0c; --frame-fill: #0e2a47; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --surface: #161b22; --line: #30363d; --line-strong: #6e7681;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --clean: #199e70; --decided: #3987e5; --open: #d95926;
+  --ai: #9085e9; --ai-fill: #25224a; --old: #6e7681;
+  --pkg: #d29922; --pkg-fill: #3a2d0c; --frame-fill: #0e2a47; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 2rem 4rem;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 1.5rem; }
+header p.kicker { font: 0.8rem/1.4 var(--mono); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { font-size: clamp(1.7rem, 4.5vw, 2.5rem); line-height: 1.15; font-weight: 650; text-wrap: balance; margin-top: 0.4rem; }
+.lede { max-width: 65ch; margin-top: 0.9rem; font-size: 1.08rem; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(1rem, 3vw, 2rem);
+  display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+h2 { font-size: 1.35rem; line-height: 1.3; font-weight: 600; color: var(--accent); text-wrap: balance; }
+h2 small { font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-left: 0.5rem; white-space: nowrap; }
+h2 .num { font: 400 0.95rem var(--mono); color: var(--muted); margin-right: 0.4rem; }
+h3 { font-size: 1rem; font-weight: 600; }
+p, li { max-width: 72ch; }
+.note { color: var(--muted); font-size: 0.9rem; }
+a { color: var(--accent); }
+code { font: 0.86em var(--mono); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { font: 0.85rem/1.6 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem 1rem; overflow-x: auto; max-width: 100%; }
+pre .c { color: var(--muted); }
+button { font: 600 0.9rem var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 0.45rem 0.9rem; cursor: pointer; }
+button.primary, button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+button:hover { border-color: var(--accent); }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.controls .say { font-size: 0.9rem; color: var(--muted); flex: 1 1 16rem; }
+.scroll { overflow-x: auto; }
+svg { display: block; max-width: 100%; height: auto; }
+figure { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+td strong { font-weight: 600; }
+.tag { font: 600 0.7rem var(--mono); letter-spacing: 0.04em; text-transform: uppercase; padding: 0.1rem 0.45rem; border-radius: 10px; border: 1px solid var(--line-strong); color: var(--muted); margin-left: 0.4rem; white-space: nowrap; vertical-align: middle; }
+.tag.pkg { border-color: var(--pkg); color: var(--pkg); }
+.tag.frame { border-color: var(--accent); color: var(--accent); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; background: var(--bg); font-size: 0.92rem; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+.card .see { font-size: 0.85rem; color: var(--muted); }
+ul.plain { padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+footer { color: var(--muted); font-size: 0.85rem; }
+
+/* the list of features under the opening drawing */
+ol.index { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 0.5rem; }
+ol.index li { max-width: none; min-width: 0; }
+ol.index a { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 0.75rem;
+  background: var(--bg); color: var(--text); text-decoration: none; font-size: 0.92rem; height: 100%; }
+ol.index a:hover { border-color: var(--accent); }
+ol.index .num { font: 0.8rem var(--mono); color: var(--muted); min-width: 1.4em; }
+ol.index .name { flex: 1 1 9rem; font-weight: 600; }
+ol.index .tag { margin-left: 0; }
+.dim { opacity: 0.4; }
+
+/* one feature: the same four parts every time */
+dl.pattern { display: grid; gap: 0.9rem; }
+dl.pattern > div { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 0.2rem 1rem; }
+dl.pattern dt { font: 600 0.72rem/1.9 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+dl.pattern dd { min-width: 0; max-width: 78ch; }
+dl.pattern dd > pre, dl.pattern dd > .scroll { margin-block: 0.6rem; }
+dl.pattern dd > pre:first-child { margin-top: 0; }
+dl.pattern > div.limit dd { color: var(--muted); }
+@media (max-width: 640px) { dl.pattern > div { grid-template-columns: minmax(0, 1fr); } }
+
+/* drawings */
+.dg { color: var(--text); min-width: 760px; }
+.dg text { font: 11px var(--sans); fill: var(--muted); text-anchor: middle; }
+.dg text.t { font: 600 13px var(--sans); fill: var(--text); }
+.dg text.m { font: 11px var(--mono); }
+.dg text.l { text-anchor: start; }
+.dg text.r { text-anchor: end; }
+.dg .node rect { fill: var(--bg); stroke: var(--line-strong); stroke-width: 1.5; }
+.dg .node.ai rect { fill: var(--ai-fill); stroke: var(--ai); stroke-width: 2; }
+.dg .node.reg rect { stroke: var(--accent); stroke-width: 2; }
+.dg .frame > rect { fill: var(--frame-fill); stroke: var(--accent); stroke-width: 2; }
+.dg .pkg > rect { fill: var(--pkg-fill); stroke: var(--pkg); stroke-width: 2; }
+.dg .chip rect { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1; }
+.dg .chip text { fill: var(--text); }
+.dg .edge { stroke: currentColor; stroke-width: 1.5; fill: none; }
+.dg .edge.next { stroke-dasharray: 6 5; }
+.dg .pickable { cursor: pointer; }
+#split.pick-package .fr-only, #split.pick-frame .pkg { opacity: 0.3; }
+#chain .only-bad { display: none; }
+#chain.bad .only-bad { display: inline; }
+#chain.bad .only-ok { display: none; }
+#chain.bad #c1 rect { stroke: var(--open); stroke-width: 3; }
+#chain .edge.bad { stroke: var(--open); stroke-dasharray: 3 4; }
+#chain text.warn { fill: var(--open); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  ol.index li, section.feature, .dg g { transition: opacity 0.25s; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="kicker">Traceworks · the key features</p>
+  <h1>A package says what is done. The tool gives the frame.</h1>
+  <p class="lede">Traceworks runs repeatable, traceable workflows: deterministic steps, a model only where a step says
+  so, every step in a container, and a run recorded as a hash-chained log in plain files. This page explains each key
+  feature by the same four questions: what goes wrong without it, what Traceworks does, where you see it, and what it
+  does not do.</p>
+  <p class="note" style="margin-top:0.6rem">The register has a page of its own, to step through:
+  <a href="audit-loop.html">the audit loop</a>.</p>
+</header>
+
+<section id="split" class="feature" data-side="package frame">
+  <h2><span class="num">1</span>The definition is independent of the tool
+    <span class="tag pkg">the package</span><span class="tag frame">the frame</span></h2>
+  <p>A workflow, with its rules, its scripts and its images, is a <strong>package</strong>: a directory of plain files
+  that says what is done. Traceworks is the <strong>frame</strong> around it: it checks the package, runs its steps in
+  containers, records what happened and keeps the register. What a check knows lives in the package, so a package
+  changes without a change of the tool.</p>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" id="split-svg" viewBox="0 0 1000 330" role="img" aria-label="The package inside the frame. The package is a directory of plain files: workflow.json, scripts and rule files, image directories and catalog.json. The frame, Traceworks, surrounds it and adds to every run: a check of the package before the start, one container per step, secrets by name, pause, resume and cancel, and a record of every event. A repository is mounted read-only as the workspace, a person starts the run, every run leaves a run record, and the report of an audit run feeds the register, which hands what it knows to the next run.">
+        <defs><marker id="ah1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <g class="node"><rect x="20" y="40" width="150" height="70" rx="6"/><text class="t" x="95" y="68">A repository</text><text x="95" y="87">the workspace of a run</text></g>
+        <g class="node"><rect x="20" y="200" width="150" height="70" rx="35"/><text class="t" x="95" y="228">A person</text><text x="95" y="247">starts, answers, decides</text></g>
+
+        <g class="frame pickable" id="pick-frame"><rect x="270" y="16" width="470" height="298" rx="10"/>
+          <text class="t l" x="290" y="42">The frame: Traceworks</text><text class="r" x="720" y="42">the same for every package</text>
+          <g class="fr-only">
+            <text class="l" x="290" y="222">What the frame adds to every run:</text>
+            <g class="chip"><rect x="290" y="230" width="82" height="40" rx="4"/><text x="331" y="247">checks the</text><text x="331" y="261">package first</text></g>
+            <g class="chip"><rect x="377" y="230" width="82" height="40" rx="4"/><text x="418" y="247">one container</text><text x="418" y="261">per step</text></g>
+            <g class="chip"><rect x="464" y="230" width="82" height="40" rx="4"/><text x="505" y="247">secrets by</text><text x="505" y="261">name, redacted</text></g>
+            <g class="chip"><rect x="551" y="230" width="82" height="40" rx="4"/><text x="592" y="247">pause, resume,</text><text x="592" y="261">cancel</text></g>
+            <g class="chip"><rect x="638" y="230" width="82" height="40" rx="4"/><text x="679" y="247">records</text><text x="679" y="261">every event</text></g>
+            <text class="l" x="290" y="296">No database, no service: it runs, writes plain files and exits.</text>
+          </g>
+        </g>
+        <g class="pkg pickable" id="pick-package"><rect x="290" y="56" width="430" height="146" rx="8"/>
+          <text class="t l" x="306" y="80">The package: plain files</text><text class="r" x="704" y="80">says what is done</text>
+          <g class="chip"><rect x="294" y="94" width="98" height="28" rx="4"/><text class="m" x="343" y="112">workflow.json</text></g>
+          <g class="chip"><rect x="402" y="94" width="98" height="28" rx="4"/><text class="m" x="451" y="112">scripts/</text></g>
+          <g class="chip"><rect x="510" y="94" width="98" height="28" rx="4"/><text class="m" x="559" y="112">images/</text></g>
+          <g class="chip"><rect x="618" y="94" width="98" height="28" rx="4"/><text class="m" x="667" y="112">catalog.json</text></g>
+          <text x="343" y="142">the steps, where</text><text x="343" y="156">a model is asked</text>
+          <text x="451" y="142">scripts and rules:</text><text x="451" y="156">what a check knows</text>
+          <text x="559" y="142">the tools a step</text><text x="559" y="156">runs, as images</text>
+          <text x="667" y="142">the rules of an</text><text x="667" y="156">audit's findings</text>
+          <text class="l" x="306" y="186">Every file is part of the package digest that a run records.</text>
+        </g>
+
+        <g class="node"><rect x="840" y="40" width="140" height="70" rx="6"/><text class="t" x="910" y="64">The run record</text><text class="m" x="910" y="82">events.jsonl</text><text class="m" x="910" y="98">run.html</text></g>
+        <g class="node reg"><rect x="840" y="200" width="140" height="70" rx="6"/><text class="t" x="910" y="226">The register</text><text x="910" y="244">findings and items</text><text x="910" y="258">across runs</text></g>
+
+        <line class="edge" x1="170" y1="75" x2="266" y2="75" marker-end="url(#ah1)"/><text x="218" y="67">read-only</text>
+        <line class="edge" x1="170" y1="235" x2="266" y2="235" marker-end="url(#ah1)"/><text x="218" y="227">starts a run</text>
+        <line class="edge" x1="740" y1="75" x2="836" y2="75" marker-end="url(#ah1)"/><text x="788" y="67">every run</text>
+        <line class="edge" x1="740" y1="222" x2="836" y2="222" marker-end="url(#ah1)"/><text x="788" y="214">audit reports</text>
+        <line class="edge next" x1="840" y1="250" x2="744" y2="250" marker-end="url(#ah1)"/><text x="790" y="266">what is known</text>
+      </svg>
+    </div>
+    <figcaption class="note">Inside: what a package defines. Around it: what Traceworks adds to every run, whatever
+    the package. The dashed arrow carries something into the next run. Each feature below is tagged with the side it
+    belongs to.</figcaption>
+  </figure>
+  <div class="controls" role="group" aria-label="Mark the features of one side">
+    <button type="button" data-pick="all" aria-pressed="true">All features</button>
+    <button type="button" data-pick="package" aria-pressed="false">What the package defines</button>
+    <button type="button" data-pick="frame" aria-pressed="false">What the frame gives</button>
+    <span class="say" id="say" aria-live="polite">All 14 features are marked. A click on the package or the frame in the drawing does the same as the buttons.</span>
+  </div>
+  <ol class="index" id="index">
+    <li data-side="package frame"><a href="#split"><span class="num">1</span><span class="name">Definition independent of the tool</span><span class="tag pkg">package</span><span class="tag frame">frame</span></a></li>
+    <li data-side="package"><a href="#reusable"><span class="num">2</span><span class="name">Defined once, used again</span><span class="tag pkg">package</span></a></li>
+    <li data-side="frame"><a href="#repeatable"><span class="num">3</span><span class="name">Repeatable</span><span class="tag frame">frame</span></a></li>
+    <li data-side="frame"><a href="#sealed"><span class="num">4</span><span class="name">Sealed</span><span class="tag frame">frame</span></a></li>
+    <li data-side="frame"><a href="#traceable"><span class="num">5</span><span class="name">Traceable</span><span class="tag frame">frame</span></a></li>
+    <li data-side="frame"><a href="#visible"><span class="num">6</span><span class="name">Visible</span><span class="tag frame">frame</span></a></li>
+    <li data-side="package"><a href="#deterministic"><span class="num">7</span><span class="name">Deterministic first, AI optional</span><span class="tag pkg">package</span></a></li>
+    <li data-side="package"><a href="#model"><span class="num">8</span><span class="name">The model, chosen per step</span><span class="tag pkg">package</span></a></li>
+    <li data-side="frame"><a href="#contained"><span class="num">9</span><span class="name">Contained</span><span class="tag frame">frame</span></a></li>
+    <li data-side="package"><a href="#tools"><span class="num">10</span><span class="name">Any tool, in a container</span><span class="tag pkg">package</span></a></li>
+    <li data-side="frame"><a href="#secrets"><span class="num">11</span><span class="name">Secrets protected</span><span class="tag frame">frame</span></a></li>
+    <li data-side="package frame"><a href="#control"><span class="num">12</span><span class="name">Controllable</span><span class="tag pkg">package</span><span class="tag frame">frame</span></a></li>
+    <li data-side="frame"><a href="#register"><span class="num">13</span><span class="name">The register</span><span class="tag frame">frame</span></a></li>
+    <li data-side="frame"><a href="#lean"><span class="num">14</span><span class="name">Lean</span><span class="tag frame">frame</span></a></li>
+  </ol>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A check that lives in the code of a tool changes only with a release of the tool. A check
+      that lives in a prompt or in someone's head is written down nowhere, so nobody can read it, review it or run it
+      the same way twice.</dd></div>
+    <div><dt>What it does</dt><dd>A package is a directory with a <code>workflow.json</code>: the blocks in their order,
+      each with its command or its prompt. Next to it lie what the blocks use: scripts, rule files, a Dockerfile per
+      image under <code>images/&lt;name&gt;/</code>, and for an audit a <code>catalog.json</code> with its rules.
+      Traceworks reads the package and adds the same frame to every run. The five audits this repository runs on
+      itself are such packages, and none of them needs anything the tool does not give every workflow.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># a package is what the directory holds</span>
+examples/hello/workflow.json
+examples/hello/scripts/count-files.sh
+<span class="c"># the tool reads it, and names it by a digest over its files</span>
+$ traceworks describe examples/hello
+$ traceworks check examples/hello</pre>
+      The digest that <code>describe</code> prints is the one a run of the unchanged package records in
+      <code>run.started</code> and in its manifest.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>A package composes the block types the tool has; it cannot add one. What
+      the operator decides is not in the package: <code>traceworks.json</code> holds the network of the AI steps, the
+      output limits and the hooks, and no workflow can set them. And a package is code you run: the containers
+      bound what its steps can do, but run only packages you trust.</dd></div>
+  </dl>
+</section>
+
+<section id="reusable" class="feature" data-side="package">
+  <h2><span class="num">2</span>Defined once, used again <span class="tag pkg">the package</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>The second time a check is done, it is done from memory: other steps, other rules, and
+      a result that cannot be compared with the first.</dd></div>
+    <div><dt>What it does</dt><dd>A check, a workflow or a typical piece of work is defined once as a package and then
+      used again: on the same repository over time, and on other repositories. The workspace is chosen when the run
+      starts, with <code>--workspace</code> or with <code>--source</code> for a new checkout of a git repository at one
+      commit. Each run has the same steps, the same rules and the same kind of record. A workflow can also run inside
+      another one, as a <code>sub-workflow</code> block. The self-audits are packages shipped with the repository,
+      under <code>examples/self-audit/</code>: <code>security</code>, <code>architecture</code>, <code>build</code>,
+      <code>functionality</code> and <code>testing</code>.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># the same package on two directories</span>
+$ traceworks run examples/audit-hello --workspace /some/dir
+$ traceworks run examples/audit-hello --workspace /another/dir
+<span class="c"># or on a checkout of a repository, at one branch, tag or commit</span>
+$ traceworks run examples/audit-hello --source &lt;path|url&gt; --ref &lt;ref&gt;
+<span class="c"># the inputs of an earlier run again</span>
+$ traceworks run examples/audit-hello --inputs-from &lt;run&gt;</pre>
+      <code>traceworks runs --long</code> adds the first 8 characters of the package digest to each run, so you see which
+      version of the workflow ran.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>Reusable means the package, not its results: what is kept of earlier
+      verdicts and decisions is the register's part (feature 13). The self-audit packages are written for the
+      Traceworks sources; their rule files and prompts describe this repository, so for other code they are examples
+      to copy, not checks that fit as they are. A register is found by its key in the Traceworks home (<code>~/.traceworks</code>), not by the repository: two
+      repositories audited by one package under one home would share a register, so give each its own home
+      (<code>--home</code>).</dd></div>
+  </dl>
+</section>
+
+<section id="repeatable" class="feature" data-side="frame">
+  <h2><span class="num">3</span>Repeatable <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>"It passed last week" cannot be checked. Nobody can say whether the workflow, the
+      inputs or the model changed in between, or only the answer.</dd></div>
+    <div><dt>What it does</dt><dd>The same workflow with the same inputs follows the same path. A run records what it
+      ran with: the digest of the package, the digest of its inputs, the ID of every image a container started from,
+      and for each AI call the provider, the model, the tools and the prompt. <code>traceworks diff</code> compares two
+      finished runs from their records and says whether the second reproduced the first.
+      <div class="scroll"><table>
+        <thead><tr><th>Counts for "reproduced"</th><th>Reported, but does not count</th></tr></thead>
+        <tbody>
+          <tr><td>the package digest and the inputs</td><td>the answer of an AI call</td></tr>
+          <tr><td>every deterministic step: its status and its output</td><td>the output and status of an AI step</td></tr>
+          <tr><td>the setup of every AI call: provider, model, effort, tools, web mode, prompts</td><td>the Traceworks version, the images, the gate, the status</td></tr>
+        </tbody>
+      </table></div></dd></div>
+    <div><dt>Where you see it</dt><dd><pre>$ traceworks diff &lt;runA&gt; &lt;runB&gt; --outputs
+<span class="c"># ... the header, the inputs and one line per step, then:</span>
+differs: run B did not reproduce run A
+  the inputs differ
+  step greet: the output differs
+<span class="c"># exit 0: reproduced. exit 11: not, and the last lines name each reason</span></pre>
+      The lines are the example of <code>docs/cli.md</code>, "diff".</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>Exit 0 means that the deterministic part ran the same and the AI part
+      was asked the same way. It does not mean that the two runs printed the same: a model's answer is not repeatable,
+      and the tool does not pretend it is. Traceworks also does not make a script deterministic. A step that reads the
+      clock or the network gives another output, and <code>diff</code> reports it. Both runs must be finished and
+      their records must verify.</dd></div>
+  </dl>
+</section>
+
+<section id="sealed" class="feature" data-side="frame">
+  <h2><span class="num">4</span>Sealed <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A package is a directory of plain files, and files cannot be locked. One edited
+      script or prompt between the review and the run, and what runs is not what was released. Nobody notices
+      until the record is read afterwards.</dd></div>
+    <div><dt>What it does</dt><dd><code>traceworks seal</code> signs a digest of the package with an SSH key and
+      writes the seal into the package as <code>traceworks.seal</code>. The digest covers every regular file of the
+      package, with its path, its content and its owner's execute bit, and every package the workflow calls through
+      a literal <code>workflow_id</code>. <code>run</code> and <code>resume</code> check the seal before anything
+      else, and <code>images build</code> checks it too: a sealed package that changed is refused, and so is one
+      whose signing key the home does not allow. Nothing stops the edit; the run refuses.
+      <div class="scroll"><table>
+        <thead><tr><th>Refused (exit 6), no run folder written</th><th>What the home keeps</th></tr></thead>
+        <tbody>
+          <tr><td>a file of the package or of a called package changed, or a file was added</td><td>the seal log, <code>&lt;home&gt;/seals</code>: a hash-chained line for every seal, unseal and refusal</td></tr>
+          <tr><td>the seal file was deleted by hand while the home holds the workflow as sealed</td><td>which workflow ids are sealed here</td></tr>
+          <tr><td>the key that signed is not in <code>allowed_signers</code>, or that file cannot be read</td><td><code>allowed_signers</code>: the public keys whose seals this home accepts</td></tr>
+          <tr><td>the seal log cannot be read or does not hold; an earlier seal was put back</td><td>the last change of each workflow, which a seal from elsewhere must be newer than</td></tr>
+        </tbody>
+      </table></div>
+      A home needs only the public key to check a seal, so whoever can read the home or the package cannot make
+      one. <code>require_seal</code> in <code>traceworks.json</code> says which runs need a sealed package:
+      <code>never</code> (the default), <code>unattended</code> or <code>always</code>.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre>$ traceworks seal /srv/workflows/release
+sealed Release (5d2f6c1e-...)
+  package  /srv/workflows/release
+  digest   5f2c9d0e...
+  signer   anna@example.org (key SHA256:0pVQIJF1boObMiCP7RTVl8F5utu6I2ROqm7b7z4L2Ik)
+  seal     /srv/workflows/release/traceworks.seal
+$ traceworks seals verify /srv/workflows/release
+<span class="c"># sealed, unsealed, or why the seal does not hold (exit 8); it records nothing</span>
+$ traceworks seals log
+<span class="c"># every SEALED, UNSEALED and REFUSED line of this home</span></pre>
+      The output of <code>seal</code> is the example of <code>docs/cli.md</code>, "seal, unseal and seals", without
+      its line for called packages. A run of a sealed package records its seal in <code>run.started</code>;
+      <code>show</code>, <code>run.html</code> and the manifest name it, and <code>traceworks verify</code> checks its
+      signature. Any other run says <code>unsealed</code>.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>By default a seal binds only the packages that have one. Write access to
+      a package is enough to make it one without: delete <code>traceworks.seal</code> and change the
+      <code>id</code> in <code>workflow.json</code>, and the home has never heard of the workflow. Only
+      <code>require_seal: "always"</code> stops that; <code>"unattended"</code> guards against an accident, not
+      against a caller, who can pass <code>--allow-unsealed</code>. The <code>signer</code> in a seal is a name the
+      sealer declared, and nobody checks it; what is checked is the key, its fingerprint and the names
+      <code>allowed_signers</code> gives it. The key must be Ed25519: Traceworks reads no other type. Whoever can
+      write the home can allow a key of their own, <code>unseal</code> is not signed, and any allowed signer can
+      seal anything. The digest does not see an empty directory, a file that is not a regular file, or the
+      top-level <code>.git/</code>, and a called package is loaded again when its block runs, without a second
+      check. A seal signs a package, not a record: manifests, approvals and register decisions are still
+      unsigned.</dd></div>
+  </dl>
+</section>
+
+<section id="traceable" class="feature" data-side="frame">
+  <h2><span class="num">5</span>Traceable <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A log that can be edited afterwards proves nothing, and what scrolled past in a
+      terminal is gone.</dd></div>
+    <div><dt>What it does</dt><dd>Every run leaves a folder of plain files. <code>events.jsonl</code> is the event log:
+      one JSON object per line, appended in order, never changed. Each line holds the hash of the line before it.
+      Outputs, commands and answers are blobs, each named by the SHA-256 of its content. When the run ends,
+      <code>manifest.json</code> names the hash of the last line and the number of lines, and a copy of it is committed
+      to the ledger, a git repository in the home. Every run, answer, resume and cancel is attributed to an actor.
+      What is not in the log did not happen.</dd></div>
+  </dl>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" id="chain" viewBox="0 0 1000 250" role="img" aria-label="The hash chain of a run. The prev field of line 0 is the hash of a fixed text with the run id. The prev field of each later line is the SHA-256 of the line before it. The manifest names the hash of the last line and the number of lines, and the ledger holds a copy of the manifest. When one byte of line 1 changes, the prev field of line 2 no longer matches.">
+        <defs>
+          <marker id="ah2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+          <marker id="ah2b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" style="fill: var(--open)"/></marker>
+        </defs>
+        <g class="node"><rect x="20" y="40" width="180" height="70" rx="6"/><text class="t" x="110" y="66">Genesis</text><text class="m" x="110" y="84">traceworks-run-v1|</text><text x="110" y="100">followed by the run id</text></g>
+        <g class="node" id="c0"><rect x="270" y="40" width="180" height="70" rx="6"/><text class="t" x="360" y="66">Line 0</text><text class="m" x="360" y="84">prev = H(genesis)</text><text x="360" y="100">run.started</text></g>
+        <g class="node" id="c1"><rect x="520" y="40" width="180" height="70" rx="6"/><text class="t" x="610" y="66">Line 1</text><text class="m" x="610" y="84">prev = H(line 0)</text>
+          <text class="only-ok" x="610" y="100">one JSON object</text><text class="only-bad warn" x="610" y="100">one byte changed</text></g>
+        <g class="node" id="c2"><rect x="770" y="40" width="180" height="70" rx="6"/><text class="t" x="860" y="66">Line 2</text><text class="m" x="860" y="84">prev = H(line 1)</text><text x="860" y="100">and so on, to the last line</text></g>
+        <g class="node"><rect x="770" y="170" width="180" height="60" rx="6"/><text class="t" x="860" y="195">manifest.json</text><text x="860" y="213">head, number of lines</text></g>
+        <g class="node"><rect x="520" y="170" width="180" height="60" rx="6"/><text class="t" x="610" y="195">The ledger</text><text x="610" y="213">git: a copy of the manifest</text></g>
+
+        <line class="edge" x1="200" y1="75" x2="266" y2="75" marker-end="url(#ah2)"/><text class="m" x="233" y="67">H</text>
+        <line class="edge" x1="450" y1="75" x2="516" y2="75" marker-end="url(#ah2)"/><text class="m" x="483" y="67">H</text>
+        <line class="edge only-ok" x1="700" y1="75" x2="766" y2="75" marker-end="url(#ah2)"/><text class="m only-ok" x="733" y="67">H</text>
+        <line class="edge bad only-bad" x1="700" y1="75" x2="766" y2="75" marker-end="url(#ah2b)"/><text class="only-bad warn" x="735" y="30">no longer matches</text>
+        <line class="edge" x1="860" y1="110" x2="860" y2="166" marker-end="url(#ah2)"/><text class="l" x="870" y="142">hash of the last line</text>
+        <line class="edge" x1="770" y1="200" x2="704" y2="200" marker-end="url(#ah2)"/><text x="737" y="192">copy</text>
+        <text class="l" x="20" y="195">H is SHA-256 over the bytes of a line.</text>
+        <text class="l" x="20" y="213">Three lines stand for the whole log.</text>
+      </svg>
+    </div>
+    <figcaption class="note" id="chain-say">The chain as it is written: each line names the hash of the one before, and
+    the manifest and the ledger name the last one. Change one byte of a line, remove a line or copy lines from another
+    run, and the next <code>prev</code> no longer matches. A log cut at its end still chains, but then the manifest
+    does not match it.</figcaption>
+  </figure>
+  <div class="controls"><button type="button" id="tamper" aria-pressed="false">Change one byte of line 1</button></div>
+  <dl class="pattern">
+    <div><dt>Where you see it</dt><dd><pre>$ traceworks verify &lt;run&gt;
+chain     ok (34 events, head 7e364c17...)
+manifest  ok
+ledger    ok
+verified
+<span class="c"># the output format of docs/cli.md; exit 8 when something does not hold</span></pre>
+      The files are in <code>~/.traceworks/runs/&lt;yyyy-mm-dd&gt;/&lt;run-id&gt;/</code>; <code>~/.traceworks</code> is the Traceworks home, a folder of its own that <code>--home</code> or <code>TRACEWORKS_HOME</code> moves. <code>verify</code> also works
+      on a copied run folder, without the home, and <code>docs/events.md</code> shows how to check the chain by hand
+      with <code>sha256sum</code>.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>The record is tamper-evident, not signed. Whoever can write the home can
+      rewrite a run folder and its ledger entry together, so keep a copy of the ledger where your runs cannot write.
+      The record says what a step did and printed, not whether what it printed is true. The scratch directory, where
+      steps hand files to each other, is not part of the record: the record lists its files, and the directory stays
+      as the steps left it.</dd></div>
+  </dl>
+</section>
+
+<section id="visible" class="feature" data-side="frame">
+  <h2><span class="num">6</span>Visible <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>Before a run, a workflow is a JSON file one has to read and believe. After it, the run
+      is whatever someone remembers of the terminal.</dd></div>
+    <div><dt>What it does</dt><dd><strong>Before:</strong> <code>traceworks describe</code> shows what a workflow
+      will do: its inputs, each block with what it may touch (network, workspace, the names of its secrets, its image,
+      the tools of a model), nested blocks and child workflows, and the counts. It starts nothing, writes nothing and
+      needs no container runtime; <code>--html</code> writes the same as one page. <code>traceworks check</code>
+      reports what a run would refuse, and <code>run</code> starts no run of a package with an error.
+      <strong>After:</strong> <code>run.html</code> in the run folder shows the run: the workflow, every step with its
+      commands, AI calls, output and files. It is one self-contained file without scripts, and its Content Security
+      Policy blocks every external load. <code>traceworks show</code> prints the same in the terminal, and
+      <code>watch</code> follows a run while it runs.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre>$ traceworks describe examples/hello
+<span class="c"># ... the header and the inputs, then the blocks:</span>
+  0   greet                    shell
+      echo "Hello, {{ name }}"
+      shell: network none, workspace read-only, image: the run's shell image
+  2   publish                  approval
+      Publish the greeting "{{ block.greet.output }}"?
+      person: a person is asked
+
+4 blocks: 0 AI steps, 0 shell steps with network, 1 step that asks a person</pre>
+      Two of the four blocks are shown; the lines are from <code>docs/cli.md</code>, "describe".</dd></div>
+    <div class="limit"><dt>The limit</dt><dd><code>describe</code> shows the workflow's side only, not what the
+      operator's <code>traceworks.json</code> decides, and a child workflow named by a placeholder is listed as not
+      shown. <code>run.html</code> is a static file, written when the run ends or parks: there is no live page and no
+      server. A long content block is cut on the page, with a note that names the blob that holds all of it.</dd></div>
+  </dl>
+</section>
+
+<section id="deterministic" class="feature" data-side="package">
+  <h2><span class="num">7</span>Deterministic first, AI optional <span class="tag pkg">the package</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>When a model reads, counts, decides and reports, no part of the result can be checked,
+      and every run pays for all of it again.</dd></div>
+    <div><dt>What it does</dt><dd>A workflow works without any AI: shell steps, tool steps, loops, conditions and
+      questions to a person. A model is asked only where a block says so, such as a <code>simple</code> or
+      <code>agentic</code> block, or a loop with <code>execution_mode: ai</code>.
+      <code>examples/hello</code> and <code>examples/audit-hello</code> have no AI step, and the <code>build</code>
+      self-audit measures with deterministic steps only. The self-audits that do ask a model share one shape: a script
+      measures and chooses, a model judges one item per call, and a script checks every quote, counts and sets the
+      gate. The model does not count, set the gate or write what the register reads.</dd></div>
+    <div><dt>Where you see it</dt><dd><code>traceworks describe &lt;package&gt;</code> ends with the count of AI steps
+      (<code>0 AI steps</code> for <code>examples/hello</code>), and marks each block that calls a model with a line
+      <code>ai:</code>. In a record, every call of a model is an <code>ai.request</code> and an
+      <code>ai.response</code> event.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>Traceworks cannot make a model's answer true. It gives what is around the
+      call: the tools the model may use, a read-only workspace, and a record of the prompt, every tool call and the
+      answer. Checking the answer is the work of the package, in a step after the call. A <code>simple</code> or
+      <code>agentic</code> step can set the gate of a run with a line of its output, so keep the verdict in a
+      deterministic step that checks the model's work.</dd></div>
+  </dl>
+</section>
+
+<section id="model" class="feature" data-side="package">
+  <h2><span class="num">8</span>The model is free to choose per step <span class="tag pkg">the package</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>One model does everything: too costly for the easy steps, too weak for the hard ones,
+      and a change of provider is a rewrite. Or the model is whatever a variable holds when the step runs, and nobody
+      can say before the run which model that will be, or who set it.</dd></div>
+    <div><dt>What it does</dt><dd>The workflow decides. A block names its <code>provider</code>, its
+      <code>model</code> and its <code>effort</code>; a block that names none takes the workflow's, and without those
+      the provider is <code>CLAUDE</code> with its default model. Two command line tools are configured, each in its
+      own built-in image: Claude Code (provider <code>CLAUDE</code>) and Pi (provider <code>PI</code>). Pi reaches the
+      backend its model names, such as <code>google/…</code>, <code>openai/…</code> or <code>openrouter/…</code>. A
+      workflow can also open the choice: it declares <code>modelChoices</code>, a name with a default and a list of
+      options, each a provider and model pair, and a block refers to it with <code>model_choice</code>. Whoever
+      starts the run picks one option with the input of that name; without it the default holds, and a value that is
+      not in the list refuses the run before it starts. The operator can narrow which models run in a home
+      (<code>allowed_models</code> in <code>traceworks.json</code>), and can never widen a package's list. What a
+      model may do is set per block as well: <code>tools</code> is <code>none</code> (the default),
+      <code>read</code>, <code>write</code> or <code>shell</code>. The record names the option that was picked, the
+      model that was asked for and the model that answered, with tokens and cost.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># from examples/self-audit/security/workflow.json: the choice, and the verdict step that refers to it</span>
+"modelChoices": {"judge": {"default": "fable", "options": {
+  "fable": {"provider": "CLAUDE", "model": "claude-fable-5-2"},
+  "opus":  {"provider": "CLAUDE", "model": "claude-opus-5-5"},
+  "astra": {"provider": "PI", "model": "openai/gpt-6-astra"}}}}
+
+"model_choice": "judge",
+"tools": "read"
+
+<span class="c"># the default judges, or the option the run picks</span>
+traceworks run examples/self-audit/security
+traceworks run examples/self-audit/security --input judge=astra</pre>
+      <code>traceworks describe</code> lists the choice with its options and the blocks that use it,
+      <code>traceworks show</code> names the option a run picked, <code>traceworks runs --long</code> lists the models
+      each run used, and <code>traceworks diff</code> counts a different pick or a different model as a different
+      run.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>A model is reached through one of these two tools, not through an API of
+      its own. Codex is refused, and an unknown provider is refused, never replaced by another. Each provider needs a
+      credential, or the run is refused before it starts; a run with a picked option needs the credential and the
+      image of that option's provider only. A model is never a placeholder: a run picks among the options the package
+      declares, once, before its first step, and no step can change the pick. Without <code>allowed_models</code> a
+      package may name any model of a provider the home holds a credential for. Pi has no web tool, and a Pi backend
+      whose host Traceworks does not know needs the operator's <code>ai_hosts</code>.</dd></div>
+  </dl>
+</section>
+
+<section id="contained" class="feature" data-side="frame">
+  <h2><span class="num">9</span>Contained <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A step of a package you did not write runs as you: with your files, your network and
+      your keys. A model with tools can send what it reads to any host.</dd></div>
+    <div><dt>What it does</dt><dd>Every step runs in its own container, with the same flags for every package: a
+      read-only root file system, all capabilities dropped, no new privileges, limits on memory, processes and CPUs
+      (4 GB, 1024 and 2 by default), and an image resolved before the start and never pulled. By default a step has no
+      network and sees the workspace read-only. A block that wants more says so (<code>network: true</code>,
+      <code>workspace_writable: true</code>), and <code>describe</code> shows it. An AI step must reach its provider and
+      reaches nothing else: its container joins a network with no way out, next to an allowlist proxy that connects to
+      the provider's hosts and the hosts the operator adds. Every connection the container asked for is in the
+      record, allowed or denied.</dd></div>
+  </dl>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" id="box" viewBox="0 0 1000 370" role="img" aria-label="What is inside a container and what stays outside. On the host, the Traceworks process starts one container per step. The Traceworks home with the record and the credentials, the logins of the user, the socket of the container runtime and other runs are never mounted. A shell step sees the workspace and the package read-only and a writable scratch directory, and has no network. An AI step has the same mounts and one credential, and its only way out is the egress proxy, which allows a connection to the provider's API and denies any other host.">
+        <defs><marker id="ah3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <g class="frame"><rect x="20" y="16" width="290" height="338" rx="10"/>
+          <text class="t l" x="38" y="42">The host: your machine</text>
+          <g class="chip"><rect x="38" y="56" width="254" height="60" rx="4"/><text class="t" x="165" y="80">The Traceworks process</text><text x="165" y="99">starts a container per step, writes the record</text></g>
+          <text class="l" x="38" y="146">Stays outside, never mounted or passed in:</text>
+          <text class="l" x="48" y="170">the Traceworks home: the record,</text>
+          <text class="l" x="48" y="185">credentials.json, the ledger</text>
+          <text class="l" x="48" y="209">your logins, such as ~/.ssh and ~/.aws</text>
+          <text class="l" x="48" y="233">the socket of the container runtime</text>
+          <text class="l" x="48" y="257">other runs, and the rest of your</text>
+          <text class="l" x="48" y="272">environment</text>
+          <text class="l" x="38" y="306">Comes back into the record: output, exit</text>
+          <text class="l" x="38" y="321">code and files, with secret values replaced.</text>
+        </g>
+        <g class="node"><rect x="400" y="16" width="250" height="150" rx="6"/>
+          <text class="t" x="525" y="42">A shell step: one container</text>
+          <text class="m l" x="416" y="68">/workspace</text><text class="r" x="634" y="68">read-only</text>
+          <text class="m l" x="416" y="88">/package</text><text class="r" x="634" y="88">read-only</text>
+          <text class="m l" x="416" y="108">/scratch</text><text class="r" x="634" y="108">writable</text>
+          <text class="l" x="416" y="128">secrets</text><text class="r" x="634" y="128">only the ones it names</text>
+          <text class="l" x="416" y="148">network</text><text class="r" x="634" y="148">none</text>
+        </g>
+        <g class="node ai"><rect x="400" y="204" width="250" height="150" rx="6"/>
+          <text class="t" x="525" y="230">An AI step: one container</text>
+          <text class="l" x="416" y="256">runs</text><text class="r" x="634" y="256">the provider's CLI</text>
+          <text class="l" x="416" y="276">mounts</text><text class="r" x="634" y="276">the same three</text>
+          <text class="l" x="416" y="296">tools of the model</text><text class="r" x="634" y="296">none by default</text>
+          <text class="l" x="416" y="316">credential</text><text class="r" x="634" y="316">its provider's only</text>
+          <text class="l" x="416" y="336">network</text><text class="r" x="634" y="336">no way out but the proxy</text>
+        </g>
+        <g class="node reg"><rect x="730" y="244" width="110" height="70" rx="6"/><text class="t" x="785" y="272">Egress proxy</text><text x="785" y="291">an allowlist</text></g>
+        <g class="node"><rect x="890" y="204" width="100" height="56" rx="6"/><text class="t" x="940" y="228">Provider</text><text x="940" y="245">its API host</text></g>
+        <g class="node"><rect x="890" y="298" width="100" height="56" rx="6"/><text class="t" x="940" y="322">Any other</text><text x="940" y="339">host</text></g>
+
+        <line class="edge" x1="310" y1="76" x2="396" y2="76" marker-end="url(#ah3)"/><text x="353" y="68">starts</text>
+        <line class="edge" x1="400" y1="118" x2="314" y2="118" marker-end="url(#ah3)"/><text x="355" y="134">output</text>
+        <line class="edge" x1="310" y1="262" x2="396" y2="262" marker-end="url(#ah3)"/><text x="353" y="254">starts</text>
+        <line class="edge" x1="400" y1="304" x2="314" y2="304" marker-end="url(#ah3)"/><text x="355" y="320">output</text>
+        <line class="edge" x1="650" y1="279" x2="726" y2="279" marker-end="url(#ah3)"/><text class="m" x="688" y="271">CONNECT</text>
+        <line class="edge" x1="840" y1="262" x2="886" y2="238" marker-end="url(#ah3)"/><text class="m" x="856" y="236">ALLOW</text>
+        <line class="edge next" x1="840" y1="296" x2="886" y2="320" marker-end="url(#ah3)"/><text class="m" x="856" y="332">DENY</text>
+        <text x="785" y="338">each request is</text><text x="785" y="352">in the record</text>
+        <text class="l" x="668" y="68">No route leaves this container.</text>
+        <text class="l" x="668" y="86">A block opens the network with</text>
+        <text class="m l" x="668" y="104">network: true</text>
+        <text class="l" x="668" y="122">and the workflow must declare it.</text>
+      </svg>
+    </div>
+    <figcaption class="note">The left box is the host, and what a container never sees. The two boxes in the middle are
+    the two kinds of step. Only the AI step has a way out, and it ends at the proxy: a connection to the provider is
+    tunnelled, any other is answered with 403 and recorded as <code>DENY</code> (the dashed arrow).</figcaption>
+  </figure>
+  <dl class="pattern">
+    <div><dt>Where you see it</dt><dd><code>traceworks describe</code> says per block what it may touch, such as
+      <code>shell: network none, workspace read-only, image: the run's shell image</code>. In the record, every
+      <code>step.command</code> names its image, the image ID and its mounts, and the
+      <code>step.command.finished</code> of an AI call lists under <code>egress</code> each target with
+      <code>ALLOW</code>, <code>DENY</code> or <code>FAIL</code>. <code>traceworks show</code> and
+      <code>run.html</code> mark a denied connection. <code>docs/security.md</code> has the whole list, with what the
+      defaults do not protect.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>The provider's own host stays reachable, and everything a model reads
+      goes there. A denied connection is an observation: it fails no step. A step with <code>network: true</code> can
+      connect anywhere, and the operator can open the network of the AI steps (<code>ai_network: "open"</code>); then
+      no connection is recorded. On a machine where no container runtime works, a run can go to the host with the
+      operator's consent (<code>--allow-host-execution</code>), and a shell command there can do what you can do.
+      Verified with Docker 29.1.3 only; Podman is supported by the code and untested.</dd></div>
+  </dl>
+</section>
+
+<section id="tools" class="feature" data-side="package">
+  <h2><span class="num">10</span>Any tool, in a container <span class="tag pkg">the package</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>Every scanner and linter has to be installed on every machine, in the same version.
+      Or a model is asked to do what a tested tool already does.</dd></div>
+    <div><dt>What it does</dt><dd>A step runs whatever tool an image holds. A shell block names its image with
+      <code>container_image</code>: an image of a registry, or one of the package's own,
+      <code>./images/&lt;name&gt;</code>, built from the Dockerfile the package brings. A block with
+      <code>container_args</code> in place of a command is a tool step: the image's own entrypoint runs with those
+      arguments, without a shell. With <code>output_format: sarif</code>, Traceworks reads the SARIF files the tool
+      wrote and turns them into a fact sheet of counts and hits that later steps and the register can use. So an
+      established tool becomes a deterministic step, and the record says which image, by its ID, did the work.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre>{"type": "shell", "name": "scan", "config": {
+  "container_image": "ghcr.io/example/scanner:1.4",
+  "container_args": ["fs", "--format", "sarif",
+                     "--output", "/out/scan.sarif", "/workspace"],
+  "output_format": "sarif"}}
+<span class="c"># the example of docs/cli.md, "Tool mode of the shell block"</span>
+<span class="c"># the image name is made up</span>
+
+<span class="c"># builds the package's images/&lt;name&gt;/Dockerfile, pulls its registry images</span>
+$ traceworks images build &lt;package&gt;</pre>
+      The security self-audit brings an image of its own, <code>./images/areas</code>, with the tool that finds the
+      areas a model then judges.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>A run never builds or pulls an image: build first, or the start check
+      refuses the run. SARIF is the one format Traceworks reads as data; any other output of a tool stays text. A
+      measurement it cannot read fails the step instead of counting as zero. An image of a registry named by a tag can
+      change between two runs; the record keeps the image ID, and <code>diff</code> shows when it differs. A tool step
+      needs a container runtime: there is none on the host.</dd></div>
+  </dl>
+</section>
+
+<section id="secrets" class="feature" data-side="frame">
+  <h2><span class="num">11</span>Secrets protected <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A token stands in a workflow file or an input, every step can read it, and it ends up
+      in the log of the run.</dd></div>
+    <div><dt>What it does</dt><dd><strong>Closed by default:</strong> a step gets nothing of your environment.
+      <strong>Named to get in:</strong> a shell step lists the names it needs in <code>secrets</code>, and only that
+      step gets them, as environment variables. A value comes from <code>credentials.json</code> in the home, which
+      only its owner may read, or from the environment of Traceworks, and from there only for the names the operator
+      allows in <code>secret_names</code>. A name without a value refuses the run before it starts. The credential of
+      an AI provider goes to that provider's containers and to no other step. <strong>Redacted in the record:</strong>
+      every value the run passes on is replaced with <code>[redacted:&lt;NAME&gt;]</code> in the event log, the blobs,
+      the checkpoints, <code>run.html</code>, the manifest, the ledger and everything Traceworks prints.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># asks for the value; the terminal does not show it</span>
+$ traceworks credentials set DEPLOY_TOKEN
+<span class="c"># the stored names, never a value</span>
+$ traceworks credentials list
+
+{"type": "shell", "name": "deploy",
+ "config": {"command": "./deploy.sh", "secrets": ["DEPLOY_TOKEN"]}}</pre>
+      The value is never an argument of a command, so it is in no shell history and no process list.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>Redaction finds a value only as it is, byte for byte. A step that prints
+      its secret encoded or in pieces puts it into the record readably: redaction keeps accidents out, it does not
+      stop a step that means to leak. A step can do anything with its secret, and with <code>network: true</code> it
+      can send it anywhere. A model with tools can read its own credential. A file in the scratch directory that holds
+      a value is listed without its content, but the file stays there.</dd></div>
+  </dl>
+</section>
+
+<section id="control" class="feature" data-side="package frame">
+  <h2><span class="num">12</span>Controllable
+    <span class="tag pkg">the package</span><span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A long run is all or nothing: stopping it loses the work, and nobody is asked before
+      the step that matters.</dd></div>
+    <div><dt>What it does</dt><dd>The frame lets a person stop a run and go on. A pause finishes the step in flight,
+      in a loop the item in flight, and parks the run to disk; a resume continues from the last checkpoint, and a
+      resumed loop takes over the items its record holds as finished. The package says where a person must decide: an
+      <code>approval</code> block asks a question with options, a <code>human-input</code> block asks for a value, and
+      a run without a terminal parks there until the answer comes. A step reports a gate with a line
+      <code>gate_status: GREEN</code>, <code>YELLOW</code> or <code>RED</code>, and the caller decides what a gate
+      means.
+      <div class="scroll"><table>
+        <thead><tr><th>What you do</th><th>What happens</th><th>The run ends its process with</th></tr></thead>
+        <tbody>
+          <tr><td><code>traceworks pause</code>, or Ctrl-C once</td><td>parks after the step or loop item in flight; nothing is cut, nothing runs twice</td><td><code>PARKED</code>, exit 5</td></tr>
+          <tr><td><code>traceworks resume &lt;run&gt;</code></td><td>goes on from the last checkpoint: today or next week, in any terminal</td><td>the status the run reaches</td></tr>
+          <tr><td><code>traceworks cancel &lt;run&gt;</code>, or Ctrl-C twice</td><td>ends the step in flight; the run cannot be resumed</td><td><code>CANCELLED</code>, exit 4</td></tr>
+          <tr><td>an <code>approval</code> block, with <code>--no-input</code> or no terminal</td><td>the question is recorded, and <code>traceworks approve &lt;run&gt; --answer Yes</code> answers it</td><td><code>PARKED</code>, exit 5</td></tr>
+          <tr><td><code>run --fail-on-gate red</code></td><td>the run completes as it would; only the exit code says that the gate was reached</td><td>exit 7</td></tr>
+        </tbody>
+      </table></div></dd></div>
+    <div><dt>Where you see it</dt><dd><pre>$ traceworks run examples/hello --no-input   <span class="c"># parks at the approval, exit 5</span>
+$ traceworks approve &lt;run&gt; --answer Yes
+$ traceworks resume &lt;run&gt; --no-input        <span class="c"># finishes, exit 0</span></pre>
+      Every pause request, resume, cancel request and answer is an event of the record, with who did it.
+      <code>show</code> and <code>run.html</code> list what was done to a run from outside its steps as
+      interventions.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>Only a question stops a run. A gate never does, and it never changes the
+      status of a run: it is a verdict, and <code>--fail-on-gate</code> turns it into an exit code after the run has
+      completed. A pause never cuts a step, so a model call of ten minutes takes its ten minutes first. A loop that
+      runs a workflow per item, and a child workflow, do not park in the middle. A question asked inside another block
+      or in a child workflow waits in the process instead of parking. Where the system has no <code>setsid</code>
+      program (macOS), Ctrl-C cancels at once; <code>traceworks pause</code> still pauses.</dd></div>
+  </dl>
+</section>
+
+<section id="register" class="feature" data-side="frame">
+  <h2><span class="num">13</span>The register <span class="tag frame">the frame</span>
+    <small>registers/&lt;key&gt;/</small></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>An audit that runs a second time starts from zero. It reports other things in other
+      words, has forgotten what was decided, and nobody can say how far it is.</dd></div>
+    <div><dt>What it does</dt><dd>A workflow that declares itself an audit (<code>metadata.audit</code>, with a key)
+      feeds a register at the end of every run. The register is what the audit knows across its runs, kept with the
+      means of a run: an append-only, hash-chained log in plain files. It has seven functions, each below with where
+      you see it and its limit. Here "reused" means verdicts and decisions; that the package can be used again is
+      feature 2. The page <a href="audit-loop.html">An audit that knows when it is done</a> shows the loop round by
+      round.</dd></div>
+  </dl>
+  <div class="cards">
+    <div class="card"><h3>Memory across runs</h3>
+      <p>A finding has an identity: the register's key, the rule and the subject. So a report
+      is compared with what is known, and each finding is new, seen again, resolved or reopened, with first seen, last
+      seen and how often.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; list</code>, and the last line of an audit run, such as
+      <code>register hello: 1 new, 1 resolved, 0 reopened, 1 open now</code>.</p>
+      <p class="see">Limit: nothing is normalised. A reworded subject is a new finding.</p></div>
+    <div class="card"><h3>Decisions kept</h3>
+      <p>A person accepts a finding as a risk, dismisses it or reopens it. The log keeps who decided, when and why.
+      An accepted risk has a review date, at most 180 days ahead, and comes up again when it has passed. The next run
+      gets the decisions, so a dismissed finding is not reported again. A decision covers the severity it was made
+      on: a finding that comes back rated higher is open again.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; accept &lt;id&gt; --note "…" --until &lt;date&gt;</code>,
+      <code>dismiss</code>, <code>reopen</code>.</p>
+      <p class="see">Limit: a decision is recorded, not signed.</p></div>
+    <div class="card"><h3>Verdicts reused</h3>
+      <p>An audit lists what it judges as items, each with a digest of what a verdict sees. "Nothing found here" is
+      then a recorded verdict, and it holds until the item changes. The next run gets the items back and asks a model
+      only about what changed, was never judged or is open.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; items</code>: each item as <code>open</code>,
+      <code>not judged</code>, <code>decided</code> or <code>clean</code>.</p>
+      <p class="see">Limit: the audit computes the digest and chooses the items; the register only compares. An audit
+      that lists no items has none.</p></div>
+    <div class="card"><h3>Proof</h3>
+      <p>Every report and every decision is a line of the register's log, chained like the log of a run. The state is
+      not stored but folded from the log, so a state edited by hand differs from it.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; verify</code> checks the chain, the blobs and
+      <code>state.json</code>; exit 8 when one does not hold.</p>
+      <p class="see">Limit: the head of a register is not anchored outside its folder yet. A changed last line or a
+      cut end can go unnoticed, so protect the folder as you protect the ledger.</p></div>
+    <div class="card"><h3>Progress that can reach its goal</h3>
+      <p>The number of findings grows with attention and has no goal. The number of settled items has one: an item is
+      settled when it is clean or every finding of it is decided. The self-audits let their gate follow it: red while
+      an open finding of high severity stands, yellow while an item is open or not judged, green when every item is
+      settled.</p>
+      <p class="see">See: <code>traceworks findings</code> prints per register a line of the form
+      <code>items 87 of 110 settled: 71 clean, 16 decided; 20 open, 3 not judged</code> (example numbers).</p>
+      <p class="see">Limit: the register counts; the rule of the gate is in the report step of each package.</p></div>
+    <div class="card"><h3>Robustness</h3>
+      <p>Silence resolves nothing: a finding a model judged stays open until a run names it as gone. A failed call
+      costs one item, which is listed as not judged, and the register takes the rest. The register marks a finding
+      whose evidence names no fact the run measured, and in the self-audits a finding counts only with a quote that a
+      script finds in the file.</p>
+      <p class="see">See: <code>"judged": true</code> for a rule in <code>catalog.json</code>, and
+      <code>traceworks findings &lt;key&gt; show &lt;id&gt;</code> with the quoted line.</p>
+      <p class="see">Limit: the checks are lookups. They find a quote that is not there, not a conclusion that is
+      wrong; a person or an agent still checks each new finding against the code.</p></div>
+    <div class="card"><h3>A way out</h3>
+      <p>The register is not a closed place. After an audit run that changed it, a hook of the operator gets the
+      changes as JSON: what is new, resolved, reopened and due for review. Everything else is readable as JSON too,
+      and as a page.</p>
+      <p class="see">See: <code>hooks.register_changed</code> in <code>traceworks.json</code>,
+      <code>findings &lt;key&gt; list --json</code>, <code>items --json</code>, <code>state.json</code> and
+      <code>report.html</code> in the register's folder.</p>
+      <p class="see">Limit: a hook is the operator's program, never the workflow's, and a failing hook does not change
+      the exit code of the run.</p></div>
+  </div>
+  <figure>
+    <div class="scroll">
+      <svg class="dg" id="life" viewBox="0 0 1000 290" role="img" aria-label="The life of a finding in a register. A finding a report states is open. It is resolved when a tool no longer measures it or a run names it as gone, and reopened when a report states it again. A person dismisses an open finding or accepts it as a risk. An accepted risk awaits verification when its review date has passed, and from there it is open again when still stated, or resolved when gone.">
+        <defs><marker id="ah4" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <g class="node reg"><rect x="200" y="30" width="180" height="60" rx="6"/><text class="t" x="290" y="55">OPEN</text><text x="290" y="73">asked about in the next run</text></g>
+        <g class="node"><rect x="800" y="30" width="170" height="60" rx="6"/><text class="t" x="885" y="55">RESOLVED</text><text x="885" y="73">kept, with its history</text></g>
+        <g class="node"><rect x="20" y="210" width="170" height="60" rx="30"/><text class="t" x="105" y="235">DISMISSED</text><text x="105" y="253">decided: not asked again</text></g>
+        <g class="node"><rect x="230" y="210" width="180" height="60" rx="30"/><text class="t" x="320" y="235">ACCEPTED_RISK</text><text x="320" y="253">decided, until its review date</text></g>
+        <g class="node"><rect x="500" y="210" width="200" height="60" rx="6"/><text class="t" x="600" y="235">AWAITING_VERIFICATION</text><text x="600" y="253">asked about again</text></g>
+
+        <circle cx="60" cy="60" r="4" fill="currentColor"/>
+        <line class="edge" x1="64" y1="60" x2="196" y2="60" marker-end="url(#ah4)"/><text x="130" y="52">a report states it</text>
+        <line class="edge" x1="380" y1="48" x2="796" y2="48" marker-end="url(#ah4)"/><text x="588" y="40">no longer measured, or a run names it as gone</text>
+        <line class="edge" x1="800" y1="74" x2="384" y2="74" marker-end="url(#ah4)"/><text x="588" y="92">a report states it again: reopened</text>
+        <polyline class="edge" points="240,90 240,150 105,150 105,206" marker-end="url(#ah4)"/><text class="m" x="172" y="142">dismiss --note</text>
+        <line class="edge" x1="320" y1="90" x2="320" y2="206" marker-end="url(#ah4)"/><text class="m r" x="312" y="190">accept --note --until</text>
+        <line class="edge" x1="410" y1="240" x2="496" y2="240" marker-end="url(#ah4)"/><text x="453" y="232">review date</text>
+        <polyline class="edge" points="560,210 560,140 355,140 355,94" marker-end="url(#ah4)"/><text x="458" y="132">still stated</text>
+        <polyline class="edge" points="660,210 660,150 885,150 885,94" marker-end="url(#ah4)"/><text x="772" y="142">gone: the fix is verified</text>
+      </svg>
+    </div>
+    <figcaption class="note">The statuses of a finding, simplified. Rounded boxes are decisions of a person; the other
+    changes come from the reports of the runs. Not drawn: <code>reopen</code> brings an accepted, dismissed or resolved
+    finding back to <code>OPEN</code>, so does a report that states an accepted or dismissed finding with a higher
+    severity than the decision was made on, and <code>accept</code> and <code>dismiss</code> also take a finding that
+    awaits verification. The full table is in <code>docs/registers.md</code>, "What a run does to its register".</figcaption>
+  </figure>
+  <dl class="pattern">
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># the smallest audit: three shell steps, no AI</span>
+$ traceworks run examples/audit-hello --workspace /some/dir
+$ traceworks findings              <span class="c"># the registers, with counts by status</span>
+$ traceworks findings hello list
+$ traceworks findings hello verify</pre>
+      The files are in <code>~/.traceworks/registers/&lt;key&gt;/</code> (the Traceworks home): <code>events.jsonl</code>, <code>blobs/</code>,
+      <code>state.json</code> and <code>report.html</code>.</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>The register keeps what a report stated: the rule, the subject, the
+      severity and the evidence. What is wrong and how to fix it are often a model's words; they stay in the record of
+      the run, and <code>findings &lt;key&gt; show</code> reads them from there. A register belongs to one workflow, and
+      a run of another workflow with the same key is refused. Triage is nobody's workflow: someone has to check a new
+      finding against the code.</dd></div>
+  </dl>
+</section>
+
+<section id="lean" class="feature" data-side="frame">
+  <h2><span class="num">14</span>Lean <span class="tag frame">the frame</span></h2>
+  <dl class="pattern">
+    <div><dt>Without it</dt><dd>A workflow server wants a database, a running service, upgrades and backups, and its
+      records can be read only through the server.</dd></div>
+    <div><dt>What it does</dt><dd>Traceworks is a command line tool. It runs a workflow, writes everything that
+      happened to plain files, and exits. There is no database and no service. Everything it writes lies in one
+      directory, the home, and the ledger in it is a git repository. The tool is one runnable jar with one runtime
+      library, Jackson, for reading and writing JSON; the build fails on any other dependency. Outside the jar it
+      needs Java 21, <code>docker</code> or <code>podman</code>, and <code>git</code>.</dd></div>
+    <div><dt>Where you see it</dt><dd><pre>&lt;home&gt;/                        <span class="c"># --home, TRACEWORKS_HOME or ~/.traceworks</span>
+  traceworks.json              <span class="c"># the operator's settings (optional)</span>
+  credentials.json             <span class="c"># the values of secrets (optional)</span>
+  runs/&lt;yyyy-mm-dd&gt;/&lt;run-id&gt;/  <span class="c"># one folder per run</span>
+  ledger/                      <span class="c"># a git repository, one commit per finished run</span>
+  registers/&lt;key&gt;/             <span class="c"># one folder per register</span></pre>
+      The written reason of each dependency is in <code>docs/architecture.md</code>, "Dependencies".</dd></div>
+    <div class="limit"><dt>The limit</dt><dd>There is no scheduler and no web page to click in: a run starts when a
+      person, a cron entry or a CI job starts it. The files live on one machine, so copies and backups are yours to
+      make. Lean is not nothing: a container runtime and its images have to be there before the first run.</dd></div>
+  </dl>
+</section>
+
+<section id="not-built">
+  <h2>Not built, or not verified <small>so that nothing above reads as more than it is</small></h2>
+  <ul class="plain">
+    <li><strong>Signatures of the record.</strong> Manifests and a person's decisions in a register carry
+      <code>signature: null</code>, and an approval in a run is not signed either. The record is tamper-evident, not
+      signed. Only a package can be signed, by its seal (feature 4).</li>
+    <li><strong>An anchor for a register.</strong> The head of a register's log is not yet named in the ledger, as the
+      head of a run is.</li>
+    <li><strong>Other front ends.</strong> There is no server for MCP clients and no export of a workflow to
+      BPMN; the command line, <code>describe</code> and <code>run.html</code> are what exists.</li>
+    <li><strong>Podman.</strong> The code supports it; nothing about it is verified.</li>
+  </ul>
+</section>
+
+<footer>This page loads nothing from the network. The text behind it: <code>docs/cli.md</code>,
+<code>docs/events.md</code>, <code>docs/registers.md</code>, <code>docs/security.md</code>,
+<code>docs/architecture.md</code> and <code>examples/self-audit/README.md</code>. The register, round by round:
+<a href="audit-loop.html">audit-loop.html</a>.</footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var all = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
+
+  // the opening drawing: mark the features of one side
+  var SAY = {
+    all: 'All 14 features are marked. A click on the package or the frame in the drawing does the same as the buttons.',
+    'package': 'Marked: what a package defines. The other features are dimmed, not hidden.',
+    frame: 'Marked: what the frame gives every package. The other features are dimmed, not hidden.'
+  };
+  var buttons = all('button[data-pick]'), marked = all('#index li, section.feature');
+  function pick(side) {
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-pick') === side)); });
+    marked.forEach(function (el) {
+      var sides = el.getAttribute('data-side').split(' ');
+      el.classList.toggle('dim', side !== 'all' && sides.indexOf(side) < 0 && el.id !== 'split');
+    });
+    $('split').classList.remove('pick-package', 'pick-frame');
+    if (side !== 'all') $('split').classList.add('pick-' + side);
+    $('say').textContent = SAY[side];
+  }
+  buttons.forEach(function (b) { b.addEventListener('click', function () { pick(b.getAttribute('data-pick')); }); });
+  $('pick-package').addEventListener('click', function (e) { e.stopPropagation(); pick('package'); });
+  $('pick-frame').addEventListener('click', function () { pick('frame'); });
+
+  // the chain: what one changed byte does
+  var chain = $('chain'), tamper = $('tamper'), chainSay = $('chain-say'), intact = chainSay.innerHTML;
+  tamper.addEventListener('click', function () {
+    var bad = chain.classList.toggle('bad');
+    tamper.setAttribute('aria-pressed', String(bad));
+    tamper.textContent = bad ? 'Put the byte back' : 'Change one byte of line 1';
+    chainSay.innerHTML = bad
+      ? 'One byte of line 1 has changed. Its hash is now another one, so the <code>prev</code> that line 2 holds no ' +
+        'longer matches, and <code>traceworks verify</code> exits 8. Lines 0 and 1 still chain; the break shows at the ' +
+        'line after the change.'
+      : intact;
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "rules": {
+    "undocumented-command": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "unknown-command-in-docs": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "undocumented-option": {"severity": {"min": "LOW", "max": "LOW"}},
+    "unknown-option-in-docs": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "exit-code-mismatch": {"severity": {"min": "MEDIUM", "max": "MEDIUM"}},
+    "example-not-mentioned": {"severity": {"min": "LOW", "max": "LOW"}},
+    "missing-example-path": {"severity": {"min": "LOW", "max": "LOW"}},
+    "undocumented-block-type": {"severity": {"min": "LOW", "max": "LOW"}},
+    "unknown-block-type-in-docs": {"severity": {"min": "LOW", "max": "LOW"}},
+    "docs-contradict-code": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true}
+  }
+}

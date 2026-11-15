@@ -1,0 +1,30 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "60ea8584-598c-4348-beff-9e5c279e9c85",
+  "name": "IT broken",
+  "description": "A package with errors that traceworks check reports and a run refuses.",
+  "requires": ["time.travel"],
+  "blocks": [
+    {
+      "type": "telepathy",
+      "name": "unknown_type",
+      "config": {}
+    },
+    {
+      "type": "conditional",
+      "name": "no_mode",
+      "config": {"condition": "true", "then_command": "echo yes"}
+    },
+    {
+      "type": "shell",
+      "name": "no_mode_mount",
+      "config": {"command": "ls /data", "mounts": ["/srv/data:/data"]}
+    },
+    {
+      "type": "compress",
+      "name": "bad_stage",
+      "config": {"source": "no_mode", "stages": [{"op": "lines.head", "lines": 0}]}
+    }
+  ]
+}

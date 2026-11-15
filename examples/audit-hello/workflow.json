@@ -1,0 +1,28 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "7c1f0a52-3b8e-4d6a-9f21-5e0c8a4b2d17",
+  "name": "Audit hello",
+  "description": "A small audit without any AI: it measures the files in the workspace, reports every file longer than ten lines as a finding, and feeds the register \"hello\", which keeps the findings across runs.",
+  "metadata": {
+    "gate": {"expected": true},
+    "audit": {"enabled": true, "key": "hello", "category": "example", "reportBlock": "report"}
+  },
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "known",
+      "config": {"command": "printf '%s\\n' {{ audit_findings }}", "shell_escape_variables": true}
+    },
+    {
+      "type": "shell",
+      "name": "measure",
+      "config": {"command": "bash \"{{ package_dir }}/scripts/measure.sh\" \"{{ scratch_dir }}\""}
+    },
+    {
+      "type": "shell",
+      "name": "report",
+      "config": {"command": "bash \"{{ package_dir }}/scripts/report.sh\" \"{{ scratch_dir }}\""}
+    }
+  ]
+}

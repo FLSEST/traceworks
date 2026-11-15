@@ -1,0 +1,32 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "fba1861b-2056-4cca-ad6b-86403b7d8d20",
+  "name": "IT secret astral",
+  "description": "A secret with a character outside the BMP is redacted in the JSON blobs too: the metadata of a failing foreach and the checkpoint state.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "each",
+      "config": {
+        "items": [
+          "a",
+          "b"
+        ],
+        "execution_mode": "shell",
+        "command": "echo \"cannot deploy with $IT_TOKEN\"; exit 1",
+        "secrets": [
+          "IT_TOKEN"
+        ],
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo after"
+      }
+    }
+  ]
+}

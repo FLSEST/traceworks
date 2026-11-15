@@ -1,0 +1,17 @@
+#!/bin/sh
+# Refuses a commit whose staged changes hold something gitleaks takes for a secret.
+#
+# Turn it on once per clone:   git config core.hooksPath scripts/hooks
+#
+# A real secret is removed and rotated, never allowed in .gitleaks.toml. A made-up value of a test gets a name that
+# does not read like a key, or an entry in .gitleaks.toml that names its exact value below src/test/.
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks is not installed, so the staged changes cannot be scanned for secrets." >&2
+    echo "pre-commit: install it (https://github.com/gitleaks/gitleaks), or commit with --no-verify on your own account." >&2
+    exit 1
+fi
+
+root=$(git rev-parse --show-toplevel)
+exec gitleaks git --pre-commit --staged --no-banner --redact -c "$root/.gitleaks.toml" "$root"

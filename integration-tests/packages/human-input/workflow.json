@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "0349b199-ab2a-455f-b82e-2f07dd163b82",
+  "name": "IT human input",
+  "description": "A human-input step parks the run; the value it receives reaches the next step.",
+  "blocks": [
+    {
+      "type": "human-input",
+      "name": "ask_name",
+      "config": {"prompt": "Who should be greeted?", "variable_name": "who"}
+    },
+    {
+      "type": "shell",
+      "name": "greet",
+      "config": {"command": "echo Hello, {{ who }}"}
+    }
+  ]
+}

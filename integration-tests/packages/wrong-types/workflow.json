@@ -1,0 +1,24 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "d6813cdb-70e8-4a75-9ef5-382f315ce975",
+  "name": "IT wrong types",
+  "description": "Settings of the wrong type: traceworks check reports each one, and a run fails the block that reads it before it runs anything.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "make_output",
+      "config": {"command": "printf '%s' 'x; echo INJECTED'"}
+    },
+    {
+      "type": "shell",
+      "name": "escape_as_text",
+      "config": {"command": "echo {{ previous_output }}", "shell_escape_variables": "true"}
+    },
+    {
+      "type": "shell",
+      "name": "never_reached",
+      "config": {"command": "true", "timeout_seconds": "5", "validation": {"min_lenght": 1}}
+    }
+  ]
+}

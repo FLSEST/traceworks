@@ -1,0 +1,70 @@
+# This file is published. Put private file names into .git/info/exclude, not here.
+
+# Environment files (local config/secrets)
+.env
+.env.*
+!.env.example
+
+# Claude Code runtime (settings, rules, scheduled tasks, plans).
+# The rules files in it are generated and contain instance-specific IDs.
+.claude/
+docs/superpowers/
+.superpowers/
+
+# Playwright MCP
+.playwright-mcp/
+
+# Internal planning documents (drafts, inventories, session and TODO references):
+# kept locally, never published.
+docs/plans/
+
+# Generated output and internal reports (root-anchored)
+.tmp/
+/output/
+/.output/
+/reports/
+/review/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Logs and local data
+logs/
+*.log
+data/
+
+# Build artifacts
+target/
+!.mvn/wrapper/maven-wrapper.jar
+dist/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+.project
+.classpath
+.settings/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files of any kind, including timestamp suffixes
+*.bak
+*.bak-*
+*.orig
+*.old
+*.save
+*.rej
+*~
+
+# Python bytecode
+__pycache__/
+*.pyc

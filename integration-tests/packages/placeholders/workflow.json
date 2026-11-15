@@ -1,0 +1,50 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "02e3e025-bb6a-484a-8128-bd0be47d91b7",
+  "name": "IT placeholders",
+  "description": "Values between steps: an input, the output of a step by index and by name, shell_escape_variables and run_if.",
+  "defaultContext": {"name": "world", "payload": "plain"},
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "greet",
+      "config": {"command": "echo \"Hello, {{ name }}\""}
+    },
+    {
+      "type": "shell",
+      "name": "second",
+      "config": {"command": "echo second-output"}
+    },
+    {
+      "type": "shell",
+      "name": "by_index",
+      "config": {"command": "echo by index: {{ step_1_output }}"}
+    },
+    {
+      "type": "shell",
+      "name": "by_name",
+      "config": {"command": "echo by name: {{ block.greet.output }}"}
+    },
+    {
+      "type": "shell",
+      "name": "raw",
+      "config": {"command": "echo raw: {{ payload }}"}
+    },
+    {
+      "type": "shell",
+      "name": "escaped",
+      "config": {"command": "echo escaped: {{ payload }}", "shell_escape_variables": true}
+    },
+    {
+      "type": "shell",
+      "name": "skipped",
+      "config": {"command": "echo must-not-run", "run_if": "test \"{{ name }}\" = nobody"}
+    },
+    {
+      "type": "shell",
+      "name": "ran",
+      "config": {"command": "echo run_if held", "run_if": "test \"{{ name }}\" != nobody"}
+    }
+  ]
+}

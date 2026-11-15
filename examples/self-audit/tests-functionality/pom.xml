@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.flsest</groupId>
+        <artifactId>traceworks-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>traceworks-self-audit-functionality-tests</artifactId>
+    <name>Traceworks functionality self-audit tests</name>
+    <description>Tests of the Python scripts of the functionality self-audit package. They run the scripts with python3. Not part of traceworks.jar.</description>
+
+    <dependencies>
+        <!-- Test scope only: the tests read the scripts' output with the register's own parsers, and one test runs
+             the package's shape through the real engine, as a host run. Run this module on its own with -am
+             (mvn -pl examples/self-audit/tests-functionality -am test), so it tests the engine of this checkout,
+             not a snapshot installed earlier. -->
+        <dependency>
+            <groupId>io.github.flsest</groupId>
+            <artifactId>traceworks-cli</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

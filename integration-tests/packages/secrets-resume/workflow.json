@@ -1,0 +1,24 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "4f0b8a2e-6c1d-4e5a-9b7f-2d3c8e1a6b90",
+  "name": "IT secrets resume",
+  "description": "A secret's value that occurs in workflow.json itself: the steps after a resume run it as written, while the record holds its name.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "before",
+      "config": {"command": "echo 'host it-registry.example.test' > /scratch/before.txt; echo before", "secrets": ["IT_HOST"]}
+    },
+    {
+      "type": "approval",
+      "name": "go",
+      "config": {"question": "Go on?", "options": ["Yes", "No"]}
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {"command": "echo 'host it-registry.example.test' > /scratch/after.txt; echo after", "secrets": ["IT_HOST"]}
+    }
+  ]
+}

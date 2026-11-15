@@ -1,0 +1,24 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "01be7632-1e02-4542-aca6-5882e0c54ba6",
+  "name": "IT mounts",
+  "description": "Declared mounts behave as declared: a :ro mount can be read but not written, a :rw mount can be written.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "read_ro",
+      "config": {"command": "cat /data-ro/given.txt", "mounts": ["{{ ro_dir }}:/data-ro:ro"]}
+    },
+    {
+      "type": "shell",
+      "name": "write_ro",
+      "config": {"command": "touch /data-ro/written.txt", "mounts": ["{{ ro_dir }}:/data-ro:ro"], "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_rw",
+      "config": {"command": "echo from-the-container > /data-rw/written.txt && cat /data-rw/written.txt", "mounts": ["{{ rw_dir }}:/data-rw:rw"]}
+    }
+  ]
+}

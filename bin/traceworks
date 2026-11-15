@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Runs Traceworks from the jar that "mvn package" builds in this checkout.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+jar="$root/traceworks-cli/target/traceworks.jar"
+
+if [[ ! -f "$jar" ]]; then
+    echo "traceworks: $jar does not exist." >&2
+    echo "Build it first: (cd '$root' && mvn -q package -DskipTests)" >&2
+    exit 70
+fi
+
+exec java -jar "$jar" "$@"

@@ -1,0 +1,216 @@
+package traceworks.core.analyzer;
+
+import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
+import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
+import traceworks.core.analyzer.ShellQuoteScanner.Quote;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class ShellQuoteScannerTest {
+
+    private static List<Placeholder> scan(String code) {
+        return ShellQuoteScanner.scan(code);
+    }
+
+    @Test
+    void should_tellNoneSingleAndDoubleQuotesApart() {
+        assertThat(scan("echo '{{ a }}' \"{{ b }}\" {{ c }}")).containsExactly(
+                new Placeholder("a", Quote.SINGLE, 1),
+                new Placeholder("b", Quote.DOUBLE, 1),
+                new Placeholder("c", Quote.NONE, 1));
+    }
+
+    @Test
+    void should_seeQuotesThatStartFarFromThePlaceholder() {
+        assertThat(scan("echo 'CHAIN_OUTPUT={{ previous_chain_output }}'"))
+                .containsExactly(new Placeholder("previous_chain_output", Quote.SINGLE, 1));
+    }
+
+    @Test
+    void should_openAFreshContext_insideCommandSubstitution() {
+        assertThat(scan("X=\"$(printf '%s' {{ a }})\"\nY=\"$(printf '%s' '{{ b }}' | head -1)\" {{ c }}"))
+                .containsExactly(
+                        new Placeholder("a", Quote.NONE, 1),
+                        new Placeholder("b", Quote.SINGLE, 2),
+                        new Placeholder("c", Quote.NONE, 2));
+    }
+
+    @Test
+    void should_keepAnApostropheInsideDoubleQuotesLiteral() {
+        assertThat(scan("echo \"it's {{ a }}\" {{ b }}")).containsExactly(
+                new Placeholder("a", Quote.DOUBLE, 1),
+                new Placeholder("b", Quote.NONE, 1));
+    }
+
+    @Test
+    void should_followAQuoteAcrossLines() {
+        assertThat(scan("printf '%s\n{{ a }}' x\necho {{ b }}")).containsExactly(
+                new Placeholder("a", Quote.SINGLE, 2),
+                new Placeholder("b", Quote.NONE, 3));
+    }
+
+    @Test
+    void should_skipCommentLines_butNotDollarHash() {
+        assertThat(scan("# '{{ a }}'\necho $# '{{ b }}' # '{{ c }}'")).containsExactly(
+                new Placeholder("b", Quote.SINGLE, 2));
+    }
+
+    @Test
+    void should_skipHeredocBodies_inEveryQuotingForm() {
+        String code = """
+                python3 - <<'PY' > out
+                print('{{ a }}')
+                PY
+                cat <<-EOF
+                  x "{{ b }}"
+                  EOF
+                cat <<\\STEP | grep x
+                '{{ c }}'
+                STEP
+                echo '{{ d }}'""";
+        assertThat(scan(code)).containsExactly(new Placeholder("d", Quote.SINGLE, 10));
+    }
+
+    @Test
+    void should_notTakeAHereStringOrAShiftForAHeredoc() {
+        assertThat(scan("grep x <<< '{{ a }}'\necho $(( 1 << 2 )) '{{ b }}'\necho '{{ c }}'")).containsExactly(
+                new Placeholder("a", Quote.SINGLE, 1),
+                new Placeholder("b", Quote.SINGLE, 2),
+                new Placeholder("c", Quote.SINGLE, 3));
+    }
+
+    @Test
+    void should_treatAnEscapedQuoteAsText() {
+        assertThat(scan("echo \\'{{ a }} \"\\\"{{ b }}\""))
+                .containsExactly(new Placeholder("a", Quote.NONE, 1), new Placeholder("b", Quote.DOUBLE, 1));
+    }
+
+    @Test
+    void should_notReadTheUnsetCheckPatternAsAPlaceholder() {
+        assertThat(scan("case \"$X\" in '{{ '*) X=\"$PREV\";; esac\necho {{ b }}"))
+                .containsExactly(new Placeholder("b", Quote.NONE, 2));
+    }
+
+    @Test
+    void should_reportEachHeredocWithItsCommandQuotingAndBodyPlaceholders() {
+        String code = """
+                mkdir -p out && python3 - "$ARG" <<'PY' > out/x.json
+                x = '''{{ previous_output }}'''
+                PY
+                BODY=$(cat <<EOF
+                {{ a }} and {{ b }}
+                EOF
+                )
+                if cat <<\\STEP | grep -q x; then :; fi
+                {{ c }}
+                STEP
+                python3 << "PYEOF"
+                PYEOF
+                echo {{ d }}""";
+        ShellQuoteScanner.Result result = ShellQuoteScanner.read(code);
+
+        assertThat(result.heredocs()).containsExactly(
+                new Heredoc("PY", true, "python3 - \"$ARG\"", "> out/x.json", List.of("previous_output")),
+                new Heredoc("EOF", false, "cat", "", List.of("a", "b")),
+                new Heredoc("STEP", true, "if cat", "| grep -q x; then :; fi", List.of("c")),
+                new Heredoc("PYEOF", true, "python3", "", List.of()));
+        assertThat(result.placeholders()).containsExactly(new Placeholder("d", Quote.NONE, 13));
+    }
+
+    @Test
+    void should_takeTheCommandFromTheStartOfItsLine_acrossAMultiLineQuote() {
+        String code = "set -e\npython3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<'IN'\n{{ x }}\nIN";
+
+        assertThat(ShellQuoteScanner.read(code).heredocs()).singleElement().satisfies(h -> {
+            assertThat(h.command()).isEqualTo("python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\"");
+            assertThat(h.placeholders()).containsExactly("x");
+        });
+    }
+
+    @Test
+    void should_notTakeAQuotedOperatorForAHeredoc() {
+        assertThat(ShellQuoteScanner.read("echo \"<<EOF\" '<<X'\necho {{ a }}").heredocs()).isEmpty();
+    }
+
+    /** A shift inside $(( ... )) or (( ... )) is no heredoc and must not swallow the lines after it. */
+    @Test
+    void should_notStartAHeredocInsideArithmetic() {
+        String code = "echo $(( 1 << n ))\necho '{{ a }}'\n(( x = 1 << SHIFT ))\necho \"{{ b }}\"\n"
+                + "y=$((1<<n)) && cat <<EOF\n{{ c }}\nEOF\necho '{{ d }}'";
+        ShellQuoteScanner.Result result = ShellQuoteScanner.read(code);
+
+        assertThat(result.heredocs()).containsExactly(new Heredoc("EOF", false, "cat", "", List.of("c")));
+        assertThat(result.placeholders()).containsExactly(
+                new Placeholder("a", Quote.SINGLE, 2),
+                new Placeholder("b", Quote.DOUBLE, 4),
+                new Placeholder("d", Quote.SINGLE, 8));
+    }
+
+    @Test
+    void should_findNothing_inAnEmptyText() {
+        assertThat(ShellQuoteScanner.read("").heredocs()).isEmpty();
+        assertThat(scan("")).isEmpty();
+        assertThat(scan(null)).isEmpty();
+    }
+
+    /** A heredoc whose delimiter never comes runs to the end of the text, its last placeholder included. */
+    @Test
+    void should_readAnUnclosedHeredocToTheEnd() {
+        assertThat(ShellQuoteScanner.read("cat <<EOF\nx\n{{ a }}").heredocs()).singleElement()
+                .satisfies(h -> assertThat(h.placeholders()).containsExactly("a"));
+    }
+
+    /** A text that ends right after {@code $(} is cut off, not a reason to fail. */
+    @Test
+    void should_readATextThatEndsInAnOpenSubstitution() {
+        assertThat(scan("echo {{ a }} $(")).containsExactly(new Placeholder("a", Quote.NONE, 1));
+    }
+
+    /** A heredoc's command starts after the separator, the pipe or the paren before it, and keeps its variables. */
+    @Test
+    void should_takeTheHeredocCommandFromTheStartOfItsSimpleCommand() {
+        String code = "printf x | python3 - <<'A'\nA\necho start\n(python3 - <<'B'\nB\n)\n$PY - $ARGS <<'C'\nC";
+
+        assertThat(ShellQuoteScanner.read(code).heredocs()).extracting(Heredoc::command)
+                .containsExactly("python3 -", "python3 -", "$PY - $ARGS");
+    }
+
+    /** A subshell is no arithmetic: a heredoc in it is one. */
+    @Test
+    void should_findAHeredocInASubshell() {
+        String code = "(cd out && python3 - <<'PY'\nprint('{{ x }}')\nPY\n)";
+
+        assertThat(ShellQuoteScanner.read(code).heredocs()).singleElement().satisfies(h -> {
+            assertThat(h.command()).isEqualTo("python3 -");
+            assertThat(h.placeholders()).containsExactly("x");
+        });
+    }
+
+    /** The paren of a subshell inside {@code $(…)} closes that subshell, not the substitution. */
+    @Test
+    void should_keepTheContextOfASubstitution_pastASubshellInIt() {
+        assertThat(scan("echo \"$( (cd /tmp) && printf '%s' {{ x }} )\"")).containsExactly(
+                new Placeholder("x", Quote.NONE, 1));
+    }
+
+    /** A shift right after a closing paren is still a shift inside arithmetic. */
+    @Test
+    void should_notStartAHeredoc_atAShiftAfterAParenInArithmetic() {
+        String code = "echo $(( (x+1)<<SHIFT ))\necho '{{ a }}'";
+        ShellQuoteScanner.Result result = ShellQuoteScanner.read(code);
+
+        assertThat(result.heredocs()).isEmpty();
+        assertThat(result.placeholders()).containsExactly(new Placeholder("a", Quote.SINGLE, 2));
+    }
+
+    @Test
+    void should_keepARedirectionAmpersandInTheHeredocCommand() {
+        String code = "python3 - 2>&1 <<'PY'\n{{ x }}\nPY\npython3 - &>out <<'PY'\n{{ y }}\nPY\nls >&2; cat <<'B'\nB";
+
+        assertThat(ShellQuoteScanner.read(code).heredocs()).extracting(Heredoc::command)
+                .containsExactly("python3 - 2>&1", "python3 - &>out", "cat");
+    }
+}

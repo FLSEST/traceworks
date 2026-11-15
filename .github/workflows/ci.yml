@@ -1,0 +1,81 @@
+# Build and test Traceworks on every push and pull request.
+#
+# secrets:     gitleaks over the whole history with .gitleaks.toml, in the gitleaks image pinned by digest. The
+#              same scan runs on staged changes before a commit: scripts/hooks/pre-commit.
+# build:       mvn -B verify, the unit and component tests of every module. It starts no container: the tests
+#              tagged "container" and the integration tests are left out (docs/architecture.md, "Building and
+#              testing").
+# integration: mvn -B -Pit verify, everything: the container tests of the adapters and the command line, then the
+#              black-box suite of integration-tests/ against a real container runtime, once with Docker and once
+#              with Podman. Under -Pit a missing runtime or image fails the test that needs it; nothing is skipped.
+#              So the built-in images are built first, with the jar. See integration-tests/README.md.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the whole history: a secret that a later commit removed is still published
+      - name: Scan the history for secrets
+        # A scan that reads no commit (git refusing the mounted repository, say) finds no leak either, so the count
+        # of scanned commits is checked as well as the exit code
+        run: |
+          docker run --rm --network none -v "$PWD:/repo:ro" -w /repo \
+            ghcr.io/gitleaks/gitleaks@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f \
+            git --no-banner --redact -c /repo/.gitleaks.toml /repo 2>&1 | tee gitleaks.log
+          grep -Eq '[1-9][0-9]* commits scanned' gitleaks.log
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Build and test
+        run: mvn -B verify
+
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [docker, podman]
+    # Podman is supported by the code but untested in this release (docs/security.md), so its leg may fail without
+    # failing the workflow. Remove this line once the suite passes with Podman.
+    continue-on-error: ${{ matrix.runtime == 'podman' }}
+    env:
+      TRACEWORKS_IT_RUNTIME: ${{ matrix.runtime }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Container runtime
+        run: ${{ matrix.runtime }} version
+      # The container tests of the adapters and the command line need the built-in images (shell, claude, pi) and
+      # fail without them; no test builds them. The jar builds them, as a user would.
+      - name: Jar
+        run: mvn -B -DskipTests package
+      - name: Built-in images
+        run: java -jar traceworks-cli/target/traceworks.jar images build
+      - name: Container tests and integration tests
+        run: mvn -B -Pit verify

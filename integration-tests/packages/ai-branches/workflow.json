@@ -1,0 +1,71 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "256c9e90-209d-45b0-8e4b-eb3112dd3177",
+  "name": "IT ai-branches",
+  "description": "The AI condition of conditional and while, and the AI step of retry, answered by the fake CLI.",
+  "blocks": [
+    {
+      "type": "conditional",
+      "name": "cond_true",
+      "config": {
+        "execution_mode": "ai",
+        "condition": "[fake:true] is the sky blue?",
+        "then_command": "then branch of true",
+        "else_command": "else branch of true"
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "cond_false",
+      "config": {
+        "execution_mode": "ai",
+        "condition": "[fake:false] is the sky green?",
+        "then_command": "then branch of false",
+        "else_command": "else branch of false"
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "cond_pi",
+      "config": {
+        "execution_mode": "ai",
+        "provider": "PI",
+        "condition": "[fake:true] does Pi answer?",
+        "then_command": "then branch of pi",
+        "else_command": "else branch of pi"
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "cond_error",
+      "config": {
+        "execution_mode": "ai",
+        "condition": "[fake:exit=1] will this fail?",
+        "on_condition_error": "false",
+        "then_command": "then branch of error",
+        "else_command": "else branch of error"
+      }
+    },
+    {
+      "type": "while",
+      "name": "loop",
+      "config": {
+        "execution_mode": "ai",
+        "condition_command": "[fake:while=2] keep going?",
+        "command": "loop body",
+        "max_iterations": 5
+      }
+    },
+    {
+      "type": "retry",
+      "name": "flaky",
+      "config": {
+        "execution_mode": "ai",
+        "command": "[fake:fail-until=3] try again",
+        "max_retries": 3,
+        "delay": 0
+      }
+    }
+  ]
+}

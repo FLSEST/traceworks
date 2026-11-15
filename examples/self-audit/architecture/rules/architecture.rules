@@ -1,0 +1,106 @@
+# The rules of the architecture self-audit: which package must not depend on which, and where direct I/O is forbidden.
+# They come from docs/architecture.md ("Modules") and from the layer rules of the support audit this package replaces.
+# A rule decides: a violation is a measured finding and turns the gate RED. The format is described in README.md.
+
+prefix traceworks
+
+# The modules (docs/architecture.md, "Modules"): the core knows neither the adapters nor the command line, and the
+# adapters do not know the command line. Maven enforces this too; here it is measured on the sources.
+layer core_module
+  why  The core reaches the outside through its ports; the adapters implement them and the CLI wires the two.
+  from core.*
+  not  adapters.* cli.*
+
+layer adapters_module
+  why  The adapters implement the core's ports; they do not know the command line that wires them.
+  from adapters.*
+  not  cli.*
+
+# The layers inside the command line: the entry point on top creates the commands, and the commands build on the
+# toolkit of the root package.
+layer cli_toolkit
+  why  The root package of the command line is the toolkit the commands and the entry point use; it knows neither.
+  from cli
+  not  cli.command cli.main
+
+layer cli_main_on_top
+  why  cli.main is the entry point that creates every command; nothing else in the command line depends on it.
+  from cli.command
+  not  cli.main
+
+# The layers inside the core: the inner packages are what the rest builds on.
+layer inner_core
+  why  The ports, the model, the AI types, the utilities, the gates and the compatibility words are what the rest of the core builds on; they know nothing of the packages that use them.
+  from core.port core.model core.ai core.util core.gate core.compat
+  not  core.app core.engine core.blocks.* core.analyzer core.record core.view core.context core.container core.ai.cli core.register core.describe core.compare core.seal
+
+layer app_on_top
+  why  core.app holds the use cases the command line calls; nothing else in the core depends on them.
+  from core.*
+  not  core.app
+
+layer view_pure
+  why  core.view renders a RunView to run.html; it knows nothing of how a run is executed or checked.
+  from core.view
+  not  core.engine core.blocks.* core.analyzer
+
+layer engine_apart
+  why  The engine runs blocks through the executors it is given; it knows neither the executors, the analyzer, the record nor the view.
+  from core.engine
+  not  core.blocks.* core.analyzer core.record core.view
+
+layer record_apart
+  why  The record turns engine events into record lines and reads them back; it knows neither the executors, the analyzer nor the view.
+  from core.record
+  not  core.blocks.* core.analyzer core.view
+
+layer register_pure
+  why  The register holds findings across runs as pure logic over the ports and the record's line format; it knows neither the engine, the executors, the analyzer nor the view.
+  from core.register
+  not  core.engine core.blocks.* core.analyzer core.view
+
+layer describe_apart
+  why  core.describe reads a package into a description with the rules the run reads a block by; it knows neither the executors, the analyzer nor the view that renders it.
+  from core.describe
+  not  core.blocks.* core.analyzer core.view
+
+layer compare_pure
+  why  The comparison of two runs reads views of their records and decides; it knows neither the engine, the executors, the analyzer, the view nor the register.
+  from core.compare
+  not  core.engine core.blocks.* core.analyzer core.view core.register
+
+layer seal_pure
+  why  A seal is verified as pure logic over the ports and the record's line format: signatures, allowed signers, the seal file and the seal log know neither the engine, the executors, the analyzer, the view, the register nor a run's state.
+  from core.seal
+  not  core.engine core.blocks.* core.analyzer core.view core.register core.context core.container
+
+layer blocks_apart
+  why  The block executors run one block each; they know neither the analyzer, the record nor the view.
+  from core.blocks.*
+  not  core.analyzer core.record core.view
+
+# Direct I/O in the core (docs/architecture.md, "Modules"): the core performs almost no I/O of its own, and the places
+# that do are named there. "The core never holds a process." A java.net.URI or URL is a value, not a connection: only
+# the types and calls that reach the network count.
+io core_io
+  why   The core reaches files, processes, the network and the environment through its ports.
+  in    core.*
+  type  java.nio.file.Files java.nio.file.FileSystems java.nio.file.Paths java.nio.channels.*
+  type  java.io.File java.io.FileInputStream java.io.FileOutputStream java.io.FileReader java.io.FileWriter
+  type  java.io.RandomAccessFile
+  type  java.lang.ProcessBuilder java.lang.Process java.lang.ProcessHandle java.lang.Runtime
+  type  java.net.Socket java.net.ServerSocket java.net.DatagramSocket java.net.URLConnection java.net.InetAddress
+  type  java.net.http.*
+  call  java.net.URL#openConnection
+  call  java.net.URL#openStream
+  call  java.lang.System#getenv
+  call  java.lang.System#getProperty
+  call  java.lang.Class#getResource
+  call  java.lang.Class#getResourceAsStream
+  call  java.lang.ClassLoader#getResource
+  call  java.lang.ClassLoader#getResourceAsStream
+  call  java.lang.ClassLoader#getResources
+  allow core.blocks.ContainerToolStep the tool mode of the shell block creates its output folder and the per-image cache folder, and reads the SARIF files the tool wrote (docs/architecture.md, "Modules")
+  allow core.blocks.SarifFactSheet the same tool mode: it reads the SARIF files the tool wrote, for ContainerToolStep (docs/architecture.md, "Modules")
+  allow core.app.TraceworksVersion reads the version from a resource on the class path (docs/architecture.md, "Modules")
+  allow core.analyzer.BlockConfigSchema reads the configuration schema of the blocks from a resource on the class path (docs/architecture.md, "Modules")

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.flsest</groupId>
+        <artifactId>traceworks-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>traceworks-image-tests</artifactId>
+    <name>Traceworks image tests</name>
+    <description>Tests of the tool that the built-in image "egress" compiles: the allowlist proxy of an AI step. Not part of traceworks.jar.</description>
+
+    <properties>
+        <!-- Nothing to install or deploy: the image compiles the source itself, from the jar's copy of images/. -->
+        <maven.install.skip>true</maven.install.skip>
+        <maven.deploy.skip>true</maven.deploy.skip>
+    </properties>
+
+    <build>
+        <!-- The source lives in the image's directory, the build context of that image; the tests and target/ stay
+             here, so a build never changes the image's digest or its tag. It uses the JDK only. -->
+        <sourceDirectory>../images/egress/src</sourceDirectory>
+    </build>
+</project>

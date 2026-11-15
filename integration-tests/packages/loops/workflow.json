@@ -1,0 +1,49 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "62c7f0fc-ef55-4505-9fe1-c5e48eec07db",
+  "name": "IT loops",
+  "description": "foreach over static items and over the lines of items_command, while with a counter in the scratch directory, and retry of a step that fails twice.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "static_items",
+      "config": {
+        "execution_mode": "shell",
+        "items": ["alpha", "beta", "gamma"],
+        "command": "echo item {{ item_index }}={{ item }}"
+      }
+    },
+    {
+      "type": "foreach",
+      "name": "listed_items",
+      "config": {
+        "execution_mode": "shell",
+        "items_source": "command",
+        "items_command": "printf 'one\\ntwo\\n'",
+        "variable_name": "word",
+        "command": "echo listed {{ word }}"
+      }
+    },
+    {
+      "type": "while",
+      "name": "count_up",
+      "config": {
+        "execution_mode": "shell",
+        "condition_command": "test \"$(cat /scratch/counter 2>/dev/null || echo 0)\" -lt 3",
+        "command": "n=$(( $(cat /scratch/counter 2>/dev/null || echo 0) + 1 )); echo $n > /scratch/counter; echo pass $n",
+        "max_iterations": 10
+      }
+    },
+    {
+      "type": "retry",
+      "name": "flaky",
+      "config": {
+        "execution_mode": "shell",
+        "max_retries": 3,
+        "delay": 0,
+        "command": "n=$(( $(cat /scratch/attempts 2>/dev/null || echo 0) + 1 )); echo $n > /scratch/attempts; if [ $n -lt 3 ]; then echo attempt $n fails; exit 1; fi; echo attempt $n passes"
+      }
+    }
+  ]
+}

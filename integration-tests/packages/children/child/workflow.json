@@ -1,0 +1,14 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "2d892b86-e91c-4393-b522-edf650838303",
+  "name": "IT child",
+  "description": "The child of IT children: greets whoever the parent names.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "greet_child",
+      "config": {"command": "echo child greets {{ who }}"}
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+#!/bin/sh
+# A fake `pi -p --mode json`: it answers in the event stream format PiStream reads, with no model.
+# What it does is picked by markers like [fake:NAME] or [fake:NAME=VALUE] in the prompt on stdin, in the system prompt
+# file, or in both; see integration-tests/README.md. Without a marker it answers with what it was given (arguments,
+# the names of the credential-like variables, a hash of each credential's value, the prompt), so a test sees exactly
+# what the adapter handed the CLI. It prints no credential's value except for [fake:print-credential].
+set -u
+
+# A reasoning call replaces Pi's system prompt (--system-prompt FILE); any other call adds to it
+# (--append-system-prompt FILE) and gives --system-prompt an empty value.
+args=""
+reason=no
+prev=""
+for a in "$@"; do
+  args="$args [$a]"
+  [ "$prev" = "--system-prompt" ] && [ -n "$a" ] && reason=yes
+  prev="$a"
+done
+
+prompt=$(cat)
+system=""
+[ -f /tmp/traceworks-system-prompt ] && system=$(cat /tmp/traceworks-system-prompt)
+all="$prompt
+$system"
+
+# Escapes text as the inside of a JSON string: backslash, quote, newlines and tabs.
+json() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/	/\\t/g' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
+}
+
+# The value of a marker [fake:NAME=VALUE] in the prompt and system prompt; empty when absent.
+marker_value() {
+  printf '%s\n' "$all" | sed -n "s/.*\[fake:$1=\([^]]*\)\].*/\1/p" | head -n 1
+}
+
+has() {
+  case "$all" in *"[fake:$1]"*) return 0;; esac
+  return 1
+}
+
+# A counter in the run's scratch directory, which every call of a run shares: the n-th call of its kind gets n.
+count() {
+  file="/scratch/fake-count-$1"
+  n=0
+  [ -f "$file" ] && n=$(cat "$file")
+  n=$((n + 1))
+  printf '%s' "$n" > "$file"
+  echo "$n"
+}
+
+hash() {
+  printf '%s' "$1" | sha256sum | cut -d' ' -f1
+}
+
+# ---- behaviours that end the call before an answer ----
+sleep_for=$(marker_value sleep)
+[ -n "$sleep_for" ] && sleep "$sleep_for"
+
+exit_code=$(marker_value exit)
+if [ -n "$exit_code" ]; then
+  echo "fake-pi: exiting with $exit_code on request" >&2
+  exit "$exit_code"
+fi
+
+if has flood; then
+  # Far beyond a 1 MiB output limit, in lines
+  yes 'fake-pi flood line, longer than a few bytes, to fill the stream quickly' | head -c 3000000
+  exit 0
+fi
+
+fail_until=$(marker_value fail-until)
+if [ -n "$fail_until" ]; then
+  n=$(count fail-until)
+  if [ "$n" -lt "$fail_until" ]; then
+    echo "fake-pi: call $n fails, the call $fail_until answers" >&2
+    exit 1
+  fi
+fi
+
+# ---- the answer ----
+tool=no
+if [ "$reason" = yes ]; then
+  # A reasoning call of an agentic block: plan once, then declare the goal reached after the observation
+  case "$prompt" in
+    *"Observation from executing your action"*)
+      answer="GOAL_STATUS: ACHIEVED
+SUMMARY: the fake reached the goal" ;;
+    *)
+      answer="GOAL_STATUS: IN_PROGRESS
+RATIONALE: the fake plans one action
+ACTION: [fake:tool] do the one thing
+SUMMARY: one action" ;;
+  esac
+elif has true; then
+  answer="TRUE"
+elif has false; then
+  answer="FALSE"
+elif [ -n "$(marker_value while)" ]; then
+  n=$(count while)
+  if [ "$n" -le "$(marker_value while)" ]; then answer="TRUE"; else answer="FALSE"; fi
+elif has print-credential; then
+  answer="the key is ${ANTHROPIC_API_KEY:-unset} and the token is ${ANTHROPIC_OAUTH_TOKEN:-unset}"
+elif has write; then
+  if (echo written > /workspace/fake-wrote.txt) 2>/dev/null; then answer="write: ok"; else answer="write: failed"; fi
+elif [ -n "$(marker_value gate)" ]; then
+  answer="checked by the fake
+gate_status: $(marker_value gate)
+gate_category: fake
+gate_description: reported by the fake CLI"
+else
+  names=$(env | sed -n 's/^\(\(ANTHROPIC\|CLAUDE\|OPENAI\|GEMINI\|OPENROUTER\|TRACEWORKS\|DISABLE\)[A-Z0-9_]*\)=.*/\1/p' | sort | tr '\n' ' ')
+  hashes=""
+  for name in ANTHROPIC_API_KEY ANTHROPIC_OAUTH_TOKEN OPENAI_API_KEY GEMINI_API_KEY OPENROUTER_API_KEY; do
+    eval "value=\${$name:-}"
+    [ -n "$value" ] && hashes="$hashes $name=$(hash "$value")"
+  done
+  answer="fake-pi answered
+args:$args
+env: $names
+sha256:$hashes
+cwd: $(pwd)
+prompt: $prompt"
+fi
+
+case "$all" in *"[fake:tool]"*) tool=yes;; esac
+printf '%s\n' '{"type":"session","version":3,"id":"fake-session","cwd":"/workspace"}'
+printf '%s\n' '{"type":"agent_start"}'
+if [ "$tool" = yes ] && [ "$reason" = no ]; then
+  printf '%s\n' '{"type":"tool_execution_start","toolCallId":"toolu_fake_1","toolName":"read","args":{"path":"hello.txt"}}'
+  printf '%s\n' '{"type":"tool_execution_end","toolCallId":"toolu_fake_1","toolName":"read","result":{"content":[{"type":"text","text":"hello from the fake tool"}]},"isError":false}'
+fi
+usage='{"input":12,"output":7,"cacheRead":0,"cacheWrite":0,"totalTokens":19,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0.001}}'
+printf '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"%s"}],"api":"anthropic-messages","provider":"anthropic","model":"fake-pi-1","usage":%s,"stopReason":"stop"}}\n' "$(json "$answer")" "$usage"
+printf '%s\n' '{"type":"agent_end","messages":[]}'

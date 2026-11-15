@@ -1,0 +1,928 @@
+{
+  "$comment": "Config keys of every block type the Traceworks engine runs: key, type, allowed values, legacy value, required. Read by the analyzer (BlockConfigSchema, ConfigKeyRules). It holds no editor texts and no definitions (the stage shapes of compress, which the analyzer checks itself, see CompressRules), no list of compress stage ops and no block type Traceworks does not run; execution_mode is limited to ai and shell. A string value \"#name\" in a field list refers to sharedFields.name. \"type\" (one name or a list: boolean, integer, string, array, object, null), \"items\" (the type of a list's entries), \"minimum\" and \"maximum\" are the types and ranges the run accepts: the analyzer reports any other value as invalid-config-value, and the run reads every setting through BlockSettings, which fails the block on it (BlockConfigSchemaTest holds the ranges against BlockSettings and, for compress and compress-ai, against their executors). A null value counts as absent. \"fields\" of an object key (validation) are its keys, checked like a block's. \"default\" is not read. \"requiredOneOf\" = exactly one of these keys must be set (shell: command or container_args). \"legacy\" = old value still accepted, \"legacyFor\" = old key name of another key, \"ignoreCase\" = the executor compares case-insensitively, \"onlyWith\" = the executor reads the key only when these other keys have these values (\"*\" = the key is set). \"topLevelOnly\" = the key works only on a top-level block, not nested in a switch case (the analyzer flags it there, and a requiredOneOf partner becomes required). Whoever teaches an executor a new config key adds it here.",
+  "onFailure": {
+    "type": "string",
+    "values": [
+      {
+        "value": "stop"
+      },
+      {
+        "value": "continue"
+      }
+    ],
+    "default": "stop",
+    "ignoreCase": true
+  },
+  "commonFields": {
+    "label": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "run_if": {
+      "type": "string"
+    },
+    "untrusted_input": {
+      "type": "boolean",
+      "default": false
+    },
+    "shell_escape_variables": {
+      "type": "boolean",
+      "default": false,
+      "onlyWith": {
+        "run_if": "*"
+      }
+    },
+    "workspace": {
+      "type": "object"
+    },
+    "validation": {
+      "type": "object",
+      "fields": {
+        "contains": {
+          "type": "string"
+        },
+        "min_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "max_length": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "retry_on_fail": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_retries": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    }
+  },
+  "ai": {
+    "blockTypes": [
+      "simple",
+      "agentic",
+      "retry",
+      "foreach",
+      "while",
+      "conditional",
+      "switch",
+      "compress-ai",
+      "approval",
+      "human-input"
+    ],
+    "fields": {
+      "provider": {
+        "type": "string",
+        "values": [
+          {
+            "value": "CLAUDE"
+          },
+          {
+            "value": "PI"
+          }
+        ],
+        "ignoreCase": true
+      },
+      "model": {
+        "type": "string"
+      },
+      "model_choice": {
+        "type": "string"
+      },
+      "effort": {
+        "type": "string",
+        "values": [
+          {
+            "value": "low"
+          },
+          {
+            "value": "medium"
+          },
+          {
+            "value": "high"
+          },
+          {
+            "value": "xhigh"
+          }
+        ],
+        "ignoreCase": true
+      }
+    }
+  },
+  "sharedFields": {
+    "execution_mode": {
+      "type": "string",
+      "values": [
+        {
+          "value": "ai"
+        },
+        {
+          "value": "shell"
+        }
+      ]
+    },
+    "shell_escape_variables": {
+      "type": "boolean",
+      "default": false
+    },
+    "wrapper_container_image": {
+      "type": "string",
+      "onlyWith": {
+        "execution_mode": "shell"
+      }
+    },
+    "wrapper_mount_docker_socket": {
+      "type": "boolean",
+      "default": false,
+      "onlyWith": {
+        "execution_mode": "shell"
+      }
+    },
+    "wrapper_mounts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "onlyWith": {
+        "execution_mode": "shell"
+      }
+    },
+    "on_condition_error": {
+      "type": [
+        "string",
+        "boolean"
+      ],
+      "values": [
+        {
+          "value": "fail"
+        },
+        {
+          "value": "false"
+        },
+        {
+          "value": "skip"
+        }
+      ],
+      "default": "fail",
+      "ignoreCase": true
+    },
+    "wrapper_network": {
+      "type": "boolean",
+      "default": false,
+      "onlyWith": {
+        "execution_mode": "shell"
+      }
+    },
+    "wrapper_workspace_writable": {
+      "type": "boolean",
+      "default": false
+    },
+    "wrapper_tools": {
+      "type": "string",
+      "values": [
+        {
+          "value": "none"
+        },
+        {
+          "value": "read"
+        },
+        {
+          "value": "write"
+        },
+        {
+          "value": "shell"
+        }
+      ],
+      "ignoreCase": true,
+      "onlyWith": {
+        "execution_mode": "ai"
+      }
+    },
+    "wrapper_secrets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "onlyWith": {
+        "execution_mode": "shell"
+      }
+    },
+    "tools": {
+      "type": "string",
+      "values": [
+        {
+          "value": "none"
+        },
+        {
+          "value": "read"
+        },
+        {
+          "value": "write"
+        },
+        {
+          "value": "shell"
+        }
+      ],
+      "ignoreCase": true
+    },
+    "web": {
+      "type": "string",
+      "values": [
+        {
+          "value": "none"
+        },
+        {
+          "value": "search"
+        },
+        {
+          "value": "fetch"
+        }
+      ],
+      "ignoreCase": true
+    },
+    "web_hosts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "wrapper_web": {
+      "type": "string",
+      "values": [
+        {
+          "value": "none"
+        },
+        {
+          "value": "search"
+        },
+        {
+          "value": "fetch"
+        }
+      ],
+      "ignoreCase": true,
+      "onlyWith": {
+        "execution_mode": "ai"
+      }
+    },
+    "wrapper_web_hosts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "onlyWith": {
+        "execution_mode": "ai"
+      }
+    }
+  },
+  "blockTypes": {
+    "simple": {
+      "required": [
+        "command"
+      ],
+      "fields": {
+        "command": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "user_mcp_servers": {
+          "type": "boolean",
+          "default": false
+        },
+        "tools": "#tools",
+        "web": "#web",
+        "web_hosts": "#web_hosts",
+        "workspace_writable": {
+          "type": "boolean",
+          "default": false
+        },
+        "mcp_servers": {
+          "type": "array",
+          "default": []
+        }
+      }
+    },
+    "shell": {
+      "requiredOneOf": [
+        "command",
+        "container_args"
+      ],
+      "fields": {
+        "command": {
+          "type": "string"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "shell_escape_variables": "#shell_escape_variables",
+        "container_image": {
+          "type": "string"
+        },
+        "mount_docker_socket": {
+          "type": "boolean",
+          "default": false
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "type": "boolean",
+          "default": false
+        },
+        "workspace_writable": {
+          "type": "boolean",
+          "default": false
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "container_args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "topLevelOnly": true
+        },
+        "output_format": {
+          "type": "string",
+          "values": [
+            {
+              "value": "raw"
+            },
+            {
+              "value": "sarif"
+            }
+          ],
+          "default": "raw",
+          "onlyWith": {
+            "container_args": "*"
+          },
+          "topLevelOnly": true
+        },
+        "output_dir": {
+          "type": "string",
+          "default": "/out",
+          "onlyWith": {
+            "output_format": "sarif"
+          },
+          "topLevelOnly": true
+        },
+        "cache_dir": {
+          "type": "string",
+          "onlyWith": {
+            "container_args": "*"
+          },
+          "topLevelOnly": true
+        },
+        "fact_prefix": {
+          "type": "string",
+          "onlyWith": {
+            "output_format": "sarif"
+          },
+          "topLevelOnly": true
+        },
+        "checked_command": {
+          "type": "boolean",
+          "default": false
+        },
+        "check_category": {
+          "type": "string",
+          "default": "build-check"
+        }
+      }
+    },
+    "agentic": {
+      "required": [
+        "goal"
+      ],
+      "fields": {
+        "goal": {
+          "type": "string"
+        },
+        "success_criteria": {
+          "type": "string"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "iteration_timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "total_timeout_seconds": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 1,
+          "maximum": 604800
+        },
+        "max_total_tokens": {
+          "type": "integer",
+          "default": 200000,
+          "minimum": 1,
+          "maximum": 1000000000
+        },
+        "max_repeated_actions": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "require_approval": {
+          "type": "boolean",
+          "default": false
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "user_mcp_servers": {
+          "type": "boolean",
+          "default": false
+        },
+        "tools": "#tools",
+        "web": "#web",
+        "web_hosts": "#web_hosts",
+        "workspace_writable": {
+          "type": "boolean",
+          "default": false
+        },
+        "mcp_servers": {
+          "type": "array",
+          "default": []
+        }
+      }
+    },
+    "retry": {
+      "required": [
+        "command"
+      ],
+      "fields": {
+        "command": {
+          "type": "string"
+        },
+        "max_retries": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 100
+        },
+        "delay": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 0,
+          "maximum": 3600
+        },
+        "exponential_backoff": {
+          "type": "boolean",
+          "default": false
+        },
+        "execution_mode": "#execution_mode",
+        "shell_escape_variables": "#shell_escape_variables",
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "container_image": "#wrapper_container_image",
+        "mount_docker_socket": "#wrapper_mount_docker_socket",
+        "mounts": "#wrapper_mounts",
+        "network": "#wrapper_network",
+        "workspace_writable": "#wrapper_workspace_writable",
+        "tools": "#wrapper_tools",
+        "web": "#wrapper_web",
+        "web_hosts": "#wrapper_web_hosts",
+        "secrets": "#wrapper_secrets"
+      }
+    },
+    "conditional": {
+      "required": [
+        "condition"
+      ],
+      "fields": {
+        "condition": {
+          "type": "string"
+        },
+        "then_command": {
+          "type": "string"
+        },
+        "else_command": {
+          "type": "string"
+        },
+        "execution_mode": "#execution_mode",
+        "shell_escape_variables": "#shell_escape_variables",
+        "on_condition_error": "#on_condition_error",
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "container_image": "#wrapper_container_image",
+        "mount_docker_socket": "#wrapper_mount_docker_socket",
+        "mounts": "#wrapper_mounts",
+        "network": "#wrapper_network",
+        "workspace_writable": "#wrapper_workspace_writable",
+        "tools": "#wrapper_tools",
+        "web": "#wrapper_web",
+        "web_hosts": "#wrapper_web_hosts",
+        "secrets": "#wrapper_secrets"
+      }
+    },
+    "switch": {
+      "required": [
+        "expression",
+        "cases"
+      ],
+      "fields": {
+        "expression": {
+          "type": "string"
+        },
+        "cases": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "default": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "foreach": {
+      "requiredOneOf": [
+        "command",
+        "workflow_id"
+      ],
+      "fields": {
+        "command": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object",
+          "onlyWith": {
+            "workflow_id": "*"
+          }
+        },
+        "variable_name": {
+          "type": "string",
+          "default": "item"
+        },
+        "items_source": {
+          "type": "string",
+          "values": [
+            {
+              "value": "list"
+            },
+            {
+              "value": "command"
+            }
+          ],
+          "default": "list"
+        },
+        "items_command": {
+          "type": "string"
+        },
+        "items": {
+          "type": [
+            "array",
+            "string"
+          ]
+        },
+        "execution_mode": "#execution_mode",
+        "shell_escape_variables": "#shell_escape_variables",
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "continue_on_error": {
+          "type": "boolean",
+          "default": false
+        },
+        "max_consecutive_failures": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "container_image": "#wrapper_container_image",
+        "mount_docker_socket": "#wrapper_mount_docker_socket",
+        "mounts": "#wrapper_mounts",
+        "network": "#wrapper_network",
+        "workspace_writable": "#wrapper_workspace_writable",
+        "tools": "#wrapper_tools",
+        "web": "#wrapper_web",
+        "web_hosts": "#wrapper_web_hosts",
+        "secrets": "#wrapper_secrets"
+      }
+    },
+    "while": {
+      "required": [
+        "command"
+      ],
+      "fields": {
+        "command": {
+          "type": "string"
+        },
+        "condition_command": {
+          "type": "string"
+        },
+        "max_iterations": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "execution_mode": "#execution_mode",
+        "shell_escape_variables": "#shell_escape_variables",
+        "on_condition_error": "#on_condition_error",
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 300,
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "container_image": "#wrapper_container_image",
+        "mount_docker_socket": "#wrapper_mount_docker_socket",
+        "mounts": "#wrapper_mounts",
+        "network": "#wrapper_network",
+        "workspace_writable": "#wrapper_workspace_writable",
+        "tools": "#wrapper_tools",
+        "web": "#wrapper_web",
+        "web_hosts": "#wrapper_web_hosts",
+        "secrets": "#wrapper_secrets"
+      }
+    },
+    "approval": {
+      "fields": {
+        "question": {
+          "type": "string",
+          "default": "Approval required"
+        },
+        "options": {
+          "type": "array",
+          "default": [
+            "Yes",
+            "Yes always",
+            "No"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "reject_options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "variable_name": {
+          "type": "string",
+          "default": "approval_answer"
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 10080
+        },
+        "mode": {
+          "type": "string",
+          "values": [
+            {
+              "value": "ask"
+            },
+            {
+              "value": "auto"
+            }
+          ],
+          "default": "ask"
+        },
+        "auto_answer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "on_no": {
+          "type": "string",
+          "values": [
+            {
+              "value": "continue"
+            },
+            {
+              "value": "fail"
+            },
+            {
+              "value": "skip"
+            }
+          ],
+          "default": "continue"
+        },
+        "actor": {
+          "type": "string",
+          "values": [
+            {
+              "value": "human"
+            },
+            {
+              "value": "ai"
+            },
+            {
+              "value": "shadow"
+            }
+          ],
+          "default": "human"
+        },
+        "actor_prompt": {
+          "type": "string"
+        }
+      }
+    },
+    "human-input": {
+      "fields": {
+        "prompt": {
+          "type": "string",
+          "default": "Please provide input:"
+        },
+        "input_type": {
+          "type": "string",
+          "values": [
+            {
+              "value": "text"
+            },
+            {
+              "value": "textarea"
+            },
+            {
+              "value": "number"
+            },
+            {
+              "value": "select"
+            },
+            {
+              "value": "checkbox"
+            },
+            {
+              "value": "date"
+            }
+          ],
+          "default": "text"
+        },
+        "variable_name": {
+          "type": "string",
+          "default": "user_input"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "default_value": {
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "validation_pattern": {
+          "type": "string"
+        },
+        "timeout_minutes": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 10080
+        },
+        "use_default_on_timeout": {
+          "type": "boolean",
+          "default": true
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "actor": {
+          "type": "string",
+          "values": [
+            {
+              "value": "human"
+            },
+            {
+              "value": "ai"
+            },
+            {
+              "value": "shadow"
+            }
+          ],
+          "default": "human"
+        },
+        "actor_prompt": {
+          "type": "string"
+        }
+      }
+    },
+    "sub-workflow": {
+      "required": [
+        "workflow_id"
+      ],
+      "fields": {
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflowId": {
+          "type": "string",
+          "legacyFor": "workflow_id"
+        }
+      }
+    },
+    "compress": {
+      "required": [
+        "source",
+        "stages"
+      ],
+      "fields": {
+        "source": {
+          "type": "string"
+        },
+        "stages": {
+          "type": "array"
+        },
+        "max_chars": {
+          "type": "integer",
+          "default": 20000,
+          "minimum": 300,
+          "maximum": 1000000
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "maximum": 600
+        }
+      }
+    },
+    "compress-ai": {
+      "required": [
+        "source"
+      ],
+      "fields": {
+        "source": {
+          "type": "string"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "max_chars": {
+          "type": "integer",
+          "default": 4000,
+          "minimum": 500,
+          "maximum": 200000
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        }
+      }
+    }
+  }
+}

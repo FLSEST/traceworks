@@ -1,0 +1,20 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "typos",
+  "name": "IT typos",
+  "description": "The commonest typos of a workflow: two blocks of one name, a property a block does not have, a step number beyond the blocks, a block nobody defines and a variable nothing sets.",
+  "defaultContext": {"name": "world"},
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "greet",
+      "config": {"command": "set -euo pipefail\necho Hello, {{ name }}"}
+    },
+    {
+      "type": "shell",
+      "name": "greet",
+      "config": {"command": "set -euo pipefail\necho {{ block.gret.output }} {{ block.greet.outptu }} {{ step_7_output }} {{ nme }}"}
+    }
+  ]
+}

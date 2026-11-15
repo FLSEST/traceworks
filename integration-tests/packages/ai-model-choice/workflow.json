@@ -1,0 +1,42 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "6d0f5a0e-2f39-4f0a-9d53-3b8a6f2a7c41",
+  "name": "IT ai-model-choice",
+  "description": "One simple AI step that refers to a model choice, and a shell step that prints the variables of the pick: the run's input picks the option the step is called with.",
+  "requires": [
+    "ai.model_choice"
+  ],
+  "modelChoices": {
+    "judge": {
+      "default": "fable",
+      "options": {
+        "fable": {
+          "provider": "CLAUDE",
+          "model": "claude-fable-5-2"
+        },
+        "astra": {
+          "provider": "PI",
+          "model": "openai/gpt-6-astra"
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "verdict",
+      "config": {
+        "command": "Judge this",
+        "model_choice": "judge"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "who",
+      "config": {
+        "command": "set -euo pipefail\necho {{ judge }} {{ judge_provider }} {{ judge_model }}"
+      }
+    }
+  ]
+}

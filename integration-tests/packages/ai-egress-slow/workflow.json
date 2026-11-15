@@ -1,0 +1,17 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "8b5e2f64-0c3a-4d7e-b1a9-2f6d9c4e7a30",
+  "name": "IT ai-egress-slow",
+  "description": "An AI step that runs for a minute behind its egress proxy, for a cancel to end.",
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "slow",
+      "config": {
+        "command": "[fake:sleep=60] too slow",
+        "timeout_seconds": 120
+      }
+    }
+  ]
+}

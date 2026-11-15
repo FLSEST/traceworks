@@ -1,0 +1,20 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "4126d2f9-dce4-421a-8586-b3f1d04e558e",
+  "name": "IT items timeout",
+  "description": "A foreach whose items_command sleeps past the block's timeout_seconds fails before the first item.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "slow_listing",
+      "config": {
+        "execution_mode": "shell",
+        "items_source": "command",
+        "items_command": "echo one; sleep 120; echo two",
+        "timeout_seconds": 3,
+        "command": "echo ran {{ item }}"
+      }
+    }
+  ]
+}

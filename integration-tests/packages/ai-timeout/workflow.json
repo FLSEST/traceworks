@@ -1,0 +1,28 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "fe3ff73e-9e01-4f74-a9bc-f9d10cbb0dc5",
+  "name": "IT ai-timeout",
+  "description": "AI steps that run longer than their timeout_seconds.",
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "claude",
+      "config": {
+        "command": "[fake:sleep=60] too slow",
+        "timeout_seconds": 3,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi",
+      "config": {
+        "command": "[fake:sleep=60] too slow",
+        "provider": "PI",
+        "timeout_seconds": 3,
+        "on_failure": "continue"
+      }
+    }
+  ]
+}

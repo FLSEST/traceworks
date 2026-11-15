@@ -1,0 +1,28 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "40807a70-d3a5-4180-a3ec-2d45f22a0c6e",
+  "name": "IT secret broken off",
+  "description": "A step that prints the first part of its secret and is stopped at its timeout keeps no part of the value.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "slow",
+      "config": {
+        "command": "printf 'config: token=%s' \"$(printf '%s' \"$IT_TOKEN\" | head -c 20)\"; sleep 30",
+        "secrets": [
+          "IT_TOKEN"
+        ],
+        "timeout_seconds": 3,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo after"
+      }
+    }
+  ]
+}

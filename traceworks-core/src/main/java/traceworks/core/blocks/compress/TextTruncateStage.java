@@ -1,0 +1,118 @@
+package traceworks.core.blocks.compress;
+
+import traceworks.core.util.TruncationUtil;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/** text.truncate — cuts to max_chars (notice included), preferring line boundaries; head_tail keeps 25 % / 75 %. */
+public final class TextTruncateStage implements CompressionStage {
+
+    public enum Keep { HEAD, TAIL, HEAD_TAIL }
+
+    @Override
+    public String op() {
+        return "text.truncate";
+    }
+
+    @Override
+    public Set<String> settings() {
+        return Set.of("max_chars", "keep");
+    }
+
+    @Override
+    public StageKind inputKind() {
+        return StageKind.ANY;
+    }
+
+    @Override
+    public StageKind outputKind() {
+        return StageKind.TEXT;
+    }
+
+    @Override
+    public void validate(Map<String, Object> config) {
+        StageConfig.intValue(config, "max_chars", null, 100, 1_000_000, StageConfig.where(op()));
+        keep(config);
+    }
+
+    @Override
+    public StageResult apply(String input, Map<String, Object> config, RegexGuard guard) {
+        int max = StageConfig.intValue(config, "max_chars", null, 100, 1_000_000, StageConfig.where(op()));
+        String out = truncate(input, max, keep(config), guard.keepWhole());
+        return new StageResult(out, out.length() < input.length() ? CompressionNumbers.signedChars(out.length() - input.length()) : null);
+    }
+
+    private static Keep keep(Map<String, Object> config) {
+        return switch (StageConfig.string(config, "keep", "head_tail", "Stage text.truncate")) {
+            case "head" -> Keep.HEAD;
+            case "tail" -> Keep.TAIL;
+            case "head_tail" -> Keep.HEAD_TAIL;
+            default -> throw new CompressionException("Stage text.truncate: 'keep' must be head, tail or head_tail");
+        };
+    }
+
+    /** A cut text and how many characters of the original it left out — the number its notice names. */
+    public record Cut(String text, int omitted) {
+    }
+
+    /** Result length is at most {@code budget} (for budgets above the notice length), notice included. */
+    public static String truncate(String text, int budget, Keep keep) {
+        return truncate(text, budget, keep, List.of());
+    }
+
+    /** Like {@link #truncate(String, int, Keep)}, with cuts that leave out a value of {@code keepWhole} whole. */
+    public static String truncate(String text, int budget, Keep keep, Collection<String> keepWhole) {
+        return cut(text, budget, keep, keepWhole).text();
+    }
+
+    /** Like {@link #truncate}, but also reports the number of omitted characters (0 when nothing was cut). */
+    public static Cut cut(String text, int budget, Keep keep) {
+        return cut(text, budget, keep, List.of());
+    }
+
+    /**
+     * Like {@link #cut(String, int, Keep)}, but no cut falls inside one of {@code keepWhole} (the run's secret
+     * values): such a value is left out whole, so the result is never longer.
+     */
+    public static Cut cut(String text, int budget, Keep keep, Collection<String> keepWhole) {
+        if (text.length() <= budget) return new Cut(text, 0);
+        int available = Math.max(0, budget - notice(text.length()).length());
+        String head = "";
+        String tail = "";
+        switch (keep) {
+            case HEAD -> head = headPart(text, available, keepWhole);
+            case TAIL -> tail = tailPart(text, available, keepWhole);
+            case HEAD_TAIL -> {
+                int headBudget = available / 4;
+                head = headPart(text, headBudget, keepWhole);
+                tail = tailPart(text, available - headBudget, keepWhole);
+            }
+        }
+        int omitted = text.length() - head.length() - tail.length();
+        return new Cut(head + notice(omitted) + tail, omitted);
+    }
+
+    static String notice(long omitted) {
+        return "\n[… " + CompressionNumbers.fmt(omitted) + " chars omitted …]\n";
+    }
+
+    private static String headPart(String text, int max, Collection<String> keepWhole) {
+        if (max <= 0) return "";
+        int cut = RegexGuard.safeCut(text, Math.min(max, text.length()));
+        int newline = text.lastIndexOf('\n', cut - 1);
+        if (newline >= cut / 2) cut = newline + 1;
+        return text.substring(0, TruncationUtil.cutBefore(text, cut, keepWhole));
+    }
+
+    private static String tailPart(String text, int max, Collection<String> keepWhole) {
+        if (max <= 0) return "";
+        int start = text.length() - Math.min(max, text.length());
+        if (start > 0 && start < text.length() && Character.isLowSurrogate(text.charAt(start))) start++;
+        int newline = text.indexOf('\n', start);
+        if (newline >= 0 && newline < start + max / 2) start = newline + 1;
+        return text.substring(TruncationUtil.cutAfter(text, start, keepWhole));
+    }
+}

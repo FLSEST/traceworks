@@ -1,0 +1,37 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "eafa24fa-bbc6-4f06-9a87-a8d05f8267e9",
+  "name": "IT branches",
+  "description": "conditional in shell mode and switch: the input mode picks the branch and the case.",
+  "defaultContext": {"mode": "fast"},
+  "blocks": [
+    {
+      "type": "conditional",
+      "name": "pick",
+      "config": {
+        "execution_mode": "shell",
+        "condition": "test {{ mode }} = fast",
+        "then_command": "echo then-branch",
+        "else_command": "echo else-branch"
+      }
+    },
+    {
+      "type": "switch",
+      "name": "route",
+      "config": {
+        "expression": "{{ mode }}",
+        "cases": [
+          {"value": "fast|quick", "blocks": [{"type": "shell", "name": "case_fast", "config": {"command": "echo case-fast"}}]},
+          {"value": "slow", "blocks": [{"type": "shell", "name": "case_slow", "config": {"command": "echo case-slow"}}]}
+        ],
+        "default": [{"type": "shell", "name": "case_default", "config": {"command": "echo case-default"}}]
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {"command": "echo after: {{ block.pick.output }} {{ block.route.output }}"}
+    }
+  ]
+}

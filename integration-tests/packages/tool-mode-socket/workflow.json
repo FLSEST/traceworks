@@ -1,0 +1,24 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "9e3938e6-67dd-4c48-bee0-37f9546a7e3e",
+  "name": "IT tool mode socket",
+  "description": "A tool-mode block that asks for the Docker socket: Traceworks never mounts it, and refuses the workflow.",
+  "requires": [
+    "package.images"
+  ],
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "docker_socket",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "args",
+          "never"
+        ],
+        "mount_docker_socket": true
+      }
+    }
+  ]
+}

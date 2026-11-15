@@ -1,0 +1,25 @@
+# gitleaks configuration: the default rules.
+#
+# If a test needs a made-up secret-like literal, allow it here, but only in test
+# directories and never for a real secret. A real secret is removed and rotated.
+[extend]
+useDefault = true
+
+# The made-up values the redaction tests pass as secrets, and the charset name a
+# test reads back from an error message, each by its exact value and only below a
+# src/test/ directory. The allowlist belongs to the one rule they trip: a global
+# allowlist with paths makes `gitleaks dir` skip every src/test/ directory as a
+# whole, so a real key in a test would go unseen there.
+[[rules]]
+id = "generic-api-key"
+[[rules.allowlists]]
+description = "Made-up test secrets"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''(^|/)src/test/''']
+regexes = [
+    '''^s3cr3t-d3ploy-t0ken$''',
+    '''^tw-env-s3cr3t-Rk4Wb8Nc1$''',
+    '''^tw-e2e-dummy-Q7mX4pZ9vK2r$''',
+    '''^ANSI_X3\.4-1968$''',
+]

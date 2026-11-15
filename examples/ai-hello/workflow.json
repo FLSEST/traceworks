@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "fe88f63c-8154-4183-b056-4f1f5b4132b8",
+  "name": "AI hello",
+  "description": "One AI step that may read the workspace, but not change it, and says in two sentences what it holds.",
+  "requires": ["ai.tools"],
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "describe",
+      "config": {
+        "command": "Look at the files in the current directory and say in two sentences what this project is. Change nothing.",
+        "provider": "CLAUDE",
+        "tools": "read"
+      }
+    }
+  ]
+}

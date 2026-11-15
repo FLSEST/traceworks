@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Traceworks audit loop</title>
+<style>
+/* Layout: one column of sections; the round player is the centre piece. */
+:root {
+  --bg: #f6f8fa; --surface: #ffffff; --line: #d0d7de; --line-strong: #8c959f;
+  --text: #1f2328; --muted: #59636e; --accent: #0969da;
+  --clean: #1baf7a; --decided: #2a78d6; --open: #eb6834;
+  --ai: #6250d6; --ai-fill: #ecebfb; --old: #8c959f;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117; --surface: #161b22; --line: #30363d; --line-strong: #6e7681;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --clean: #199e70; --decided: #3987e5; --open: #d95926;
+    --ai: #9085e9; --ai-fill: #25224a; --old: #6e7681; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --surface: #161b22; --line: #30363d; --line-strong: #6e7681;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --clean: #199e70; --decided: #3987e5; --open: #d95926;
+  --ai: #9085e9; --ai-fill: #25224a; --old: #6e7681; color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 2rem 4rem;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 1.5rem; }
+header p.kicker { font: 0.8rem/1.4 var(--mono); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { font-size: clamp(1.7rem, 4.5vw, 2.5rem); line-height: 1.15; font-weight: 650; text-wrap: balance; margin-top: 0.4rem; }
+.lede { max-width: 65ch; margin-top: 0.9rem; font-size: 1.08rem; }
+section { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(1rem, 3vw, 2rem);
+  display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+h2 { font-size: 1.35rem; line-height: 1.25; font-weight: 600; color: var(--accent); text-wrap: balance; }
+h2 small { font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-left: 0.5rem; white-space: nowrap; }
+h3 { font-size: 1rem; font-weight: 600; }
+p, li { max-width: 72ch; }
+.note { color: var(--muted); font-size: 0.9rem; }
+code { font: 0.86em var(--mono); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0.1em 0.35em; border-radius: 4px; }
+
+/* round player */
+.panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+@media (max-width: 760px) { .panels { grid-template-columns: 1fr; } }
+.panel { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; background: var(--bg); }
+.panel h3 span { display: block; font-weight: 400; font-size: 0.85rem; color: var(--muted); }
+.cells { display: grid; grid-template-columns: repeat(15, 1fr); gap: 4px; }
+@media (max-width: 420px) { .cells { grid-template-columns: repeat(12, 1fr); } }
+.cells i { aspect-ratio: 1; border-radius: 3px; border: 1.5px solid var(--line-strong); background: transparent; display: block; }
+.cells i.clean { background: var(--clean); border-color: var(--clean); }
+.cells i.decided { background: var(--decided); border-color: var(--decided); }
+.cells i.open { border-color: var(--open); background: radial-gradient(circle, var(--bg) 0 26%, var(--open) 30%); }
+.cells i.hit { outline: 2px solid var(--text); outline-offset: 1px; }
+@media (prefers-reduced-motion: no-preference) {
+  .cells i { transition: background-color 0.35s, border-color 0.35s; }
+  .playing .cells i.hit { animation: pulse 0.7s ease-out; }
+  @keyframes pulse { from { transform: scale(0.6); } to { transform: scale(1); } }
+}
+.legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: 0.82rem; color: var(--muted); list-style: none; padding: 0; }
+.legend li { display: flex; align-items: center; gap: 0.4rem; }
+.legend .cells { display: inline-grid; grid-template-columns: 14px; }
+.legend b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+dl.stats { display: grid; grid-template-columns: 1fr auto; gap: 0.15rem 1rem; font-size: 0.9rem; }
+dl.stats dt { color: var(--muted); }
+dl.stats dd { font: 600 0.95rem var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.what { font-size: 0.9rem; min-height: 3.2em; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+button { font: 600 0.9rem var(--sans); color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 6px; padding: 0.45rem 0.9rem; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, li[tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=range] { flex: 1 1 180px; min-width: 0; accent-color: var(--accent); }
+#where { font: 0.9rem var(--mono); min-width: 22ch; }
+
+/* chart */
+.chart-head { display: flex; flex-wrap: wrap; gap: 0.3rem 1.5rem; font-size: 0.88rem; color: var(--muted); list-style: none; padding: 0; }
+.chart-head li { display: flex; align-items: center; gap: 0.45rem; }
+.chart-head b { color: var(--text); font-variant-numeric: tabular-nums; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.sw.a { background: var(--old); } .sw.b { background: var(--ai); }
+.scroll { overflow-x: auto; }
+svg { display: block; max-width: 100%; height: auto; }
+#chart { overflow-x: auto; }
+#chart svg { max-width: 640px; min-width: 460px; }
+#chart text { font: 11px var(--mono); fill: var(--muted); }
+#chart .grid { stroke: var(--line); stroke-width: 1; }
+#chart .a { fill: var(--old); } #chart .b { fill: var(--ai); }
+details summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+td strong { font-weight: 600; }
+
+/* loop diagram */
+#loop { min-width: 760px; color: var(--text); }
+#loop text { font: 11px var(--sans); fill: var(--muted); text-anchor: middle; }
+#loop text.t { font: 600 13px var(--sans); fill: var(--text); }
+#loop text.var { font: 11px var(--mono); text-anchor: start; }
+#loop .node rect { fill: var(--bg); stroke: var(--line-strong); stroke-width: 1.5; }
+#loop .node.ai rect { fill: var(--ai-fill); stroke: var(--ai); stroke-width: 2; }
+#loop .node.reg rect { stroke: var(--accent); stroke-width: 2; }
+#loop .edge { stroke: currentColor; stroke-width: 1.5; fill: none; }
+#loop .edge.next { stroke-dasharray: 6 5; }
+#loop .node { transition: opacity 0.25s; }
+#loop.focus .node { opacity: 0.35; }
+#loop.focus .node.on { opacity: 1; }
+#loop .node.on rect { stroke-width: 3; }
+ol.steps { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 0.75rem; counter-reset: s; }
+ol.steps li { counter-increment: s; border: 1px solid var(--line); border-radius: 8px; padding: 0.8rem 1rem; font-size: 0.9rem; background: var(--bg); min-width: 0; }
+ol.steps li.on { border-color: var(--accent); }
+ol.steps h3::before { content: counter(s) "  "; font-family: var(--mono); color: var(--muted); }
+.tag { font: 600 0.7rem var(--mono); letter-spacing: 0.04em; text-transform: uppercase; padding: 0.1rem 0.45rem; border-radius: 10px; border: 1px solid var(--line-strong); color: var(--muted); margin-left: 0.4rem; white-space: nowrap; }
+.tag.ai { border-color: var(--ai); color: var(--ai); }
+.tag.reg { border-color: var(--accent); color: var(--accent); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 1rem; background: var(--bg); font-size: 0.92rem; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+pre { font: 0.85rem/1.6 var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 0.9rem 1rem; overflow-x: auto; }
+pre .c { color: var(--muted); }
+ul.plain { padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.35rem; }
+footer { color: var(--muted); font-size: 0.85rem; }
+footer a { color: var(--accent); }
+footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="kicker">Traceworks · the audit loop</p>
+  <h1>An audit that knows when it is done</h1>
+  <p class="lede">Send an agent over a repository a second time and it starts from zero. It reads everything again, reports
+  different things, and has forgotten what you decided last time. Traceworks keeps a register between runs. Each run then
+  asks a model only about what changed, what was never judged, and what is still open.</p>
+</header>
+
+<section id="rounds">
+  <h2>The same repository, eight rounds, two ways <small>a model you can step through</small></h2>
+  <p>Each square is one item an audit judges: a class, or an area of risky code. Both sides audit the same 120 items, and
+  between rounds the same findings get fixed and the same code changes. The only difference is whether anything remembers.</p>
+
+  <div class="controls">
+    <button class="primary" id="play" type="button">Play from the start</button>
+    <button id="back" type="button" aria-label="One step back">◀ Back</button>
+    <button id="next" type="button" aria-label="One step on">Next ▶</button>
+    <input id="scrub" type="range" min="0" value="0" step="1" aria-label="Step of the eight rounds">
+    <span id="where" aria-live="polite"></span>
+  </div>
+
+  <div class="panels" id="panels">
+    <div class="panel">
+      <h3>Ask again every time <span>no memory between runs</span></h3>
+      <div class="cells" id="cellsA" role="img" aria-label="120 items without memory"></div>
+      <ul class="legend">
+        <li><span class="cells"><i class="open"></i></span>reported this round <b id="a-rep"></b></li>
+        <li><span class="cells"><i></i></span>nothing reported, nothing recorded <b id="a-none"></b></li>
+      </ul>
+      <dl class="stats">
+        <dt>Model calls this round</dt><dd id="a-calls"></dd>
+        <dt>Model calls so far</dt><dd id="a-total"></dd>
+        <dt>Reported last round as well</dt><dd id="a-again"></dd>
+        <dt>Items known to be settled</dt><dd>unknown</dd>
+      </dl>
+      <p class="what" id="a-what"></p>
+    </div>
+    <div class="panel">
+      <h3>The loop with a register <span>30 places per run</span></h3>
+      <div class="cells" id="cellsB" role="img" aria-label="120 items with a register"></div>
+      <ul class="legend">
+        <li><span class="cells"><i class="clean"></i></span>clean <b id="b-clean"></b></li>
+        <li><span class="cells"><i class="decided"></i></span>decided <b id="b-decided"></b></li>
+        <li><span class="cells"><i class="open"></i></span>open <b id="b-open"></b></li>
+        <li><span class="cells"><i></i></span>not judged <b id="b-nj"></b></li>
+      </ul>
+      <dl class="stats">
+        <dt>Model calls this round</dt><dd id="b-calls"></dd>
+        <dt>Model calls so far</dt><dd id="b-total"></dd>
+        <dt>Left out because settled</dt><dd id="b-skipped"></dd>
+        <dt>Items settled</dt><dd id="b-settled"></dd>
+      </dl>
+      <p class="what" id="b-what"></p>
+    </div>
+  </div>
+  <p class="note">A square with a strong outline was sent to the model in this step. Hover a square for its history.</p>
+
+  <h3>Model calls per round</h3>
+  <ul class="chart-head">
+    <li><span class="sw a"></span>ask again every time <b id="c-a"></b></li>
+    <li><span class="sw b"></span>with a register <b id="c-b"></b></li>
+  </ul>
+  <div id="chart"></div>
+  <details>
+    <summary>The numbers as a table</summary>
+    <div class="scroll"><table id="ctable"></table></div>
+  </details>
+  <p class="note">This is a model with invented rates, not a measurement: 18% of items start with a real defect, a verdict
+  raises a false alarm on 8% of sound items, and 3% of items change between rounds. The random numbers have a fixed seed,
+  so the page shows the same eight rounds every time. What we measured on real runs is in the table further down.</p>
+</section>
+
+<section id="one-round">
+  <h2>One round <small>what runs, and who decides</small></h2>
+  <p>The model is called in exactly one of seven steps. The other steps are scripts that give the same answer for the same
+  code, a log in plain files, and a person.</p>
+  <figure>
+    <div class="scroll">
+      <svg id="loop" viewBox="0 0 1000 344" role="img" aria-label="The audit loop: scripts measure the repository and choose the items, a model judges each chosen item, a script checks the quotes, the report feeds the register, a person decides, and the register hands its items and findings to the next run.">
+        <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+        <g class="node" id="n0"><rect x="20" y="36" width="140" height="64" rx="6"/><text class="t" x="90" y="63">Repository</text><text x="90" y="82">the code under audit</text></g>
+        <g class="node" id="n1"><rect x="225" y="36" width="140" height="64" rx="6"/><text class="t" x="295" y="63">1 Measure</text><text x="295" y="82">facts, items, digests</text></g>
+        <g class="node" id="n2"><rect x="430" y="36" width="140" height="64" rx="6"/><text class="t" x="500" y="63">2 Choose</text><text x="500" y="82">changed · new · open</text></g>
+        <g class="node ai" id="n3"><rect x="635" y="36" width="140" height="64" rx="6"/><text class="t" x="705" y="63">3 Judge</text><text x="705" y="82">one model call per item</text></g>
+        <g class="node" id="n4"><rect x="840" y="36" width="140" height="64" rx="6"/><text class="t" x="910" y="63">4 Check</text><text x="910" y="82">every quote, by lookup</text></g>
+        <g class="node" id="n5"><rect x="840" y="256" width="140" height="64" rx="6"/><text class="t" x="910" y="283">5 Report</text><text x="910" y="302">findings · gone · items</text></g>
+        <g class="node reg" id="n6"><rect x="500" y="256" width="190" height="64" rx="6"/><text class="t" x="595" y="283">6 Register</text><text x="595" y="302">hash-chained log → state</text></g>
+        <g class="node" id="n7"><rect x="225" y="256" width="140" height="64" rx="32"/><text class="t" x="295" y="283">7 Decide</text><text x="295" y="302">a person, or an agent</text></g>
+
+        <line class="edge" x1="160" y1="68" x2="221" y2="68" marker-end="url(#ah)"/><text x="192" y="60">reads</text>
+        <line class="edge" x1="365" y1="68" x2="426" y2="68" marker-end="url(#ah)"/><text x="397" y="60">all items</text>
+        <line class="edge" x1="570" y1="68" x2="631" y2="68" marker-end="url(#ah)"/><text x="602" y="60">the chosen</text>
+        <line class="edge" x1="775" y1="68" x2="836" y2="68" marker-end="url(#ah)"/><text x="807" y="60">verdicts</text>
+        <line class="edge" x1="910" y1="100" x2="910" y2="252" marker-end="url(#ah)"/><text x="900" y="180" style="text-anchor:end">what holds</text>
+        <line class="edge" x1="840" y1="288" x2="694" y2="288" marker-end="url(#ah)"/><text x="767" y="280">envelope</text>
+        <line class="edge next" x1="540" y1="256" x2="540" y2="104" marker-end="url(#ah)"/>
+        <text class="var" x="552" y="172">{{ audit_items }}</text><text class="var" x="552" y="188">{{ audit_findings }}</text><text x="552" y="206" style="text-anchor:start">to the next run</text>
+        <line class="edge" x1="500" y1="276" x2="369" y2="276" marker-end="url(#ah)"/><text x="434" y="268">new findings</text>
+        <line class="edge" x1="365" y1="302" x2="496" y2="302" marker-end="url(#ah)"/><text x="432" y="318">accept · dismiss</text>
+        <polyline class="edge next" points="225,288 90,288 90,104" marker-end="url(#ah)"/><text x="100" y="200" style="text-anchor:start">fixes the code</text>
+      </svg>
+    </div>
+    <figcaption class="note">Solid arrows are one run. Dashed arrows carry something into the next run: the register's
+    items and findings, and the fixed code. The model sits in step 3 only.</figcaption>
+  </figure>
+  <div class="controls"><button id="walk" type="button">Walk through the steps</button></div>
+  <ol class="steps" id="steps">
+    <li tabindex="0" data-n="n1"><h3>Measure <span class="tag">script</span></h3>
+      A script reads the code and lists every item the audit can judge. Each item gets a digest of exactly what a verdict
+      would see. No model is involved, so the same code gives the same list.</li>
+    <li tabindex="0" data-n="n2"><h3>Choose <span class="tag">script</span></h3>
+      The register hands the run its items and open findings. An item with an unchanged digest and no open finding is left
+      out. Changed and never-judged items come first, then open ones, up to a fixed number of places.</li>
+    <li tabindex="0" data-n="n3"><h3>Judge <span class="tag ai">model</span></h3>
+      One call per chosen item, in a container that reaches only the model's provider, with read-only tools. The model
+      answers for each open finding of the item: holds or gone. It may say the item is fine, and what it tried.</li>
+    <li tabindex="0" data-n="n4"><h3>Check <span class="tag">script</span></h3>
+      Every finding must quote the line it is about, and a lookup confirms the quote. A finding whose quote does not hold
+      does not count, and its item is asked about again next time.</li>
+    <li tabindex="0" data-n="n5"><h3>Report <span class="tag">script</span></h3>
+      The run writes its findings, the findings that are gone, and the full list of items with their digests. A failed
+      call is one item marked as not judged. It is not a failed audit. A finding the model rates low stays in the
+      report of the run. The register takes medium and high.</li>
+    <li tabindex="0" data-n="n6"><h3>Register <span class="tag reg">the tool</span></h3>
+      Every report and every decision is an event in a hash-chained log in plain files. The state is derived by replaying
+      it. A finding a model judged stays open until a run names it as gone: silence resolves nothing.</li>
+    <li tabindex="0" data-n="n7"><h3>Decide <span class="tag">person</span></h3>
+      Someone checks each new finding against the code. They fix it, accept the risk with a review date, or dismiss it
+      with a reason. The decision is in the log, and the next run knows it.</li>
+  </ol>
+</section>
+
+<section id="register">
+  <h2>What the register keeps <small>registers/&lt;key&gt;/</small></h2>
+  <div class="cards">
+    <div class="card"><h3>Findings, with their history</h3>
+      <p>One identity per finding across runs: first seen, last seen, how often, resolved, reopened. A decision keeps who
+      made it, when, and why.</p></div>
+    <div class="card"><h3>Items, with a digest</h3>
+      <p>Per item the digest of what the last verdict saw, and the run it came from. The state is derived, never stored:
+      <code>open</code>, <code>not judged</code>, <code>decided</code>, <code>clean</code>.</p></div>
+    <div class="card"><h3>The chain</h3>
+      <p>Each event names the hash of the one before it. A changed or missing event breaks the chain, and the register's
+      page says so. There is no database and no service.</p></div>
+  </div>
+  <pre><span class="c"># one line per register tells how far the audit is</span>
+$ traceworks findings
+  items 87 of 110 settled: 71 clean, 16 decided; 20 open, 3 not judged
+<span class="c"># the format of the line; the numbers are an example, not a run</span></pre>
+  <p>"Settled" is the number that can reach its goal. The number of findings cannot: it grows with attention. The gate
+  of a run follows it: red while an open finding of high severity stands, yellow while an item is open or not judged,
+  green when every item is settled.</p>
+</section>
+
+<section id="reuse">
+  <h2>Three things are reused <small>instead of paid for again</small></h2>
+  <div class="cards">
+    <div class="card"><h3>A verdict</h3>
+      <p>"Nothing found here" is a recorded verdict with a digest. It holds until the item changes, or until the question
+      changes: a package raises its <code>verdict_version</code> and every item is asked again.</p></div>
+    <div class="card"><h3>A decision</h3>
+      <p>A dismissed finding stays dismissed, with its reason. An accepted risk comes back on its review date. Nobody
+      explains the same thing to a model twice.</p></div>
+    <div class="card"><h3>The audit itself</h3>
+      <p>An audit is a package: a workflow, its rules and its scripts, shipped with the repository. The memory is in the
+      tool, so any audit that lists its items gets it. The model is named per step and can be swapped.</p></div>
+  </div>
+</section>
+
+<section id="lessons">
+  <h2>What real runs showed <small>2026-11-11 to 2026-11-13, Traceworks auditing itself</small></h2>
+  <p>None of this showed in a test of a single run. Every gap appeared across runs and across many items.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>What we saw</th><th>What the tool does now</th></tr></thead>
+    <tbody>
+      <tr><td>In round 2, findings vanished that <strong>nobody had fixed</strong>. The model just did not mention them again.</td>
+          <td>A finding a model judged stays open until a run names it as gone.</td></tr>
+      <tr><td><strong>110 model calls</strong> per security run, clean areas included, every run.</td>
+          <td>Items with a digest. A settled item is not sent to the model.</td></tr>
+      <tr><td>The testing audit could not end: <strong>51 findings gone, 52 new</strong>, in the same 30 classes.</td>
+          <td>A verdict may say "fine" and what it tried. Settled classes free their places for the next ones.</td></tr>
+      <tr><td><strong>8 of 13</strong> findings checked by hand were refuted by code outside the area the model saw.</td>
+          <td>A verdict call gets read-only tools, and every finding must quote a line that exists.</td></tr>
+      <tr><td><strong>32 of the first 64</strong> testing findings were rated low, and counted like the others.</td>
+          <td>A low finding stays in the report of the run. The gate counts settled items, not findings.</td></tr>
+      <tr><td><strong>22 verdicts lost</strong> when a usage limit stopped a long run.</td>
+          <td>A run can pause and go on. A resumed loop takes over the items its record holds as finished.</td></tr>
+      <tr><td>Triage that parsed the Markdown report <strong>missed 3 of 67</strong> findings.</td>
+          <td>Every finding is data as well, and <code>findings show</code> prints it from the record of the run.</td></tr>
+      <tr><td>One failed call made a whole run <strong>worthless to its register</strong>.</td>
+          <td>A failed call is one item not judged. The register takes the rest.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="status">
+  <h2>Where this stands <small>2026-11-13</small></h2>
+  <ul class="plain">
+    <li><strong>Built:</strong> items in the register. The four audits that ask a model use them:
+      <code>security</code>, <code>testing</code>, <code>functionality</code> and <code>architecture</code>. Their
+      gates follow the settled number, and low findings stay in the report of the run.</li>
+    <li><strong>Tested with stand-ins for the model only.</strong> No real run has used items yet, so the saving on a real
+      repository is not measured.</li>
+    <li><strong>Not built yet:</strong> a step that confirms a finding mechanically before a person looks at it, and an
+      audit of what a run costs the host.</li>
+  </ul>
+</section>
+
+<footer>This page loads nothing from the network. The text behind it: <code>docs/registers.md</code> and <code>examples/self-audit/README.md</code>.
+The register is one of the key features of Traceworks; all of them, each explained the same way: <a href="features.html">features.html</a>.</footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var N = 120, CAP = 30, ROUNDS = 8;
+  function rng(seed) {
+    return function () {
+      seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function n(k, one, many) { return k + ' ' + (k === 1 ? one : many); }
+  function stateOf(it) { return it.f === 'open' ? 'open' : it.vv !== it.ver ? 'nj' : it.f === 'decided' ? 'decided' : 'clean'; }
+
+  function simulate() {
+    var world = rng(20261113), left = rng(7), items = [], frames = [], i;
+    for (i = 0; i < N; i++) items.push({ score: world(), defect: world() < 0.18, ver: 0, vv: null, f: null, alarm: false, last: 0 });
+    var totA = 0, totB = 0, rep = new Array(N).fill(false), perA = [], perB = [];
+    function snap(extra) {
+      var b = items.map(stateOf), counts = { clean: 0, decided: 0, open: 0, nj: 0 };
+      b.forEach(function (s) { counts[s]++; });
+      var f = { a: rep.slice(), b: b, last: items.map(function (it) { return it.last; }), counts: counts, totA: totA, totB: totB,
+        hitB: new Array(N).fill(false), hitA: false, callsA: 0, callsB: 0, again: null, skipped: null };
+      for (var k in extra) f[k] = extra[k];
+      frames.push(f);
+    }
+    snap({ round: 0, phase: 'start', whatA: 'Nothing has run yet.', whatB: 'Nothing has run yet. Every item is not judged.' });
+    for (var round = 1; round <= ROUNDS; round++) {
+      // without memory: every item, every time
+      var before = rep, again = 0;
+      rep = items.map(function (it) { return left() < (it.defect ? 0.6 : 0.08); });
+      rep.forEach(function (r, j) { if (r && before[j]) again++; });
+      var reported = rep.filter(Boolean).length;
+      totA += N; perA.push(N);
+      // with a register: changed and never judged first, then open and unchanged, up to the cap
+      var fresh = [], open = [], settled = 0;
+      items.forEach(function (it, j) {
+        if (it.vv !== it.ver) fresh.push(j); else if (it.f === 'open') open.push(j); else settled++;
+      });
+      var byScore = function (x, y) { return items[y].score - items[x].score; };
+      fresh.sort(byScore); open.sort(byScore);
+      var chosen = fresh.concat(open).slice(0, CAP), hit = new Array(N).fill(false);
+      var nFresh = Math.min(fresh.length, CAP), waiting = fresh.length + open.length - chosen.length;
+      chosen.forEach(function (j) {
+        var it = items[j]; hit[j] = true;
+        if (it.defect) { if (it.f !== 'decided') { it.f = 'open'; it.alarm = false; } }
+        else if (it.f === 'open') { if (!it.alarm || world() < 0.5) { it.f = null; it.alarm = false; } }
+        else if (world() < 0.08) { it.f = 'open'; it.alarm = true; }
+        it.vv = it.ver; it.last = round;
+      });
+      totB += chosen.length; perB.push(chosen.length);
+      snap({ round: round, phase: 'run', hitA: true, hitB: hit, callsA: N, callsB: chosen.length, again: round > 1 ? again : null,
+        skipped: settled,
+        whatA: 'All 120 items go to the model again. It reports ' + n(reported, 'finding', 'findings') +
+          (round > 1 ? ', ' + again + ' of them on an item it reported last round too.' : '.'),
+        whatB: n(chosen.length, 'item goes', 'items go') + ' to the model: ' + nFresh + ' changed or never judged, ' +
+          (chosen.length - nFresh) + ' with an open finding. ' + (waiting ? n(waiting, 'waits', 'wait') + ' for a later run.' : 'Nothing waits.') });
+      // between the rounds: people decide, code changes
+      var fixed = 0, dismissed = 0, accepted = 0, changed = 0;
+      items.forEach(function (it) {
+        if (it.f === 'open' && it.vv === it.ver) {
+          if (it.alarm) { if (world() < 0.7) { it.f = 'decided'; dismissed++; } }
+          else { var x = world(); if (x < 0.55) { it.defect = false; it.ver++; fixed++; } else if (x < 0.7) { it.f = 'decided'; accepted++; } }
+        }
+      });
+      items.forEach(function (it) { if (world() < 0.03) { it.ver++; changed++; if (world() < 0.2) it.defect = true; } });
+      snap({ round: round, phase: 'between',
+        whatA: 'People fix ' + n(fixed, 'defect', 'defects') + '. What they dismissed or accepted is written down nowhere the next run reads.',
+        whatB: 'People fix ' + n(fixed, 'defect', 'defects') + ', dismiss ' + n(dismissed, 'false alarm', 'false alarms') + ' and accept ' +
+          n(accepted, 'risk', 'risks') + '. ' + n(changed, 'other item changes', 'other items change') + ' in the code and ' +
+          (changed === 1 ? 'needs' : 'need') + ' a new verdict.' });
+    }
+    return { frames: frames, perA: perA, perB: perB };
+  }
+
+  var sim = simulate(), frames = sim.frames, at = frames.length - 2, timer = null;
+  var $ = function (id) { return document.getElementById(id); };
+  function cells(id) { var box = $(id), out = []; for (var i = 0; i < N; i++) { var c = document.createElement('i'); box.appendChild(c); out.push(c); } return out; }
+  var cA = cells('cellsA'), cB = cells('cellsB');
+  var WORD = { clean: 'clean', decided: 'decided', open: 'open', nj: 'not judged' };
+
+  function chart(upTo) {
+    var W = 640, H = 210, L = 46, R = 8, T = 10, B = 30, band = (W - L - R) / ROUNDS, bw = 20, s = '';
+    var y = function (v) { return T + (H - T - B) * (1 - v / 120); };
+    [0, 30, 60, 90, 120].forEach(function (v) {
+      s += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(v) + '" y2="' + y(v) + '"/>' +
+        '<text x="' + (L - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + v + '</text>';
+    });
+    for (var r = 0; r < ROUNDS; r++) {
+      var x = L + r * band + (band - 2 * bw - 2) / 2;
+      s += '<text x="' + (L + r * band + band / 2) + '" y="' + (H - 12) + '" text-anchor="middle">' + (r + 1) + '</text>';
+      if (r < upTo) {
+        [['a', sim.perA[r], x, 'ask again every time'], ['b', sim.perB[r], x + bw + 2, 'with a register']].forEach(function (d) {
+          var top = y(d[1]), h = y(0) - top;
+          if (h > 0) s += '<path class="' + d[0] + '" d="M' + d[2] + ',' + y(0) + ' V' + (top + 4) + ' q0,-4 4,-4 h' + (bw - 8) +
+            ' q4,0 4,4 V' + y(0) + ' z"><title>Round ' + (r + 1) + ', ' + d[3] + ': ' + d[1] + ' model calls</title></path>';
+        });
+      }
+    }
+    s += '<text x="' + (L - 6) + '" y="' + (H - 12) + '" text-anchor="end">round</text>';
+    $('chart').innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Model calls per round for both ways">' + s + '</svg>';
+    var rows = '<thead><tr><th>Round</th><th class="num">Ask again every time</th><th class="num">With a register</th></tr></thead><tbody>';
+    for (r = 0; r < ROUNDS; r++) rows += '<tr><td>' + (r + 1) + '</td><td class="num">' + sim.perA[r] + '</td><td class="num">' + sim.perB[r] + '</td></tr>';
+    $('ctable').innerHTML = rows + '</tbody>';
+  }
+
+  function render() {
+    var f = frames[at], i;
+    for (i = 0; i < N; i++) {
+      cA[i].className = (f.a[i] ? 'open' : '') + (f.hitA ? ' hit' : '');
+      cA[i].title = 'Item ' + (i + 1) + ': ' + (f.round === 0 ? 'not asked yet' : f.a[i] ? 'reported in round ' + f.round : 'nothing reported in round ' + f.round);
+      cB[i].className = (f.b[i] === 'nj' ? '' : f.b[i]) + (f.hitB[i] ? ' hit' : '');
+      cB[i].title = 'Item ' + (i + 1) + ': ' + WORD[f.b[i]] + (f.last[i] ? ', last judged in round ' + f.last[i] : ', never judged');
+    }
+    var rep = f.a.filter(Boolean).length, settled = f.counts.clean + f.counts.decided;
+    $('a-rep').textContent = rep; $('a-none').textContent = N - rep;
+    $('a-calls').textContent = f.callsA; $('a-total').textContent = f.totA;
+    $('a-again').textContent = f.again === null ? '–' : f.again;
+    $('b-clean').textContent = f.counts.clean; $('b-decided').textContent = f.counts.decided;
+    $('b-open').textContent = f.counts.open; $('b-nj').textContent = f.counts.nj;
+    $('b-calls').textContent = f.callsB; $('b-total').textContent = f.totB;
+    $('b-skipped').textContent = f.skipped === null ? '–' : f.skipped;
+    $('b-settled').textContent = settled + ' of ' + N;
+    $('a-what').textContent = f.whatA; $('b-what').textContent = f.whatB;
+    $('c-a').textContent = f.totA + ' calls so far'; $('c-b').textContent = f.totB + ' calls so far';
+    $('where').textContent = f.phase === 'start' ? 'Before the first run' : 'Round ' + f.round + ' of ' + ROUNDS + (f.phase === 'run' ? ': the run' : ': between runs');
+    $('scrub').value = at;
+    chart(f.round);
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } $('panels').classList.remove('playing'); $('play').textContent = 'Play from the start'; }
+  function go(n) { at = Math.max(0, Math.min(frames.length - 1, n)); render(); }
+  $('scrub').max = frames.length - 1;
+  $('scrub').addEventListener('input', function () { stop(); go(+this.value); });
+  $('back').addEventListener('click', function () { stop(); go(at - 1); });
+  $('next').addEventListener('click', function () { stop(); go(at + 1); });
+  $('play').addEventListener('click', function () {
+    if (timer) { stop(); return; }
+    go(0); $('panels').classList.add('playing'); this.textContent = 'Pause';
+    timer = setInterval(function () { if (at >= frames.length - 1) { stop(); return; } go(at + 1); }, 1500);
+  });
+  render();
+
+  // the loop diagram: a step in the list lights its node
+  var loop = $('loop'), steps = Array.prototype.slice.call(document.querySelectorAll('#steps li')), walking = null;
+  function light(li) {
+    steps.forEach(function (s) { s.classList.remove('on'); });
+    Array.prototype.forEach.call(loop.querySelectorAll('.node'), function (n) { n.classList.remove('on'); });
+    if (!li) { loop.classList.remove('focus'); return; }
+    li.classList.add('on'); loop.classList.add('focus'); $(li.getAttribute('data-n')).classList.add('on');
+  }
+  steps.forEach(function (li) {
+    ['mouseenter', 'focus', 'click'].forEach(function (e) { li.addEventListener(e, function () { clearInterval(walking); light(li); }); });
+    ['mouseleave', 'blur'].forEach(function (e) { li.addEventListener(e, function () { light(null); }); });
+  });
+  $('walk').addEventListener('click', function () {
+    clearInterval(walking); var k = 0; light(steps[0]);
+    walking = setInterval(function () { k++; if (k >= steps.length) { clearInterval(walking); light(null); return; } light(steps[k]); }, 1800);
+  });
+})();
+</script>
+</body>
+</html>

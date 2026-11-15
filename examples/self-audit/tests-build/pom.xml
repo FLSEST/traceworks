@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>io.github.flsest</groupId>
+        <artifactId>traceworks-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>traceworks-self-audit-build-tests</artifactId>
+    <name>Traceworks build self-audit tests</name>
+    <description>Tests of the facts tool that the build self-audit package builds into its image. Not part of traceworks.jar.</description>
+
+    <dependencies>
+        <!-- Test scope only: one test runs the package's shape through the real engine, as a host run. Run this
+             module on its own with -am (mvn -pl examples/self-audit/tests-build -am test), so it tests the engine of
+             this checkout, not a snapshot installed earlier. -->
+        <dependency>
+            <groupId>io.github.flsest</groupId>
+            <artifactId>traceworks-cli</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <!-- The sources live in the package image's directory, the build context of that image; the tests and
+             target/ stay here, so a build never changes the package digest or the image tag. -->
+        <sourceDirectory>../build/images/facts/src</sourceDirectory>
+    </build>
+</project>

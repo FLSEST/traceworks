@@ -1,0 +1,43 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "3d0b7c1e-52a4-4f0b-9c8e-6a1f2e7d4b90",
+  "name": "IT ai-wrapper-tools",
+  "description": "The AI step of a wrapper carries the wrapper's tools: a foreach with read for Claude, a retry with read for Pi, and a foreach without the key.",
+  "requires": [
+    "ai.tools"
+  ],
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "each_read",
+      "config": {
+        "execution_mode": "ai",
+        "items": ["one"],
+        "command": "Report your arguments.",
+        "tools": "read"
+      }
+    },
+    {
+      "type": "retry",
+      "name": "retry_read",
+      "config": {
+        "execution_mode": "ai",
+        "provider": "PI",
+        "command": "Report your arguments.",
+        "max_retries": 0,
+        "delay": 0,
+        "tools": "read"
+      }
+    },
+    {
+      "type": "foreach",
+      "name": "each_none",
+      "config": {
+        "execution_mode": "ai",
+        "items": ["one"],
+        "command": "Report your arguments."
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "12623897-63ab-4e96-98ab-cbe6fc0c109a",
+  "name": "IT gates",
+  "description": "Gate markers in a shell step's output, a checked command that passes, and one that exits with the input broken_exit and carries on_failure: continue.",
+  "defaultContext": {"broken_exit": "0"},
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "report",
+      "config": {"command": "printf 'checked the widgets\\ngate_status: YELLOW\\ngate_category: widgets\\ngate_description: two widgets are old\\n'"}
+    },
+    {
+      "type": "shell",
+      "name": "build_ok",
+      "config": {"command": "true", "checked_command": true, "check_category": "build"}
+    },
+    {
+      "type": "shell",
+      "name": "build_broken",
+      "config": {"command": "echo compiling; exit {{ broken_exit }}", "checked_command": true, "check_category": "build", "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {"command": "echo still running"}
+    }
+  ]
+}

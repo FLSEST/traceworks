@@ -1,0 +1,31 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "1c04b37c-6e7d-449b-85a6-3bc95138a381",
+  "name": "IT ai-agentic",
+  "description": "An agentic block for Claude and one for Pi: the fake plans one action, runs it with a tool call, and declares the goal reached.",
+  "requires": [
+    "ai.tools"
+  ],
+  "blocks": [
+    {
+      "type": "agentic",
+      "name": "claude_agent",
+      "config": {
+        "goal": "Greet the world",
+        "tools": "read",
+        "max_iterations": 3
+      }
+    },
+    {
+      "type": "agentic",
+      "name": "pi_agent",
+      "config": {
+        "goal": "Greet the world",
+        "tools": "read",
+        "max_iterations": 3,
+        "provider": "PI"
+      }
+    }
+  ]
+}

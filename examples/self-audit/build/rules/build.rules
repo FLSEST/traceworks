@@ -1,0 +1,33 @@
+# The rules of the build and dependencies self-audit: what must hold for Traceworks' build (docs/architecture.md:
+# few dependencies, only Jackson at runtime; a reproducible build; pinned images), and where the tool looks.
+# A broken rule turns the gate RED. The format is described in the package's README.md.
+
+# Outside the test scope only Jackson and Traceworks' own modules (the modules of the reactor are always allowed).
+runtime-allow    com.fasterxml.jackson.core:*
+runtime-allow    io.github.flsest:*
+
+# maven-enforcer-plugin guards the line above in every build: its bannedDependencies must allow exactly that.
+require          enforcer-guard
+
+# Two builds of one commit give the same jar.
+require          output-timestamp
+java-release     21
+
+# The plugins that shape traceworks.jar or run its tests come from the POMs, not from the Maven that runs the build.
+plugin-pinned    maven-compiler-plugin maven-resources-plugin maven-jar-plugin maven-surefire-plugin
+
+# Pre-releases (alpha, beta, M1, rc, ...) and qualified builds (byte-buddy's -jdk5) are no update.
+stable-version   ^\d+(\.\d+)*$
+
+maven-repository https://repo.maven.apache.org/maven2
+npm-registry     https://registry.npmjs.org
+
+# Every base image of the Dockerfiles below is on Docker Hub; the registries step asks no other image registry.
+image-registry   docker.io
+
+# The images Traceworks ships and the images of its packages. The fake images of the integration tests are not
+# shipped and stay out.
+dockerfile       images/*/Dockerfile
+dockerfile       examples/**/images/*/Dockerfile
+
+accept           package_unpinned images/shell/Dockerfile The shell image installs Debian's current packages on purpose, and the record names the image ID each container started from (docs/security.md, "Images and containers").

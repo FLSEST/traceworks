@@ -1,0 +1,48 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "f6194167-affd-47a3-a390-dd4718697497",
+  "name": "IT ai-isolation",
+  "description": "An AI step that tries to write /workspace: refused in a read-only workspace, possible with workspace_writable.",
+  "requires": [
+    "ai.tools"
+  ],
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "claude_readonly",
+      "config": {
+        "command": "[fake:write] try to write",
+        "tools": "shell"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_readonly",
+      "config": {
+        "command": "[fake:write] try to write",
+        "provider": "PI",
+        "tools": "shell"
+      }
+    },
+    {
+      "type": "simple",
+      "name": "claude_writable",
+      "config": {
+        "command": "[fake:write] try to write",
+        "tools": "shell",
+        "workspace_writable": true
+      }
+    },
+    {
+      "type": "simple",
+      "name": "pi_writable",
+      "config": {
+        "command": "[fake:write] try to write",
+        "provider": "PI",
+        "tools": "shell",
+        "workspace_writable": true
+      }
+    }
+  ]
+}

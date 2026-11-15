@@ -1,0 +1,14 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "6eb1f3ef-888c-49d3-9e23-81b81cb77b20",
+  "name": "IT output limit setting",
+  "description": "A step that prints 2 MiB (in lines of 4 KiB) and ends: below the default limit of 16 MiB, beyond an operator's output_limit_mib of 1.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "two_mib",
+      "config": {"command": "yes \"$(printf '%4095s' '' | tr ' ' y)\" | head -c 2097152", "timeout_seconds": 120}
+    }
+  ]
+}

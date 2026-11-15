@@ -1,0 +1,45 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "e3db6e7e-49dd-4ef9-a484-20dd80656e37",
+  "name": "IT isolation",
+  "description": "What a container may do by default: no network and a read-only workspace; network: true and workspace_writable: true open each one for their step only.",
+  "requires": ["container.network"],
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "reach_out",
+      "config": {"command": "exec 3<>/dev/tcp/1.1.1.1/53", "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "interfaces",
+      "config": {"command": "ls /sys/class/net"}
+    },
+    {
+      "type": "shell",
+      "name": "interfaces_with_network",
+      "config": {"command": "ls /sys/class/net", "network": true}
+    },
+    {
+      "type": "shell",
+      "name": "write_read_only",
+      "config": {"command": "touch /workspace/read-only-probe", "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_writable",
+      "config": {"command": "touch /workspace/writable-probe && echo wrote", "workspace_writable": true}
+    },
+    {
+      "type": "shell",
+      "name": "write_package",
+      "config": {"command": "touch /package/package-probe", "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_scratch",
+      "config": {"command": "echo hand-over > /scratch/note.txt && cat /scratch/note.txt"}
+    }
+  ]
+}

@@ -1,0 +1,345 @@
+{
+  "format": "traceworks-workflow",
+  "formatVersion": 1,
+  "id": "00269840-cbbf-4055-b907-cc07c314040c",
+  "name": "IT tool mode",
+  "description": "The tool mode of the shell block: a package image's entrypoint runs with container_args, no shell in between. The input 'case' picks the blocks that run.",
+  "requires": [
+    "package.images"
+  ],
+  "defaultContext": {
+    "case": "args",
+    "who": "nobody"
+  },
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "seed",
+      "config": {
+        "command": "set -eu; echo from-seed",
+        "run_if": "test \"{{ case }}\" = args"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "entrypoint_args",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "args",
+          "two words",
+          "semi;colon",
+          "$(echo injected)",
+          "`touch injected`",
+          "*",
+          "it's \"quoted\"",
+          "{{ who }}",
+          "{{ block.seed.output }}"
+        ],
+        "run_if": "test \"{{ case }}\" = args"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "untrusted_input",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "args",
+          "{{ previous_chain_output }}"
+        ],
+        "run_if": "test \"{{ case }}\" = untrusted"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "quote_it",
+      "config": {
+        "command": "set -eu; echo got {{ previous_chain_output }}",
+        "run_if": "test \"{{ case }}\" = tainted"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "tainted_output",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "args",
+          "{{ block.quote_it.output }}"
+        ],
+        "run_if": "test \"{{ case }}\" = tainted"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "raw_ok",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "args",
+          "one",
+          "two"
+        ],
+        "run_if": "test \"{{ case }}\" = raw"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "exit_seven",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "fail",
+          "7"
+        ],
+        "run_if": "test \"{{ case }}\" = fail"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "Scan-Tree",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sarif",
+          "/out"
+        ],
+        "run_if": "test \"{{ case }}\" = sarif",
+        "output_format": "sarif"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "explicit_prefix",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sarif",
+          "/out"
+        ],
+        "run_if": "test \"{{ case }}\" = sarif",
+        "output_format": "sarif",
+        "fact_prefix": "Audit Tool"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "custom_dir",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sarif",
+          "/results"
+        ],
+        "run_if": "test \"{{ case }}\" = sarif",
+        "output_format": "sarif",
+        "output_dir": "/results",
+        "fact_prefix": "custom"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "clean",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sarif-clean",
+          "/out"
+        ],
+        "run_if": "test \"{{ case }}\" = sarif",
+        "output_format": "sarif"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "no_report",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "none"
+        ],
+        "run_if": "test \"{{ case }}\" = unmeasured",
+        "output_format": "sarif"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "counted",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "cache",
+          "/cache"
+        ],
+        "run_if": "test \"{{ case }}\" = cache",
+        "cache_dir": "/cache"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "with_secret",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "env",
+          "IT_TOKEN"
+        ],
+        "run_if": "test \"{{ case }}\" = env",
+        "secrets": [
+          "IT_TOKEN"
+        ]
+      }
+    },
+    {
+      "type": "shell",
+      "name": "without_secret",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "env",
+          "IT_TOKEN"
+        ],
+        "run_if": "test \"{{ case }}\" = env"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "no_network",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "net"
+        ],
+        "run_if": "test \"{{ case }}\" = isolation"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "write_read_only",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "write",
+          "/workspace/read-only-probe"
+        ],
+        "run_if": "test \"{{ case }}\" = isolation",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "write_writable",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "write",
+          "/workspace/writable-probe"
+        ],
+        "run_if": "test \"{{ case }}\" = isolation",
+        "workspace_writable": true
+      }
+    },
+    {
+      "type": "shell",
+      "name": "read_mount",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "cat",
+          "/data-ro/given.txt"
+        ],
+        "run_if": "test \"{{ case }}\" = mounts",
+        "mounts": [
+          "{{ ro_dir }}:/data-ro:ro"
+        ]
+      }
+    },
+    {
+      "type": "shell",
+      "name": "write_mount_ro",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "write",
+          "/data-ro/written.txt"
+        ],
+        "run_if": "test \"{{ case }}\" = mounts",
+        "mounts": [
+          "{{ ro_dir }}:/data-ro:ro"
+        ],
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "write_mount_rw",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "write",
+          "/data-rw/written.txt"
+        ],
+        "run_if": "test \"{{ case }}\" = mounts",
+        "mounts": [
+          "{{ rw_dir }}:/data-rw:rw"
+        ]
+      }
+    },
+    {
+      "type": "shell",
+      "name": "stuck",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sleep",
+          "/out"
+        ],
+        "run_if": "test \"{{ case }}\" = timeout",
+        "output_format": "sarif",
+        "timeout_seconds": 3,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "stuck_raw",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "sleep",
+          "/scratch"
+        ],
+        "run_if": "test \"{{ case }}\" = timeout",
+        "timeout_seconds": 3
+      }
+    },
+    {
+      "type": "shell",
+      "name": "flood",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "flood"
+        ],
+        "run_if": "test \"{{ case }}\" = flood",
+        "timeout_seconds": 120,
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "flood_sarif",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "flood-sarif",
+          "/out"
+        ],
+        "run_if": "test \"{{ case }}\" = flood",
+        "output_format": "sarif",
+        "timeout_seconds": 120
+      }
+    }
+  ]
+}
