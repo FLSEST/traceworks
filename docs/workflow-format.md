@@ -21,8 +21,10 @@ Those five keys had camel-case names first (`formatVersion`, `defaultContext`, `
 `schemaVersion`), and Traceworks still reads them: a workflow written with them means exactly the same and needs no
 change. Everything Traceworks prints names a key with its underscore, whichever spelling the file has. A definition
 must not use both spellings of one key: it would not say which value counts, so the package is not loaded
-(`duplicate-key-spelling`), and `check`, `describe`, `run` and `seal` refuse it with exit 6. The package digest and
-a seal are over the file as it is, so respelling a key of a sealed package changes the package: seal it again.
+(`duplicate-key-spelling`, naming every such key), and `check`, `describe`, `run`, `resume` and `seal` refuse it
+with exit 6; a child workflow with both fails the step that calls it, as any child that cannot be loaded. The
+package digest and a seal are over the file as it is, so respelling a key of a sealed package changes the package:
+seal it again.
 
 ## Rules
 

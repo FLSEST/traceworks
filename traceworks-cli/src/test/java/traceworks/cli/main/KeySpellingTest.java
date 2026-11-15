@@ -168,4 +168,121 @@ class KeySpellingTest {
                 .contains("both metadata.audit.report_block and metadata.audit.reportBlock");
         assertThat(exec("runs").out()).as("no run was started").doesNotContain("both");
     }
+
+    /** The definitions above with an approval before the report, so that a run of them parks. */
+    private static String parking(String json) {
+        String report = "{\"type\": \"shell\", \"name\": \"report\"";
+        assertThat(json).contains(report);
+        return json.replace(report, "{\"type\": \"approval\", \"name\": \"ok\", \"config\": {\"question\": \"Go?\","
+                + " \"options\": [\"Yes\", \"No\"]}},\n    " + report);
+    }
+
+    /** The recorded definition of a parked run holds the file as written: all five camel-case names. */
+    @Test
+    void aParkedRun_ofTheCamelCaseNames_isResumed() throws IOException {
+        Path camelCase = pkg("parked", parking(CAMEL_CASE));
+
+        Result parked = run(camelCase);
+        assertThat(parked.code()).as(parked.all()).isEqualTo(5);
+        String id = runId(parked);
+        assertThat(exec("approve", id, "--answer", "Yes").code()).isZero();
+        Result resumed = exec("resume", id, "--allow-host-execution");
+
+        assertThat(resumed.code()).as(resumed.all()).isZero();
+        assertThat(resumed.out()).as("report_block and default_context of the recorded definition were read")
+                .contains("register spelling: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(exec("findings", "spelling", "list").out()).contains("A.java");
+        assertThat(exec("show", id).out()).contains("COMPLETED");
+        assertThat(exec("verify", id).code()).isZero();
+    }
+
+    /** A package that got both spellings of a key while its run was parked is not loaded, so the run does not go on. */
+    @Test
+    void aResume_againstAPackageWithBothSpellings_isRefused() throws IOException {
+        Path pkg = pkg("respelled", parking(UNDERSCORE));
+        Result parked = run(pkg);
+        assertThat(parked.code()).as(parked.all()).isEqualTo(5);
+        String id = runId(parked);
+        assertThat(exec("approve", id, "--answer", "Yes").code()).isZero();
+        Files.writeString(pkg.resolve("workflow.json"), parking(UNDERSCORE).replace("\"format_version\": 1,",
+                "\"format_version\": 1, \"formatVersion\": 1,"));
+
+        Result refused = exec("resume", id, "--allow-host-execution", "--allow-changed-package");
+
+        assertThat(refused.code()).as(refused.all()).isEqualTo(6);
+        assertThat(refused.all()).contains("duplicate-key-spelling", "both format_version and formatVersion");
+        assertThat(exec("findings", "spelling", "list").all()).as("the report step never ran")
+                .doesNotContain("A.java");
+    }
+
+    @Test
+    void seal_sealsEitherSpelling_andRefusesBoth() throws Exception {
+        Path key = Files.createDirectories(temp.resolve("keys")).resolve("seal");
+        Process keygen = new ProcessBuilder("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "test@traceworks",
+                "-f", key.toString()).redirectErrorStream(true).start();
+        assertThat(keygen.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(keygen.exitValue()).isZero();
+        Files.writeString(home.resolve("traceworks.json"), "{\"signing_key\": \"" + key + "\"}");
+        Files.writeString(home.resolve("allowed_signers"),
+                "release@example.org " + Files.readString(Path.of(key + ".pub")));
+        Path camelCase = pkg("sealed-camel", CAMEL_CASE.replace("spelling", "camel"));
+        Path underscore = pkg("sealed-underscore", UNDERSCORE);
+        Path both = pkg("sealed-both", UNDERSCORE.replace("\"id\": \"spelling\"", "\"id\": \"both\"")
+                .replace("\"default_context\":", "\"defaultContext\": {}, \"default_context\":"));
+
+        for (Path pkg : List.of(camelCase, underscore)) {
+            Result sealed = exec("seal", pkg.toString());
+            assertThat(sealed.code()).as(sealed.all()).isZero();
+            assertThat(pkg.resolve("traceworks.seal")).exists();
+            Result run = run(pkg);
+            assertThat(run.code()).as(run.all()).isZero();
+        }
+        // The seal is over the file as it is: the other spelling of a key is a change
+        Files.writeString(camelCase.resolve("workflow.json"),
+                UNDERSCORE.replace("spelling", "camel"));
+        Result respelled = run(camelCase);
+        assertThat(respelled.code()).as(respelled.all()).isEqualTo(6);
+        assertThat(respelled.all()).contains("changed since it was sealed");
+
+        Result refused = exec("seal", both.toString());
+        assertThat(refused.code()).as(refused.all()).isEqualTo(6);
+        assertThat(refused.all()).contains("duplicate-key-spelling", "both default_context and defaultContext");
+        assertThat(both.resolve("traceworks.seal")).doesNotExist();
+    }
+
+    private Path parentOf(String name, String childJson) throws IOException {
+        Path parent = pkg(name, """
+                {"format": "traceworks-workflow", "format_version": 1, "id": "%s", "name": "Parent", "blocks": [
+                  {"type": "sub-workflow", "name": "child", "config": {"workflow_id": "./child"}}]}""".formatted(name));
+        Files.createDirectories(parent.resolve("child"));
+        Files.writeString(parent.resolve("child/workflow.json"), childJson);
+        return parent;
+    }
+
+    private static String child(String keys) {
+        return """
+                {"format": "traceworks-workflow", %s, "id": "child", "name": "Child", "blocks": [
+                  {"type": "shell", "name": "say", "config": {"command": "echo child ran"}}]}""".formatted(keys);
+    }
+
+    @Test
+    void aChildWorkflow_isReadInEitherSpelling_andOneWithBothFailsTheStepThatCallsIt() throws IOException {
+        Result camelCase = run(parentOf("parent-camel", child("\"formatVersion\": 1, \"defaultContext\": {}")));
+        Result newer = run(parentOf("parent-newer", child("\"formatVersion\": 2")));
+        Path withBoth = parentOf("parent-both", child("\"format_version\": 1, \"formatVersion\": 1"));
+        Result both = run(withBoth);
+        Result bothUnchecked = exec("run", withBoth.toString(), "--allow-host-execution", "--no-input", "--no-check");
+
+        assertThat(camelCase.code()).as(camelCase.all()).isZero();
+        assertThat(newer.code()).as("the camel-case key of the child is read, not ignored: " + newer.all())
+                .isNotZero();
+        assertThat(newer.all()).contains("format_version 2 is newer");
+        // A child that cannot be loaded fails the step that calls it, as any unreadable child does
+        for (Result refused : List.of(both, bothUnchecked)) {
+            assertThat(refused.code()).as(refused.all()).isNotZero();
+            assertThat(refused.out()).contains("FAILED").doesNotContain("child ran");
+            assertThat(exec("show", runId(refused), "--full").all())
+                    .contains("duplicate-key-spelling", "both format_version and formatVersion");
+        }
+    }
 }
