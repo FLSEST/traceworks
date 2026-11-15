@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "1a7badc6-c969-4055-bf8a-cd54e14348fa",
   "name": "IT login mount",
   "description": "A step that declares a mount of a login folder below the home directory is refused and starts nothing.",

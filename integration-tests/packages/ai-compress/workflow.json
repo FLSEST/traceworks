@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "295d0ca9-5bdd-498b-85a2-b101c12bf7b1",
   "name": "IT ai-compress",
   "description": "A shell step prints a log, compress-ai condenses it with one AI call that has no tools.",

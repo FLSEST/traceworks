@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "5e7c1a90-2b4d-4f3e-8a6b-9d0c1e2f3a44",
   "name": "IT ai-web",
   "description": "AI steps with web tools: search alone, fetch with named hosts, and a prompt that carries an instruction aimed at an AI.",

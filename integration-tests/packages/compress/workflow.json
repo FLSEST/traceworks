@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "717c4550-6e2a-464a-af36-c4810d457452",
   "name": "IT compress",
   "description": "The deterministic compress block keeps one error line of a log, and the next step reads the compressed text.",

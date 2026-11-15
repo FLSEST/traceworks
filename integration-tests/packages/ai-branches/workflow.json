@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "256c9e90-209d-45b0-8e4b-eb3112dd3177",
   "name": "IT ai-branches",
   "description": "The AI condition of conditional and while, and the AI step of retry, answered by the fake CLI.",

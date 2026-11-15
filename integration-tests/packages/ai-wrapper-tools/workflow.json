@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "3d0b7c1e-52a4-4f0b-9c8e-6a1f2e7d4b90",
   "name": "IT ai-wrapper-tools",
   "description": "The AI step of a wrapper carries the wrapper's tools: a foreach with read for Claude, a retry with read for Pi, and a foreach without the key.",

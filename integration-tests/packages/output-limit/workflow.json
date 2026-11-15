@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "a0fb4aa7-e45c-4766-8be7-129210118f05",
   "name": "IT output limit",
   "description": "A step that prints without end (yes, with lines of 4 KiB) is stopped when its standard output goes beyond 16 MiB.",

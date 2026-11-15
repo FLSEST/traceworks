@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "60ea8584-598c-4348-beff-9e5c279e9c85",
   "name": "IT broken",
   "description": "A package with errors that traceworks check reports and a run refuses.",

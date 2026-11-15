@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "5c2e8f41-7a3d-4b9e-a6c1-0d4f2e8b7a93",
   "name": "IT retry cancel",
   "description": "A retry whose command always fails waits 120 seconds between its attempts; a cancel ends the wait.",

@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "fe3ff73e-9e01-4f74-a9bc-f9d10cbb0dc5",
   "name": "IT ai-timeout",
   "description": "AI steps that run longer than their timeout_seconds.",

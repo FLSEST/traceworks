@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "e3db6e7e-49dd-4ef9-a484-20dd80656e37",
   "name": "IT isolation",
   "description": "What a container may do by default: no network and a read-only workspace; network: true and workspace_writable: true open each one for their step only.",

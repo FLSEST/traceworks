@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "62c7f0fc-ef55-4505-9fe1-c5e48eec07db",
   "name": "IT loops",
   "description": "foreach over static items and over the lines of items_command, while with a counter in the scratch directory, and retry of a step that fails twice.",

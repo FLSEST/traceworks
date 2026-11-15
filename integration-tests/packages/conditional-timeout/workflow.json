@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "0d7a9a52-6f4c-4b8e-9d0e-3c1f6b2a8e51",
   "name": "IT conditional timeout",
   "description": "A conditional whose shell condition sleeps past the block's timeout_seconds fails and runs no branch.",

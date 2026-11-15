@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "01be7632-1e02-4542-aca6-5882e0c54ba6",
   "name": "IT mounts",
   "description": "Declared mounts behave as declared: a :ro mount can be read but not written, a :rw mount can be written.",

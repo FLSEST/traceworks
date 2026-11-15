@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "0c79c7c2-1de6-4bfc-a96d-c970bbede754",
   "name": "Build and dependencies self-audit",
   "description": "Audits the build of the Maven project in the workspace against the rule file rules/build.rules, with deterministic steps only: what the POMs and Dockerfiles pin, the dependencies as Maven resolves them, newer versions in the registries, and known vulnerabilities in the resolved dependencies. A broken rule turns the gate RED; an update, a conflict or anything not measured turns it YELLOW.",

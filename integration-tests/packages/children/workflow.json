@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "033263ce-94ef-4480-9a41-ee5bd21f9ab7",
   "name": "IT children",
   "description": "A sub-workflow and a foreach with workflow_id run the child workflow in child/ as child runs.",
-  "defaultContext": {"who": "parent"},
+  "default_context": {"who": "parent"},
   "blocks": [
     {
       "type": "sub-workflow",
