@@ -14,7 +14,7 @@ traceworks findings audit.testing
 |---|---|---|---|
 | `fetch` | `./images/maven` | yes | builds a copy of the sources and fills a Maven repository in the tool's cache folder |
 | `measure` | `./images/maven` | no | builds the copy again offline and runs PIT on each module; the tests of the project run here |
-| `findings` | built-in `shell` | no | maps PIT's CSV to one entry per method and the fact sheet, with what a person decided on it, with `awk` and `jq` |
+| `findings` | built-in `shell` | no | maps PIT's CSV to one entry per method and the fact sheet with `awk` and `jq`, and adds from the register folder of the run what the register knew: the last rating of each method with its reason, and what a person decided on it |
 | `rate` | `claude` | provider only | AI calls per Java package, twenty methods a call: reads the code and rates each method's gap `high`, `medium` or `low` with one sentence. A package whose gaps are what they were at its last rating is left out |
 | `report` | built-in `shell` | no | writes the gate, the findings and the list of packages; a rating only sets the severity of a method that was measured |
 
@@ -36,10 +36,11 @@ traceworks findings audit.testing
   test, a changed method or a decision rates the one package again. A method without an answer in a package that was
   to be rated keeps its rating, or is `MEDIUM` from ten unnoticed changes on, else `LOW`, and its package is rated
   again next time.
-- **The limit:** the next run learns the ratings from `{{ audit_findings }}`, which holds 250 rows and 60 000 bytes.
-  The report shortens the reason it keeps with each finding so that all rows fit (the full reason is in the
-  description of the run that rated). From about 190 findings above `low` on the list is cut, and a list that was
-  cut rates every package again: decide on findings, or cover them with tests, to get below.
+- **What the next run knows:** the ratings, their reasons and the decisions come from the register folder of the run
+  (`{{ register_dir }}`, docs/registers.md, "The register folder of a run"): `findings.jsonl` holds every finding
+  whole, so no number of findings makes a run forget. The reason of a rating is the first line of the finding's
+  description (`Rating: ...`); the evidence is the measured fact alone. A method rated `low` is no finding, so the
+  register keeps no reason for it: that is enough here, because a package that changed is rated from zero.
 - **Inputs:** `modules` (a comma list of Maven modules), `classes` (a PIT glob of the classes to change and of the
   tests to run) and `threads`. A run with other `modules` or `classes` states another snapshot, so the register
   resolves what the smaller run did not look at: keep them the same from run to run.

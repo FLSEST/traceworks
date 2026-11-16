@@ -9,16 +9,15 @@
 # The gate counts what is left to decide: a method a person accepted or dismissed does not count, unless it is rated
 # above the severity the decision covers. It stays in the findings, so the register keeps it. The decisions are those
 # the register held before this run: what the register makes of this report shows in the gate of the next run.
-# The reason of a rating goes on in the evidence, so the next run can keep it. {{ audit_findings }} holds 60 000
-# bytes, and a list that was cut rates every package again: so the evidence takes as much of each reason as lets all
-# rows fit, and none below 40 characters.
+# The reason of a rating is the first line of the description, "Rating: ...", one line: the next run reads it from
+# the register folder (scripts/findings.sh). The evidence is what the fact sheet can verify and nothing else.
 set -euo pipefail
 
 jq -r --rawfile answers /dev/stdin '
   def rank: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}[.] // 0;
   ( [ $answers | split("\n")[] | (capture("(?<json>\\{\"ratings\".*\\})\\s*$")? | .json | fromjson? | .ratings[]?)
       | select((.method | type) == "string" and ((.severity | ascii_upcase?) | IN("LOW", "MEDIUM", "HIGH")))
-      | {key: .method, value: {severity: (.severity | ascii_upcase), why: ((.why // "") | tostring | .[:400])}} ]
+      | {key: .method, value: {severity: (.severity | ascii_upcase), why: ((.why // "") | tostring | gsub("\\s+"; " ") | .[:400])}} ]
     | from_entries ) as $rated
   | .mutants as $mutants
   | (.packages | map({key: .name, value: .}) | from_entries) as $packages
@@ -34,10 +33,6 @@ jq -r --rawfile answers /dev/stdin '
   | ($reported | map(select(.undecided))) as $open
   | ($open | map(select((.severity | rank) >= ("HIGH" | rank)))) as $high
   | (($reported | length) - ($open | length)) as $decided
-  # A row is the status, the severity, the rule, the subject, the title and the evidence: about 110 bytes and
-  # the subject three times. 50 000 leaves room for the head and for characters of more than one byte.
-  | ((50000 - ([$reported[] | 110 + 3 * (.subject | utf8bytelength)] | add // 0)) / ([$reported | length, 1] | max)
-     | floor | if . > 170 then 170 elif . < 40 then 0 else . end) as $room
   | "# Testing audit",
     "",
     "PIT changed the code in \($mutants) places. \($unnoticed) changes went unnoticed by the tests, in \($methods | length) methods. A model rated \($methods | map(select(.rated)) | length) of them in this run, in \([.packages[] | select(.rate)] | length) of \(.packages | length) packages; the others keep their rating. \($reported | length) methods are rated above low. A person decided on \($decided) of them; \($open | length) are left to decide, \($high | length) of them high:",
@@ -57,7 +52,7 @@ jq -r --rawfile answers /dev/stdin '
           severity: .severity,
           title: "\(.n) of \(.mutants) changes of \(.subject | split(".") | last) go unnoticed by the tests",
           description: "\(if .why then "Rating: " + .why + "\n" else "" end)Survived (a test runs the line and stays green): \(.survived[:40] | join(", "))\nNot covered (no test runs the line): \(.uncovered[:40] | join(", "))\nEach place is the line and the mutator of PIT.",
-          evidence: "undetected: \(.fact)\(if .why and $room > 0 then ". Rated: " + .why[:$room] else "" end)" } ],
+          evidence: "undetected: \(.fact)" } ],
         expectedItems: (.packages | length),
         items: [ .packages[] | {name, digest, judged: (.rate and $answered[.name])} ]
       } | tojson) -->"' "$1/findings.json"

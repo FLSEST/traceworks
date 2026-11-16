@@ -65,7 +65,7 @@
       "type": "shell",
       "name": "findings",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/items.txt; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ scratch_dir }}/known.txt {{ scratch_dir }}/items.txt",
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ register_dir }}",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }
