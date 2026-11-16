@@ -34,26 +34,23 @@ import java.util.Set;
  *
  * @param started      how many runs the ledger saw start
  * @param ended        how many runs the ledger saw end
- * @param earlier      how many run folders hold a record of a version that noted no start, and have no start entry
+ * @param earlier      how many run folders are from before the ledger: their record is of a version that noted no
+ *                     start ({@code run.started} without {@code ledger_start}), and the ledger holds nothing of
+ *                     them. The ledger never knew them, so it says nothing of them, and that is no failure
  * @param open         the runs the ledger saw start and not end, in the order of their start
  * @param endedGone    the runs the ledger saw end whose folder is not in the runs folder, each with its status
- * @param earlierOpen  the run folders of an earlier version whose run has not ended, each with its status: the
- *                     ledger never knew them
+ * @param earlierOpen  those of them whose run has not ended, each with its status
  * @param problems     what does not hold, every problem of every run; the acknowledged ones are not among them
  * @param acknowledged the problems a person acknowledged, for good, each with the note
  * @param inFlight     the runs whose process is alive and has not written an entry yet that its record calls for:
  *                     between {@code run.started} and the start entry (it waits for the ledger's lock), or between
  *                     {@code run.finished} and the end entry. No failure: the entry is on its way
- * @param unjudged     the paths of the entries of the ledger that no hash covers: written by a version whose
- *                     messages named none, and not pinned yet. Nothing is said of them, so a check that holds does
- *                     not hold for them; the next run pins them
- * @param pins         the pins of the ledger, oldest first, one sentence each
  * @param records      whether the record of every ended run was verified against the end entry (its chain, its
  *                     blobs and the manifest it gives); without, only its first line and its manifest were read
  */
 public record LedgerReport(int started, int ended, int earlier, List<Open> open, List<Named> endedGone,
                            List<Named> earlierOpen, List<Problem> problems, List<Acknowledged> acknowledged,
-                           List<Named> inFlight, List<String> unjudged, List<String> pins, boolean records) {
+                           List<Named> inFlight, boolean records) {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -71,8 +68,6 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         problems = List.copyOf(problems);
         acknowledged = List.copyOf(acknowledged);
         inFlight = List.copyOf(inFlight);
-        unjudged = List.copyOf(unjudged);
-        pins = List.copyOf(pins);
     }
 
     /**
@@ -294,11 +289,13 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                             + folder.state() + "), and the ledger holds no start entry of the run (run.started "
                             + folder.runStarted() + ")" + held(folder, folder.startedAt(), now));
                 }
-            } else if (!folder.ledgerStart() && !startHeld) {
+            } else if (!folder.ledgerStart() && run == null) {
+                // From before the ledger: a run of a version that noted no start, of which the ledger holds nothing
                 earlier++;
                 if (!folder.isFinal()) {
                     earlierOpen.add(new Named(id, folder.state()));
                 }
+                continue;
             }
             if (folder.isFinal() && !endHeld && !holdsNow(() -> ledger.find(id))) {
                 if (folder.alive() && young(folder.lastAt(), now)) {
@@ -341,8 +338,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             }
         }
         return new LedgerReport(started, ended, earlier, open, endedGone, earlierOpen,
-                List.copyOf(problems.found.values()), acknowledged, inFlight, named.unjudged(), named.pins(),
-                records);
+                List.copyOf(problems.found.values()), acknowledged, inFlight, records);
     }
 
     /** Whether a line written at {@code at} is young enough for its entry to be on its way. */

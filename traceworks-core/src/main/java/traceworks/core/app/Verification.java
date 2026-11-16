@@ -66,6 +66,10 @@ final class Verification {
         String ledgerState;
         if (ledgerReason != null) {
             ledgerState = VerifyReport.NOT_CHECKED;
+        } else if (copy.isEmpty() && finished && view != null && !view.ledgerStart() && noStart(ledger, run)) {
+            // A run of a version that noted no start, of which the ledger holds nothing: from before this ledger
+            ledgerState = VerifyReport.NOT_CHECKED;
+            ledgerReason = "the ledger does not know this run: it is of a version before this ledger began";
         } else if (copy.isEmpty()) {
             ledgerState = finished ? VerifyReport.MISSING : VerifyReport.NOT_CHECKED;
         } else if (manifest.isPresent()) {
@@ -73,7 +77,7 @@ final class Verification {
         } else {
             ledgerState = agrees(copy.get(), run.runId(), chain, view, run.blobs());
         }
-        if (ledgerReason == null) {
+        if (run.inStore()) {
             // An entry is added once, by the commit that names it: one that a later commit changed is not the
             // entry of this run any more, whatever it holds now
             try {
@@ -83,16 +87,6 @@ final class Verification {
                 }
             } catch (RuntimeException e) {
                 ledgerState = "NOT checked: " + e.getMessage();
-            }
-            try {
-                // An entry no hash covers is not judged: this must not read as an entry that holds
-                List<String> unjudged = ledger.unjudged(run.runId());
-                if (!unjudged.isEmpty()) {
-                    ledgerReason = "not judged: no hash covers " + String.join(", ", unjudged) + " yet, an entry of"
-                            + " a version that named none; the next run pins it";
-                }
-            } catch (RuntimeException e) {
-                // the ledger line says that it cannot be read
             }
         }
         String sealState = view == null ? VerifyReport.NOT_CHECKED : seal(view.seal());
@@ -152,6 +146,15 @@ final class Verification {
                     + " is " + (line == null ? "not readable" : line);
         }
         return VerifyReport.OK + " (the ledger noted the start, run.started " + line.substring(0, 12) + ")";
+    }
+
+    /** Whether the ledger can be read and holds no start entry of the run. */
+    private static boolean noStart(Ledger ledger, StoredRun run) {
+        try {
+            return ledger.findStart(run.runId()).isEmpty();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /**

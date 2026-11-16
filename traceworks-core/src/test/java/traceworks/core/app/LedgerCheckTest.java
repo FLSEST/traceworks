@@ -383,21 +383,28 @@ class LedgerCheckTest {
     }
 
     /**
-     * An entry no hash covers is not judged, and the checks say so instead of a plain OK: the home's check names
-     * the paths, and the run's check says it on its ledger line. Neither fails: the next run pins the entry.
+     * A new ledger beside runs of a version that noted no start: the ledger never knew them. The check of the home
+     * counts them as from before the ledger, which is no failure, and the check of such a run says that its ledger
+     * part is not checked. A run of this version without its entries fails as ever.
      */
     @Test
-    void anEntryNoHashCovers_isNamedAsNotJudged_byBothChecks() {
-        String id = finished();
-        fx.ledger.endWithoutHash(id);
+    void aRunFromBeforeTheLedger_isCountedAsSuch_andItsLedgerPartIsNotChecked() throws Exception {
+        String earlier = loadEarlier();
+        services.cancel(earlier);
+        String ours = finished();
+        fx.ledger.startOver();
 
         LedgerReport home = services.ledgerReport();
-        assertThat(home.ok()).isTrue();
-        assertThat(home.unjudged()).containsExactly("runs/" + id + ".json");
-        VerifyReport run = services.verify(id);
+        assertThat(home.earlier()).isEqualTo(1);
+        assertThat(home.earlierOpen()).isEmpty();
+        assertThat(home.problems()).extracting(LedgerReport.Problem::runId).containsOnly(ours);
+
+        VerifyReport run = services.verify(earlier);
+        assertThat(run.ledger()).isEqualTo(VerifyReport.NOT_CHECKED);
+        assertThat(run.ledgerReason()).contains("the ledger does not know this run", "before this ledger began");
+        assertThat(run.start()).startsWith(VerifyReport.NONE);
         assertThat(run.ok()).isTrue();
-        assertThat(run.ledgerReason()).startsWith("not judged: no hash covers runs/" + id + ".json");
-        assertThat(services.verify(finished()).ledgerReason()).isNull();
+        assertThat(services.verify(ours).ok()).isFalse();
     }
 
     /** A problem of the anchors of a register is listed under registers.<key>, and acknowledged like one of a run. */
@@ -509,7 +516,7 @@ class LedgerCheckTest {
         assertThat(report.ok()).isTrue();
         LedgerReport home = services.ledgerReport();
         assertThat(home.ok()).isTrue();
-        assertThat(home.earlier()).isEqualTo(1);
+        assertThat(home.earlier()).as("the ledger knows the run: it is not from before the ledger").isZero();
     }
 
     /** An empty commit 'run <id> STARTED': the ledger names a run it holds nothing of. A failure one can acknowledge. */
