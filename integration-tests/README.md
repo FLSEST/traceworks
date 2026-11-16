@@ -128,6 +128,7 @@ With Podman only the before and after listing is printed.
 | `AiBranchesIT` | `ai-branches` | the AI condition of `conditional` (TRUE and FALSE, Claude and Pi, `on_condition_error`) and of `while`, and the AI step of `retry`, all with `tools: none` |
 | `AiIsolationIT` | `ai-isolation` | an AI container's workspace is read-only (a write fails) unless `workspace_writable: true`; the package read-only, the scratch directory writable, the network of its provider's host only |
 | `AiEgressIT` | `ai-egress`, `ai-egress-slow`, `ai-simple`, `ai-timeout` | where an AI container can connect, with the real proxy image: a target in `ai_hosts` is reached through the proxy (a socket the test opens on the machine's own address), a target nobody listed is refused with 403 and is a `DENY` in the record, in `show` and in `run.html`, and no direct connection works; without `ai_hosts` only the provider's host is listed; `ai_network: "open"` gives the default network with no proxy, as before; after a timeout and after a `traceworks cancel` of a running call, the step's container, the proxy and both networks are gone. A proxy that does not start, an exhausted address pool and Podman are not covered |
+| `AiLocalModelIT` | `ai-local-model`, `ai-local-model-tools` | a `PI` step on a model server of the operator's (`local_models`), with the **real Pi CLI** of the built-in image `traceworks/pi:<hash>` and the real proxy, against a stand-in server the test starts on the machine's own address (the JDK's HTTP server, which answers the chat completions API with a fixed reply): the run completes with the stand-in's reply, the stand-in got the prompt, the record names the local backend and its URL, the proxy recorded the connection to the server and none to a provider, no provider credential exists in the sandbox; a server's secret reaches it as its key and is nowhere in the record; a model name with a colon; and a step that asks its proxy for a provider's host is denied, with the `DENY` in the record. It calls no model. It is not an `AiIntegrationTest`: it needs the built-in `pi` image, which the suite never builds (run `traceworks images build` once) |
 | `AiCredentialsIT` | `ai-simple`, `ai-marker` | the fake gets exactly the fake credential of its provider (a hash it prints), no other; a credential it prints is redacted in the events, blobs, `run.html`, manifest, ledger and output; a run without a credential is refused (exit 6); the harness strips every credential name |
 | `AiFailuresIT` | `ai-marker`, `ai-timeout` | a CLI's non-zero exit, a timeout (exit code 124) and a stream beyond `output_limit_mib: 1` (exit code 153) fail the AI step as documented |
 | `AiGatesIT` | `ai-gates` | a `gate_status:` line in a `simple` step's output sets the gate; the output of a `retry` in AI mode sets none; `--fail-on-gate` |
@@ -147,7 +148,10 @@ workspace and fake user home, and fails the test if something there cannot be re
 
 ## AI blocks
 
-The AI tests (`Ai*IT`, base class `AiIntegrationTest`) never call a model and never use a real credential:
+The AI tests (`Ai*IT`, base class `AiIntegrationTest`) never call a model and never use a real credential. One
+class is apart from them: `AiLocalModelIT` runs the real Pi CLI, in the built-in `pi` image as it is on the machine,
+against a stand-in server of its own; it calls no model and uses no credential of a provider either, and it fails
+with the start check's refusal when the image is missing.
 
 - **Fake CLIs.** `fake-ai/claude/` and `fake-ai/pi/` hold a Dockerfile each, from the same pinned base as `images/claude`
   and `images/pi`, with a POSIX `sh` script installed under the name the adapter calls (`claude`; `pi`, which Traceworks
