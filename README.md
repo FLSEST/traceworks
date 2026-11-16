@@ -98,8 +98,8 @@ The names are those of [docs/features.html](docs/features.html), where each has 
 | Contained | One container per step: read-only root file system, no capabilities, resource limits, no network and a read-only workspace unless the block says otherwise | [docs/security.md](docs/security.md#what-the-defaults-protect) |
 | Any tool, in a container | A step runs whatever tool an image holds; SARIF output becomes facts that later steps and the register can use | [docs/cli.md](docs/cli.md#tool-mode-of-the-shell-block) |
 | Secrets protected | A step gets only the secrets it names; every value is redacted in the record and in what the tool prints | [docs/cli.md](docs/cli.md#secrets), [docs/events.md](docs/events.md#redaction) |
-| Controllable | Pause, resume and cancel; approval and input blocks where a person must decide; gates as `GREEN`, `YELLOW` or `RED` | [docs/cli.md](docs/cli.md#interactive-and-parked-runs) |
-| The register | What an audit knows across its runs: findings with an identity, a person's decisions, reused verdicts, in a hash-chained log; the next run gets it as files | [docs/registers.md](docs/registers.md) |
+| Controllable | Pause, resume and cancel; approval and input blocks where a person, or an AI actor the workflow names, must decide; gates as `GREEN`, `YELLOW` or `RED` | [docs/cli.md](docs/cli.md#interactive-and-parked-runs) |
+| The register | What an audit knows across its runs: findings with an identity, the decisions on them with who made each, reused verdicts, in a hash-chained log; the next run gets it as files | [docs/registers.md](docs/registers.md) |
 | Lean | One runnable jar with one runtime library; plain files in one directory; no database, no service | [docs/architecture.md](docs/architecture.md#dependencies) |
 
 ## AI steps
@@ -156,7 +156,8 @@ measurement, and Traceworks asks of it what one asks of a witness:
 - **It is on record.** The prompt and the answer are in the run record, and a change of either shows.
 - **It can be checked.** A finding names its evidence, and the register compares it with the facts the run
   measured.
-- **A person answers for the decision.** The model proposes; a person accepts or dismisses in the register.
+- **Someone answers for the decision.** The model proposes. Who accepts or dismisses a finding in the register is
+  the operator's choice, a person or an agent, and the register records who it was and when.
 
 A loop over a model's verdicts does not end by itself. It ends when the workflow keeps to a few rules. They are
 decisions of the workflow's author, and the tool gives the means: a defined workflow, a register as the memory.
@@ -164,7 +165,7 @@ decisions of the workflow's author, and the tool gives the means: a defined work
 1. **A measurement says what there is.** A tool measures the whole set, and the model rates what was measured. It
    adds no finding.
 2. **A verdict is given once per state.** What did not change is not judged again.
-3. **A verdict changes for a reason:** the thing changed, or a person decided.
+3. **A verdict changes for a reason:** the thing changed, or a decision was made on it.
 4. **Below a floor, nothing goes to the register.** What the model rates `low` is counted in the report of the
    run and is no finding.
 
