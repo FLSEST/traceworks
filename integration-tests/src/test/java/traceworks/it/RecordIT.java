@@ -69,6 +69,7 @@ class RecordIT extends IntegrationTest {
         assertThat(verify.code()).as(verify.describe()).isZero();
         assertThat(verify.out()).containsPattern("(?m)^chain +ok \\(\\d+ events, head [0-9a-f]+\\)$")
                 .containsPattern("(?m)^manifest +ok$").containsPattern("(?m)^ledger +ok$")
+                .containsPattern("(?m)^start +ok \\(the ledger noted the start, run\\.started [0-9a-f]{12}\\)$")
                 .endsWith("verified\n");
 
         Path log = traceworks.folder(id).eventsFile();
@@ -159,6 +160,64 @@ class RecordIT extends IntegrationTest {
 
         Result unknown = traceworks.exec("show", "ffffffff-0000-0000-0000-000000000000");
         assertThat(unknown.code()).as(unknown.describe()).isEqualTo(2);
+    }
+
+    /**
+     * A run that is ended in the middle of a step has no manifest and no end entry, but the ledger noted its start
+     * before the first step: the start entry names the first line of its record, {@code verify} without a run lists
+     * it as started and not ended, and after its folder is removed the same command still names it, and fails.
+     */
+    @Test
+    void aRunEndedMidStep_leavesAStartEntry_andStaysNamedAfterItsFolderIsRemoved() throws Exception {
+        Path ran = traceworks.workspace().resolve("ran.txt");
+        Traceworks.Running running = traceworks.startRun("pause-loop");
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90);
+        while (!Files.isRegularFile(ran)) {
+            assertThat(System.nanoTime()).as("waited 90 s for the first item to start").isLessThan(deadline);
+            Thread.sleep(100);
+        }
+
+        running.terminate();
+        Result run = running.await(120);
+
+        assertThat(run.code()).as("128 + SIGTERM: " + run.describe()).isEqualTo(143);
+        assertThat(traceworks.folders()).hasSize(1);
+        RunFolder folder = traceworks.folders().getFirst();
+        String id = folder.id();
+        assertThat(folder.ownEvents("run.finished")).isEmpty();
+        assertThat(folder.hasManifest()).isFalse();
+        Containers.assertNoneLeft(traceworks.environment().runtime(), java.util.Set.of(id));
+        assertThat(folder.only("run.started").path("ledger_start").asBoolean()).isTrue();
+
+        Path ledger = traceworks.home().resolve("ledger");
+        assertThat(ledger.resolve("runs/" + id + ".json")).as("no end entry").doesNotExist();
+        String entry = read(ledger.resolve("starts/" + id + ".json"));
+        String firstLine = Files.readAllLines(folder.eventsFile(), StandardCharsets.UTF_8).getFirst();
+        assertThat(entry).contains("\"run_id\" : \"" + id + "\"",
+                "\"workflow_id\" : \"4f0836fd-9da5-4024-acd4-9f8e823bb3e8\"",
+                "\"run_started\" : \"" + sha256(firstLine) + "\"");
+
+        Result one = traceworks.exec("verify", id);
+        assertThat(one.code()).as(one.describe()).isZero();
+        assertThat(one.out()).containsPattern("(?m)^start +ok \\(the ledger noted the start, run\\.started [0-9a-f]{12}\\)$");
+        Result there = traceworks.exec("verify");
+        assertThat(there.code()).as(there.describe()).isZero();
+        assertThat(there.out()).contains("ledger    1 run started, 0 ended", "started, not ended (1)")
+                .containsPattern("(?m)^  " + id + "  \\S+  4f0836fd-9da5-4024-acd4-9f8e823bb3e8  folder INTERRUPTED$");
+
+        Traceworks.deleteTree(folder.dir());
+
+        assertThat(traceworks.exec("runs").out()).as("the runs folder knows nothing of it now").isBlank();
+        Result gone = traceworks.exec("verify");
+        assertThat(gone.code()).as(gone.describe()).isEqualTo(8);
+        assertThat(gone.out())
+                .containsPattern("(?m)^  " + id + "  \\S+  4f0836fd-9da5-4024-acd4-9f8e823bb3e8  folder GONE$")
+                .contains("verification FAILED: 1 run started, never ended, and the folder is gone");
+    }
+
+    private static String sha256(String line) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(line.getBytes(StandardCharsets.UTF_8)));
     }
 
     private static String read(Path file) {
