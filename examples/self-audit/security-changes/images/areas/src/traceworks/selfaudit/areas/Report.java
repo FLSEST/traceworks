@@ -532,6 +532,8 @@ final class Report {
         if (unmappable > 0) doubts.add(count(unmappable, "changed file") + " could not be compared");
         int uncompiled = number(changes.get("uncompiledFiles"));
         if (uncompiled > 0) doubts.add(count(uncompiled, "changed Java file") + " that no compiled source root holds");
+        int removedJava = number(changes.get("removedJavaFiles"));
+        if (removedJava > 0) doubts.add(count(removedJava, "removed Java file"));
         int cannotJudge = number(changes.get("cannotJudgeFiles"));
         if (cannotJudge > 0) doubts.add(count(cannotJudge, "changed file") + " this check cannot judge");
         String skipped = text(changes.get("skipped"));
@@ -579,6 +581,10 @@ final class Report {
         row(md, "Workspace commit", fullId(head) + (dirty ? ", with changes that are in no commit (a `.java` file git ignores is one); they count as"
                 + " changed"
                 : ", with nothing uncommitted"));
+        if (dirty) {
+            row(md, "The next run without `since` starts from", fullId(base) + ": the base of this run again, since"
+                    + " the files that were judged are not the workspace commit");
+        }
         String skipped = text(changes.get("skipped"));
         if (input && !previous.isEmpty() && !previous.equals(base)) {
             row(md, "Workspace commit of the last run of this audit", fullId(previous) + ": not the base of this run");
@@ -597,10 +603,11 @@ final class Report {
         row(md, "Of them tests (`src/test/java`), not judged by this check", String.valueOf(number(changes.get("testFiles"))));
         row(md, "Of them documentation (`*.md`, `docs/`)", String.valueOf(number(changes.get("docFiles"))));
         row(md, "Of them Java files that no compiled source root holds", String.valueOf(number(changes.get("uncompiledFiles"))));
+        row(md, "Of them removed Java files, other than tests", String.valueOf(number(changes.get("removedJavaFiles"))));
         row(md, "Of them files this check cannot judge (a script, a workflow, a build file, a resource)",
                 String.valueOf(number(changes.get("cannotJudgeFiles"))));
         row(md, "Changed files that could not be compared", String.valueOf(list(changes.get("unmappable")).size()));
-        row(md, "Changed places in no member (an import, the head of a class): no area comes from them",
+        row(md, "Changed places in no member (an import, the head of a class): every area of their file is judged",
                 String.valueOf(number(changes.get("outsideMembers"))));
         row(md, "Changed members", String.valueOf(number(changes.get("changedMembers"))));
         row(md, "Areas of the project", String.valueOf(number(changes.get("areasOfProject"))));
@@ -613,6 +620,9 @@ final class Report {
         named(md, "Changed or new Java files that no compiled source root holds. Nothing looked at their code, so the"
                 + " gate is not GREEN, and no finding is named as gone because its member is no area any more: it may"
                 + " have moved there", list(changes.get("uncompiled")), number(changes.get("uncompiledFiles")));
+        named(md, "Removed Java files. Their areas are gone with them, and what called them was looked at only where"
+                + " it changed, so the gate is not GREEN", list(changes.get("removedJava")),
+                number(changes.get("removedJavaFiles")));
         named(md, "Changed, new or removed files this check cannot judge. They can change what the project does, so"
                 + " the gate is not GREEN", list(changes.get("cannotJudge")), number(changes.get("cannotJudgeFiles")));
         named(md, "Changed files that could not be compared. Nothing mapped them to an area, so the gate is not"

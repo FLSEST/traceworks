@@ -336,4 +336,31 @@ class ChangesRoundTripTest {
                 + " judge; ").contains("so the gate is not GREEN: `run.sh`");
         assertThat(askedAndForgotten()).isEmpty();
     }
+
+    /**
+     * The workspace commit holds a change that the files on disk do not have. The run judges the disk, so it must
+     * not count the commit as judged: the next run, on a clean workspace, starts from the same base and judges it.
+     */
+    @Test
+    void aRunOnAWorkspaceThatDiffersFromItsCommit_doesNotMoveTheBase_soTheNextRunJudgesTheCommit() throws IOException {
+        String first = git("rev-parse", "HEAD");
+        commit("Runner.java", runner("c, c"));
+        Files.writeString(repo.resolve(SRC + "Runner.java"), runner("c"));
+
+        String one = run("--input", "since=" + first);
+
+        assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(askedAndForgotten()).as("the disk is the base: nothing to judge").isEmpty();
+        assertThat(newest("security-changes-report.md")).contains("**Gate:** GREEN: nothing changed since ",
+                "| The next run without `since` starts from | `" + first + "`");
+
+        git("checkout", "--quiet", "--", ".");
+        String two = run();
+
+        assertThat(two).as(one).contains("register security-changes:");
+        assertThat(askedAndForgotten()).as("the commit the first run did not see is judged now")
+                .containsExactly(CALLER + ": neighbour of Runner.run(String)", RUNNER + ": changed");
+        assertThat(newest("security-changes-report.md"))
+                .contains("| Base: the commit the changes are measured from | `" + first + "`");
+    }
 }

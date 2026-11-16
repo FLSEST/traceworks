@@ -162,7 +162,7 @@ public final class Main {
         // The check of the changes: what differs from the base, decided here from content, and the changed lines
         // of exactly the files the finder read
         Changes.Base base = handed == null ? null : Changes.of(handed, Changes.compare(handed, root), result);
-        Changes.Kinds kinds = base == null ? null : Changes.kinds(base, result);
+        Changes.Kinds kinds = base == null ? null : Changes.kinds(base, result, root);
         notRead.addAll(result.notParsed());
         notRead.sort(java.util.Comparator.comparing(NotParsed::file));
         SecureRandom random = new SecureRandom();
@@ -318,9 +318,10 @@ public final class Main {
         // Known findings whose member is no area any more: the report names them as gone
         List<Map<String, Object>> orphans = Known.orphans(known, null, subjects);
         List<Map<String, Object>> unowned = new ArrayList<>(Known.unowned(known, null, subjects));
-        if (kinds != null && !kinds.uncompiled().isEmpty() && !orphans.isEmpty()) {
-            // Java code changed or came where the finder does not read. The member of such a finding may have moved
-            // there, so its absence from the areas says nothing: the finding stays open, for a person
+        if (kinds != null && !(kinds.uncompiled().isEmpty() && kinds.tests().isEmpty()) && !orphans.isEmpty()) {
+            // Java code changed or came where the finder does not read, a test source root included. The member
+            // of such a finding may have moved there, so its absence from the areas says nothing: the finding stays
+            // open, for a person
             for (Map<String, Object> orphan : orphans) {
                 Map<String, Object> entry = new LinkedHashMap<>(orphan);
                 entry.put("severity", known.stream().filter(row -> row.asked() && row.ruleKey().equals(orphan.get("ruleKey"))
@@ -362,6 +363,12 @@ public final class Main {
             changes.put("uncompiled", named(kinds.uncompiled()));
             changes.put("cannotJudgeFiles", (long) kinds.cannotJudge().size());
             changes.put("cannotJudge", named(kinds.cannotJudge()));
+            changes.put("removedJavaFiles", (long) kinds.removedJava().size());
+            changes.put("removedJava", named(kinds.removedJava()));
+            // Up to where the history counts as judged: the workspace commit, when the files that were judged are
+            // that commit. A workspace that differs from it was judged as it is, not as the commit is, so the next
+            // run starts from this run's base again and no commit is left out
+            changes.put("judgedUpTo", base.dirty() ? base.base() : base.head());
             changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
             changes.put("areasOfProject", (long) all.size());
             changes.put("changedAreas", (long) changedAreas);
@@ -387,6 +394,7 @@ public final class Main {
             out.println("FACT changes_files_cannot_judge: " + kinds.cannotJudge().size());
             out.println("FACT changes_files_tests: " + kinds.tests().size());
             out.println("FACT changes_files_docs: " + kinds.docs().size());
+            out.println("FACT changes_files_java_removed: " + kinds.removedJava().size());
             out.println("FACT changes_areas_of_project: " + all.size());
             out.println("FACT changes_areas_changed: " + changedAreas);
             out.println("FACT changes_areas_neighbours: " + neighbourAreas);
@@ -453,10 +461,13 @@ public final class Main {
         out.println("gate_category: security");
         out.println("gate_description: " + outcome.description());
         // Right after the gate, before any name of the workspace: the next run of the audit reads its base from
-        // the first changes_head line of this output, which the register hands it as the previous report
+        // the first changes_head line of this output, which the register hands it as the previous report. It is
+        // the commit up to which this run judged: the workspace commit, or this run's base again when the files
+        // were not that commit
         if (summary.get("changes") instanceof Map<?, ?> changes) {
             out.println("FACT changes_base: " + safe(String.valueOf(changes.get("base"))));
-            out.println("FACT changes_head: " + safe(String.valueOf(changes.get("head"))));
+            out.println("FACT changes_head: " + safe(String.valueOf(changes.containsKey("judgedUpTo")
+                    ? changes.get("judgedUpTo") : changes.get("head"))));
             out.println("FACT changes_areas_changed: " + count(changes.get("changedAreas")));
             out.println("FACT changes_areas_neighbours: " + count(changes.get("neighbourAreas")));
             out.println("FACT changes_areas_carried: " + count(changes.get("carriedAreas")));

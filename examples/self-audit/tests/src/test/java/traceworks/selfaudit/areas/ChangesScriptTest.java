@@ -266,7 +266,7 @@ class ChangesScriptTest {
         assertThat(compared.dirty()).isFalse();
         assertThat(Files.readString(out.resolve("wanted"))).as("no bytes are asked for a file that is no Java file")
                 .isEmpty();
-        assertThat(Changes.kinds(base, Handover.read(repo)).cannotJudge()).containsExactly("Dockerfile", "pom.xml", "run.sh");
+        assertThat(Changes.kinds(base, Handover.read(repo), repo).cannotJudge()).containsExactly("Dockerfile", "pom.xml", "run.sh");
     }
 
     // --- what a workspace that is not trusted must neither hide nor start ---
@@ -362,9 +362,10 @@ class ChangesScriptTest {
         Changes.Base base = read();
 
         assertThat(base.status()).containsOnly(Map.entry("\"A.java\"", "M"), Map.entry("A.java", "A"),
-                Map.entry("src/odd\nname.java", "M"), Map.entry("src/Link.java", "U"));
+                Map.entry("src/odd\nname.java", "M"), Map.entry("src/Link.java", "M"));
         assertThat(base.lines().get("src/odd\nname.java")).containsExactly(new Changes.Range(1, 1));
-        assertThat(base.unmappable()).containsExactly("src/Link.java (not a readable regular file)");
+        assertThat(Changes.kinds(base, Handover.read(repo), repo).uncompiled()).as("a link where a file was is a"
+                + " changed file that nothing compiles").contains("src/Link.java");
     }
 
     @Test

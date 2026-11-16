@@ -37,8 +37,9 @@ import java.util.regex.Pattern;
  * Every other file that differs is named by its kind ({@link #kinds}), and the report does not go GREEN over a
  * changed file that this check cannot judge.
  *
- * <p>An area is <em>changed</em> when a changed line lies in it, or when a member it shows a part of changed outside
- * that part. It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
+ * <p>An area is <em>changed</em> when a changed line lies in it, when a member it shows a part of changed outside
+ * that part, or when a line of its file changed that lies in no member (an import, the package, the head of a
+ * class: such a line can change what every name in the file means, so every area of the file is judged). It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
  * called by one. Two calls away is not looked at. The changed members an area is connected with are shown to the
  * verdict next to the area's own code ({@link #connectedText}).
  */
@@ -48,10 +49,12 @@ final class Changes {
     static final int MAX_CONNECTED = 4;
     static final int MAX_CONNECTED_LINES = 60;
     private static final int MAX_NAMED = 5;
+    static final String HEAD_CHANGED = "changed: the head of its file (outside every member)";
     /** Above this many pairs of lines, the part of a file between its common start and end counts as rewritten. */
     private static final long MAX_COMPARED = 4_000_000;
 
     private static final String NOT_REGULAR = " (not a readable regular file)";
+    private static final String NO_NAME = " (its name is no UTF-8, so it could not be compared)";
     private static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
 
     private Changes() {
@@ -129,8 +132,11 @@ final class Changes {
      * @param docs        documentation: {@code *.md}, and everything below a directory {@code docs}
      * @param cannotJudge every other file: a script, a workflow, a build file, a resource. It can change what the
      *                    project does, and this check has no word on it
+     * @param removedJava Java files that are gone, other than tests: their areas are gone with them, and what
+     *                    called them is looked at only where it changed
      */
-    record Kinds(List<String> tests, List<String> uncompiled, List<String> docs, List<String> cannotJudge) {
+    record Kinds(List<String> tests, List<String> uncompiled, List<String> docs, List<String> cannotJudge,
+                 List<String> removedJava) {
     }
 
     /** Why an area is looked at, and the changed members it is connected with outside its own lines. */
@@ -188,7 +194,8 @@ final class Changes {
         int start = 0;
         for (int i = 0; i < listed.length; i++) {
             if (listed[i] != 0) continue;
-            String record = new String(listed, start, i - start, StandardCharsets.UTF_8);
+            // Read byte for byte, so that the path is cut at the right place whatever its bytes are
+            String record = new String(listed, start, i - start, StandardCharsets.ISO_8859_1);
             start = i + 1;
             int tab = record.indexOf('\t');
             String[] head = tab < 0 ? new String[0] : record.substring(0, tab).split(" ");
@@ -196,7 +203,7 @@ final class Changes {
                     || tab + 1 >= record.length()) {
                 throw new IllegalArgumentException("the tree of a commit holds a line that is none");
             }
-            String path = record.substring(tab + 1);
+            String path = name(record.substring(tab + 1).getBytes(StandardCharsets.ISO_8859_1));
             if (head[1].equals("commit")) {
                 throw new IllegalArgumentException("the workspace has a submodule (" + Main.safe(path)
                         + "): this check does not look into one");
@@ -206,6 +213,40 @@ final class Changes {
         }
         if (start != listed.length) throw new IllegalArgumentException("the tree of a commit is cut");
         return tree;
+    }
+
+    /** How a path that is no UTF-8 is marked: no path of a file starts so. */
+    static final String NO_UTF8 = "\uFFFD";
+
+    /**
+     * A path as the key of a file: its text when its bytes are UTF-8, as they are in a tree and on disk. A path
+     * whose bytes are no UTF-8 has no text that leads back to the file, so it keeps its bytes, each as a character,
+     * behind {@link #NO_UTF8}: the same key for the same bytes, and a file that cannot be compared.
+     */
+    static String name(byte[] path) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(path)).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            return NO_UTF8 + new String(path, StandardCharsets.ISO_8859_1);
+        }
+    }
+
+    /** The path of {@code file} below {@code root} with the bytes it has on disk, which its URI keeps. */
+    private static String nameOnDisk(Path root, Path file) {
+        String all = file.toUri().getRawPath();
+        String prefix = root.toUri().getRawPath();
+        String raw = all.startsWith(prefix) ? all.substring(prefix.length()) : all;
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '%' && i + 2 < raw.length() + 0 && raw.substring(i + 1, i + 3).matches("[0-9A-Fa-f]{2}")) {
+                bytes.write(Integer.parseInt(raw.substring(i + 1, i + 3), 16));
+                i += 2;
+            } else {
+                bytes.writeBytes(String.valueOf(c).getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        return name(bytes.toByteArray());
     }
 
     /**
@@ -250,7 +291,8 @@ final class Changes {
     }
 
     /** The id of the file at {@code path}; {@code null} when it is not there, empty when it cannot be compared. */
-    private static String idNow(Path root, String path, String mode, int hexDigits) {
+    private static String idNow(Path root, String path, int hexDigits) {
+        if (path.startsWith(NO_UTF8)) return "";
         Path file;
         try {
             file = root.resolve(path).normalize();
@@ -260,8 +302,7 @@ final class Changes {
         if (!file.startsWith(root) || file.equals(root)) return "";
         try {
             if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
-            if (mode.equals("120000")) {
-                if (!Files.isSymbolicLink(file)) return "";
+            if (Files.isSymbolicLink(file)) {
                 return blobId(Files.readSymbolicLink(file).toString().getBytes(StandardCharsets.UTF_8), hexDigits);
             }
             if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return "";
@@ -271,9 +312,16 @@ final class Changes {
         }
     }
 
+    /** The mode a tree would give the file at {@code path}: a link, an executable file, or a plain one. */
+    private static String modeNow(Path root, String path) {
+        Path file = root.resolve(path);
+        return Files.isSymbolicLink(file) ? "120000" : Files.isExecutable(file) ? "100755" : "100644";
+    }
+
     /**
      * Compares the workspace with the base, by content. Every file of the base and of the workspace commit is
-     * looked up in the workspace and its blob id computed: another id is a changed file, no file a removed one. A
+     * looked up in the workspace and its blob id computed: another id is a changed file, and so is another mode (a
+     * file made executable, or replaced by a link); no file is a removed one. A
      * file the workspace commit has and the base does not is new, whatever its kind. A {@code .java} file that
      * neither tree has is new too, whether git tracks it, ignores it or neither: the walk takes every regular
      * {@code .java} file below the root that is not below a {@code .git} directory, so every file the finder can
@@ -291,18 +339,23 @@ final class Changes {
         for (String path : paths) {
             Entry before = handed.baseTree().get(path);
             Entry committed = handed.headTree().get(path);
-            String now = idNow(root, path, (committed != null ? committed : before).mode(), hex);
+            String now = idNow(root, path, hex);
+            String mode = now == null || now.isEmpty() ? "" : modeNow(root, path);
             if (before != null) {
                 if (now == null) status.put(path, "D");
                 else if (now.isEmpty()) status.put(path, "U");
                 else if (!now.equals(before.id())) {
                     status.put(path, "M");
                     baseIds.put(path, before.id());
+                } else if (!mode.equals(before.mode())) {
+                    status.put(path, "M");
                 }
             } else if (now != null) {
+                // Of the workspace commit and not of the base. (One that is in neither any more is no change.)
                 status.put(path, now.isEmpty() ? "U" : "A");
             }
-            dirty |= committed == null ? now != null && before == null : !committed.id().equals(now);
+            dirty |= committed == null ? now != null && before == null
+                    : !committed.id().equals(now) || !committed.mode().equals(mode);
         }
         List<String> walked = new ArrayList<>();
         Files.walkFileTree(root, new java.nio.file.SimpleFileVisitor<>() {
@@ -315,7 +368,7 @@ final class Changes {
             @Override
             public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes a) {
                 if (file.getFileName().toString().endsWith(".java") && (a.isRegularFile() || a.isSymbolicLink())) {
-                    walked.add(root.relativize(file).toString().replace('\\', '/'));
+                    walked.add(nameOnDisk(root, file));
                 }
                 return java.nio.file.FileVisitResult.CONTINUE;
             }
@@ -327,7 +380,7 @@ final class Changes {
         });
         for (String path : walked) {
             if (paths.contains(path)) continue;
-            status.put(path, "A");
+            status.put(path, path.startsWith(NO_UTF8) ? "U" : "A");
             dirty = true;
         }
         return new Compared(dirty, status, baseIds);
@@ -354,11 +407,18 @@ final class Changes {
         for (SourceFile file : result.files()) read.put(file.path(), file);
         compared.status().forEach((path, status) -> {
             if (status.equals("D")) removed.add(path);
-            if (status.equals("U")) unmappable.add(path + NOT_REGULAR);
+            if (status.equals("U")) {
+                unmappable.add(path.startsWith(NO_UTF8) ? Main.safe(path.substring(1)) + NO_NAME : path + NOT_REGULAR);
+            }
             SourceFile file = read.get(path);
             if (file == null || status.equals("D") || status.equals("U")) return;
             List<Range> whole = List.of(new Range(1, Integer.MAX_VALUE));
             if (status.equals("A")) {
+                lines.put(path, whole);
+                return;
+            }
+            if (!compared.baseIds().containsKey(path)) {
+                // The same bytes under another mode: nothing says which lines that touches, so all of them
                 lines.put(path, whole);
                 return;
             }
@@ -386,28 +446,53 @@ final class Changes {
 
     /**
      * The files that differ and that no area comes from, by their kind: every file of {@link Base#status} that the
-     * finder did not read. A removed Java file is in none of them: it is counted as removed.
+     * finder did not read and that could be compared. Each is of one kind.
+     *
+     * @param workspace the root, where a {@code workflow.json} marks a package
      */
-    static Kinds kinds(Base base, Result result) {
+    static Kinds kinds(Base base, Result result, Path workspace) {
         Set<String> read = new java.util.HashSet<>();
         for (SourceFile file : result.files()) read.add(file.path());
         List<String> tests = new ArrayList<>();
         List<String> uncompiled = new ArrayList<>();
         List<String> docs = new ArrayList<>();
         List<String> cannotJudge = new ArrayList<>();
+        List<String> removedJava = new ArrayList<>();
         base.status().forEach((path, status) -> {
             // What could not be compared is named as that
             if (read.contains(path) || status.equals("U")) return;
             if (path.endsWith(".java")) {
-                if (status.equals("D")) return;
-                (("/" + path).contains("/src/test/java/") ? tests : uncompiled).add(path);
-            } else if (path.endsWith(".md") || ("/" + path).contains("/docs/")) {
+                (("/" + path).contains("/src/test/java/") ? tests : status.equals("D") ? removedJava : uncompiled)
+                        .add(path);
+            } else if (documentation(path, workspace)) {
                 docs.add(path);
             } else {
                 cannotJudge.add(path);
             }
         });
-        return new Kinds(List.copyOf(tests), List.copyOf(uncompiled), List.copyOf(docs), List.copyOf(cannotJudge));
+        return new Kinds(List.copyOf(tests), List.copyOf(uncompiled), List.copyOf(docs), List.copyOf(cannotJudge),
+                List.copyOf(removedJava));
+    }
+
+    /**
+     * Whether a file is documentation that nothing reads when the project runs: a {@code *.md} file, or a file below
+     * the {@code docs} directory of the workspace. Not one below a {@code src} or a hidden directory, not one of a
+     * workflow package (a directory with a {@code workflow.json}, at or above the file: a package's files are what
+     * its steps and prompts can read), and not {@code AGENTS.md} or {@code CLAUDE.md}, which an AI tool reads as
+     * instructions.
+     */
+    static boolean documentation(String path, Path workspace) {
+        String[] parts = path.split("/");
+        String name = parts[parts.length - 1];
+        if (name.equals("AGENTS.md") || name.equals("CLAUDE.md")) return false;
+        Path dir = workspace;
+        for (int i = 0; i < parts.length - 1; i++) {
+            if (parts[i].startsWith(".") || parts[i].equals("src")) return false;
+            dir = dir.resolve(parts[i]);
+            if (Files.exists(dir.resolve("workflow.json"))) return false;
+        }
+        if (name.startsWith(".") || Files.exists(workspace.resolve("workflow.json")) && parts.length == 1) return false;
+        return name.endsWith(".md") || parts.length > 1 && parts[0].equals("docs");
     }
 
     /**
@@ -477,7 +562,8 @@ final class Changes {
 
     /**
      * The changed lines of the Java files the finder read that lie in no member: an import, the head of a class, an
-     * annotation of a type. No area and no neighbour comes from them, so they are counted and named. Each as
+     * annotation of a type. Every area of such a file counts as changed ({@link #picks}); the places are counted and
+     * named. Each as
      * {@code <file>:<from>-<to>}.
      */
     static List<String> outsideMembers(Result result, Map<String, List<Range>> lines) {
@@ -524,6 +610,8 @@ final class Changes {
         Comparator<Declared> place = Comparator.comparing(Declared::file)
                 .thenComparingInt((Declared d) -> d.member().start()).thenComparing(d -> d.member().label());
 
+        Set<String> headChanged = new java.util.HashSet<>();
+        for (String outside : outsideMembers(result, lines)) headChanged.add(outside.substring(0, outside.lastIndexOf(':')));
         Map<String, Pick> picks = new LinkedHashMap<>();
         for (Area area : areas) {
             List<Declared> held = byFile.getOrDefault(area.file(), List.of()).stream()
@@ -532,6 +620,8 @@ final class Changes {
             List<String> reasons = new ArrayList<>();
             boolean changedHere = touched(lines, area.file(), area.start(), area.end());
             if (changedHere) reasons.add("changed");
+            // An import, the package, the head of a class: what a name in any member means may have changed
+            else if (headChanged.contains(area.file())) reasons.add(HEAD_CHANGED);
             for (Declared member : held) {
                 boolean whole = member.member().start() >= area.start() && member.member().end() <= area.end();
                 if (isChanged.contains(member) && !whole
@@ -539,7 +629,7 @@ final class Changes {
                         Math.min(area.end(), member.member().end()))) {
                     // The area shows a part of a long member, and the member changed in another part
                     connected.add(member);
-                    if (!changedHere) reasons.add("changed: " + member.member().label() + " outside the lines of this area");
+                    if (reasons.isEmpty()) reasons.add("changed: " + member.member().label() + " outside the lines of this area");
                 }
                 for (Declared other : near.getOrDefault(member, Set.of())) {
                     boolean inside = other.file().equals(area.file()) && other.member().start() >= area.start()

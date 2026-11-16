@@ -310,7 +310,7 @@ class ChangesTest {
         assertThat(base.lines().get("mod/src/main/java/p/build/Fresh.java"))
                 .containsExactly(new Range(1, Integer.MAX_VALUE));
         assertThat(base.lines().values().stream().filter(r -> r.equals(List.of(new Range(4, 4))))).hasSize(5);
-        assertThat(Changes.kinds(base, result).uncompiled()).isEmpty();
+        assertThat(Changes.kinds(base, result, work).uncompiled()).isEmpty();
     }
 
     @Test
@@ -334,24 +334,32 @@ class ChangesTest {
     @Test
     void theFilesNoAreaComesFrom_areSortedByKind() throws IOException {
         Path work = Files.createDirectories(root.resolve("work"));
-        for (String path : List.of("mod/src/main/java/p/A.java", "mod/src/test/java/p/ATest.java",
-                "other/src/p/Moved.java", "README.md", "docs/plan.txt", "run.sh", "mod/pom.xml")) {
-            workFile(path, "new\n");
-        }
-        Path dir = Handover.write(root.resolve("changes"), Map.of("Gone.java", "x\n", "gone.sh", "x\n"), Map.of(
-                "README.md", "new\n", "docs/plan.txt", "new\n", "run.sh", "new\n", "mod/pom.xml", "new\n"));
+        List<String> written = List.of("mod/src/main/java/p/A.java", "mod/src/test/java/p/ATest.java",
+                "other/src/p/Moved.java", "README.md", "docs/plan.txt", "mod/notes.md", "run.sh", "mod/pom.xml",
+                // No documentation: a file of a workflow package, below a source tree, below a docs that is not
+                // the project's, in a hidden directory, and the instruction files an AI CLI reads
+                "pkg/workflow.json", "pkg/README.md", "pkg/prompts/judge.md", "mod/src/main/resources/help.md",
+                "mod/docs/a.txt", ".claude/rules/x.md", "AGENTS.md", "sub/CLAUDE.md");
+        for (String path : written) workFile(path, "new\n");
+        Map<String, String> head = new java.util.TreeMap<>();
+        for (String path : written) if (!path.endsWith(".java")) head.put(path, "new\n");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("Gone.java", "x\n", "gone.sh", "x\n",
+                "mod/src/test/java/p/GoneTest.java", "x\n"), head);
 
         Changes.Handed handed = Changes.read(dir);
         Result result = Handover.read(work, "mod/src/main/java/p/A.java");
         Changes.Base base = Changes.of(handed, Changes.compare(handed, work), result);
-        Changes.Kinds kinds = Changes.kinds(base, result);
+        Changes.Kinds kinds = Changes.kinds(base, result, work);
 
-        assertThat(kinds.tests()).containsExactly("mod/src/test/java/p/ATest.java");
+        assertThat(kinds.tests()).containsExactly("mod/src/test/java/p/ATest.java", "mod/src/test/java/p/GoneTest.java");
         assertThat(kinds.uncompiled()).containsExactly("other/src/p/Moved.java");
-        assertThat(kinds.docs()).containsExactly("README.md", "docs/plan.txt");
-        assertThat(kinds.cannotJudge()).as("a removed script counts too").containsExactly("gone.sh", "mod/pom.xml", "run.sh");
-        assertThat(base.removed()).containsExactly("Gone.java", "gone.sh");
-        assertThat(base.files()).isEqualTo(9);
+        assertThat(kinds.removedJava()).as("a removed Java file counts").containsExactly("Gone.java");
+        assertThat(kinds.docs()).containsExactly("README.md", "docs/plan.txt", "mod/notes.md");
+        assertThat(kinds.cannotJudge()).as("a removed script counts too").containsExactly(".claude/rules/x.md",
+                "AGENTS.md", "gone.sh", "mod/docs/a.txt", "mod/pom.xml", "mod/src/main/resources/help.md",
+                "pkg/README.md", "pkg/prompts/judge.md", "pkg/workflow.json", "run.sh", "sub/CLAUDE.md");
+        assertThat(base.removed()).containsExactly("Gone.java", "gone.sh", "mod/src/test/java/p/GoneTest.java");
+        assertThat(base.files()).isEqualTo(19);
     }
 
     @Test
@@ -380,14 +388,117 @@ class ChangesTest {
     }
 
     @Test
-    void aChangedLineOutsideEveryMember_isNamed_andPicksNoArea() throws IOException {
+    void aChangedLineOutsideEveryMember_isNamed_andMarksEveryAreaOfItsFile() throws IOException {
         project();
         Map<String, List<Range>> lines = Map.of(SRC + "p/Runner.java", List.of(new Range(1, 2)));
 
-        assertThat(reasons(lines)).isEmpty();
+        assertThat(reasons(lines)).as("an import or the head of the class can change what every call in the file"
+                + " resolves to").containsExactly(Map.entry("p/Runner.java#Runner.run(String)",
+                "changed: the head of its file (outside every member)"));
         Result result = Finder.find(root, List.of(root.resolve(SRC)), RuleFile.parse(RULES));
         assertThat(Changes.outsideMembers(result, lines)).containsExactly(SRC + "p/Runner.java:1-2");
         assertThat(Changes.outsideMembers(result, Map.of(SRC + "p/Runner.java",
                 List.of(new Range(1, Integer.MAX_VALUE))))).as("a new file has members").isEmpty();
+    }
+
+    private static byte[] treeOf(String... entries) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        for (String entry : entries) {
+            out.writeBytes(entry.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+            out.write(0);
+        }
+        return out.toByteArray();
+    }
+
+    @Test
+    void aFileWhoseNameIsNoUtf8_inATreeOrOnDisk_isNotInvisible_itIsADoubtByItsName() throws Exception {
+        Path work = Files.createDirectories(root.resolve("work/src"));
+        // The name holds the byte 0xff: written by a shell, since no Java string gives that name
+        Process touch = new ProcessBuilder("bash", "-c", "printf 'class Evil { }\\n' > $'Ev\\xffil.java';"
+                + " printf 'x\\n' > $'Un\\xfftracked.java'").directory(work.toFile()).inheritIO().start();
+        assertThat(touch.waitFor()).isZero();
+        Path dir = Handover.write(root.resolve("changes"), Map.of(), Map.of());
+        String id = Changes.blobId("class Evil { }\n".getBytes(), 40);
+        Files.write(dir.resolve("head-tree"), treeOf("100644 blob " + id + "\tsrc/Evÿil.java"));
+
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Compared compared = Changes.compare(handed, root.resolve("work"));
+        Changes.Base base = Changes.of(handed, compared, Handover.read(root.resolve("work")));
+
+        assertThat(compared.status()).as("a file of the workspace commit that the base does not have, and one in no"
+                + " commit").hasSize(2).containsValues("U");
+        assertThat(base.unmappable()).hasSize(2).allMatch(name -> name.contains("its name is no UTF-8"))
+                .anyMatch(name -> name.contains("Ev\\u00ffil.java") || name.contains("Ev\\ufffdil.java"));
+        assertThat(compared.dirty()).isTrue();
+    }
+
+    @Test
+    void aChangedMode_isAChangeOfTheFile_alsoWhenTheBytesAreTheSame() throws IOException {
+        Path work = Files.createDirectories(root.resolve("work"));
+        Files.writeString(work.resolve("run.sh"), "echo\n");
+        assertThat(work.resolve("run.sh").toFile().setExecutable(true)).isTrue();
+        Files.writeString(work.resolve("plain.sh"), "echo\n");
+        Files.writeString(work.resolve("target.txt"), "t\n");
+        Files.createSymbolicLink(work.resolve("Link.java"), Path.of("target.txt"));
+        String echo = Changes.blobId("echo\n".getBytes(), 40);
+        String link = Changes.blobId("target.txt".getBytes(), 40);
+        String target = Changes.blobId("t\n".getBytes(), 40);
+        Path dir = Handover.write(root.resolve("changes"), Map.of(), Map.of());
+        // The base: run.sh not executable, and Link.java a file whose bytes are the name the link now points at
+        Files.write(dir.resolve("base-tree"), treeOf("100644 blob " + link + "\tLink.java",
+                "100644 blob " + echo + "\tplain.sh", "100644 blob " + echo + "\trun.sh",
+                "100644 blob " + target + "\ttarget.txt"));
+        Files.write(dir.resolve("head-tree"), treeOf("120000 blob " + link + "\tLink.java",
+                "100644 blob " + echo + "\tplain.sh", "100755 blob " + echo + "\trun.sh",
+                "100644 blob " + target + "\ttarget.txt"));
+
+        Changes.Compared compared = Changes.compare(Changes.read(dir), work);
+
+        assertThat(compared.status()).containsOnly(Map.entry("run.sh", "M"), Map.entry("Link.java", "M"));
+        assertThat(compared.dirty()).isFalse();
+    }
+
+    /**
+     * The rule of the check: every file that differs has one status, and every status leads to changed lines of a
+     * file the finder read, or to a name in a list the report shows. Here every status meets every kind of file.
+     */
+    @Test
+    void noStatusOfNoKindOfFile_isDroppedSilently() throws IOException {
+        Path work = Files.createDirectories(root.resolve("work"));
+        Map<String, String> before = new java.util.TreeMap<>();
+        Map<String, String> head = new java.util.TreeMap<>();
+        List<String> kindsOfFile = List.of("mod/src/main/java/p/%s.java", "mod/src/test/java/p/%sTest.java",
+                "tool/src/%s.java", "docs/%s.txt", "%s.md", "scripts/%s.sh");
+        for (String kind : kindsOfFile) {
+            before.put(kind.formatted("Changed"), "old\n");
+            workFile(kind.formatted("Changed"), "new\n");
+            head.put(kind.formatted("Changed"), "new\n");
+            before.put(kind.formatted("Removed"), "old\n");
+            workFile(kind.formatted("Added"), "new\n");
+            head.put(kind.formatted("Added"), "new\n");
+            before.put(kind.formatted("Odd"), "old\n");
+            Files.createDirectories(work.resolve(kind.formatted("Odd")));
+        }
+        Path dir = Handover.write(root.resolve("changes"), before, head);
+        Result result = Handover.read(work, "mod/src/main/java/p/Changed.java", "mod/src/main/java/p/Added.java");
+
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Base base = Changes.of(handed, Changes.compare(handed, work), result);
+        Changes.Kinds kinds = Changes.kinds(base, result, work);
+
+        assertThat(base.status()).hasSize(24);
+        java.util.Set<String> accounted = new java.util.TreeSet<>(base.lines().keySet());
+        for (List<String> list : List.of(kinds.tests(), kinds.uncompiled(), kinds.removedJava(), kinds.docs(),
+                kinds.cannotJudge())) {
+            for (String file : list) assertThat(accounted).as("a file is of one kind").doesNotContain(file);
+            accounted.addAll(list);
+        }
+        for (String name : base.unmappable()) accounted.add(name.substring(0, name.indexOf(" (")));
+        assertThat(accounted).containsExactlyElementsOf(new java.util.TreeSet<>(base.status().keySet()));
+        // What is neither a judged line, a test, nor a document is a doubt of the gate
+        assertThat(kinds.uncompiled()).containsExactly("tool/src/Added.java", "tool/src/Changed.java");
+        assertThat(kinds.removedJava()).containsExactly("mod/src/main/java/p/Removed.java", "tool/src/Removed.java");
+        assertThat(kinds.cannotJudge()).containsExactly("scripts/Added.sh", "scripts/Changed.sh", "scripts/Removed.sh");
+        assertThat(base.unmappable()).hasSize(6);
     }
 }

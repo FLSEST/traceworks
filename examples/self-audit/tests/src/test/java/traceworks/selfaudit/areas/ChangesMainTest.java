@@ -166,6 +166,8 @@ class ChangesMainTest {
                 Map.entry("dirty", false), Map.entry("changedFiles", 2L), Map.entry("testFiles", 0L),
                 Map.entry("docFiles", 1L), Map.entry("uncompiledFiles", 0L), Map.entry("uncompiled", List.of()),
                 Map.entry("cannotJudgeFiles", 0L), Map.entry("cannotJudge", List.of()),
+                Map.entry("removedJavaFiles", 0L), Map.entry("removedJava", List.of()),
+                Map.entry("judgedUpTo", HEAD),
                 Map.entry("baseDate", "2026-11-10T09:00:00Z"), Map.entry("skipped", ""),
                 Map.entry("removedFiles", 0L), Map.entry("unmappable", List.of()),
                 Map.entry("outsideMembers", 0L), Map.entry("outside", List.of()),
@@ -329,7 +331,7 @@ class ChangesMainTest {
         assertThat(report()).isZero();
 
         assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
-                + " since aaaaaaaaaaaa: 1 changed file could not be compared; no verified finding; ");
+                + " since aaaaaaaaaaaa: 1 changed file could not be compared; 1 removed Java file; no verified finding; ");
         assertThat(Files.readString(work.resolve("report.md")))
                 .contains("| Files that differ from the base | 2 (1 of them removed) |",
                         "| Changed files that could not be compared | 1 |",
@@ -367,15 +369,17 @@ class ChangesMainTest {
     }
 
     @Test
-    void aChangedImport_isCountedAndNamed_andNoAreaComesFromIt() throws IOException {
+    void aChangedLineInTheHeadOfAFile_isCountedAndNamed_andEveryAreaOfTheFileIsJudged() throws IOException {
         changes("1:" + SRC + "Runner.java");
 
         assertThat(run("", find())).as(err.toString()).isZero();
-        assertThat(areas()).isEmpty();
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason"))
+                .containsExactly(RUNNER + ": changed: the head of its file (outside every member)");
         assertThat(report()).isZero();
 
         assertThat(Files.readString(work.resolve("report.md")))
-                .contains("| Changed places in no member (an import, the head of a class): no area comes from them | 1 |",
+                .contains("| Changed places in no member (an import, the head of a class): every area of their file"
+                                + " is judged | 1 |",
                         "Changed places that lie in no member: `" + SRC + "Runner.java:1-1`");
     }
 
@@ -440,12 +444,26 @@ class ChangesMainTest {
                                 + " area any more: it may have moved there: `extra/src/p/Runner.java`",
                         "## Open findings that no item carries");
 
+        // The same when the Java file that came is a test: the class may have moved there
+        Path test = Files.createDirectories(root.resolve("app/src/test/java/p"));
+        Files.move(moved.resolve("Runner.java"), test.resolve("Runner.java"));
+        Map<String, String> asTest = Handover.files(root);
+        Handover.write(work.resolve("changes"), base, asTest);
+        assertThat(run("", find("--known", known.toString()))).isZero();
+        assertThat(summary().get("knownGone")).isEqualTo(List.of());
+        assertThat(report()).isZero();
+        assertThat(out()).startsWith("gate_status: RED\n");
+        Files.move(test.resolve("Runner.java"), moved.resolve("Runner.java"));
+
         // Without such a file, a member that is gone takes its finding with it
         Files.delete(moved.resolve("Runner.java"));
         Map<String, String> without = Handover.files(root);
         Handover.write(work.resolve("changes"), base, without);
         assertThat(run("", find("--known", known.toString()))).isZero();
         assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER)));
+        assertThat(report()).isZero();
+        assertThat(out()).as("its file is removed, and that is said").startsWith("gate_status: YELLOW\ngate_category:"
+                + " security\ngate_description: of the changes since aaaaaaaaaaaa: 1 removed Java file; ");
     }
 
     @Test
@@ -503,5 +521,52 @@ class ChangesMainTest {
         Files.writeString(dir.resolve("from"), "register\n");
         assertThat(run("", "changed", "--changes", dir.toString(), "--root", root.toString())).isZero();
         assertThat(Files.readString(dir.resolve("wanted"))).isEmpty();
+    }
+
+    /**
+     * The import of a caller is pointed at another class of the same name, whose check does nothing. No line of
+     * a member changed, and the call in the area now reaches other code.
+     */
+    @Test
+    void anImportThatRePointsACall_marksTheAreaOfTheCaller_soItIsJudged() throws IOException {
+        Path sources = root.resolve("app/src/main/java");
+        Files.createDirectories(sources.resolve("q"));
+        Files.writeString(sources.resolve("p/Checks.java"), "package p;\npublic class Checks {\n"
+                + "    public static void verify(String c) {\n        if (c.isEmpty()) throw new IllegalArgumentException();\n"
+                + "    }\n}\n");
+        Files.writeString(sources.resolve("q/Checks.java"), "package q;\npublic class Checks {\n"
+                + "    public static void verify(String c) {\n    }\n}\n");
+        String guarded = "package p;\nimport %s.Checks;\nclass Guarded {\n    void start(String c) throws Exception {\n"
+                + "        Checks.verify(c);\n        new ProcessBuilder(c).start();\n    }\n}\n";
+        Files.writeString(sources.resolve("p/Guarded.java"), guarded.formatted("q"));
+        Map<String, String> head = Handover.files(root);
+        Map<String, String> base = new java.util.TreeMap<>(head);
+        base.put(SRC + "Guarded.java", guarded.formatted("p"));
+        Handover.write(work.resolve("changes"), base, head);
+
+        assertThat(run("", find())).as(err.toString()).isZero();
+
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason")).containsExactly(
+                SRC + "Guarded.java#Guarded.start(String): changed: the head of its file (outside every member)");
+    }
+
+    @Test
+    void aWorkspaceThatDiffersFromItsCommit_doesNotMoveTheBase_andTheReportSaysSo() throws IOException {
+        // The workspace commit holds a change of Runner that the files on disk do not have
+        Map<String, String> disk = Handover.files(root);
+        Map<String, String> head = new java.util.TreeMap<>(disk);
+        head.put(SRC + "Runner.java", disk.get(SRC + "Runner.java").replace("ProcessBuilder(c)", "ProcessBuilder(c, c)"));
+        Handover.write(work.resolve("changes"), disk, head);
+        Files.writeString(work.resolve("changes/from"), "register\n");
+
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(report()).isZero();
+
+        assertThat(out()).as("what was judged is the disk, so the next run must start where this one did")
+                .contains("\nFACT changes_base: " + BASE + "\nFACT changes_head: " + BASE + "\n")
+                .doesNotContain("FACT changes_head: " + HEAD);
+        assertThat(Files.readString(work.resolve("report.md"))).contains("with changes that are in no commit",
+                "| The next run without `since` starts from | `" + BASE + "`: the base of this run again, since the"
+                        + " files that were judged are not the workspace commit |");
     }
 }
