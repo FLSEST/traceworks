@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.ExecutionMode;
 import traceworks.core.model.BlockDefinition;
@@ -291,17 +291,12 @@ class RetryBlockExecutorTest {
     }
 
     @Test
-    void execute_shellMode_untrustedVariable_isEscaped() {
+    void execute_shellMode_untrustedVariable_isRefused() {
         context.setUntrustedVariable("pkg", "left-pad; id");
-        when(commands.shellStep(any(BlockDefinition.class), anyInt(), eq(300), any()))
-                .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
-        executor.execute(retry(Map.of(
-                "command", "npm install {{ pkg }}", "max_retries", 1, "delay", 0, "execution_mode", "shell")), context);
-
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "left-pad; id") + "npm install \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> executor.execute(retry(Map.of(
+                "command", "npm install {{ pkg }}", "max_retries", 1, "delay", 0, "execution_mode", "shell")), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -317,19 +312,14 @@ class RetryBlockExecutorTest {
     }
 
     @Test
-    void execute_shellMode_taintedPreviousOutput_isEscaped() {
+    void execute_shellMode_taintedPreviousOutput_isRefused() {
         context.setUntrustedVariable("u", "z");   // webhook payload: the run is tainted
         context.recordOutput(null, "pkg; id");
-        when(commands.shellStep(any(BlockDefinition.class), anyInt(), eq(300), any()))
-                .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
-        executor.execute(retry(Map.of(
+        assertThatThrownBy(() -> executor.execute(retry(Map.of(
                 "command", "npm install {{ previous_output }}", "max_retries", 1, "delay", 0,
-                "execution_mode", "shell")), context);
-
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "pkg; id") + "npm install \"${TRACEWORKS_VALUE_1}\"");
+                "execution_mode", "shell")), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test

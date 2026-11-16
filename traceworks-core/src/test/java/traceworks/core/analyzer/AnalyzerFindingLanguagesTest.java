@@ -89,13 +89,18 @@ class AnalyzerFindingLanguagesTest {
                 block("sub-workflow", "both", Map.of("workflow_id", "abc", "workflowId", "abc"))), null));
         // Quoting: quoted-placeholder, placeholder-self-compare
         out.addAll(analyzer.analyze(List.of(
-                block("shell", "quoted", Map.of("command", "set -euo pipefail\necho 'CHAIN={{ previous_chain_output }}'")),
+                block("shell", "quoted", Map.of("command", "set -euo pipefail\necho 'LAST={{ previous_output }}'")),
                 block("shell", "unset", Map.of("command", "set -euo pipefail\nX='{{ x }}'\n"
                         + "[ \"$X\" = '{{ x }}' ] && X=default"))), null));
         // An AI step's output without quotes in a shell command: unquoted-ai-output
         out.addAll(analyzer.analyze(List.of(
                 block("simple", "review", Map.of("command", "Review the diff")),
                 block("shell", "report", Map.of("command", "set -euo pipefail\nprintf '%s' {{ block.review.output }}"))),
+                null));
+        // The shell variables of a block: invalid-value-name, unused-value
+        out.addAll(analyzer.analyze(List.of(
+                block("shell", "named", Map.of("command", "set -euo pipefail\necho", "values", Map.of("lower", "x"))),
+                block("shell", "unused", Map.of("command", "set -euo pipefail\necho", "values", Map.of("NOTE", "x")))),
                 null));
         // Heredoc bodies: heredoc-placeholder (interpreter source, unquoted delimiter, escaped block)
         out.addAll(analyzer.analyze(List.of(

@@ -238,7 +238,7 @@ public final class ContainerCommandRunner implements CommandRunner {
     private ContainerRun containerRun(CommandRequest request, CommandFacts facts, String egressImageId) {
         String name = "traceworks-" + runId + "-" + containers.incrementAndGet();
         String entrypoint = request.runsEntrypoint() ? null : SHELL;
-        List<String> args = request.runsEntrypoint() ? request.entrypointArgs() : List.of("-c", request.command());
+        List<String> args = request.runsEntrypoint() ? request.entrypointArgs() : List.of("-c", request.script());
         return new ContainerRun(name, runId, facts.imageId(), entrypoint, args, facts.workingDirectory(),
                 facts.mounts(), new RunDirectories(paths.workspace(), paths.packageDirectory(), paths.scratch()),
                 facts.network(), request.environment(), request.stdin(), request.timeoutSeconds(), limits,

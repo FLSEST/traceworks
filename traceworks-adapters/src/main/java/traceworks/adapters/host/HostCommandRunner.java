@@ -115,7 +115,7 @@ public final class HostCommandRunner implements CommandRunner {
 
     private CommandResult runOnce(CommandRequest request) {
         long start = System.nanoTime();
-        String command = request.command();
+        String command = request.script();
         ProcessTracking.Tracker tracker = ProcessTracking.current();
         Process process = null;
         ProcessTracking.StopHandle stop = null;

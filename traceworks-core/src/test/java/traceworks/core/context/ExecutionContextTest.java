@@ -1,6 +1,5 @@
 package traceworks.core.context;
 
-import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.model.BlockDefinition;
 import traceworks.core.port.AiProviders;
 import traceworks.core.port.Clock;
@@ -569,8 +568,8 @@ class ExecutionContextTest {
     void resolveShellTemplate_untrustedVariable_isSingleQuoted() {
         context.setUntrustedVariable("branch", "main; rm -rf /");
 
-        assertThat(context.resolveShellTemplate("git checkout {{ branch }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "main; rm -rf /") + "git checkout \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("git checkout {{ branch }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -578,16 +577,16 @@ class ExecutionContextTest {
         context.setUntrustedVariable("msg", "$(curl evil)`id`");
         context.setVariable("dir", "/repo");
 
-        assertThat(context.resolveShellTemplate("cd {{ dir }} && echo {{msg}}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "$(curl evil)`id`") + "cd /repo && echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("cd {{ dir }} && echo {{msg}}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
     void resolveShellTemplate_untrustedValue_singleQuoteCannotBreakOut() {
         context.setUntrustedVariable("v", "x'; id; echo '");
 
-        assertThat(context.resolveShellTemplate("echo {{ v }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x'; id; echo '") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ v }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -595,9 +594,9 @@ class ExecutionContextTest {
         context.setVariable("secret", "it's raw $(danger)");
         context.setUntrustedVariable("payload", "{{ secret }}; id");
 
-        String resolved = context.resolveShellTemplate("echo {{ payload }}", false);
+        String resolved = context.resolveShellValue("{{ payload }}");
 
-        assertThat(resolved).isEqualTo(FakeCommandRunner.value(1, "{{ secret }}; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(resolved).isEqualTo("{{ secret }}; id");
         assertThat(resolved).doesNotContain("danger");
     }
 
@@ -616,8 +615,8 @@ class ExecutionContextTest {
         context.setBlockOutput("scan", "x && y");
         context.setUntrustedVariable("u", "z");
 
-        assertThat(context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }} {{ u }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "z") + "a | b x && y \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }} {{ u }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -625,7 +624,8 @@ class ExecutionContextTest {
         context.setVariable("path", "/tmp/a b");
         context.setUntrustedVariable("u", "z");
 
-        assertThat(context.resolveShellTemplate("ls {{ path }} {{ u }}", true)).isEqualTo(FakeCommandRunner.value(1, "z") + "ls '/tmp/a b' \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("ls {{ path }} {{ u }}", true))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -677,8 +677,8 @@ class ExecutionContextTest {
         context.setUntrustedPlatformVariable("previous_report", "x; rm -rf /");
 
         assertThat(context.isUntrusted("previous_report")).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x; rm -rf /") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_report }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -716,17 +716,17 @@ class ExecutionContextTest {
 
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.getUntrustedVariables()).containsExactly("previous_report");
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false)).isEqualTo(FakeCommandRunner.value(1, "y; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_report }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
-    // ── Platform data taints the run once it really lands in a shell command line ──
+    // ── Platform data taints the run once it really reaches a shell, as the value of a variable ──
 
     @Test
-    void platformVariable_substitutedIntoAShellCommand_taintsTheRun() {
+    void platformVariable_inAShellValue_taintsTheRun() {
         context.setUntrustedPlatformVariable("previous_report", "x; id");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(context.resolveShellValue("Report: {{ previous_report }}")).isEqualTo("Report: x; id");
 
         assertThat(context.hasUntrustedInput()).isTrue();
     }
@@ -734,35 +734,39 @@ class ExecutionContextTest {
     @Test
     void platformVariable_substitutedIntoAShellCommand_escapesLaterDerivedVariables() {
         context.setUntrustedPlatformVariable("previous_report", "report");
-        context.resolveShellTemplate("echo {{ previous_report }}", false);
+        context.resolveShellValue("{{ previous_report }}");
 
         context.setDerivedVariable("item", "a.txt; id");
 
         assertThat(context.isUntrusted("item")).isTrue();
-        assertThat(context.resolveShellTemplate("cat {{ item }}", false)).isEqualTo(FakeCommandRunner.value(1, "a.txt; id") + "cat \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("cat {{ item }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
     void platformVariable_substitutedIntoAShellCommand_taintsLaterBlockOutputs() {
         context.setUntrustedPlatformVariable("open_todos", "todos");
-        context.resolveShellTemplate("echo {{open_todos}}", false);
+        context.resolveShellValue("{{open_todos}}");
 
         context.recordOutput("scan", "a | b");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a | b") + FakeCommandRunner.value(2, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
         assertThat(context.exportTaint()).containsEntry(ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE,
                 List.of(ExecutionContext.PREVIOUS_OUTPUT_NAME, "scan"));
     }
 
     @Test
-    void platformVariable_substitutedWithEscapeAll_taintsTheRun() {
+    void platformVariable_inAShellLine_isRefused_withEscapeAllToo_andReachesNoShell() {
         context.setUntrustedPlatformVariable("previous_report", "report");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", true))
-                .isEqualTo(FakeCommandRunner.value(1, "report") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        for (boolean escapeAll : new boolean[] {false, true}) {
+            assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_report }}", escapeAll))
+                    .isInstanceOf(ShellLineRefusedException.class)
+                    .hasMessageStartingWith("shell line refused, nothing ran: {{ previous_report }} is text");
+        }
 
-        assertThat(context.hasUntrustedInput()).isTrue();
+        assertThat(context.hasUntrustedInput()).as("a refused line put nothing into a shell").isFalse();
     }
 
     @Test
@@ -809,10 +813,10 @@ class ExecutionContextTest {
                 .isEqualTo("Rate: x; id");
         context.recordOutput("analysis", "a | b");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
-        assertThat(context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -847,8 +851,8 @@ class ExecutionContextTest {
         context.resolvePromptTemplate("Rate: {{ previous_report }}");
         context.recordOutput("late", "a | b");
 
-        assertThat(context.resolveShellTemplate("{{ block.early.output }} {{ block.late.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "e | f \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ block.early.output }} {{ block.late.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     /** Sub-workflow hand-over and resume carry the tainted output via {@code __untrusted_outputs}. */
@@ -881,10 +885,12 @@ class ExecutionContextTest {
         context.setDerivedVariable("step_1_output", "e | f");
 
         assertThat(context.hasUntrustedInput()).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ block.summary.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "c | d") + "echo \"${TRACEWORKS_VALUE_1}\"");
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "c | d") + "echo \"${TRACEWORKS_VALUE_1}\"");
-        assertThat(context.resolveShellTemplate("echo {{ step_1_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "e | f") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.summary.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ step_1_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
         assertThat(context.exportTaint())
                 .isNotEmpty()
                 .containsEntry(ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE,
@@ -909,8 +915,8 @@ class ExecutionContextTest {
 
         assertThat(context.isUntrusted("previous_report")).isTrue();
         assertThat(context.hasUntrustedInput()).isFalse();
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "/runs/run/repo/a.java; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_report }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -922,7 +928,8 @@ class ExecutionContextTest {
         assertThat(context.isUntrusted("branch")).isTrue();
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.getUntrustedVariables()).containsExactly("branch");
-        assertThat(context.resolveShellTemplate("cd {{ branch }}", false)).isEqualTo(FakeCommandRunner.value(1, "/runs/run/repo; id") + "cd \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("cd {{ branch }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -954,8 +961,8 @@ class ExecutionContextTest {
         context.recordOutput("scan", "x; id");
 
         assertThat(context.hasUntrustedInput()).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x; id") + FakeCommandRunner.value(2, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -963,8 +970,8 @@ class ExecutionContextTest {
         context.setUntrustedVariable("u", "z");
         context.recordOutput("scan", "x'; id; echo '");
 
-        assertThat(context.resolveShellTemplate("echo {{ block.scan.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x'; id; echo '") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -973,9 +980,9 @@ class ExecutionContextTest {
         context.setUntrustedVariable("u", "z");
         context.recordOutput(null, "{{ secret }}; id");
 
-        String resolved = context.resolveShellTemplate("echo {{ previous_output }}", false);
+        String resolved = context.resolveShellValue("{{ previous_output }}");
 
-        assertThat(resolved).isEqualTo(FakeCommandRunner.value(1, "{{ secret }}; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(resolved).isEqualTo("{{ secret }}; id");
         assertThat(resolved).doesNotContain("danger");
     }
 
@@ -988,9 +995,9 @@ class ExecutionContextTest {
         assertThat(context.hasUntrustedInput()).isTrue();
         context.recordOutput("second", "also tainted");
 
-        assertThat(context.resolveShellTemplate(
-                "echo {{ block.first.output }} {{ block.second.output }} {{ previous_output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "tainted") + FakeCommandRunner.value(2, "also tainted") + FakeCommandRunner.value(3, "also tainted") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate(
+                "{{ block.first.output }} {{ block.second.output }} {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -999,8 +1006,8 @@ class ExecutionContextTest {
         context.setBlockOutput("scan", "raw && stays");
         context.recordOutput(null, "x; id");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\" raw && stays");
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -1026,7 +1033,8 @@ class ExecutionContextTest {
         context.markOutputUntrusted(ExecutionContext.PREVIOUS_OUTPUT_NAME);
 
         assertThat(context.hasUntrustedInput()).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -1036,8 +1044,8 @@ class ExecutionContextTest {
 
         context.setUntrustedVariable("u", "z");
         context.setDerivedVariable("step_1_output", "c; id");
-        assertThat(context.resolveShellTemplate("echo {{ step_1_output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "c; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ step_1_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -1069,7 +1077,7 @@ class ExecutionContextTest {
     @Test
     void exportTaint_platformDataUsedInShell_isExportedWithoutAnyRecordedOutput() {
         context.setUntrustedPlatformVariable("previous_report", "x; id");
-        context.resolveShellTemplate("echo {{ previous_report }}", false);
+        context.resolveShellValue("{{ previous_report }}");
 
         assertThat(context.exportTaint())
                 .containsEntry(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE, true)

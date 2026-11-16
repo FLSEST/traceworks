@@ -130,29 +130,34 @@ class WorkflowEnginePauseTest {
      */
     @Test
     void aResumedLoopThatTakesOverAnswers_marksTheRunAsOneThatAskedAModel() {
-        Map<String, Map<String, Object>> loops = new java.util.LinkedHashMap<>();
-        loops.put(FakeCommandRunner.value(1, "[a]: one; id\n[b]: two") + "./report \"${TRACEWORKS_VALUE_1}\"",
-                Map.of("execution_mode", "ai", "items", List.of("a", "b"),
-                "command", "Judge {{ item }}"));
-        loops.put("./report [a]: one; id\n[b]: two", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
-                "command", "./work"));
-
-        loops.forEach((reportLine, loop) -> {
-            WorkflowDefinition workflow = workflow("wf-taken-over", block("foreach", "each", loop),
-                    block("shell", "report", Map.of("command", "./report {{ block.each.output }}")));
+        Map<String, Object> asking = Map.of("execution_mode", "ai", "items", List.of("a", "b"),
+                "command", "Judge {{ item }}");
+        Map<String, Object> shell = Map.of("execution_mode", "shell", "items", List.of("a", "b"), "command", "./work");
+        BlockDefinition inALine = block("shell", "report", Map.of("command", "./report {{ block.each.output }}"));
+        BlockDefinition asAValue = block("shell", "report", Map.of("values", Map.of("EACH", "{{ block.each.output }}"),
+                "command", "./report \"$EACH\""));
+        RecordedItems items = (step, index, item) -> step == 0
+                ? new RecordedItems.Completed(index == 0 ? "one; id" : "two", 100 + index) : null;
+        java.util.function.BiFunction<Map<String, Object>, BlockDefinition, Session> resume = (loop, report) -> {
+            WorkflowDefinition workflow = workflow("wf-taken-over", block("foreach", "each", loop), report);
             Session first = new Session();
             first.run(workflow);   // only its checkpoint before the loop is used
-            RecordedItems items = (step, index, item) -> step == 0
-                    ? new RecordedItems.Completed(index == 0 ? "one; id" : "two", 100 + index) : null;
             Session second = new Session();   // its provider has no answer: a call would fail the step
             second.commands.on("./report", "reported");
+            second.resume(workflow, first.events.of(Checkpoint.class).getFirst(), items);
+            return second;
+        };
 
-            RunOutcome resumed = second.resume(workflow, first.events.of(Checkpoint.class).getFirst(), items);
-
-            assertThat(resumed.status()).as(loop + ": " + resumed.error()).isEqualTo(RunStatus.COMPLETED);
-            assertThat(second.commands.commands()).as(loop.toString())
-                    .containsExactly(reportLine);
-        });
+        Session refused = resume.apply(asking, inALine);
+        assertThat(refused.commands.commands()).as("the answers of the AI loop are model text: the line is refused")
+                .isEmpty();
+        Session handed = resume.apply(asking, asAValue);
+        assertThat(handed.commands.commands()).containsExactly("./report \"$EACH\"");
+        assertThat(handed.commands.requests().getFirst().values())
+                .containsOnly(Map.entry("EACH", "[a]: one; id\n[b]: two"));
+        Session plain = resume.apply(shell, inALine);
+        assertThat(plain.commands.commands()).as("a shell loop marks nothing")
+                .containsExactly("./report [a]: one; id\n[b]: two");
     }
 
     /** A cancel wins over a pause: the run ends CANCELLED, final, and does not park. */

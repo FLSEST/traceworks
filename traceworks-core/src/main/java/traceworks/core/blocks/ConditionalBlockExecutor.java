@@ -1,6 +1,7 @@
 package traceworks.core.blocks;
 
 import traceworks.core.context.ExecutionContext;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.CancelledSteps;
 import traceworks.core.engine.ExecutionMode;
@@ -66,7 +67,8 @@ public class ConditionalBlockExecutor implements BlockExecutor {
         if (isShell) {
             // Shell mode: exit code 0 = true, anything else = false; a timeout, a cut output or a condition that
             // did not run is no answer
-            ShellResult evaluated = commands.runCommand(condition, branch.shellTimeout(), context);
+            ShellResult evaluated = commands.runCommand(condition, branch.shellTimeout(), context,
+                    ShellValues.resolve(config, context));
             if (context.shouldStop()) {
                 result.setInput("if (" + condition + ") → cancelled");
                 result.setOutput(CancelledSteps.WHILE_RUNNING);

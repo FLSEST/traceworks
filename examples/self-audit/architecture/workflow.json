@@ -25,7 +25,8 @@
       "name": "facts",
       "config": {
         "container_image": "./images/architecture",
-        "command": "set -euo pipefail; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; architecture facts --rules {{ package_dir }}/rules/architecture.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --verdict-version 1 --facts {{ scratch_dir }}/architecture-facts.json --candidates {{ scratch_dir }}/candidates.jsonl",
+        "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
+        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/known-items.txt; architecture facts --rules {{ package_dir }}/rules/architecture.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --verdict-version 1 --facts {{ scratch_dir }}/architecture-facts.json --candidates {{ scratch_dir }}/candidates.jsonl",
         "timeout_seconds": 600,
         "shell_escape_variables": true
       }
@@ -53,7 +54,8 @@
       "name": "report",
       "config": {
         "container_image": "./images/architecture",
-        "command": "set -euo pipefail; printf '%s' {{ block.verdicts.output }} | architecture report --facts {{ scratch_dir }}/architecture-facts.json --candidates {{ scratch_dir }}/candidates.jsonl --verdicts - --out {{ scratch_dir }}/architecture-report.md",
+        "values": {"VERDICTS": "{{ block.verdicts.output }}"},
+        "command": "set -euo pipefail; printf '%s' \"$VERDICTS\" | architecture report --facts {{ scratch_dir }}/architecture-facts.json --candidates {{ scratch_dir }}/candidates.jsonl --verdicts - --out {{ scratch_dir }}/architecture-report.md",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

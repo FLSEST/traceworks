@@ -48,6 +48,33 @@ final class Content {
         }
     }
 
+    /**
+     * The shell variables a command found set, each name with its value as {@code <pre>}, cut like any content;
+     * nothing when the reference is {@code null}.
+     */
+    void values(StringBuilder out, BlobRef ref) {
+        if (ref == null) {
+            return;
+        }
+        String json = text(ref);
+        if (json == null) {
+            out.append("<p class=\"deleted\">values deleted (sha256 ").append(Html.line(ref.sha256())).append(")</p>");
+            return;
+        }
+        traceworks.core.record.CommandView.values(json).forEach((name, value) -> {
+            String shown = Html.cut(value, LIMIT);
+            out.append("<details><summary>value <code>").append(Html.line(name)).append("</code> (")
+                    .append(value.length()).append(" characters)</summary><pre>").append(Html.text(shown))
+                    .append("</pre>");
+            if (shown.length() < value.length()) {
+                out.append("<p class=\"cut\">cut at ").append(shown.length()).append(" of ").append(value.length())
+                        .append(" characters; the full values are blob ").append(Html.line(ref.sha256()))
+                        .append("</p>");
+            }
+            out.append("</details>\n");
+        });
+    }
+
     /** The content as it is, not escaped, for a caller that takes a part of it; {@code null} when there is none or it is deleted. */
     String text(BlobRef ref) {
         if (ref == null) {

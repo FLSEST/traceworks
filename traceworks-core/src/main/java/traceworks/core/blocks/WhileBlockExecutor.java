@@ -2,6 +2,7 @@ package traceworks.core.blocks;
 
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.OutputBudget;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.ExecutionMode;
 import traceworks.core.engine.GateSources;
@@ -83,7 +84,8 @@ public class WhileBlockExecutor implements BlockExecutor {
                 if (isShell) {
                     // Shell mode: exit code 0 = go on, anything else = stop; a timeout, a cut output or a condition
                     // that did not run fails the block
-                    ShellResult evaluated = commands.runCommand(resolvedCondition, body.shellTimeout(), context);
+                    ShellResult evaluated = commands.runCommand(resolvedCondition, body.shellTimeout(), context,
+                            ShellValues.resolve(block.getConfig(), context));
                     if (evaluated.timedOut() || evaluated.truncated() || evaluated.didNotRun()) {
                         outputs.note("[condition] " + (evaluated.timedOut()
                                         ? WrapperCommands.conditionTimedOut(body.shellTimeout())

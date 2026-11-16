@@ -185,20 +185,25 @@ class WorkflowEngineResumeTest {
     /**
      * The output of an AI step whose prompt carried platform data is tainted (ExecutionContextTaint's
      * {@code substitutedIntoPrompt}): the run from the checkpoint after that step sees the same taint as the run that
-     * went on, and its shell line quotes the output and the platform data the same way.
+     * went on, and its shell line gets the output and the platform data as values the same way.
      */
     /**
-     * A run that asked a model keeps that across a resume: the answer recorded before the checkpoint is quoted in
-     * the shell line of the resumed run, as in the run that went on, and so is an output the resumed run records.
+     * A run that asked a model keeps that across a resume: the answer recorded before the checkpoint reaches a
+     * command of the resumed run as a value, as in the run that went on, and refuses a shell line that names it; so
+     * does an output the resumed run records.
      */
     @Test
-    void resume_keepsWhatAModelWrote_quoted() {
-        WorkflowDefinition workflow = workflow("wf-model-text",
+    void resume_keepsWhatAModelWrote_protected() {
+        List<BlockDefinition> first = List.of(
                 block("shell", "before", Map.of("command", "list")),
                 block("simple", "ask", Map.of("command", "Name the files")),
-                block("shell", "after", Map.of("command", "cat")),
-                block("shell", "use", Map.of("command", "echo {{ block.before.output }} {{ block.ask.output }}"
-                        + " {{ step_1_output }} {{ block.after.output }}")));
+                block("shell", "after", Map.of("command", "cat")));
+        WorkflowDefinition workflow = workflow("wf-model-text", first.get(0), first.get(1), first.get(2),
+                block("shell", "use", Map.of("values", Map.of("ASK", "{{ block.ask.output }}",
+                        "STEP", "{{ step_1_output }}", "AFTER", "{{ block.after.output }}"),
+                        "command", "echo {{ block.before.output }} \"$ASK\"")));
+        WorkflowDefinition inALine = workflow("wf-model-text", first.get(0), first.get(1), first.get(2),
+                block("shell", "use", Map.of("command", "echo {{ block.ask.output }} {{ block.after.output }}")));
         Session uninterrupted = new Session();
         uninterrupted.claude.answers("a; rm -rf ~");
         uninterrupted.commands.on("list", "one two").on("cat", "three four").on("echo ", "done");
@@ -207,16 +212,23 @@ class WorkflowEngineResumeTest {
         Session resumed = new Session();
         resumed.commands.on("cat", "three four").on("echo ", "done");
         RunOutcome back = resumed.resume(workflow, uninterrupted.checkpoint(2));
+        Session refusing = new Session();
+        refusing.commands.on("cat", "three four");
+        RunOutcome refused = refusing.resume(inALine, uninterrupted.checkpoint(2));
 
         assertThat(went.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(back.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(uninterrupted.checkpoint(2).snapshot().context().taint().modelText())
                 .isEqualTo(new ContextState.ModelText(true, Set.of("step_1_output"), Set.of("ask"), true));
-        assertThat(resumed.commands.commands())
-                .containsExactly("cat", FakeCommandRunner.value(1, "a; rm -rf ~") + FakeCommandRunner.value(2, "a; rm -rf ~")
-                        + FakeCommandRunner.value(3, "three four") + "echo one two \"${TRACEWORKS_VALUE_1}\""
-                        + " \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
-        assertThat(uninterrupted.commands.commands()).endsWith(resumed.commands.commands().getLast());
+        assertThat(resumed.commands.commands()).containsExactly("cat", "echo one two \"$ASK\"");
+        assertThat(resumed.commands.requests().getLast().values()).containsOnly(Map.entry("ASK", "a; rm -rf ~"),
+                Map.entry("STEP", "a; rm -rf ~"), Map.entry("AFTER", "three four"));
+        assertThat(uninterrupted.commands.requests().getLast()).isEqualTo(resumed.commands.requests().getLast());
+        assertThat(refused.status()).as("the answer recorded before the resume, and an output after it")
+                .isEqualTo(RunStatus.FAILED);
+        assertThat(refused.error()).contains("shell line refused, nothing ran: {{ block.ask.output }},"
+                + " {{ block.after.output }} are text a model wrote");
+        assertThat(refusing.commands.commands()).containsExactly("cat");
     }
 
     @Test
@@ -224,8 +236,8 @@ class WorkflowEngineResumeTest {
         WorkflowDefinition workflow = workflow("wf-taint",
                 block("simple", "ask", Map.of("command", "Summarize {{ previous_chain_output }}")),
                 block("taint-probe", "probe", Map.of()),
-                block("shell", "use", Map.of("command",
-                        "echo {{ block.ask.output }} {{ previous_chain_output }} {{ topic }}")));
+                block("shell", "use", Map.of("values", Map.of("ASK", "{{ block.ask.output }}",
+                        "CHAIN", "{{ previous_chain_output }}"), "command", "echo \"$ASK\" \"$CHAIN\" {{ topic }}")));
         Map<String, Object> inputs = Map.of("previous_chain_output", "chain text", "topic", "release");
         Session uninterrupted = new Session();
         uninterrupted.claude.answers("do this; rm -rf ~");
@@ -247,10 +259,11 @@ class WorkflowEngineResumeTest {
                 .containsEntry("{{ previous_chain_output }}", true)
                 .containsEntry("{{ topic }}", false);
         assertThat(afterResume).as("the taint after resume").isEqualTo(wentOn);
-        assertThat(resumed.commands.commands()).as("the resumed shell line quotes as the uninterrupted one")
-                .containsExactly(FakeCommandRunner.value(1, "do this; rm -rf ~") + FakeCommandRunner.value(2, "chain text") + ""
-                        + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" release")
-                .isEqualTo(uninterrupted.commands.commands());
+        assertThat(resumed.commands.requests()).as("the resumed shell line and its values, as the uninterrupted one")
+                .isEqualTo(uninterrupted.commands.requests());
+        assertThat(resumed.commands.commands()).containsExactly("echo \"$ASK\" \"$CHAIN\" release");
+        assertThat(resumed.commands.requests().getFirst().values())
+                .containsOnly(Map.entry("ASK", "do this; rm -rf ~"), Map.entry("CHAIN", "chain text"));
     }
 
     /**

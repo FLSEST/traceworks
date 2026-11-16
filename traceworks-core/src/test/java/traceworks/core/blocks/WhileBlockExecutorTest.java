@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.StepFailureSummary;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -111,7 +111,7 @@ class WhileBlockExecutorTest {
         config.put("timeout_seconds", 60);
 
         // condition: true the first time, false the second time
-        when(commands.runCommand(eq("test -f /tmp/flag"), eq(60), any())).thenReturn(exit(0)).thenReturn(exit(1));
+        when(commands.runCommand(eq("test -f /tmp/flag"), eq(60), any(), any())).thenReturn(exit(0)).thenReturn(exit(1));
         when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "hello"));
 
         StepResult result = executor.execute(whileOf(config), context);
@@ -203,7 +203,7 @@ class WhileBlockExecutorTest {
         config.put("max_iterations", 5);
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
-        when(commands.runCommand(eq("./more"), eq(60), any())).thenAnswer(inv -> {
+        when(commands.runCommand(eq("./more"), eq(60), any(), any())).thenAnswer(inv -> {
             context.cancel();
             return exit(130);
         });
@@ -327,12 +327,12 @@ class WhileBlockExecutorTest {
         config.put("timeout_seconds", 60);
 
         // condition false on the first call: a non-zero exit code, so the body never runs
-        when(commands.runCommand(eq("test -f /tmp/never"), eq(60), any())).thenReturn(exit(1));
+        when(commands.runCommand(eq("test -f /tmp/never"), eq(60), any(), any())).thenReturn(exit(1));
 
         StepResult result = executor.execute(whileOf(config), context);
 
         assertThat(result.getOutput()).isEmpty();
-        verify(commands, times(1)).runCommand(eq("test -f /tmp/never"), eq(60), any());
+        verify(commands, times(1)).runCommand(eq("test -f /tmp/never"), eq(60), any(), any());
         verify(commands, never()).shellStep(any(), anyInt(), anyInt(), any());
     }
 
@@ -346,7 +346,7 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("check"), eq(60), any())).thenReturn(exit(0))
+        when(commands.runCommand(eq("check"), eq(60), any(), any())).thenReturn(exit(0))
                 .thenReturn(new ShellResult("y\n" + NOTE, 153, 0, NOTE));
         when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "hello"));
 
@@ -367,7 +367,7 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("check"), eq(60), any())).thenReturn(exit(0))
+        when(commands.runCommand(eq("check"), eq(60), any(), any())).thenReturn(exit(0))
                 .thenReturn(new ShellResult("Command timed out after 60 seconds", 124, 0, "", true));
         when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "hello"));
 
@@ -389,7 +389,7 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("check"), eq(60), any())).thenReturn(exit(0))
+        when(commands.runCommand(eq("check"), eq(60), any(), any())).thenReturn(exit(0))
                 .thenReturn(new ShellResult("image traceworks/shell:0123456789ab is not present; run traceworks images build", 125, 0, "", false, "image traceworks/shell:0123456789ab is not present; run traceworks images build"));
         when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "hello"));
 
@@ -412,7 +412,7 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("odd"), eq(60), any())).thenReturn(exit(exitCode));
+        when(commands.runCommand(eq("odd"), eq(60), any(), any())).thenReturn(exit(exitCode));
 
         StepResult result = executor.execute(whileOf(config), context);
 
@@ -430,7 +430,7 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("odd"), eq(60), any())).thenReturn(exit(124));
+        when(commands.runCommand(eq("odd"), eq(60), any(), any())).thenReturn(exit(124));
 
         StepResult result = executor.execute(whileOf(config), context);
 
@@ -541,13 +541,13 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 17);
 
-        when(commands.runCommand(eq("check it"), eq(17), any())).thenReturn(exit(0));
+        when(commands.runCommand(eq("check it"), eq(17), any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(), anyInt(), eq(17), any())).thenReturn(step(StepStatus.COMPLETED, "done"));
 
         executor.execute(whileOf(config), context);
 
         // condition and body both use the configured 17 s timeout
-        verify(commands).runCommand(eq("check it"), eq(17), any());
+        verify(commands).runCommand(eq("check it"), eq(17), any(), any());
         verify(commands).shellStep(any(), anyInt(), eq(17), any());
     }
 
@@ -602,7 +602,7 @@ class WhileBlockExecutorTest {
 
         verify(commands, times(4)).shellStep(any(), anyInt(), eq(60), any());
         // the condition is never asked
-        verify(commands, never()).runCommand(anyString(), anyInt(), any());
+        verify(commands, never()).runCommand(anyString(), anyInt(), any(), any());
         assertThat(result.getOutput()).contains("[iteration 4]");
     }
 
@@ -624,7 +624,7 @@ class WhileBlockExecutorTest {
     }
 
     @Test
-    void execute_shellMode_untrustedVariable_isEscapedInConditionAndCommand() {
+    void execute_shellMode_untrustedVariableInConditionAndCommand_isRefused() {
         context.setUntrustedVariable("target", "x; id");
         Map<String, Object> config = new HashMap<>();
         config.put("command", "build {{ target }}");
@@ -633,33 +633,27 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq(FakeCommandRunner.value(1, "x; id") + "check \"${TRACEWORKS_VALUE_1}\""), eq(60), any())).thenReturn(exit(0)).thenReturn(exit(1));
-        when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "ok"));
-
-        executor.execute(whileOf(config), context);
-
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), eq(60), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "build \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> executor.execute(whileOf(config), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
-    void execute_shellMode_taintedIterationOutput_isEscapedInTheNextIteration() {
+    void execute_shellMode_taintedIterationOutput_reachesTheNextIterationAsAValue() {
         context.setUntrustedVariable("u", "z");   // webhook payload: the run is tainted
+        when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "out; id"));
         Map<String, Object> config = new HashMap<>();
-        config.put("command", "echo {{ previous_output }}");
+        config.put("values", Map.of("PREVIOUS", "{{ previous_output }}"));
+        config.put("command", "echo \"$PREVIOUS\"");
         config.put("max_iterations", 2);
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
-
-        when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "x; id"));
 
         executor.execute(whileOf(config), context);
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands, times(2)).shellStep(captor.capture(), anyInt(), eq(60), any());
-        assertThat(captor.getAllValues().get(0).getConfig().get("command")).isEqualTo("echo ");
-        assertThat(captor.getAllValues().get(1).getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(captor.getAllValues().get(1).getConfig()).containsEntry("command", "echo \"$PREVIOUS\"")
+                .containsEntry("values", Map.of("PREVIOUS", "out; id"));
     }
 
     @Test

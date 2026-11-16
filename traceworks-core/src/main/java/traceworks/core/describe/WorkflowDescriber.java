@@ -12,6 +12,7 @@ import traceworks.core.describe.WorkflowDescription.Block;
 import traceworks.core.describe.WorkflowDescription.Counts;
 import traceworks.core.describe.WorkflowDescription.Line;
 import traceworks.core.describe.WorkflowDescription.Section;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.ModelChoices;
 import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.engine.NestedBlocks;
@@ -215,6 +216,10 @@ public final class WorkflowDescriber {
             facts.add("secrets " + String.join(", ", secrets));
         } else if (config.get(SecretNames.KEY) != null && !(config.get(SecretNames.KEY) instanceof List<?>)) {
             facts.add("secrets" + INVALID);
+        }
+        List<String> values = ShellValues.names(config);
+        if (!values.isEmpty()) {
+            facts.add("values " + String.join(", ", values));
         }
         if (config.get("container_image") == null) {
             facts.add("image: the run's shell image");

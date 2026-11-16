@@ -287,38 +287,32 @@ content, and no blob is written through one.
   With shell tools it can no longer send it anywhere: its container reaches the provider's hosts only (above). It can
   still send it there, under another account. Give AI steps a key you can limit and revoke, and keep `tools: none`
   for steps whose prompt carries content you do not trust.
-- **A model's answer in a shell command.** A model reads the workspace, and what it reads (a file, a page) can
-  steer its answer, so the output of an AI step never becomes shell code.
-  - **A protected value is never part of the shell text.** The run protects text a model wrote, untrusted input,
-    platform data (`previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) and the outputs of
-    a run that carries untrusted input. Such a value reaches the shell as the value of a shell variable, and the
-    shell line holds a reference in its placeholder's place. `printf '%s\n' {{ block.review.output }}` runs as
+- **A model's answer in a shell command.** Traceworks never writes a protected value into shell code. Protected
+  is text a model wrote, untrusted input, platform data (`previous_report`, `audit_findings`, `audit_items`,
+  `previous_chain_output`) and every output of a run that carries untrusted input. A shell line that names such a
+  placeholder is refused, wherever it stands, quoted or not, with or without `shell_escape_variables`: `check`
+  reports it as an error (`protected-value-in-shell`) where the workflow shows it, and the run refuses the line
+  before anything runs otherwise. The way in is by name: a block lists `values`, a variable name and a template
+  each, and its shell lines find the variables set (`"$REVIEW"`). Traceworks reads no shell text to decide where a
+  value would be harmless; no reading of shell text is bash's.
+  - **How a value arrives.** The text bash parses holds the lines Traceworks writes first, alone and without any
+    text of the workflow, then the command as its author wrote it. The value travels encoded, in letters, digits
+    and `\xHH` inside single quotes, an alphabet that means nothing to bash's parser, and bash itself decodes it
+    into the variable (`printf %b`): what a variable holds, bash does not parse.
 
     ```
-    IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :
-    it's $(not run)
-    TRACEWORKS_VALUE_1_END
-    TRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\n'}
-    printf '%s\n' "${TRACEWORKS_VALUE_1}"
+    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && printf -v "$1" '%s' "$TRACEWORKS_V" || { echo "traceworks: the value of $1 did not arrive whole" >&2; exit 74; }; }
+    TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
+    unset -f TRACEWORKS_VALUE
+    printf '%s\n' "$REVIEW" > review.md
     ```
 
-    Bash does not read what a parameter expansion yields as code, so the value cannot become a command, whatever
-    it holds and whatever the author, or another value, wrote around the reference. The lines that set the
-    variables are the first of the text, written by Traceworks alone, where no text of the workflow can change how
-    bash reads them. Each value is the body of a heredoc with a quoted delimiter, in which bash expands nothing: the
-    value stands there as it is, and the delimiter is one that no line of the value is (`…_END`, with a `_` more
-    for as long as the value has such a line). `read` takes the body whole and the last line takes off the newline
-    the heredoc ends with, so every byte arrives, trailing newlines included, for a value as large as the output
-    limit (16 MiB takes bash a few seconds). The variables are plain shell variables: not exported, so no process
-    the command starts inherits them, and not bound by the limits of arguments and the environment. The names
-    start with `TRACEWORKS_VALUE_`; no secret can have such a name. A NUL byte in a value is dropped, as it was
-    when the value stood in the line: bash holds none.
-  - **The form of the reference follows the place.** A bare word gets `"${TRACEWORKS_VALUE_1}"`, one argument;
-    inside the author's double quotes, in the body of a heredoc with an unquoted delimiter and in a comment it is
-    `${TRACEWORKS_VALUE_1}`. Traceworks reads the place with a small reader of shell text, not a shell. Where that
-    reader is wrong, or where a value inserted as it is (a trusted one) changes how bash reads the rest of the
-    line, the reference expands in another place than expected: a value split into words, or the reference
-    printed as text. It does not become a command.
+    Every byte arrives, trailing newlines included, for a value as large as the output limit (16 MiB takes bash
+    some seconds, and up to four times its size in the text). A NUL is taken out before the value is sent: no shell
+    variable holds one. Each variable's length in bytes is compared with what was sent; a value that did not arrive
+    whole ends the shell with exit code 74 before the command's first line. The variables are not exported, so no
+    process the command starts inherits them unless the command exports them. A tool step (`container_args`) runs
+    no shell and takes no values.
   - **What is model text.** From the first call of a model on (a `simple` or `agentic` step, a wrapper in AI mode,
     `compress-ai`, a step an AI actor decides, a child workflow that asks one), every step output recorded since
     and every variable made from one: `{{ block.<name>.output }}`, `{{ previous_output }}`, `{{ step_N_output }}`,
@@ -329,38 +323,19 @@ content, and no blob is written through one.
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
     static `items` of a `foreach`, a person's answer.
-  - **The run refuses a line where no reference can stand**, before anything of it runs (a `run_if` test and an
-    `items_command` included), with `shell line refused, nothing ran: {{ item }} stands inside single quotes,
-    where the shell expands no reference. …`, and the run ends with that error:
-    - where bash expands no reference: single quotes, `$'…'`, a heredoc with a quoted delimiter (`<<'EOF'`), after
-      a backslash, and backticks, which bash reads twice;
-    - where bash evaluates what a value holds as arithmetic, or evaluates a name it is given: `$(( ))`, `(( ))`,
-      `$[ ]`, `let`, an array subscript, the offset of `${name:offset}`, `[[ … ]]` with `-eq -ne -lt -le -gt -ge`,
-      `declare`, `typeset`, `local`, `export` and `readonly` with `-i` or `-n` or for a name, `read`, `unset`,
-      `mapfile`, `printf -v`, `test -v`;
-    - where a command runs what it is given: `eval`, `source` and `.`, `trap`, the code argument of `bash -c`,
-      `sh -c`, `python3 -c`, `perl -e`, `node -e` and the like, a heredoc such an interpreter reads as its program
-      (`bash <<EOF`, `… | sh`), and the place of the command's name.
-
-    `traceworks check` reports each of these as an error where the workflow shows the value to be protected
-    (`quoted-placeholder`, `heredoc-placeholder`, `placeholder-refused-place`), so `traceworks run` starts no run.
-    Bare model text in a block without `shell_escape_variables: true` is the error `unquoted-ai-output`: its author
-    wrote a value inserted as it is, and the run would hand it over as one argument.
-  - **What is not closed.** The list of evaluating places is what is cheap to recognise, and it is not complete.
-    A command that takes a protected value as an argument still decides what it does with it: `xargs`,
-    `find -exec`, `ssh host <command>`, `su -c`, an `awk` or `sed` program, `git` options, a path to delete, a file
-    a later step runs or sources, a redirection to a path the value names. Those are the workflow author's to
-    keep safe. A loop item, a variable and a child workflow's own shell lines are not seen by `check`: there a
-    bare placeholder is handed over as one argument although its author did not ask for it (`wc -l {{ files }}`
-    over `a.txt b.txt` counts one file of that name), without a refusal; the recorded command shows it.
-  - **No reference outside a shell line.** A tool step's `container_args`, the host path of a `mounts` entry and a
-    child's `workflow_id` pass no shell. A protected value there, model text included, is refused: it would
-    choose what the tool does, what the container sees or which workflow runs. The image of a step
-    (`container_image`), its `network` and its secrets are read as written, without placeholders; a hook gets its
-    payload on standard input and its program and arguments from `traceworks.json`; the git commands of
-    `run --source` take the operator's arguments only.
+  - **What the author's command does with the variable is the author's.** Traceworks guarantees that the value is
+    in the variable and nowhere in the code. Two classic traps remain. An unquoted `$REVIEW` is split into words
+    and its `*` matched against file names: write `"$REVIEW"`. And a command that evaluates what it is given runs
+    the value: `eval "$REVIEW"`, `bash -c "$REVIEW"`, `$REVIEW` as the command itself, and bash's arithmetic, which
+    evaluates a variable's content (`$(( REVIEW ))`, `[[ $REVIEW -eq 1 ]]`, an array index, `declare -i`). The
+    same holds for programs that take code: `xargs`, `find -exec`, `ssh host "$REVIEW"`, an `awk` or `sed` program.
+  - **No protected value outside a shell line either.** A tool step's `container_args`, the host path of a
+    `mounts` entry and a child's `workflow_id` take none, model text included: it would choose what the tool does,
+    what the container sees or which workflow runs. The image of a step (`container_image`), its `network` and its
+    secrets are read as written, without placeholders; a hook gets its payload on standard input and its program
+    and arguments from `traceworks.json`; the git commands of `run --source` take the operator's arguments only.
   - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it:
-    a run resumed from one inserts what those calls wrote as before, until the resumed run asks a model itself. A
+    a run resumed from one treats what those calls wrote as before, until the resumed run asks a model itself. A
     checkpoint written now has a format number such a version refuses.
 - **A gate from an AI step.** A `simple` or `agentic` step can set the run's gate with a `gate_status:` line, since a
   report step delivers its verdict that way; a model steered by what it reads can therefore set a gate too. Keep the

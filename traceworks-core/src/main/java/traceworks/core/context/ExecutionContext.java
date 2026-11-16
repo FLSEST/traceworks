@@ -509,25 +509,33 @@ public class ExecutionContext {
     }
 
     /**
-     * Shell command line. A value the run has to protect (an untrusted or platform variable, a tainted block output,
-     * what may hold text a model wrote) never becomes part of the text: it reaches the shell as the value of a
-     * variable the line starts by setting, and a reference stands in its placeholder's place. Every other value is
-     * inserted as it is, or with {@code escapeAll} in single quotes. Substituted platform data taints the run from
-     * here on ({@link ExecutionContextTaint#substitutedIntoShell}). See {@link TemplateResolver#shellLine}.
+     * Shell command line: every value is inserted as it is, or with {@code escapeAll} in single quotes. A protected
+     * value (an untrusted or platform variable, a tainted block output, what may hold text a model wrote) never goes
+     * into a shell line: a line that names one is refused. See {@link TemplateResolver#shellLine}.
      *
-     * @throws ShellLineRefusedException when such a value stands where no reference can stand (single quotes, an
-     *                                   arithmetic expression, an argument of {@code eval} and so on,
-     *                                   {@link ShellValuePlace}); nothing is filled in then, with {@code escapeAll} too
+     * @throws ShellLineRefusedException when the line names a protected value, wherever it stands and with
+     *                                   {@code escapeAll} too; nothing is filled in then
      */
     public String resolveShellTemplate(String template, boolean escapeAll) {
         return TemplateResolver.shellLine(template, previousOutput, blockOutputs, variables, taint.snapshot(),
-                escapeAll, taint::substitutedIntoShell);
+                escapeAll);
     }
 
     /**
-     * Whether the template names a value the run has to protect (an untrusted or platform variable, a tainted
-     * output, what may hold text a model wrote). A place that passes no shell, where no reference can stand, refuses
-     * such a value: the arguments of a tool step, the host path of a mount.
+     * The value of a shell variable a block names under {@code values}: the template with every placeholder filled
+     * in as it is, a protected one too, because the result reaches the shell as a variable's value and never as
+     * shell text. Platform data in it taints the run from here on, as it did in a shell line
+     * ({@link ExecutionContextTaint#substitutedIntoShell}).
+     */
+    public String resolveShellValue(String template) {
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables,
+                taint::substitutedIntoShell);
+    }
+
+    /**
+     * Whether the template names a protected value (an untrusted or platform variable, a tainted output, what may
+     * hold text a model wrote). The places that take none refuse it: the arguments of a tool step, the host path of
+     * a mount.
      */
     public boolean namesEscapedValue(String template) {
         return TemplateResolver.namesEscapedValue(template, taint.snapshot());

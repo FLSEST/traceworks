@@ -49,16 +49,18 @@ class EngineRoundTripTest {
                         Map.of("type", "shell", "name", "areas", "config", Map.of("command", "set -euo pipefail; "
                                 + tool + " find --rules '" + rules + "' --root . --out {{ scratch_dir }}/areas.jsonl"
                                 + " --summary {{ scratch_dir }}/areas-summary.json")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("AREA_ID", "{{ area.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/areas.jsonl", "variable_name", "area",
                                 "shell_escape_variables", true, "continue_on_error", true,
                                 "max_consecutive_failures", 0L, "on_failure", "continue",
-                                "command", "set -euo pipefail; if [ {{ area.id }} = A002 ]; then echo boom; exit 1; fi;"
-                                        + " printf '{\"area\":\"%s\",\"findings\":[]}' {{ area.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "set -euo pipefail; if [ \"$AREA_ID\" = A002 ]; then echo boom; exit 1; fi;"
+                                        + " printf '{\"area\":\"%s\",\"findings\":[]}' \"$AREA_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --areas "
+                                        + "\"$VERDICTS\" | " + tool + " report --areas "
                                         + "{{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json"
                                         + " --verdicts - --out {{ scratch_dir }}/security-report.md")))));
         Files.writeString(pkg.resolve("workflow.json"), workflow);
@@ -118,16 +120,18 @@ class EngineRoundTripTest {
                         Map.of("type", "shell", "name", "areas", "config", Map.of("command", "set -euo pipefail; "
                                 + tool + " find --rules '" + rules + "' --root . --out {{ scratch_dir }}/areas.jsonl"
                                 + " --summary {{ scratch_dir }}/areas-summary.json")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("AREA_ID", "{{ area.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/areas.jsonl", "variable_name", "area",
                                 "shell_escape_variables", true,
-                                "command", "set -euo pipefail; if [ {{ area.id }} = A001 ]; then cat"
+                                "command", "set -euo pipefail; if [ \"$AREA_ID\" = A001 ]; then cat"
                                         + " {{ package_dir }}/answer-a001.json; else"
-                                        + " printf '{\"area\":\"%s\",\"findings\":[]}' {{ area.id }}; fi")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                        + " printf '{\"area\":\"%s\",\"findings\":[]}' \"$AREA_ID\"; fi")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --areas "
+                                        + "\"$VERDICTS\" | " + tool + " report --areas "
                                         + "{{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json"
                                         + " --verdicts - --out {{ scratch_dir }}/security-report.md")))));
         Files.writeString(pkg.resolve("workflow.json"), workflow);
@@ -169,20 +173,23 @@ class EngineRoundTripTest {
                         "key", "roundtrip", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to find, which sorts it to the areas
-                        Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_findings }} >"
+                        Map.of("type", "shell", "name", "areas", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" >"
                                         + " {{ scratch_dir }}/known-findings.txt; " + tool + " find --rules '" + rules
                                         + "' --root . --known {{ scratch_dir }}/known-findings.txt"
                                         + " --out {{ scratch_dir }}/areas.jsonl"
                                         + " --summary {{ scratch_dir }}/areas-summary.json")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("AREA_ID", "{{ area.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/areas.jsonl", "variable_name", "area",
                                 "shell_escape_variables", true,
-                                "command", "set -euo pipefail; cat {{ package_dir }}/answer-{{ area.id }}.json")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "set -euo pipefail; cat {{ package_dir }}/answer-\"$AREA_ID\".json")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --areas "
+                                        + "\"$VERDICTS\" | " + tool + " report --areas "
                                         + "{{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json"
                                         + " --verdicts - --out {{ scratch_dir }}/security-report.md")))));
         Files.writeString(pkg.resolve("workflow.json"), workflow);
@@ -272,19 +279,22 @@ class EngineRoundTripTest {
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
                         "key", "items", "category", "security", "report_block", "report")),
                 "blocks", List.of(
-                        Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; "
+                        Map.of("type", "shell", "name", "areas", "config", Map.of("values", Map.of("KNOWN_ITEMS", "{{ audit_items }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/known-items.txt; "
                                         + tool + " find --rules '" + rules + "' --root . --items {{ scratch_dir }}/known-items.txt"
                                         + " --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("AREA_ITEM", "{{ area.item }}", "AREA_ID", "{{ area.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/areas.jsonl", "variable_name", "area",
                                 "shell_escape_variables", true, "continue_on_error", true, "on_failure", "continue",
-                                "command", "set -euo pipefail; echo {{ area.item }} >> '" + asked + "'; if [ -e '" + fail
-                                        + "' ]; then echo boom; exit 1; fi; printf '{\"area\":\"%s\",\"findings\":[]}' {{ area.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "set -euo pipefail; echo \"$AREA_ITEM\" >> '" + asked + "'; if [ -e '" + fail
+                                        + "' ]; then echo boom; exit 1; fi; printf '{\"area\":\"%s\",\"findings\":[]}' \"$AREA_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --areas "
+                                        + "\"$VERDICTS\" | " + tool + " report --areas "
                                         + "{{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json"
                                         + " --verdicts - --out {{ scratch_dir }}/security-report.md"))))));
         Path home = Files.createDirectories(temp.resolve("home-items"));
@@ -350,22 +360,25 @@ class EngineRoundTripTest {
                         "key", "held", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows of findings and items goes to find
-                        Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_findings }} >"
-                                        + " {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} >"
+                        Map.of("type", "shell", "name", "areas", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}", "KNOWN_ITEMS", "{{ audit_items }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" >"
+                                        + " {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" >"
                                         + " {{ scratch_dir }}/known-items.txt; " + tool + " find --rules '" + rules
                                         + "' --root . --known {{ scratch_dir }}/known-findings.txt"
                                         + " --items {{ scratch_dir }}/known-items.txt --out {{ scratch_dir }}/areas.jsonl"
                                         + " --summary {{ scratch_dir }}/areas-summary.json")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("AREA_ID", "{{ area.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/areas.jsonl", "variable_name", "area",
                                 "shell_escape_variables", true,
-                                "command", "set -euo pipefail; echo {{ area.id }} >> '" + asked
+                                "command", "set -euo pipefail; echo \"$AREA_ID\" >> '" + asked
                                         + "'; cat {{ package_dir }}/answer.json")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --areas "
+                                        + "\"$VERDICTS\" | " + tool + " report --areas "
                                         + "{{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json"
                                         + " --verdicts - --out {{ scratch_dir }}/security-report.md"))))));
         Path home = Files.createDirectories(temp.resolve("home-held"));
@@ -430,8 +443,9 @@ class EngineRoundTripTest {
                 config.put("execution_mode", "shell");
                 config.remove("tools");
                 config.remove("untrusted_input");
+                config.put("values", Map.of("AREA_ITEM", "{{ area.item }}", "AREA_ID", "{{ area.id }}"));
                 config.put("command", "set -euo pipefail; echo {{ judge }} {{ judge_provider }} {{ judge_model }}"
-                        + " {{ area.item }} >> '" + asked + "'; cat {{ package_dir }}/answer-{{ area.id }}.json");
+                        + " \"$AREA_ITEM\" >> '" + asked + "'; cat {{ package_dir }}/answer-\"$AREA_ID\".json");
             } else {
                 assertThat(command).satisfiesAnyOf(c -> assertThat(c).containsOnlyOnce("; areas find "),
                         c -> assertThat(c).containsOnlyOnce("| areas report "));

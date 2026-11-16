@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.WorkflowExecutionException;
 import traceworks.core.model.BlockDefinition;
@@ -137,7 +137,7 @@ class ConditionalBlockExecutorTest {
     /** A shell condition the cancel killed (exit 130) is no "false": no branch runs, and no SKIPPED either. */
     @Test
     void execute_aShellConditionTheCancelKilled_takesNoBranch_andIsCancelled() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenAnswer(inv -> {
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenAnswer(inv -> {
             context.cancel();
             return exit(130);
         });
@@ -249,7 +249,7 @@ class ConditionalBlockExecutorTest {
 
     @Test
     void execute_shellMode_exitCodeZero_executesThenBranch() {
-        when(commands.runCommand(eq("test -f /tmp/x"), anyInt(), any())).thenReturn(exit(0));
+        when(commands.runCommand(eq("test -f /tmp/x"), anyInt(), any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "then-shell-output"));
 
@@ -270,7 +270,7 @@ class ConditionalBlockExecutorTest {
     /** The branch command honours container_image like retry, foreach, while and switch. */
     @Test
     void execute_shellMode_passesContainerImageAndMountsToTheBranchCommand() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(0));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
@@ -296,7 +296,7 @@ class ConditionalBlockExecutorTest {
 
     @Test
     void execute_shellMode_withoutContainerImage_staysOnTheHost() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(0));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
@@ -314,7 +314,7 @@ class ConditionalBlockExecutorTest {
 
     @Test
     void execute_shellMode_nonZeroExit_executesElseBranch() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(1));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(1));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "else-shell"));
 
@@ -336,7 +336,7 @@ class ConditionalBlockExecutorTest {
      */
     @Test
     void execute_shellMode_conditionBeyondTheOutputLimit_failsAndRunsNoBranch() {
-        when(commands.runCommand(anyString(), anyInt(), any()))
+        when(commands.runCommand(anyString(), anyInt(), any(), any()))
                 .thenReturn(new ShellResult("y\n" + NOTE, 153, 0, NOTE));
 
         Map<String, Object> config = new HashMap<>();
@@ -356,7 +356,7 @@ class ConditionalBlockExecutorTest {
     /** A condition that ran out of time fails the block and runs no branch; the runner's mark decides. */
     @Test
     void execute_shellMode_conditionTimesOut_failsAndRunsNoBranch() {
-        when(commands.runCommand(anyString(), anyInt(), any()))
+        when(commands.runCommand(anyString(), anyInt(), any(), any()))
                 .thenReturn(new ShellResult("Command timed out after 300 seconds", 124, 0, "", true));
 
         Map<String, Object> config = new HashMap<>();
@@ -376,7 +376,7 @@ class ConditionalBlockExecutorTest {
     /** A condition the runner refused never ran: the block fails with the reason and runs no branch. */
     @Test
     void execute_shellMode_conditionDidNotRun_failsAndRunsNoBranch() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(new ShellResult(
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(new ShellResult(
                 "image traceworks/shell:0123456789ab is not present; run traceworks images build", 125, 0, "", false, "image traceworks/shell:0123456789ab is not present; run traceworks images build"));
 
         Map<String, Object> config = new HashMap<>();
@@ -397,7 +397,7 @@ class ConditionalBlockExecutorTest {
     @ParameterizedTest
     @ValueSource(ints = {125, 1, 74})
     void execute_shellMode_conditionExitsLikeARefusalByItself_takesTheElseBranch(int exitCode) {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(exitCode));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(exitCode));
         when(commands.shellStep(any(), anyInt(), anyInt(), any())).thenReturn(step(StepStatus.COMPLETED, "else-shell"));
 
         Map<String, Object> config = new HashMap<>();
@@ -415,7 +415,7 @@ class ConditionalBlockExecutorTest {
     /** A condition that exits 124 by itself is false: the else branch runs. */
     @Test
     void execute_shellMode_conditionExits124ByItself_takesTheElseBranch() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(124));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(124));
         when(commands.shellStep(any(), anyInt(), anyInt(), any())).thenReturn(step(StepStatus.COMPLETED, "else-shell"));
 
         Map<String, Object> config = new HashMap<>();
@@ -432,7 +432,7 @@ class ConditionalBlockExecutorTest {
 
     @Test
     void execute_shellMode_falsy_noElseDefined_skips() {
-        when(commands.runCommand(anyString(), anyInt(), any())).thenReturn(exit(1));
+        when(commands.runCommand(anyString(), anyInt(), any(), any())).thenReturn(exit(1));
 
         Map<String, Object> config = new HashMap<>();
         config.put("execution_mode", "shell");
@@ -483,7 +483,7 @@ class ConditionalBlockExecutorTest {
 
     @Test
     void execute_customTimeout_passedToShellExecutor() {
-        when(commands.runCommand(anyString(), eq(99), any())).thenReturn(exit(0));
+        when(commands.runCommand(anyString(), eq(99), any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), eq(99), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
@@ -495,7 +495,7 @@ class ConditionalBlockExecutorTest {
 
         executor.execute(conditional(config), context);
 
-        verify(commands).runCommand(anyString(), eq(99), any());
+        verify(commands).runCommand(anyString(), eq(99), any(), any());
         verify(commands).shellStep(any(BlockDefinition.class), anyInt(), eq(99), any());
     }
 
@@ -586,27 +586,23 @@ class ConditionalBlockExecutorTest {
     }
 
     @Test
-    void execute_shellMode_untrustedVariableInCondition_isSingleQuoted() {
+    void execute_shellMode_untrustedVariableInCondition_isRefused() {
         context.setUntrustedVariable("branch", "main; id");
-        when(commands.runCommand(eq(FakeCommandRunner.value(1, "main; id") + "test \"${TRACEWORKS_VALUE_1}\" = main"), anyInt(), any())).thenReturn(exit(1));
 
         Map<String, Object> config = new HashMap<>();
         config.put("execution_mode", "shell");
         config.put("condition", "test {{ branch }} = main");
         config.put("then_command", "echo then");
 
-        StepResult result = executor.execute(conditional(config), context);
-
-        assertThat(result.getInput()).contains("false");
-        verify(commands).runCommand(eq(FakeCommandRunner.value(1, "main; id") + "test \"${TRACEWORKS_VALUE_1}\" = main"),
-                anyInt(), any());
+        assertThatThrownBy(() -> executor.execute(conditional(config), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
     void execute_shellMode_escapeOption_quotesPreviousOutputInConditionAndBranch() {
         context.recordOutput("audit", "line one\nVERIFICATION_PASSED");
         when(commands.runCommand(eq("echo 'line one\nVERIFICATION_PASSED' | grep -q VERIFICATION_PASSED"), anyInt(),
-                any())).thenReturn(exit(0));
+                any(), any())).thenReturn(exit(0));
         when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
                 .thenReturn(step(StepStatus.COMPLETED, "ok"));
 
@@ -826,7 +822,7 @@ class ConditionalBlockExecutorTest {
     void conditionError_doesNotApplyInShellMode_whereANonZeroExitIsFalse() {
         BlockDefinition block = aiConditional("skip");
         block.getConfig().put("execution_mode", "shell");
-        when(commands.runCommand(any(), anyInt(), any())).thenReturn(exit(1));
+        when(commands.runCommand(any(), anyInt(), any(), any())).thenReturn(exit(1));
         when(commands.shellStep(any(), anyInt(), anyInt(), any()))
                 .thenReturn(StepResult.builder().status(StepStatus.COMPLETED).output("else ran").build());
 

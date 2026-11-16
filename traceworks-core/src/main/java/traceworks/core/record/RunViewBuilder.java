@@ -296,7 +296,7 @@ final class RunViewBuilder {
         List<String> networkHosts = new ArrayList<>();
         e.fields().path("network_hosts").forEach(h -> networkHosts.add(h.asText()));
         JsonNode item = e.fields().path("item");
-        return new CommandView(e.seq(), item.isInt() ? item.intValue() : null, e.blob("command"),
+        return new CommandView(e.seq(), item.isInt() ? item.intValue() : null, e.blob("command"), e.blob("values"),
                 text(e.fields(), "working_dir"), text(e.fields(), "image"), text(e.fields(), "image_id"), mounts,
                 network(e.fields()), networkHosts,
                 envNames, e.fields().path("host").asBoolean(), null);

@@ -1,14 +1,11 @@
 package traceworks.core.analyzer;
 
 import traceworks.core.analyzer.AnalyzerFinding.Severity;
-import traceworks.core.context.HeredocReader;
-import traceworks.core.context.ShellQuoteScanner;
-import traceworks.core.context.ShellQuoteScanner.Context;
-import traceworks.core.context.ShellQuoteScanner.Occurrence;
-import traceworks.core.context.ShellValuePlace;
-import traceworks.core.context.ShellQuoteScanner.Heredoc;
-import traceworks.core.context.ShellQuoteScanner.Placeholder;
-import traceworks.core.context.ShellQuoteScanner.Quote;
+import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
+import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
+import traceworks.core.analyzer.ShellQuoteScanner.Quote;
+import traceworks.core.context.PlaceholderSyntax;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.engine.NestedBlocks;
 import traceworks.core.engine.StepModes;
@@ -28,17 +25,17 @@ import java.util.regex.Pattern;
 /**
  * Rules for placeholders in shell code whose value the shell has to take as one piece of text.
  *
- * <p>A run treats two kinds of value differently. A value it has to <b>protect</b> (outside text, and what a model
- * wrote, both below) never becomes shell text: the run sets a shell variable to it and writes a reference in the
- * placeholder's place, or refuses the line where no reference can stand ({@link ShellValuePlace}). Every other
- * value is <b>inserted</b> as it is, or in single quotes with {@code shell_escape_variables}.
+ * <p>A run treats two kinds of value differently. A <b>protected</b> value (outside text, and what a model wrote,
+ * both below) never goes into shell code: a shell line that names one is refused by the run, wherever the
+ * placeholder stands, and the value reaches a command as a shell variable the block names under {@code values}
+ * ({@code core.engine.ShellValues}). Every other value is <b>inserted</b> as it is, or in single quotes with
+ * {@code shell_escape_variables}; the rules for those read the shell text ({@link ShellQuoteScanner}), as they
+ * always did, to warn of a value that would not be one piece of text.
  *
  * <ul>
- *   <li>The lines a run would refuse, for the values the workflow shows to be protected, are {@code ERROR}s, and
- *       no other place of such a value is: {@code quoted-placeholder} inside single quotes,
- *       {@code heredoc-placeholder} in a heredoc with a quoted delimiter or one an interpreter reads as its program,
- *       {@code placeholder-refused-place} for the others (backticks, arithmetic, an argument of {@code eval} and so
- *       on). The analyzer asks the class the run asks.</li>
+ *   <li>{@code protected-value-in-shell} ({@code ERROR}): a placeholder the workflow shows to be protected stands
+ *       in shell code, anywhere, with or without {@code shell_escape_variables}. The run would refuse the line
+ *       ({@code ShellLineRefusedException}), so the check refuses the workflow.</li>
  *   <li>{@code quoted-placeholder} ({@code WARNING}): an inserted block output inside quotes. An apostrophe or a
  *       quote in the value ends them ({@code '; id} runs {@code id}); in a block with
  *       {@code shell_escape_variables} also any other placeholder in single quotes, where the two pairs cancel out
@@ -53,11 +50,6 @@ import java.util.regex.Pattern;
  *       ({@code WARNING}); a quoted heredoc whose reader takes the body as input ({@code cat > file},
  *       {@code python3 tool.py}) is fine. In a block with {@code shell_escape_variables} every inserted placeholder
  *       in a body is a {@code WARNING}: the resolver quotes it there too and the quotes land in the text.</li>
- *   <li>{@code unquoted-ai-output}: what a model wrote stands as a bare word in shell code of a block without
- *       {@code shell_escape_variables}. A model reads the workspace, and what it reads can steer its answer, so a
- *       run hands what a model wrote to the shell as one value ({@code ExecutionContextTaint}); the command would
- *       not run as its author wrote it, a value inserted as it is, and a workflow behaves as written or is refused.
- *       {@code ERROR}. Inside double quotes the author asked for one piece of text and gets it: no finding.</li>
  * </ul>
  *
  * <p><b>What a model wrote</b>, as far as the block list tells: the output of a block that asks a model
@@ -70,8 +62,7 @@ import java.util.regex.Pattern;
  * {@code previous_output} in a nested block, name an output whose step the list does not tell: they count as what a
  * model wrote when the workflow asks a model before the block. What the list does not tell at all (a loop item, a
  * variable, a child whose reference is a placeholder, the values a parent hands to a child) the run decides: it
- * hands such a value over by reference, and refuses the shell line where none can stand
- * ({@code ShellLineRefusedException}).
+ * refuses the shell line ({@code ShellLineRefusedException}).
  *
  * <p>The TODO and goal variables ({@code todo_title}, {@code open_todos}, {@code goal_status}, ...) are no outside
  * text: Traceworks does not provide them. A run input of the same name is used as is (never
@@ -129,11 +120,10 @@ final class QuotingRules {
             if (block == null) continue;
             List<ShellText> texts = shellTexts(block, i);
             if (texts.isEmpty()) continue;
-            refusedPlaces(model, texts, i, block.getName(), out);
+            protectedInShell(model, texts, i, block.getName(), out);
             quoted(model, texts, i, block.getName(), out);
             selfCompare(texts, i, block.getName(), out);
             heredoc(model, texts, i, block.getName(), out);
-            unquotedAiOutput(model, texts, i, out);
         }
     }
 
@@ -146,62 +136,35 @@ final class QuotingRules {
     }
 
     /**
-     * The shell lines a run would refuse ({@link ShellValuePlace}): a value the run protects stands where no
-     * reference can stand. One finding per kind of place: {@code quoted-placeholder} for single quotes,
-     * {@code heredoc-placeholder} for a heredoc body, {@code placeholder-refused-place} for the others.
+     * A placeholder the workflow shows to be protected, anywhere in shell code: in a comment or a heredoc body too,
+     * because the run fills those in like the rest and refuses the line.
      */
-    private static void refusedPlaces(ModelSteps model, List<ShellText> texts, int i, String name,
-                                      List<AnalyzerFinding> out) {
-        Map<String, Set<String>> byRule = new java.util.LinkedHashMap<>();
-        Map<String, String> first = new HashMap<>();
-        for (ShellText text : texts) {
-            for (Occurrence occurrence : ShellQuoteScanner.occurrences(text.code())) {
-                if (!protectedValue(model, i, occurrence.key(), text.own())) continue;
-                ShellValuePlace place = ShellValuePlace.of(occurrence);
-                if (place.form() != ShellValuePlace.Form.REFUSED) continue;
-                String rule = occurrence.context() == Context.SINGLE_QUOTES ? "quoted-placeholder"
-                        : occurrence.context() == Context.HEREDOC ? "heredoc-placeholder"
-                        : "placeholder-refused-place";
-                String shown = "{{ " + occurrence.key().strip() + " }}";
-                byRule.computeIfAbsent(rule, r -> new LinkedHashSet<>()).add(shown + " stands " + place.refusal());
-                first.putIfAbsent(rule, shown);
-            }
-        }
-        byRule.forEach((rule, places) -> out.add(AnalyzerFinding.of(rule, Severity.ERROR, i, name,
-                String.join("; ", places) + " — its value is text a model wrote or comes from outside the run; a run"
-                        + " hands such a value to the shell as a variable and writes a reference in the placeholder's"
-                        + " place, which needs a place where the shell takes a value, so the run refuses this shell"
-                        + " line before anything runs. Correct: the placeholder as a bare word or inside double"
-                        + " quotes (X=" + first.get(rule) + ", then use \"$X\"), or pass the value through a file or"
-                        + " standard input (printf '%s\\n' " + first.get(rule) + " > file)")));
-    }
-
-    private static void unquotedAiOutput(ModelSteps model, List<ShellText> texts, int i, List<AnalyzerFinding> out) {
-        Set<String> placeholders = new LinkedHashSet<>();
+    private static void protectedInShell(ModelSteps model, List<ShellText> texts, int i, String name,
+                                         List<AnalyzerFinding> out) {
+        Set<String> keys = new LinkedHashSet<>();
         Set<String> sources = new LinkedHashSet<>();
         for (ShellText text : texts) {
-            if (text.escaped()) continue;
-            for (Occurrence occurrence : ShellQuoteScanner.occurrences(text.code())) {
-                if (occurrence.context() != Context.BARE
-                        || ShellValuePlace.of(occurrence).form() == ShellValuePlace.Form.REFUSED) {
-                    continue;
-                }
-                String source = model.sourceOf(i, occurrence.key().strip(), text.own());
+            for (String key : PlaceholderSyntax.keysIn(text.code())) {
+                String stripped = key.strip();
+                String source = outsideText(stripped) ? "text from outside the run"
+                        : model.sourceOf(i, stripped, text.own());
                 if (source != null) {
-                    placeholders.add("{{ " + occurrence.key().strip() + " }}");
+                    keys.add(stripped);
                     sources.add(source);
                 }
             }
         }
-        if (placeholders.isEmpty()) return;
-        out.add(AnalyzerFinding.of("unquoted-ai-output", Severity.ERROR, i, model.blocks().get(i).getName(),
-                "puts " + String.join(", ", placeholders) + " into shell code as a bare word without"
-                        + " shell_escape_variables, " + String.join(", ", sources) + " — a model reads the workspace,"
-                        + " and what it reads can steer its answer, so a run hands what a model wrote to the shell as"
-                        + " one value, never as shell code, and this command would not run as written; Traceworks"
-                        + " refuses the workflow. Correct: shell_escape_variables: true on this block, or the"
-                        + " placeholder inside double quotes; to hand the text on as standard input or as a file,"
-                        + " write printf '%s\\n' " + placeholders.iterator().next() + " | tool, or > file"));
+        if (keys.isEmpty()) return;
+        String first = keys.iterator().next();
+        String variable = ShellLineRefusedException.variableName(first);
+        out.add(AnalyzerFinding.of("protected-value-in-shell", Severity.ERROR, i, name,
+                "puts " + keys.stream().map(key -> "{{ " + key + " }}").collect(java.util.stream.Collectors.joining(", "))
+                        + " into shell code, " + String.join(", ", sources) + " — text a model wrote and text from"
+                        + " outside the run never go into shell code, quoted or not: a model reads the workspace, and"
+                        + " what it reads can steer its answer; a run refuses this shell line before anything runs,"
+                        + " so Traceworks refuses the workflow. Correct: hand the value to the command as a variable:"
+                        + " \"values\": {\"" + variable + "\": \"{{ " + first + " }}\"} in this block's config, and"
+                        + " \"$" + variable + "\" where the placeholder stands"));
     }
 
     /**
@@ -356,8 +319,8 @@ final class QuotingRules {
     }
 
     /**
-     * A value the run inserts as it is, inside the author's quotes. What the run protects is not judged here: inside
-     * double quotes a reference to it is fine, and single quotes are {@link #refusedPlaces}'.
+     * A value the run inserts as it is, inside the author's quotes. A protected value is not judged here: it is
+     * {@link #protectedInShell}'s, wherever it stands.
      */
     private static void quoted(ModelSteps model, List<ShellText> texts, int i, String name,
                                List<AnalyzerFinding> out) {
@@ -395,8 +358,8 @@ final class QuotingRules {
     }
 
     /**
-     * A value the run inserts as it is, in the body of a heredoc. What the run protects is not judged here: in an
-     * unquoted heredoc a reference to it is fine, and the bodies that take none are {@link #refusedPlaces}'.
+     * A value the run inserts as it is, in the body of a heredoc. A protected value is not judged here: it is
+     * {@link #protectedInShell}'s, wherever it stands.
      */
     private static void heredoc(ModelSteps model, List<ShellText> texts, int i, String name,
                                 List<AnalyzerFinding> out) {
@@ -443,9 +406,8 @@ final class QuotingRules {
         String delimiter = hits.delimiters.iterator().next();
         return AnalyzerFinding.of("heredoc-placeholder", Severity.WARNING, i, name,
                 "puts " + names + " into the body of a heredoc with an unquoted delimiter (<<" + delimiter + ") — the"
-                        + " value is inserted as it is, and the shell runs $(…) and backticks in it; correct: pass the"
-                        + " value outside the body with shell_escape_variables: true, e.g. printf '%s\\n' "
-                        + hits.expanded.iterator().next() + " > file");
+                        + " shell runs $(…) and backticks in the value, quotes do not protect there, not even the"
+                        + " resolver's; correct: quote the delimiter (<<'" + delimiter + "')");
     }
 
     private static AnalyzerFinding quotesInBody(HeredocHits hits, int i, String name) {

@@ -55,7 +55,8 @@
       "type": "shell",
       "name": "quote_it",
       "config": {
-        "command": "set -eu; echo got {{ previous_chain_output }}",
+        "values": {"CHAIN_OUTPUT": "{{ previous_chain_output }}"},
+        "command": "set -eu; echo got \"$CHAIN_OUTPUT\"",
         "run_if": "test \"{{ case }}\" = tainted"
       }
     },

@@ -200,6 +200,29 @@ class RecordingCommandRunnerTest {
         assertThat(ofType("step.command.finished")).noneMatch(f -> f.has("egress"));
     }
 
+    /**
+     * The shell variables a command found set are recorded by name next to the command, whose text holds none of
+     * them; a command without values has no such field.
+     */
+    @Test
+    void theValuesOfACommand_areRecordedByName_nextToTheCommand() throws Exception {
+        CommandRunner plain = request -> new CommandResult(0, "", "", 1, false);
+        Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put("REVIEW", "it's $(not run)\n");
+        values.put("TITLE", "Review");
+
+        recorder.recording(plain).run(new CommandRequest("printf '%s' \"$REVIEW\"", "/w", 30, null, null, null, false)
+                .withValues(values));
+        recorder.recording(plain).run(new CommandRequest("true", "/w", 30, null, null, null, false));
+
+        JsonNode command = ofType("step.command").getFirst();
+        assertThat(text(command.get("command"))).isEqualTo("printf '%s' \"$REVIEW\"");
+        assertThat(text(command.get("values"))).isEqualTo("{\"REVIEW\":\"it's $(not run)\\n\",\"TITLE\":\"Review\"}");
+        assertThat(CommandView.values(text(command.get("values")))).containsExactly(
+                Map.entry("REVIEW", "it's $(not run)\n"), Map.entry("TITLE", "Review"));
+        assertThat(ofType("step.command").get(1).has("values")).isFalse();
+    }
+
     /** A command whose output went beyond the limit: its end names the cut streams, stdout before stderr. */
     @Test
     void aTruncatedOutput_isNamedInTheCommandsEnd() throws Exception {

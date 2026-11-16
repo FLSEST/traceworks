@@ -86,7 +86,7 @@ class WorkflowDescriberTest {
                 {"id":"wf","blocks":[
                  {"type":"shell","name":"plain","config":{"command":"echo hi\\nsecond"}},
                  {"type":"shell","name":"deploy","config":{"command":"deploy","network":true,"workspace_writable":true,
-                  "secrets":["DEPLOY_TOKEN","OTHER"],"container_image":"./images/tools","timeout_seconds":600,
+                  "secrets":["DEPLOY_TOKEN","OTHER"],"values":{"REVIEW":"{{ previous_output }}","TITLE":"t"},"container_image":"./images/tools","timeout_seconds":600,
                   "mounts":["/data:/data:ro"]}}]}""");
 
         Block plain = described.blocks().get(0);
@@ -98,7 +98,8 @@ class WorkflowDescriberTest {
                 "image: the run's shell image");
 
         assertThat(facts(described.blocks().get(1), "shell")).containsExactly("network open", "workspace writable",
-                "secrets DEPLOY_TOKEN, OTHER", "image ./images/tools", "mounts /data:/data:ro", "timeout 600 s");
+                "secrets DEPLOY_TOKEN, OTHER", "values REVIEW, TITLE", "image ./images/tools", "mounts /data:/data:ro",
+                "timeout 600 s");
     }
 
     /** Only the names of secrets exist in a package; no value is ever looked up. */

@@ -85,40 +85,77 @@ class HostCommandRunnerTest {
         assertThat(marker).exists();
     }
 
-    /** The lines a run puts before a shell line to set a variable to a value it protects (docs/cli.md, "check"). */
-    private static String valueAssignment(String value) {
-        return "IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :\n" + value
-                + "\nTRACEWORKS_VALUE_1_END\nTRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\\n'}\n";
-    }
-
     /**
-     * A shell line of a run starts by setting a variable to each value the run protects, from a heredoc that holds
-     * the value as it is. The command travels on stdin, so a value as large as the output limit arrives whole, with
-     * every quote and its trailing newlines, in a variable no child process inherits, also under {@code set -e}.
+     * The values of a request are shell variables its command finds set. The text bash parses holds none of their
+     * bytes as code, so nothing a value holds runs: every hostile value arrives byte for byte in {@code "$VALUE"},
+     * and no file named {@code pwned} appears. A NUL is taken out before the value is sent.
      */
     @Test
-    void run_aLineWithAValueAssignment_keepsALargeValueByteForByte_andDoesNotExportIt(@TempDir Path dir)
-            throws Exception {
+    void run_values_arriveByteForByteInTheirVariable_andNothingOfThemRuns(@TempDir Path dir) throws Exception {
+        String delimiterWithNul = "x\nTRACEWORKS_VALUE_1_EN\u0000D\ntouch pwned\n: <<'TRACEWORKS_VALUE_1_END'";
+        List<String> hostile = new java.util.ArrayList<>(List.of(
+                "$(touch pwned)", "`touch pwned`", "'; touch pwned; '", "\"; touch pwned; \"", "x\ntouch pwned",
+                "\\x27; touch pwned; \\x27", "\\c", "%s %b \\n \\\\", "a b", "*", "-rf /", "", "\n", "\n\n\n",
+                "tail\n\n", "café € 😀", delimiterWithNul, "\u0000", "a\u0000", "\u0000b",
+                "a\u0000\u0000b\u0000", "'\u0000'", "TRACEWORKS_VALUE\u0000 X 1 'x'\nunset -f TRACEWORKS_VALUE\ntouch pwned",
+                "line with 'quotes', \"more\", $(nothing) and `nothing`\n".repeat(1024 * 1024 / 55)));
+        for (int at = 0; at <= "ab'c".length(); at++) {
+            hostile.add(new StringBuilder("ab'c").insert(at, '\u0000').toString());
+        }
+        Path out = dir.resolve("value");
+        String command = "set -euo pipefail\nprintf '%s' \"$VALUE\" > '" + out + "'; printf '%s' \"${#NAME}\"";
+
+        for (String value : hostile) {
+            java.nio.file.Files.deleteIfExists(out);
+            Map<String, String> values = new java.util.LinkedHashMap<>();
+            values.put("VALUE", value);
+            values.put("NAME", "name");
+            CommandRequest request = shell(command, dir.toString(), 60).withValues(values);
+
+            CommandResult result = runner.run(request);
+
+            String what = value.length() > 60 ? value.substring(0, 60) + "…" : value;
+            assertThat(result.exitCode()).as("%s: %s", what, result.stderr()).isZero();
+            assertThat(result.stdout()).as("the second variable: %s", what).isEqualTo("4");
+            assertThat(java.nio.file.Files.readString(out).equals(value.replace("\u0000", "")))
+                    .as("the value, byte for byte, without NUL: %s", what).isTrue();
+            assertThat(dir.resolve("pwned")).as("a command of the value ran: %s", what).doesNotExist();
+            assertThat(request.script()).as("no NUL in the text bash reads").doesNotContain("\u0000");
+        }
+    }
+
+    /** A value as large as the output limit arrives whole, and no child process inherits the variable. */
+    @Test
+    void run_aValueOf16MiB_arrivesWhole_andIsNotExported(@TempDir Path dir) throws Exception {
         String value = "line with 'quotes', \"more\", $(nothing run) and `nothing`\n".repeat(16 * 1024 * 1024 / 58)
                 + "\n\n";
         Path out = dir.resolve("value");
-        String command = "set -euo pipefail\n" + valueAssignment(value)
-                + "printf '%s' \"${TRACEWORKS_VALUE_1}\" > '" + out + "'; env | grep -c TRACEWORKS_VALUE || true";
+        CommandRequest request = shell("printf '%s' \"$VALUE\" > '" + out + "'; env | grep -c VALUE || true", null, 120)
+                .withValues(Map.of("VALUE", value));
 
-        CommandResult result = new HostCommandRunner(64 * 1024 * 1024).run(shell(command, null, 120));
+        CommandResult result = new HostCommandRunner(64 * 1024 * 1024).run(request);
 
         assertThat(result.exitCode()).as(result.stderr()).isZero();
         assertThat(result.stdout()).as("not in the environment of a child").isEqualTo("0\n");
         assertThat(java.nio.file.Files.readString(out).equals(value)).as("the value, byte for byte").isTrue();
     }
 
-    /** bash holds no NUL in a script or a variable: the byte is dropped from a value, and bash says so. */
+    /**
+     * A value that does not arrive whole ends the shell before the command's first line: the length bash finds is
+     * compared with the length that was sent, here made wrong on purpose.
+     */
     @Test
-    void run_aNulByteInAValue_isDropped() {
-        CommandResult result = run(valueAssignment("a\u0000b") + "printf '%s' \"${TRACEWORKS_VALUE_1}\"", 30);
+    void run_aValueThatDidNotArriveWhole_endsTheShell_beforeTheCommandRuns(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "four"));
+        String cut = request.script().replace("TRACEWORKS_VALUE VALUE 4 'four'", "TRACEWORKS_VALUE VALUE 4 'fou'");
+        assertThat(cut).isNotEqualTo(request.script());
 
-        assertThat(result.exitCode()).isZero();
-        assertThat(result.stdout()).endsWith("ab").doesNotContain("\u0000");
+        CommandResult result = run(cut, 30);
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.stdout() + result.stderr()).contains("traceworks: the value of VALUE did not arrive whole");
+        assertThat(marker).doesNotExist();
     }
 
     @Test

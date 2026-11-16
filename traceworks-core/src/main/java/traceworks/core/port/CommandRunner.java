@@ -1,6 +1,7 @@
 package traceworks.core.port;
 
 import traceworks.core.util.ProcessTracking;
+import traceworks.core.util.ShellVariables;
 
 import java.util.List;
 import java.util.Map;
@@ -108,17 +109,27 @@ public interface CommandRunner {
      * @param stdin             what the command reads on its standard input; {@code null} for nothing (closed)
      * @param writableWorkspace whether a container may write the workspace ({@code workspace_writable: true}); by
      *                          default it sees it read-only
-     * @throws IllegalArgumentException if the request has both a command and entrypoint arguments, neither, or
-     *                                  entrypoint arguments without an image
+     * @param values            shell variables the command finds set, by name, in the order given: the block's
+     *                          {@code values}. They are no part of {@code command}: a runner runs {@link #script},
+     *                          which sets them first, and the record keeps them next to the command. Not exported,
+     *                          and only for a shell command
+     * @throws IllegalArgumentException if the request has both a command and entrypoint arguments, neither,
+     *                                  entrypoint arguments without an image, or values without a shell command
      */
     record CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                           Map<String, String> environment, String image, List<Mount> mounts, Egress network,
-                          List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
+                          List<String> entrypointArgs, String stdin, boolean writableWorkspace,
+                          Map<String, String> values) {
         public CommandRequest {
             network = network == null ? Egress.NONE : network;
             environment = environment == null ? Map.of() : Map.copyOf(environment);
             mounts = mounts == null ? List.of() : List.copyOf(mounts);
             entrypointArgs = entrypointArgs == null ? null : List.copyOf(entrypointArgs);
+            values = values == null || values.isEmpty() ? Map.of()
+                    : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(values));
+            if (entrypointArgs != null && !values.isEmpty()) {
+                throw new IllegalArgumentException("An image's entrypoint runs without a shell: it takes no values");
+            }
             if (entrypointArgs != null) {
                 if (command != null) {
                     throw new IllegalArgumentException(
@@ -130,6 +141,14 @@ public interface CommandRunner {
             } else if (command == null) {
                 throw new IllegalArgumentException("A request needs a command or entrypoint arguments");
             }
+        }
+
+        /** A request without values. */
+        public CommandRequest(String command, String workingDirectory, int timeoutSeconds,
+                              Map<String, String> environment, String image, List<Mount> mounts, Egress network,
+                              List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
+            this(command, workingDirectory, timeoutSeconds, environment, image, mounts, network, entrypointArgs,
+                    stdin, writableWorkspace, Map.of());
         }
 
         /** A request with the network on ({@link Egress#OPEN}) or off ({@link Egress#NONE}). */
@@ -168,7 +187,22 @@ public interface CommandRunner {
         /** This request, with {@code network} as where its container can connect. */
         public CommandRequest withNetwork(Egress network) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace);
+                    entrypointArgs, stdin, writableWorkspace, values);
+        }
+
+        /** This request, with {@code values} as the shell variables its command finds set. */
+        public CommandRequest withValues(Map<String, String> values) {
+            return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
+                    entrypointArgs, stdin, writableWorkspace, values);
+        }
+
+        /**
+         * The text a runner hands to bash for a shell command: the lines that set the {@link #values}, written by
+         * Traceworks alone and without a byte of a value ({@link ShellVariables#preamble}), then {@link #command};
+         * the command itself for a request without values. {@code null} for an entrypoint request.
+         */
+        public String script() {
+            return command == null ? null : ShellVariables.preamble(values) + command;
         }
 
         /** Whether this request runs the image's entrypoint (tool mode) instead of a shell command. */
@@ -179,13 +213,13 @@ public interface CommandRunner {
         /** This request, with {@code stdin} on its standard input; {@code null} closes it. */
         public CommandRequest withStdin(String stdin) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace);
+                    entrypointArgs, stdin, writableWorkspace, values);
         }
 
         /** This request, with the workspace writable or read-only. */
         public CommandRequest withWritableWorkspace(boolean writable) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writable);
+                    entrypointArgs, stdin, writable, values);
         }
 
         /** The request with the names of its environment variables, never their values (a secret's among them). */
@@ -195,7 +229,8 @@ public interface CommandRunner {
                     + ", timeoutSeconds=" + timeoutSeconds + ", environment=" + new TreeSet<>(environment.keySet())
                     + ", image=" + image + ", mounts=" + mounts + ", network=" + network + ", entrypointArgs="
                     + entrypointArgs + ", stdin=" + (stdin == null ? null : stdin.length() + " characters")
-                    + ", writableWorkspace=" + writableWorkspace + "]";
+                    + ", writableWorkspace=" + writableWorkspace
+                    + (values.isEmpty() ? "" : ", values=" + values.keySet()) + "]";
         }
     }
 

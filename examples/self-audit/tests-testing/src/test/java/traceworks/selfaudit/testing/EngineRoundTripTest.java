@@ -261,8 +261,13 @@ class EngineRoundTripTest {
         for (String aiOnly : new String[] {"provider", "model", "tools", "untrusted_input"}) {
             verdicts.remove(aiOnly);
         }
+        // The stand-in for the model is a shell line: it takes the item's fields as variables, as every shell line
+        // takes a protected value (the items of an audit run are)
+        verdicts.putObject("values").put("CANDIDATE_CLASS", "{{ candidate.class }}")
+                .put("CANDIDATE_FILE", "{{ candidate.file }}");
         verdicts.put("execution_mode", "shell").put("shell_escape_variables", true).put("max_consecutive_failures", 0)
-                .put("command", command);
+                .put("command", command.replace("{{ candidate.class }}", "\"$CANDIDATE_CLASS\"")
+                        .replace("{{ candidate.file }}", "\"$CANDIDATE_FILE\""));
         Files.writeString(pkg.resolve("workflow.json"), JSON.writeValueAsString(workflow));
         return pkg;
     }

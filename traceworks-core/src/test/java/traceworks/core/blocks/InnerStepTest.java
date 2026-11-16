@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.ai.ToolPolicy;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -158,13 +158,24 @@ class InnerStepTest {
     }
 
     @Test
-    void shellStep_quotesUntrustedValues_andCarriesTheContainerSettingsAndShellTimeout() {
+    void shellStep_refusesAnUntrustedValueInTheCommand() {
         context.setUntrustedVariable("target", "x; id");
-        when(commands.shellStep(any(), anyInt(), eq(77), eq(context))).thenReturn(done);
         BlockDefinition wrapper = block(Map.of("container_image", "alpine:3", "mount_docker_socket", false,
                 "mounts", List.of("/data:/data:ro"), "network", true, "workspace_writable", true));
 
-        new InnerStep(wrapper, true, false, 77, null).run(commands, context, "build {{ target }}");
+        assertThatThrownBy(() -> new InnerStep(wrapper, true, false, 77, null)
+                .run(commands, context, "build {{ target }}")).isInstanceOf(ShellLineRefusedException.class);
+    }
+
+    @Test
+    void shellStep_carriesItsValuesFilledIn_theContainerSettingsAndTheShellTimeout() {
+        context.setUntrustedVariable("target", "x; id");
+        when(commands.shellStep(any(), anyInt(), eq(77), eq(context))).thenReturn(done);
+        BlockDefinition wrapper = block(Map.of("container_image", "alpine:3", "mount_docker_socket", false,
+                "mounts", List.of("/data:/data:ro"), "network", true, "workspace_writable", true,
+                "values", Map.of("TARGET", "{{ target }}")));
+
+        new InnerStep(wrapper, true, false, 77, null).run(commands, context, "build \"$TARGET\"");
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), eq(0), eq(77), eq(context));
@@ -172,7 +183,8 @@ class InnerStepTest {
         assertThat(shellBlock.getType()).isEqualTo("shell");
         assertThat(shellBlock.getName()).isNull();
         assertThat(shellBlock.getConfig())
-                .containsEntry("command", FakeCommandRunner.value(1, "x; id") + "build \"${TRACEWORKS_VALUE_1}\"")
+                .containsEntry("command", "build \"$TARGET\"")
+                .containsEntry("values", Map.of("TARGET", "x; id"))
                 .containsEntry("container_image", "alpine:3")
                 .containsEntry("mount_docker_socket", false)
                 .containsEntry("mounts", List.of("/data:/data:ro"))

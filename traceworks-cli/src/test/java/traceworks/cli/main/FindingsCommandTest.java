@@ -169,13 +169,14 @@ class FindingsCommandTest {
                 + "\"model\",\"details\":[{\"file\":\"src/A.java\",\"line\":12,\"quote\":\"mount(path);\",\"severity\":\"medium\","
                 + "\"model\":{\"issue\":\"" + ISSUE + " \\u001b[2J\\nsecond line\",\"fix\":\"check the real path first\"}}]}\n");
         String command = "cp {{ package_dir }}/findings.jsonl {{ scratch_dir }}/findings.jsonl; "
-                + "printf 'KNOWN %s\\n' {{ audit_findings }}; "
+                + "printf 'KNOWN %s\\n' \"$KNOWN\"; "
                 + "printf '%s\\n' '# Report' '<!-- traceworks:audit-result:v1' "
                 + "'{\"snapshotComplete\":true,\"findings\":[{\"ruleKey\":\"size\",\"subject\":\"A.java\",\"severity\":"
                 + "\"MEDIUM\",\"title\":\"Big A.java\",\"evidence\":\"src/A.java:12: mount(path);\"}]}' '-->'";
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
                 + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"shell_escape_variables\":true,"
+                + "\"values\":{\"KNOWN\":\"{{ audit_findings }}\"},"
                 + "\"command\":" + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;
     }

@@ -1,4 +1,4 @@
-package traceworks.core.context;
+package traceworks.core.analyzer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  * <p>A heuristic over the words of the command, like {@link ShellQuoteScanner}: an option it does not know costs a
  * missed finding ({@code python3 -X dev script.py} reads as data either way), never a false one on a script file.
  */
-public final class HeredocReader {
+final class HeredocReader {
 
     private HeredocReader() {}
 
@@ -91,29 +91,13 @@ public final class HeredocReader {
      * @param command the command the heredoc operator belongs to, up to the operator
      * @param rest    the rest of the operator's line: more words of the command, a pipe into the next one
      */
-    public static String sourceReader(String command, String rest) {
+    static String sourceReader(String command, String rest) {
         List<List<String>> pipeline = pipeline(command + " " + rest);
         for (List<String> words : pipeline) {
             String reader = stdinProgram(words);
             if (reader != null) return reader;
         }
         return null;
-    }
-
-    /**
-     * Whether {@code option} of the interpreter {@code name} brings the program along, so that the word after it is
-     * program text: {@code bash -c}, {@code sh -lc}, {@code python3 -c}, {@code perl -e}, {@code node -e}.
-     */
-    public static boolean takesCode(String name, String option) {
-        Family family = Family.of(name);
-        if (family == null || !option.startsWith("-") || option.startsWith("--") || option.length() < 2) {
-            return family != null && (option.equals("--eval") || option.equals("--print")
-                    || option.equals("--command"));
-        }
-        for (int p = 1; p < option.length(); p++) {
-            if (family.code.indexOf(option.charAt(p)) >= 0) return true;
-        }
-        return false;
     }
 
     /** The interpreter of one simple command if it reads its program from stdin. */

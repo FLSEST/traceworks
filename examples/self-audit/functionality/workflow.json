@@ -24,7 +24,8 @@
       "type": "shell",
       "name": "facts",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; python3 -B {{ package_dir }}/scripts/facts.py --root . --rules {{ package_dir }}/rules/functionality.rules --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --out {{ scratch_dir }}",
+        "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
+        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/known-items.txt; python3 -B {{ package_dir }}/scripts/facts.py --root . --rules {{ package_dir }}/rules/functionality.rules --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --out {{ scratch_dir }}",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }
@@ -52,7 +53,8 @@
       "type": "shell",
       "name": "report",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ block.verdicts.output }} | python3 -B {{ package_dir }}/scripts/report.py --root . --facts {{ scratch_dir }}/facts.json --sections {{ scratch_dir }}/sections.jsonl --verdicts - --out {{ scratch_dir }}/functionality-report.md",
+        "values": {"VERDICTS": "{{ block.verdicts.output }}"},
+        "command": "set -euo pipefail; printf '%s' \"$VERDICTS\" | python3 -B {{ package_dir }}/scripts/report.py --root . --facts {{ scratch_dir }}/facts.json --sections {{ scratch_dir }}/sections.jsonl --verdicts - --out {{ scratch_dir }}/functionality-report.md",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

@@ -12,7 +12,7 @@
     {
       "type": "shell",
       "name": "known",
-      "config": {"command": "printf '%s\\n' {{ audit_findings }}", "shell_escape_variables": true}
+      "config": {"values": {"KNOWN_FINDINGS": "{{ audit_findings }}"}, "command": "printf '%s\\n' \"$KNOWN_FINDINGS\""}
     },
     {
       "type": "shell",

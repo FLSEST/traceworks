@@ -24,7 +24,8 @@
       "type": "shell",
       "name": "facts",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; python3 {{ package_dir }}/scripts/facts.py --rules {{ package_dir }}/rules/testing.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --facts {{ scratch_dir }}/testing-facts.json --candidates {{ scratch_dir }}/candidates.jsonl",
+        "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
+        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/known-items.txt; python3 {{ package_dir }}/scripts/facts.py --rules {{ package_dir }}/rules/testing.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --facts {{ scratch_dir }}/testing-facts.json --candidates {{ scratch_dir }}/candidates.jsonl",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }
@@ -52,7 +53,8 @@
       "type": "shell",
       "name": "report",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ block.verdicts.output }} | python3 {{ package_dir }}/scripts/report.py --rules {{ package_dir }}/rules/testing.rules --root . --facts {{ scratch_dir }}/testing-facts.json --candidates {{ scratch_dir }}/candidates.jsonl --verdicts - --out {{ scratch_dir }}/testing-report.md",
+        "values": {"VERDICTS": "{{ block.verdicts.output }}"},
+        "command": "set -euo pipefail; printf '%s' \"$VERDICTS\" | python3 {{ package_dir }}/scripts/report.py --rules {{ package_dir }}/rules/testing.rules --root . --facts {{ scratch_dir }}/testing-facts.json --candidates {{ scratch_dir }}/candidates.jsonl --verdicts - --out {{ scratch_dir }}/testing-report.md",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

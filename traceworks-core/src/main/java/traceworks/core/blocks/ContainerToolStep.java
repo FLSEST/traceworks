@@ -2,6 +2,7 @@ package traceworks.core.blocks;
 
 import traceworks.core.container.RunPaths;
 import traceworks.core.context.ExecutionContext;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.GateSources;
 import traceworks.core.engine.WorkflowExecutionException;
 import traceworks.core.model.BlockDefinition;
@@ -52,6 +53,7 @@ class ContainerToolStep {
             throw new WorkflowExecutionException("'container_args' must be a list of strings");
         }
         MountSpecs.refuseDockerSocket(spec.mountDockerSocket());
+        ShellValues.resolve(block.getConfig(), context);   // a tool step takes none: refused before anything runs
         Map<String, String> environment = ShellTarget.secretEnvironment(block.getConfig(), context.getSecrets());
         List<String> args = resolveArgs(spec.args(), context);
         List<Mount> extraMounts = MountSpecs.parse(ShellBlockExecutor.resolveMounts(spec.mounts(), context));

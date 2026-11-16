@@ -21,7 +21,7 @@ public final class ProcessCommandRunner implements CommandRunner {
     @Override
     public CommandResult run(CommandRequest request) {
         long start = System.currentTimeMillis();
-        ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c", request.command());
+        ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c", request.script());
         if (request.image() == null && request.workingDirectory() != null && !request.workingDirectory().isBlank()) {
             builder.directory(new File(request.workingDirectory()));
         }

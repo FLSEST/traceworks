@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.model.SourceStep;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -649,22 +649,17 @@ class SwitchBlockExecutorTest {
     }
 
     @Test
-    void execute_nestedShellBlock_untrustedVariable_isSingleQuoted() {
+    void execute_nestedShellBlock_untrustedVariable_isRefused() {
         context.setUntrustedVariable("payload", "x; id");
         context.setVariable("status", "success");
-        when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
-                .thenReturn(step(1, StepStatus.COMPLETED, "ok"));
 
         Map<String, Object> config = new HashMap<>();
         config.put("expression", "{{ status }}");
         config.put("cases", List.of(Map.of("value", "success", "blocks", List.of(
                 Map.of("type", "shell", "config", Map.of("command", "echo {{ payload }}"))))));
 
-        executor.execute(switchOf(config), context);
-
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), anyInt(), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> executor.execute(switchOf(config), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -944,8 +939,8 @@ class SwitchBlockExecutorTest {
 
         executor.execute(switchOf(config), context);
 
-        assertThat(context.resolveShellTemplate("echo {{ block.scan.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -978,8 +973,8 @@ class SwitchBlockExecutorTest {
 
         executor.execute(switchOf(config), context);
 
-        assertThat(context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
-                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     /**

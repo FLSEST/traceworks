@@ -46,7 +46,8 @@
       "name": "areas",
       "config": {
         "container_image": "./images/areas",
-        "command": "set -euo pipefail; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; areas find --rules {{ package_dir }}/rules/security.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --verdict-version 1 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
+        "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
+        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/known-items.txt; areas find --rules {{ package_dir }}/rules/security.rules --root . --known {{ scratch_dir }}/known-findings.txt --items {{ scratch_dir }}/known-items.txt --verdict-version 1 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
         "timeout_seconds": 600,
         "shell_escape_variables": true
       }
@@ -74,7 +75,8 @@
       "name": "report",
       "config": {
         "container_image": "./images/areas",
-        "command": "set -euo pipefail; printf '%s' {{ block.verdicts.output }} | areas report --areas {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json --verdicts - --out {{ scratch_dir }}/security-report.md",
+        "values": {"VERDICTS": "{{ block.verdicts.output }}"},
+        "command": "set -euo pipefail; printf '%s' \"$VERDICTS\" | areas report --areas {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json --verdicts - --out {{ scratch_dir }}/security-report.md",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

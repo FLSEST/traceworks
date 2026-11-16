@@ -1,9 +1,8 @@
-package traceworks.core.context;
+package traceworks.core.analyzer;
 
-import traceworks.core.context.ShellQuoteScanner.Context;
-import traceworks.core.context.ShellQuoteScanner.Heredoc;
-import traceworks.core.context.ShellQuoteScanner.Placeholder;
-import traceworks.core.context.ShellQuoteScanner.Quote;
+import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
+import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
+import traceworks.core.analyzer.ShellQuoteScanner.Quote;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -11,87 +10,6 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShellQuoteScannerTest {
-
-    private static List<Context> contexts(String code) {
-        return ShellQuoteScanner.occurrences(code).stream().map(ShellQuoteScanner.Occurrence::context).toList();
-    }
-
-    /** Every placeholder of the text has a place, those in comments and heredoc bodies too, in the text's order. */
-    @Test
-    void occurrences_tellEveryPlace() {
-        assertThat(contexts("echo {{ a }} \"{{ b }}\" '{{ c }}' `echo {{ d }}` $(( {{ e }} )) # {{ f }}\n"
-                + "cat <<'EOF'\n{{ g }}\nEOF\necho \\{{ h }} \"$(printf '%s' {{ i }})\" x{{ j }}y"))
-                .containsExactly(Context.BARE, Context.DOUBLE_QUOTES, Context.SINGLE_QUOTES, Context.BACKTICKS,
-                        Context.ARITHMETIC, Context.COMMENT, Context.HEREDOC, Context.UNREAD, Context.BARE,
-                        Context.BARE);
-        assertThat(ShellQuoteScanner.occurrences("echo {{ a }} {{b}}"))
-                .containsExactly(new ShellQuoteScanner.Occurrence("a", 5, Context.BARE, "echo ", " {{b}}", null),
-                        new ShellQuoteScanner.Occurrence("b", 13, Context.BARE, "echo {{ a }} ", "", null));
-        assertThat(ShellQuoteScanner.occurrences(null)).isEmpty();
-    }
-
-    /** In {@code $'…'} a backslash escapes the quote, so the string goes on past it. */
-    @Test
-    void occurrences_readAnsiQuotesWithTheirBackslash() {
-        assertThat(contexts("echo $'it\\'s {{ a }}' {{ b }}"))
-                .containsExactly(Context.SINGLE_QUOTES, Context.BARE);
-        assertThat(contexts("echo $'\\'' x '{{ a }}'")).containsExactly(Context.SINGLE_QUOTES);
-        assertThat(contexts("echo 'a\\' {{ a }}")).as("plain single quotes know no backslash")
-                .containsExactly(Context.BARE);
-    }
-
-    /** The {@code )} of a case pattern closes no {@code $(}; {@code case} as an argument is a plain word. */
-    @Test
-    void occurrences_readACaseInsideASubstitution_andCaseAsAWord() {
-        assertThat(contexts("X=\"$(case $1 in a) echo \"{{ a }}\";; *) echo {{ b }};; esac)\"; echo {{ c }}"))
-                .containsExactly(Context.DOUBLE_QUOTES, Context.BARE, Context.BARE);
-        assertThat(contexts("if true; then case x in x) echo '{{ a }}';; esac; fi; echo \"$(echo esac) {{ b }}\""))
-                .containsExactly(Context.SINGLE_QUOTES, Context.DOUBLE_QUOTES);
-        assertThat(contexts("echo \"$(echo case) {{ a }}\"")).containsExactly(Context.DOUBLE_QUOTES);
-    }
-
-    /**
-     * A heredoc ends at a line that is its delimiter and nothing else, as for the shell: a delimiter of any word,
-     * {@code <<-} with tabs taken off, two heredocs on one line, each with its body.
-     */
-    @Test
-    void occurrences_readHeredocsAsTheShellDoes() {
-        assertThat(contexts("cat <<1\n{{ a }}\n1\necho {{ b }}")).containsExactly(Context.HEREDOC, Context.BARE);
-        assertThat(contexts("cat <<.E\n{{ a }}\n.E\necho {{ b }}")).containsExactly(Context.HEREDOC, Context.BARE);
-        assertThat(contexts("cat <<'E-F'\n{{ a }}\nE-F\necho {{ b }}"))
-                .containsExactly(Context.HEREDOC, Context.BARE);
-        assertThat(contexts("cat <<EOF\n{{ a }}\n EOF\n{{ b }}\nEOF\necho {{ c }}")).as("an indented delimiter")
-                .containsExactly(Context.HEREDOC, Context.HEREDOC, Context.BARE);
-        assertThat(contexts("cat <<-EOF\n{{ a }}\n EOF\n{{ b }}\n\tEOF\necho {{ c }}")).as("spaces are no tabs")
-                .containsExactly(Context.HEREDOC, Context.HEREDOC, Context.BARE);
-        ShellQuoteScanner.Result two = ShellQuoteScanner.read("cat <<A <<'B'\n{{ a }}\nA\n{{ b }}\nB\necho {{ c }}");
-        assertThat(two.occurrences()).extracting(ShellQuoteScanner.Occurrence::context)
-                .containsExactly(Context.HEREDOC, Context.HEREDOC, Context.BARE);
-        assertThat(two.occurrences().get(0).heredoc().quoted()).isFalse();
-        assertThat(two.occurrences().get(1).heredoc().quoted()).isTrue();
-        assertThat(two.placeholders()).containsExactly(new Placeholder("c", Quote.NONE, 6));
-    }
-
-    /** A placeholder whose key holds more than a plain name is text for the shell, its quotes included. */
-    @Test
-    void occurrences_readAKeyWithAQuoteAsTheTextItIs() {
-        assertThat(ShellQuoteScanner.occurrences("echo {{ a'b }} {{ x }} {{ c'd }}"))
-                .extracting(ShellQuoteScanner.Occurrence::key, ShellQuoteScanner.Occurrence::context)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple("x", Context.SINGLE_QUOTES));
-    }
-
-    /** What stands before and after a placeholder in its command, for those who judge the command. */
-    @Test
-    void occurrences_carryTheCommandUpToThePlaceholder() {
-        assertThat(ShellQuoteScanner.occurrences("true; eval \"a {{ x }} b\" c\necho"))
-                .containsExactly(new ShellQuoteScanner.Occurrence("x", 14, Context.DOUBLE_QUOTES, " eval \"a ",
-                        " b\" c", null));
-        assertThat(ShellQuoteScanner.occurrences("list=(\n  {{ x }}\n)").getFirst().before()).as("an array literal")
-                .startsWith("=( ");
-        assertThat(contexts("(true)# {{ x }}")).as("a comment after a closing paren").containsExactly(Context.COMMENT);
-        assertThat(contexts("echo $(( \"{{ x }}\" + 1 ))")).as("quotes keep no arithmetic from evaluating")
-                .containsExactly(Context.ARITHMETIC);
-    }
 
     private static List<Placeholder> scan(String code) {
         return ShellQuoteScanner.scan(code);
@@ -147,8 +65,8 @@ class ShellQuoteScannerTest {
                 print('{{ a }}')
                 PY
                 cat <<-EOF
-                \tx "{{ b }}"
-                \tEOF
+                  x "{{ b }}"
+                  EOF
                 cat <<\\STEP | grep x
                 '{{ c }}'
                 STEP

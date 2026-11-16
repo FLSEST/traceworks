@@ -1,6 +1,5 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ChildRuns;
 import traceworks.core.context.ChildRuns.ChildRun;
 import traceworks.core.context.ExecutionContext;
@@ -355,7 +354,7 @@ class SubWorkflowBlockExecutorTest {
     @SuppressWarnings("unchecked")
     void execute_platformDataTheParentUsed_stillTaintsTheChild_withoutItsValues() {
         context.setUntrustedPlatformVariable("previous_report", "Report; rm -rf /");
-        context.resolveShellTemplate("echo {{ previous_report }}", false);
+        context.resolveShellValue("echo {{ previous_report }}");
         context.resolvePromptTemplate("Assess: {{ previous_report }}");
         context.recordOutput("assessment", "a | b");
 
@@ -553,10 +552,13 @@ class SubWorkflowBlockExecutorTest {
     @Test
     void execute_childIsARunOfItsOwn_andKeepsTheParentsTaint() {
         WorkflowDefinition child = workflow("child", "Child",
-                shell("show", "echo {{ trigger_source }} {{ workflow_run_id }} {{ branch }}"));
+                BlockDefinition.builder().type("shell").name("show").config(new HashMap<>(Map.of(
+                        "values", Map.of("BRANCH", "{{ branch }}"),
+                        "command", "echo {{ trigger_source }} {{ workflow_run_id }} \"$BRANCH\""))).build(),
+                shell("in_a_line", "echo {{ branch }}"));
         List<String> commandsRun = new CopyOnWriteArrayList<>();
         CommandRunner commands = request -> {
-            commandsRun.add(request.command());
+            commandsRun.add(request.command() + " " + request.values());
             return new CommandResult(0, "ok", "", 1, false);
         };
 
@@ -567,8 +569,9 @@ class SubWorkflowBlockExecutorTest {
                         .commandRunner(commands).workingDirectory("/workspace").build());
 
         String childRunId = (String) outcome.steps().getFirst().getMetadata().get("subRunId");
-        assertThat(commandsRun).containsExactly(FakeCommandRunner.value(1, "main; id") + "echo SUB_WORKFLOW " + childRunId
-                + " \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(commandsRun).as("the child gets the parent's untrusted value as a variable, and refuses it in a line")
+                .containsExactly("echo SUB_WORKFLOW " + childRunId + " \"$BRANCH\" {BRANCH=main; id}");
+        assertThat(outcome.steps().getFirst().getOutput()).contains("shell line refused, nothing ran: {{ branch }}");
     }
 
     /** A child that may not start (unknown workflow) fails the step with the reason, not the run. */

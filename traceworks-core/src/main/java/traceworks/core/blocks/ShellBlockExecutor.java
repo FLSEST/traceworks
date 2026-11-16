@@ -2,6 +2,7 @@ package traceworks.core.blocks;
 
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.PlaceholderSyntax;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.GateSources;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -76,8 +77,9 @@ public class ShellBlockExecutor implements BlockExecutor {
         ShellTarget target = ShellTarget.of(config, () -> resolveMounts(mounts, context),
                 context.isContainerRun(), context.getSecrets());
 
-        // Untrusted variables (webhook payloads) are always escaped; shell_escape_variables escapes everything.
+        // A protected value refuses the line; it reaches the command as one of the block's values
         String command = context.resolveShellTemplate(rawCommand, escapeVariables);
+        Map<String, String> values = ShellValues.resolve(config, context);
         if (checked) {
             command = "set -e -o pipefail\n" + command;
         }
@@ -88,7 +90,8 @@ public class ShellBlockExecutor implements BlockExecutor {
         step.setInput(command);
         step.setStatus(StepStatus.RUNNING);
 
-        CommandResult ran = context.getCommandRunner().run(target.request(command, context.getProjectPath(), timeout));
+        CommandResult ran = context.getCommandRunner().run(
+                target.request(command, context.getProjectPath(), timeout).withValues(values));
         ShellResult result = ShellResult.of(ran, timeout, context.secretValues());
 
         String output = result.exitCode() != 0

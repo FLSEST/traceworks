@@ -3,6 +3,7 @@ package traceworks.core.blocks;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.OutputBudget;
 import traceworks.core.context.RecordedItems;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.CancelledSteps;
 import traceworks.core.engine.ExecutionMode;
@@ -216,11 +217,15 @@ public class ForEachBlockExecutor implements BlockExecutor {
     /**
      * The result of an item a resumed loop takes over from the record instead of running it: completed, with the
      * recorded output. The loop treats it as it treats an item that ran, so its step ends as one pass would: the item
-     * draws its step index, and its command is filled in although it does not run, because filling it in is what
-     * marks the run as carrying untrusted input (platform data that reaches a command line or a prompt).
+     * draws its step index, and its command and, for a shell step, its values are filled in although it does not run,
+     * because filling them in is what marks the run as carrying untrusted input (platform data that reaches a shell
+     * or a prompt).
      */
     private static StepResult takenOver(Settings settings, ExecutionContext context, RecordedItems.Completed taken) {
         settings.itemStep().resolve(context, settings.command());
+        if (settings.itemStep().shell()) {
+            ShellValues.resolve(settings.itemStep().block().getConfig(), context);
+        }
         Instant now = context.getClock().now();
         return StepResult.builder().stepIndex(context.nextStepIndex()).status(StepStatus.COMPLETED)
                 .output(taken.output()).startedAt(now).completedAt(now).durationMs(0L).build();
@@ -283,7 +288,8 @@ public class ForEachBlockExecutor implements BlockExecutor {
         String itemsCommand = context.resolveShellTemplate(
                 BlockSettings.of("foreach", config).text("items_command"), settings.itemStep().escapeVariables());
         // items_command always runs as a shell command: it collects the iteration targets, it is no AI work
-        ShellResult listed = commands.runCommand(itemsCommand, settings.itemStep().shellTimeout(), context);
+        ShellResult listed = commands.runCommand(itemsCommand, settings.itemStep().shellTimeout(), context,
+                ShellValues.resolve(config, context));
         if (context.shouldStop()) {
             // a list the cancel ended is only its first part, or none of it: the loop is cancelled, not empty
             failure.append(CancelledSteps.WHILE_RUNNING);

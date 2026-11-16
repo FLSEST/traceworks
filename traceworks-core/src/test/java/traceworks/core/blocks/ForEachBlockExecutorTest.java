@@ -1,6 +1,6 @@
 package traceworks.core.blocks;
 
-import traceworks.core.testing.FakeCommandRunner;
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.OutputBudget;
 import traceworks.core.context.RecordedItems;
@@ -147,7 +147,7 @@ class ForEachBlockExecutorTest {
 
     @Test
     void execute_withCommandSource_usesCommandOutput() {
-        when(commands.runCommand(eq("git diff --name-only"), eq(300), any())).thenReturn(printed("file1.js\nfile2.js"));
+        when(commands.runCommand(eq("git diff --name-only"), eq(300), any(), any())).thenReturn(printed("file1.js\nfile2.js"));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -168,7 +168,7 @@ class ForEachBlockExecutorTest {
      */
     @Test
     void execute_itemsCommandBeyondTheOutputLimit_failsBeforeTheFirstItem() {
-        when(commands.runCommand(eq("find /"), eq(300), any()))
+        when(commands.runCommand(eq("find /"), eq(300), any(), any()))
                 .thenReturn(new ShellResult("/a\n/b\n" + NOTE, 153, 0, NOTE));
 
         Map<String, Object> config = aiConfig();
@@ -191,7 +191,7 @@ class ForEachBlockExecutorTest {
      */
     @Test
     void execute_itemsCommandTimesOut_failsBeforeTheFirstItem() {
-        when(commands.runCommand(eq("slow"), eq(300), any()))
+        when(commands.runCommand(eq("slow"), eq(300), any(), any()))
                 .thenReturn(new ShellResult("one\nCommand timed out after 300 seconds", 124, 0, "", true));
 
         Map<String, Object> config = aiConfig();
@@ -211,7 +211,7 @@ class ForEachBlockExecutorTest {
     /** An items_command the runner refused never ran: its refusal text is no item, the block fails before the first. */
     @Test
     void execute_itemsCommandDidNotRun_failsBeforeTheFirstItem() {
-        when(commands.runCommand(eq("ls targets"), eq(300), any()))
+        when(commands.runCommand(eq("ls targets"), eq(300), any(), any()))
                 .thenReturn(new ShellResult("image traceworks/shell:0123456789ab is not present; run traceworks images build", 125, 0, "", false, "image traceworks/shell:0123456789ab is not present; run traceworks images build"));
 
         Map<String, Object> config = aiConfig();
@@ -232,7 +232,7 @@ class ForEachBlockExecutorTest {
     @ParameterizedTest
     @ValueSource(ints = {125, 1, 74})
     void execute_itemsCommandExitsLikeARefusalByItself_itsLinesAreTheItems(int exitCode) {
-        when(commands.runCommand(eq("odd"), eq(300), any())).thenReturn(new ShellResult("a\nb", exitCode, 0));
+        when(commands.runCommand(eq("odd"), eq(300), any(), any())).thenReturn(new ShellResult("a\nb", exitCode, 0));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -253,7 +253,7 @@ class ForEachBlockExecutorTest {
         ExecutionContext small = ExecutionContext.builder().workflowRunId("run-1").events(events::add)
                 .outputBudget(budget).build();
         small.setProjectPath("/test/project");
-        when(commands.runCommand(eq("ls"), eq(300), any())).thenReturn(printed("aaaaaaaa\nbbbbbbbb"));
+        when(commands.runCommand(eq("ls"), eq(300), any(), any())).thenReturn(printed("aaaaaaaa\nbbbbbbbb"));
 
         Map<String, Object> config = aiConfig();
         config.put("items_source", "command");
@@ -296,7 +296,7 @@ class ForEachBlockExecutorTest {
         OutputBudget fromCommand = new OutputBudget(10_000);
         OutputBudget fromStatic = new OutputBudget(10_000);
         List<Long> heldDuring = new ArrayList<>();
-        when(commands.runCommand(eq("ls"), eq(300), any())).thenReturn(printed("a".repeat(100) + "\n" + "b".repeat(100)));
+        when(commands.runCommand(eq("ls"), eq(300), any(), any())).thenReturn(printed("a".repeat(100) + "\n" + "b".repeat(100)));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenAnswer(inv -> {
             heldDuring.add(inv.<ExecutionContext>getArgument(1).getOutputBudget().heldBytes());
             return ok("ok");
@@ -328,7 +328,7 @@ class ForEachBlockExecutorTest {
 
     @Test
     void execute_itemsCommandExits124ByItself_isNoTimeout() {
-        when(commands.runCommand(eq("odd"), eq(300), any())).thenReturn(new ShellResult("a\nb", 124, 0));
+        when(commands.runCommand(eq("odd"), eq(300), any(), any())).thenReturn(new ShellResult("a\nb", 124, 0));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -570,7 +570,7 @@ class ForEachBlockExecutorTest {
     @SuppressWarnings("unchecked")
     void execute_itemsCommand_emptyOutput_iteratesZeroTimes() {
         // an empty items_command output means zero items, not one empty item (that would be a pointless AI call)
-        when(commands.runCommand(eq("cat topics.txt"), eq(300), any())).thenReturn(printed(""));
+        when(commands.runCommand(eq("cat topics.txt"), eq(300), any(), any())).thenReturn(printed(""));
 
         Map<String, Object> config = aiConfig();
         config.put("items_source", "command");
@@ -589,7 +589,7 @@ class ForEachBlockExecutorTest {
 
     @Test
     void execute_itemsCommand_whitespaceOnlyOutput_iteratesZeroTimes() {
-        when(commands.runCommand(eq("list-topics"), eq(300), any())).thenReturn(printed("\n  \n\n"));
+        when(commands.runCommand(eq("list-topics"), eq(300), any(), any())).thenReturn(printed("\n  \n\n"));
 
         Map<String, Object> config = aiConfig();
         config.put("items_source", "command");
@@ -607,7 +607,7 @@ class ForEachBlockExecutorTest {
     @SuppressWarnings("unchecked")
     void execute_itemsCommand_blankLinesAreDropped() {
         // blank lines in between and at the end are not items
-        when(commands.runCommand(eq("ls"), eq(300), any())).thenReturn(printed("a.txt\n\n   \nb.txt\n"));
+        when(commands.runCommand(eq("ls"), eq(300), any(), any())).thenReturn(printed("a.txt\n\n   \nb.txt\n"));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -782,7 +782,7 @@ class ForEachBlockExecutorTest {
 
     @Test
     void execute_shellMode_commandSource_usesShellForItems() {
-        when(commands.runCommand(eq("ls *.txt"), eq(300), any())).thenReturn(printed("a.txt\nb.txt"));
+        when(commands.runCommand(eq("ls *.txt"), eq(300), any(), any())).thenReturn(printed("a.txt\nb.txt"));
         when(commands.shellStep(any(), anyInt(), eq(300), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = new HashMap<>();
@@ -794,7 +794,7 @@ class ForEachBlockExecutorTest {
         StepResult result = executor.execute(foreach(config), context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        verify(commands).runCommand(eq("ls *.txt"), eq(300), any());
+        verify(commands).runCommand(eq("ls *.txt"), eq(300), any(), any());
         verify(commands, times(2)).shellStep(any(), anyInt(), eq(300), any());
     }
 
@@ -919,7 +919,7 @@ class ForEachBlockExecutorTest {
     @Test
     void execute_itemsCommand_templateVariablesResolved() {
         context.setVariable("branch", "main");
-        when(commands.runCommand(eq("git diff main --name-only"), eq(300), any())).thenReturn(printed("changed.js"));
+        when(commands.runCommand(eq("git diff main --name-only"), eq(300), any(), any())).thenReturn(printed("changed.js"));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -929,7 +929,7 @@ class ForEachBlockExecutorTest {
 
         executor.execute(foreach(config), context);
 
-        verify(commands).runCommand(eq("git diff main --name-only"), eq(300), any());
+        verify(commands).runCommand(eq("git diff main --name-only"), eq(300), any(), any());
     }
 
     @Test
@@ -1003,10 +1003,8 @@ class ForEachBlockExecutorTest {
     }
 
     @Test
-    void execute_shellMode_untrustedVariable_isEscapedInItemsCommandAndCommand() {
+    void execute_shellMode_untrustedVariableInItemsCommandAndCommand_isRefused() {
         context.setUntrustedVariable("dir", "src; id");
-        when(commands.runCommand(eq(FakeCommandRunner.value(1, "src; id") + "ls \"${TRACEWORKS_VALUE_1}\""), eq(300), any())).thenReturn(printed("a.txt"));
-        when(commands.shellStep(any(), anyInt(), eq(300), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = new HashMap<>();
         config.put("items_source", "command");
@@ -1014,22 +1012,15 @@ class ForEachBlockExecutorTest {
         config.put("command", "cat {{ dir }}/{{ item }}");
         config.put("execution_mode", "shell");
 
-        StepResult result = executor.execute(foreach(config), context);
-
-        assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(
-                FakeCommandRunner.value(1, "src; id") + FakeCommandRunner.value(2, "a.txt") + "cat \"${TRACEWORKS_VALUE_1}\"/\"${TRACEWORKS_VALUE_2}\"");
+        assertThatThrownBy(() -> executor.execute(foreach(config), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
-    void execute_shellMode_platformDataInItemsCommand_escapesTheItems() {
+    void execute_shellMode_platformDataInItemsCommand_isRefused() {
         // previous_report is quoted in the items_command, but its content becomes the items:
         // substituting it into a shell line taints the run, so the items are escaped too
         context.setUntrustedPlatformVariable("previous_report", "report");
-        when(commands.runCommand(eq(FakeCommandRunner.value(1, "report") + "echo \"${TRACEWORKS_VALUE_1}\""), eq(300), any())).thenReturn(printed("a.txt; id"));
-        when(commands.shellStep(any(), anyInt(), eq(300), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = new HashMap<>();
         config.put("items_source", "command");
@@ -1037,12 +1028,8 @@ class ForEachBlockExecutorTest {
         config.put("command", "cat {{ item }}");
         config.put("execution_mode", "shell");
 
-        StepResult result = executor.execute(foreach(config), context);
-
-        assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
-        verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "a.txt; id") + "cat \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> executor.execute(foreach(config), context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -1068,7 +1055,7 @@ class ForEachBlockExecutorTest {
     @Test
     void execute_itemsFromATaintedCommand_areUntrustedWithTheirFields() {
         context.setUntrustedVariable("branch", "main");
-        when(commands.runCommand(any(), anyInt(), any())).thenReturn(printed("{\"id\": \"x; rm\"}\n"));
+        when(commands.runCommand(any(), anyInt(), any(), any())).thenReturn(printed("{\"id\": \"x; rm\"}\n"));
         when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = aiConfig();
@@ -1082,7 +1069,8 @@ class ForEachBlockExecutorTest {
         assertThat(context.isUntrusted("feature")).isTrue();
         assertThat(context.isUntrusted("feature.id")).isTrue();
         assertThat(context.isUntrusted("feature_index")).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ feature.id }}", false)).isEqualTo(FakeCommandRunner.value(1, "x; rm") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ feature.id }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -1230,17 +1218,19 @@ class ForEachBlockExecutorTest {
     }
 
     /**
-     * Untrusted stays untrusted: platform data in the command of an item taken over marks the run as one that
-     * carries untrusted input, as running the item would have.
+     * Untrusted stays untrusted: platform data in a value of an item taken over marks the run as one that carries
+     * untrusted input, as running the item would have.
      */
     @Test
-    void resumed_anItemTakenOver_stillTaintsTheRunItsCommandWouldTaint() {
+    void resumed_anItemTakenOver_stillTaintsTheRunItsValuesWouldTaint() {
         context.startStepIndicesAt(4);
         context.setUntrustedPlatformVariable("previous_report", "from outside");
         context.recordedItems(X_IS_RECORDED);
         assertThat(context.hasUntrustedInput()).isFalse();
+        Map<String, Object> loop = shellLoop("handle {{ item }} \"$REPORT\"", "x");
+        loop.put("values", Map.of("REPORT", "{{ previous_report }}"));
 
-        executor.execute(foreach(shellLoop("handle {{ item }} {{ previous_report }}", "x")), context);
+        executor.execute(foreach(loop), context);
 
         verify(commands, never()).shellStep(any(), anyInt(), anyInt(), any());
         assertThat(context.hasUntrustedInput()).isTrue();

@@ -2,8 +2,6 @@ package traceworks.core.context;
 
 import traceworks.core.util.ShellQuoting;
 
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -20,13 +18,6 @@ final class TemplateResolver {
     /** Shared with static analyses (the analyzer) — see {@link PlaceholderSyntax#PLACEHOLDER}. */
     private static final Pattern PLACEHOLDER = PlaceholderSyntax.PLACEHOLDER;
 
-    /**
-     * The names of the shell variables that carry a protected value into a shell line: this prefix and a number.
-     * No workflow can set one: a secret's name must not start with {@code TRACEWORKS_}
-     * ({@code core.engine.SecretNames}), and a workflow's own variables never reach the shell as variables.
-     */
-    static final String VALUE_VARIABLE_PREFIX = "TRACEWORKS_VALUE_";
-
     /** No caller interested in which placeholders were substituted (prompt paths). */
     private static final Consumer<String> IGNORE = key -> { };
 
@@ -35,24 +26,25 @@ final class TemplateResolver {
     /** Raw substitution — values are inserted verbatim. Never reports substitutions: prompts are not a shell path. */
     static String resolve(String template, String previousOutput,
                           Map<String, String> blockOutputs, Map<String, Object> vars) {
-        return substitute(template, previousOutput, blockOutputs, vars, IGNORE);
+        return substitute(template, previousOutput, blockOutputs, vars, false, IGNORE);
     }
 
     /**
-     * Raw substitution for an AI prompt — identical output to {@link #resolve}, but every placeholder
-     * that really resolved is reported. Platform data in a prompt does not taint the run (a prompt is
-     * no command line), it marks the output of the block that used it
-     * ({@link ExecutionContextTaint#substitutedIntoPrompt}).
+     * Raw substitution that reports every placeholder that really resolved — identical output to {@link #resolve}.
+     * For an AI prompt: platform data in a prompt does not taint the run (a prompt is no command line), it marks the
+     * output of the block that used it ({@link ExecutionContextTaint#substitutedIntoPrompt}). And for the template
+     * of a shell value ({@code values}), whose result reaches a shell as a variable's value, never as shell text:
+     * platform data there taints the run as in a shell line ({@link ExecutionContextTaint#substitutedIntoShell}).
      */
     static String resolvePrompt(String template, String previousOutput, Map<String, String> blockOutputs,
                                 Map<String, Object> vars, Consumer<String> onSubstitution) {
-        return substitute(template, previousOutput, blockOutputs, vars, onSubstitution);
+        return substitute(template, previousOutput, blockOutputs, vars, false, onSubstitution);
     }
 
     /**
-     * Which values of a run a shell line has to protect: variable names, named block outputs and whether
-     * {@code previous_output} is one. Untrusted input, platform data, the outputs of a tainted run and text a model
-     * wrote. {@link #NONE} is a clean run.
+     * Which values of a run are protected: variable names, named block outputs and whether {@code previous_output}
+     * is one. Untrusted input, platform data, the outputs of a tainted run and text a model wrote. {@link #NONE} is a
+     * clean run.
      */
     record Taint(Set<String> variables, Set<String> outputs, boolean previousOutput) {
 
@@ -64,147 +56,34 @@ final class TemplateResolver {
     }
 
     /**
-     * A shell command line of a block without {@code shell_escape_variables}: {@link #shellLine} with the other
-     * values inserted as they are.
-     */
-    static String resolveShell(String template, String previousOutput, Map<String, String> blockOutputs,
-                               Map<String, Object> vars, Taint taint, Consumer<String> onSubstitution) {
-        return shellLine(template, previousOutput, blockOutputs, vars, taint, false, onSubstitution);
-    }
-
-    /**
-     * A shell command line of a block with {@code shell_escape_variables}: {@link #shellLine} with each of the other
-     * values wrapped in POSIX single quotes, internal single quotes written as {@code '\''}.
-     */
-    static String resolveShellSafe(String template, String previousOutput, Map<String, String> blockOutputs,
-                                   Map<String, Object> vars, Taint taint, Consumer<String> onSubstitution) {
-        return shellLine(template, previousOutput, blockOutputs, vars, taint, true, onSubstitution);
-    }
-
-    /**
-     * Fills in a shell command line. One pass over the template: every placeholder is looked up once and what is
-     * inserted is never scanned again, so a value that itself contains {@code {{ … }}} stays literal.
+     * Fills in a shell command line: every placeholder is looked up once and what is inserted is never scanned
+     * again, so a value that itself contains {@code {{ … }}} stays literal. A value is inserted as it is, or with
+     * {@code escapeAll} ({@code shell_escape_variables}) wrapped in POSIX single quotes, internal single quotes
+     * written as {@code '\''}. A placeholder that names nothing stays literal.
      *
-     * <p><b>A value of {@code taint} never becomes part of the shell text.</b> In its placeholder's place stands a
-     * reference to a shell variable, {@code "${TRACEWORKS_VALUE_1}"} for a bare word and {@code ${TRACEWORKS_VALUE_1}}
-     * inside the author's double quotes or an unquoted heredoc ({@link ShellValuePlace}), and the line starts by
-     * setting the variables, one per value ({@link #valueAssignment}):
+     * <p><b>A protected value never goes into a shell line.</b> A placeholder that names a value of {@code taint}
+     * refuses the line, wherever it stands and with {@code escapeAll} too: Traceworks does not read shell text to
+     * decide where a value is harmless, because such a reading is never bash's. Such a value reaches a command as a
+     * shell variable the block names under {@code values} ({@code core.util.ShellVariables}).
      *
-     * <pre>
-     * IFS= read -r -d '' TRACEWORKS_VALUE_1 &lt;&lt;'TRACEWORKS_VALUE_1_END' || :
-     * it's $(not run)
-     * TRACEWORKS_VALUE_1_END
-     * TRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\n'}
-     * printf '%s\n' "${TRACEWORKS_VALUE_1}" &gt; "notes/${TRACEWORKS_VALUE_1}.txt"
-     * </pre>
-     *
-     * The shell does not read the result of a parameter expansion as code, so the value cannot become a command,
-     * whatever it holds and whatever the author or another value wrote around the reference. The assignments are
-     * the first thing in the text, written by this method alone, where no text of the workflow can change how the
-     * shell reads them. They are plain shell variables: not exported, so no child process inherits them, and not
-     * bound by the size limits of arguments and the environment. The text is still the whole of what runs: whoever
-     * reads the recorded command sees each reference and its value. A NUL in a value does not reach the variable
-     * (bash holds none in a variable or a script), as it did not reach the command before.
-     *
-     * <p>Every other value is inserted as it always was: as it is, or with {@code escapeAll} in single quotes.
-     * A placeholder that names nothing stays literal. {@code onSubstitution} is told the key of every placeholder
-     * that resolved, the signal that turns platform data into a run-level taint source
-     * ({@link ExecutionContextTaint#substitutedIntoShell}).
-     *
-     * @throws ShellLineRefusedException when a value of {@code taint} stands where no reference can stand
-     *                                   ({@link ShellValuePlace.Form#REFUSED}); nothing is filled in then
+     * @throws ShellLineRefusedException when the template names a value of {@code taint}; nothing is filled in then
      */
     static String shellLine(String template, String previousOutput, Map<String, String> blockOutputs,
-                            Map<String, Object> vars, Taint taint, boolean escapeAll,
-                            Consumer<String> onSubstitution) {
+                            Map<String, Object> vars, Taint taint, boolean escapeAll) {
         if (template == null) return null;
-        Map<Integer, ShellQuoteScanner.Occurrence> places = new HashMap<>();
-        boolean scanned = false;
-        Map<String, String> names = new LinkedHashMap<>();
-        Map<String, String> values = new LinkedHashMap<>();
-        Set<String> refusals = new LinkedHashSet<>();
-        String firstRefused = null;
-        Matcher matcher = PLACEHOLDER.matcher(template);
-        StringBuilder line = new StringBuilder();
-        while (matcher.find()) {
-            String key = matcher.group(2);
-            String raw = lookup(key, previousOutput, blockOutputs, vars);
-            String replacement;
-            if (raw == null) {
-                replacement = matcher.group();
-            } else if (!names(key, taint)) {
-                onSubstitution.accept(key);
-                replacement = escapeAll ? shellEscape(raw) : raw;
-            } else {
-                onSubstitution.accept(key);
-                if (!scanned) {
-                    ShellQuoteScanner.occurrences(template).forEach(found -> places.put(found.start(), found));
-                    scanned = true;
-                }
-                ShellValuePlace place = ShellValuePlace.of(places.get(matcher.start()));
-                if (place.form() == ShellValuePlace.Form.REFUSED) {
-                    String shown = "{{ " + key + " }}";
-                    if (firstRefused == null) firstRefused = shown;
-                    refusals.add(shown + " stands " + place.refusal());
-                    replacement = "";
-                } else {
-                    String name = names.computeIfAbsent(key, k -> VALUE_VARIABLE_PREFIX + (names.size() + 1));
-                    values.put(name, raw);
-                    replacement = place.form() == ShellValuePlace.Form.QUOTED ? "\"${" + name + "}\""
-                            : "${" + name + "}";
-                }
+        if (!taint.isEmpty()) {
+            Set<String> refused = new LinkedHashSet<>();
+            for (String key : PlaceholderSyntax.keysIn(template)) {
+                if (names(key, taint) && lookup(key, previousOutput, blockOutputs, vars) != null) refused.add(key);
             }
-            matcher.appendReplacement(line, Matcher.quoteReplacement(replacement));
+            if (!refused.isEmpty()) throw new ShellLineRefusedException(refused);
         }
-        matcher.appendTail(line);
-        if (!refusals.isEmpty()) throw new ShellLineRefusedException(refusals, firstRefused);
-        if (values.isEmpty()) return line.toString();
-        StringBuilder text = new StringBuilder();
-        values.forEach((name, value) -> text.append(valueAssignment(name, value)));
-        return text.append(line).toString();
+        return substitute(template, previousOutput, blockOutputs, vars, escapeAll, IGNORE);
     }
 
     /**
-     * The lines that set the shell variable {@code name} to {@code value}, byte for byte:
-     *
-     * <pre>
-     * IFS= read -r -d '' NAME &lt;&lt;'NAME_END' || :
-     * the value, as it is
-     * NAME_END
-     * NAME=${NAME%$'\n'}
-     * </pre>
-     *
-     * The value is the body of a heredoc with a quoted delimiter, where the shell expands nothing and nothing needs
-     * an escape, so the text holds the value as it is and bash takes a value of any size in the time it takes to
-     * read it (a value in single quotes costs bash time with every {@code '} in it, minutes for megabytes). The
-     * body ends at the first line that is the delimiter, so the delimiter is one no line of the value is: the
-     * variable's name and {@code _END}, with a {@code _} more for as long as the value has such a line. {@code read}
-     * with an empty delimiter takes the whole body, the newline the heredoc ends it with included, which the last
-     * line takes off again; it ends with a status other than 0 because the body holds no NUL, hence {@code || :},
-     * so a line under {@code set -e} goes on.
-     */
-    static String valueAssignment(String name, String value) {
-        String end = name + "_END";
-        while (hasLine(value, end)) end += "_";
-        return "IFS= read -r -d '' " + name + " <<'" + end + "' || :\n" + value + "\n" + end + "\n"
-                + name + "=${" + name + "%$'\\n'}\n";
-    }
-
-    private static boolean hasLine(String value, String line) {
-        int at = value.indexOf(line);
-        while (at >= 0) {
-            int after = at + line.length();
-            if ((at == 0 || value.charAt(at - 1) == '\n') && (after == value.length() || value.charAt(after) == '\n')) {
-                return true;
-            }
-            at = value.indexOf(line, at + 1);
-        }
-        return false;
-    }
-
-    /**
-     * Whether {@code template} names a value of {@code taint}. For the places that pass no shell, so that no
-     * reference can stand there — a tool step's arguments, the host path of a mount — which refuse such values.
+     * Whether {@code template} names a value of {@code taint}. For the places that take no protected value: a tool
+     * step's arguments, the host path of a mount.
      */
     static boolean namesEscapedValue(String template, Taint taint) {
         for (String key : PlaceholderSyntax.keysIn(template)) {
@@ -231,15 +110,16 @@ final class TemplateResolver {
      * scanned again, so a value that itself contains {@code {{ … }}} (a log, an AI answer) stays literal.
      */
     private static String substitute(String template, String previousOutput, Map<String, String> blockOutputs,
-                                     Map<String, Object> vars, Consumer<String> onSubstitution) {
+                                     Map<String, Object> vars, boolean escape, Consumer<String> onSubstitution) {
         if (template == null) return null;
         Matcher matcher = PLACEHOLDER.matcher(template);
         StringBuilder out = new StringBuilder();
         while (matcher.find()) {
             String key = matcher.group(2);
             String raw = lookup(key, previousOutput, blockOutputs, vars);
+            String replacement = raw == null ? matcher.group() : escape ? shellEscape(raw) : raw;
             if (raw != null) onSubstitution.accept(key);
-            matcher.appendReplacement(out, Matcher.quoteReplacement(raw == null ? matcher.group() : raw));
+            matcher.appendReplacement(out, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(out);
         return out.toString();

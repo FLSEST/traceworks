@@ -15,10 +15,12 @@ import java.util.List;
  *                     for a record that does not say
  * @param networkHosts the hosts of {@code hosts}, each {@code host:port}: the only targets the container could reach,
  *                     through the egress proxy; empty otherwise
+ * @param values       the shell variables the command found set (the block's {@code values}): a blob that holds a
+ *                     JSON object from each name to its value ({@link #values(String)}); {@code null} for none
  */
-public record CommandView(int seq, Integer item, BlobRef command, String workingDir, String image, String imageId,
-                          List<Mount> mounts, String network, List<String> networkHosts, List<String> envNames,
-                          boolean host, Result result) {
+public record CommandView(int seq, Integer item, BlobRef command, BlobRef values, String workingDir, String image,
+                          String imageId, List<Mount> mounts, String network, List<String> networkHosts,
+                          List<String> envNames, boolean host, Result result) {
 
     /** The network of a command that could connect to listed hosts only. */
     public static final String HOSTS = "hosts";
@@ -73,7 +75,24 @@ public record CommandView(int seq, Integer item, BlobRef command, String working
     }
 
     CommandView withResult(Result result) {
-        return new CommandView(seq, item, command, workingDir, image, imageId, mounts, network, networkHosts,
+        return new CommandView(seq, item, command, values, workingDir, image, imageId, mounts, network, networkHosts,
                 envNames, host, result);
+    }
+
+    /**
+     * The names and values a {@code values} blob holds, in the order recorded; empty for content that is no JSON
+     * object of texts (a blob another tool wrote).
+     */
+    public static java.util.Map<String, String> values(String json) {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        try {
+            com.fasterxml.jackson.databind.JsonNode node = Blobs.MAPPER.readTree(json);
+            if (node != null && node.isObject()) {
+                node.properties().forEach(entry -> values.put(entry.getKey(), entry.getValue().asText()));
+            }
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            return java.util.Map.of();
+        }
+        return values;
     }
 }
