@@ -61,6 +61,8 @@ public final class RunRecorder implements RunEvents {
     /** Set before the first event; read by every thread that writes ({@link #redacting}). */
     private volatile Redactor redactor = Redactor.none();
 
+    /** Whether {@code run.started} says that the ledger notes the start ({@link #notingTheStartInTheLedger}). */
+    private boolean ledgerStart;
     private int nextSeq;
     private String head;
     private EventFields.Answer nextAnswer;
@@ -122,6 +124,18 @@ public final class RunRecorder implements RunEvents {
      */
     public RunRecorder withScratch(ScratchDirectory scratch) {
         scratchFiles.attach(Objects.requireNonNull(scratch, "scratch"));
+        return this;
+    }
+
+    /**
+     * Says in {@code run.started} that the ledger notes the start of this run ({@code ledger_start}): the caller
+     * writes the start entry right after the line, and lets no step run without it. A record without the field is
+     * one of a version that noted no start.
+     *
+     * @return this recorder
+     */
+    public RunRecorder notingTheStartInTheLedger() {
+        this.ledgerStart = true;
         return this;
     }
 
@@ -207,6 +221,9 @@ public final class RunRecorder implements RunEvents {
         if (start.workspaceSource() != null) {
             f.put("workspace_source", start.workspaceSource());
             f.put("workspace_source_sha", start.workspaceSourceSha());
+        }
+        if (ledgerStart) {
+            f.put("ledger_start", true);
         }
         append(RecordTypes.RUN_STARTED, runId, null, f);
     }

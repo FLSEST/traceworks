@@ -79,6 +79,11 @@ public final class InMemoryRunStore implements RunStore {
         failDiscard = fail;
     }
 
+    /** Removes the run, folder and all, as someone who deletes a run folder does. */
+    public synchronized void forget(String runId) {
+        runs.remove(runId);
+    }
+
     private synchronized void remove(String runId) {
         runs.remove(runId);
     }

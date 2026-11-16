@@ -6,6 +6,7 @@ import traceworks.core.record.ChainReport;
 import traceworks.core.record.ChainVerifier;
 import traceworks.core.record.Manifest;
 import traceworks.core.record.RunView;
+import traceworks.core.record.StartEntry;
 import traceworks.core.view.RunHtml;
 
 import java.util.ArrayList;
@@ -72,7 +73,9 @@ final class RunOutputs {
      * the record. Doing it again completes nothing. Only a run folder in this home's {@code runs/} is completed: a
      * copied folder belongs to the ledger of the home that ran it, and {@code verify} is what checks a copy.
      *
-     * @return what was written, in order: {@code manifest}, {@code ledger entry}; empty when nothing was missing
+     * @return what was written, in order: {@code start entry} (of a run whose start the ledger could not note, and
+     *         that ended without a step for it), {@code manifest}, {@code ledger entry}; empty when nothing was
+     *         missing
      * @throws RunRefusedException    if the run folder is not in the runs folder of this home
      * @throws RecordDamagedException if the chain does not verify, or a manifest or ledger copy that is there does
      *                                not match the record
@@ -86,12 +89,14 @@ final class RunOutputs {
         }
         Optional<byte[]> manifest = run.readManifest();
         Optional<byte[]> copy = ledger.find(id);
-        if (manifest.isPresent() && copy.isPresent()) {
+        List<byte[]> lines = run.events().readAll();
+        RunView view = RunRecords.view(id, RunRecords.parse(id, lines), false);
+        // A run that ended FAILED because the ledger could not note its start: the entry is written now
+        boolean startMissing = view.ledgerStart() && ledger.findStart(id).isEmpty();
+        if (manifest.isPresent() && copy.isPresent() && !startMissing) {
             feedQuietly(run, catalogJson);
             return List.of();
         }
-        List<byte[]> lines = run.events().readAll();
-        RunView view = RunRecords.view(id, RunRecords.parse(id, lines), false);
         ChainReport chain = ChainVerifier.verify(id, lines, run.blobs());
         if (!chain.intact()) {
             throw new RecordDamagedException("The record of run " + id + " does not verify ("
@@ -107,6 +112,10 @@ final class RunOutputs {
         byte[] json = manifest.or(() -> copy)
                 .orElseGet(() -> Manifest.of(view, run.blobs(), TraceworksVersion.current()).toJson());
         List<String> completed = new ArrayList<>();
+        if (startMissing) {
+            ledger.recordStart(id, StartEntry.of(lines.getFirst()).toJson());
+            completed.add("start entry");
+        }
         if (manifest.isEmpty()) {
             run.writeManifest(json);
             completed.add("manifest");

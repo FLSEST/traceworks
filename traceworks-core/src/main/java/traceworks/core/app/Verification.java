@@ -14,6 +14,7 @@ import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RegisterHandover;
 import traceworks.core.record.RunView;
 import traceworks.core.record.SealView;
+import traceworks.core.record.StartEntry;
 import traceworks.core.seal.Seal;
 import traceworks.core.seal.SshSignature;
 import traceworks.core.record.StepView;
@@ -28,7 +29,7 @@ import java.util.Optional;
  * Verifies a run: the hash chain and the blobs, then whether {@code manifest.json} names the head and the number of
  * events the log has (a cut-off tail leaves an intact chain and shows only there) and is byte for byte the manifest
  * the record gives (a rewritten status or gate shows there), and whether the ledger holds the
- * same manifest, and for the run of an audit workflow whether the files of its register folder are the ones
+ * same manifest and noted the start of the run with the first line the record has, and for the run of an audit workflow whether the files of its register folder are the ones
  * {@code run.started} recorded. A manifest or ledger entry is expected once the log says the run finished; when there is one, it is
  * checked whatever the log says, so a log cut before its {@code run.finished} does not escape. Bytes after the last
  * line feed of a finished run's log are a problem of the chain.
@@ -74,11 +75,61 @@ final class Verification {
         }
         String sealState = view == null ? VerifyReport.NOT_CHECKED : seal(view.seal());
         String registerState = view == null ? VerifyReport.NOT_CHECKED : registerFolder(run, view.register());
+        String startState = start(run, ledger, lines);
         boolean ok = chain.intact() && acceptable(manifestState) && acceptable(ledgerState)
+                && (startState.startsWith(VerifyReport.OK) || startState.startsWith(VerifyReport.NONE)
+                || startState.equals(VerifyReport.NOT_CHECKED))
                 && (sealState.startsWith(VerifyReport.OK) || sealState.equals(VerifyReport.UNSEALED)
                 || sealState.equals(VerifyReport.NOT_CHECKED))
                 && (registerState.startsWith(VerifyReport.OK) || registerState.equals(VerifyReport.NOT_CHECKED));
-        return new VerifyReport(chain, manifestState, ledgerState, ledgerReason, ok, sealState, registerState);
+        return new VerifyReport(chain, manifestState, ledgerState, ledgerReason, ok, sealState, registerState,
+                startState);
+    }
+
+    /**
+     * The start entry of the ledger against the first line of the record. The entry holds the SHA-256 of the
+     * {@code run.started} line it was written for, so a record whose first line was changed, or that is another
+     * record under the same run id, does not match. A {@code run.started} with {@code ledger_start} was written by a
+     * version that lets no step run without the entry: such a run without one lost it. A {@code run.started} without
+     * the field is of an earlier version and has none; an entry that is there is compared all the same.
+     */
+    private static String start(StoredRun run, Ledger ledger, List<byte[]> lines) {
+        if (!run.inStore()) {
+            return VerifyReport.NOT_CHECKED;
+        }
+        Optional<byte[]> entry;
+        try {
+            entry = ledger.findStart(run.runId());
+        } catch (RuntimeException e) {
+            return "NOT checked: " + e.getMessage();
+        }
+        RecordedEvent first = null;
+        try {
+            first = lines.isEmpty() ? null : RecordedEvent.parse(lines.getFirst());
+        } catch (IllegalArgumentException e) {
+            // the chain report names the line
+        }
+        if (entry.isEmpty()) {
+            if (first == null) {
+                return VerifyReport.NOT_CHECKED;
+            }
+            return first.fields().path("ledger_start").asBoolean(false)
+                    ? VerifyReport.MISSING + ": run.started says the ledger noted the start of this run, and the"
+                    + " ledger holds no start entry of it"
+                    : VerifyReport.NONE + ": the run was recorded by a version that noted no start in the ledger"
+                    + " (Traceworks " + first.fields().path("version").asText("of an unknown version") + ")";
+        }
+        String line = first == null ? null : EventChain.sha256Hex(lines.getFirst());
+        Optional<StartEntry> noted = StartEntry.parse(entry.get());
+        if (noted.isEmpty()) {
+            return VerifyReport.MISMATCH + ": the start entry of the ledger cannot be read";
+        }
+        if (!run.runId().equals(noted.get().runId()) || !noted.get().runStarted().equals(line)) {
+            return VerifyReport.MISMATCH + ": the ledger noted the start of run " + noted.get().runId()
+                    + " with the run.started line " + noted.get().runStarted() + ", and the first line of this record"
+                    + " is " + (line == null ? "not readable" : line);
+        }
+        return VerifyReport.OK + " (the ledger noted the start, run.started " + line.substring(0, 12) + ")";
     }
 
     /**

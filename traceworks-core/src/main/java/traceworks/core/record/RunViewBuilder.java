@@ -101,6 +101,7 @@ final class RunViewBuilder {
                 run.aiNetwork = text(e.fields(), "ai_network");
                 run.seal = seal(e.fields().path("seal"));
                 run.register = register(e.fields().path("register"));
+                run.ledgerStart = e.fields().path("ledger_start").asBoolean(false);
                 for (Map.Entry<String, JsonNode> choice : e.fields().path("model_choices").properties()) {
                     JsonNode pick = choice.getValue();
                     run.modelChoices.add(new ModelPick(choice.getKey(), text(pick, "option"),
@@ -465,7 +466,7 @@ final class RunViewBuilder {
                 status == RunStatus.PARKED ? run.parkedAnswer : null, run.checkpoint, run.definition, run.inputs,
                 children, root ? eventCount : run.events, root ? head : null, root ? interventions : List.of(),
                 run.images, run.aiNetwork, run.aiHosts, status == RunStatus.PARKED ? run.parkedBy : null, run.seal,
-                run.modelChoices, run.register);
+                run.modelChoices, run.register, root && run.ledgerStart);
     }
 
     /** What the register handed the run, as {@code run.started} records it; {@code null} when it records none. */
@@ -587,6 +588,7 @@ final class RunViewBuilder {
         String packageDigest;
         SealView seal;
         RegisterHandover register;
+        boolean ledgerStart;
         final List<ModelPick> modelChoices = new ArrayList<>();
         String packageCommit;
         final List<ImageFacts> images = new ArrayList<>();

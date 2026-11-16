@@ -307,6 +307,16 @@ public final class RunServices {
     }
 
     /**
+     * The ledger against the runs folder of this home: the runs the ledger saw start that it never saw end, each with
+     * what its folder says, and the runs the ledger names whose folder is gone ({@link LedgerReport}). Read-only.
+     *
+     * @throws RecordDamagedException if the ledger exists and cannot be read
+     */
+    public LedgerReport ledgerReport() {
+        return LedgerReport.of(ledger, store);
+    }
+
+    /**
      * Compares two finished runs from their records, read-only: header, inputs, steps and AI calls, and for two audit
      * runs the findings of their register between them ({@link traceworks.core.compare.RunComparer}
      * says what is matched and what counts).
