@@ -61,24 +61,28 @@ class GitProcessTest {
     /**
      * git has ended, and its output has not: a helper it started still holds the pipe and writes into it. The call
      * waits for the end of the output and gives all of it, not what had arrived when git ended.
+     *
+     * <p>git runs for a moment first, as every git does: the promise holds for a git that still runs when the reading
+     * has started (BoundedOutput#drain). It then ends right after its own line, when the reader may be between two
+     * reads.
      */
     @Test
     void run_givesTheOutputToItsEnd_alsoWhatArrivesAfterGitEnded() throws Exception {
-        GitProcess git = new GitProcess(fakeGit("(sleep 0.5; echo late) 2>/dev/null &\necho first; exit 0").toString(),
-                List.of(), Map.of(), Map.of(), 10_000);
+        GitProcess git = new GitProcess(fakeGit("sleep 0.3\n(sleep 0.3; echo late; sleep 0.2; echo later) 2>/dev/null &\n"
+                + "echo first; exit 0").toString(), List.of(), Map.of(), Map.of(), 10_000);
 
         GitProcess.Result result = git.run(dir, List.of("status"));
 
         assertThat(result.exitCode()).isZero();
-        assertThat(result.outputText()).isEqualTo("first\nlate\n");
+        assertThat(result.outputText()).isEqualTo("first\nlate\nlater\n");
         assertThat(result.errorText()).isEmpty();
     }
 
     /** The same for the standard error, which is read on a thread of its own. */
     @Test
     void run_givesTheErrorOutputToItsEnd_alsoWhatArrivesAfterGitEnded() throws Exception {
-        GitProcess git = new GitProcess(fakeGit("(sleep 0.5; echo late >&2) >/dev/null &\necho first >&2; exit 3")
-                .toString(), List.of(), Map.of(), Map.of(), 10_000);
+        GitProcess git = new GitProcess(fakeGit("sleep 0.3\n(sleep 0.3; echo late >&2) >/dev/null &\n"
+                + "echo first >&2; exit 3").toString(), List.of(), Map.of(), Map.of(), 10_000);
 
         GitProcess.Result result = git.run(dir, List.of("status"));
 

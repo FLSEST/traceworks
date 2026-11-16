@@ -56,6 +56,10 @@ public final class HostCommandRunner implements CommandRunner {
     private static final String SHELL = "/bin/bash";
     /** How often the wait for the process looks at its output. */
     private static final long POLL_MILLIS = 200;
+    /** How long the output is read after a command ended by itself, for what a process it left behind still writes. */
+    static final long AFTER_END_MILLIS = 5000;
+    /** The same after the runner stopped the command: on a timeout or an output beyond the limit. */
+    static final long AFTER_STOP_MILLIS = 2000;
 
     private final Map<String, String> inheritedEnvironment;
     private final String processEncoding;
@@ -134,11 +138,13 @@ public final class HostCommandRunner implements CommandRunner {
             process = OwnSession.start(pb::start);
             stop = ProcessTree.stopHandle(process);
             tracker.started(stop);
-            BashScript.supply(process, BashScript.stdin(command));
 
-            // Read the output on a thread of its own, so a full pipe never blocks the process
+            // Read the output on a thread of its own, so a full pipe never blocks the process. The reading starts
+            // before bash gets its script: bash cannot end before the reader holds the stream, and so the output is
+            // read to the end of the pipe, also what a child of the command writes after the command ended
             BoundedOutput output = new BoundedOutput(outputLimit);
-            Thread reader = output.drain(process.getInputStream(), "host-command-output");
+            output.drain(process.getInputStream(), "host-command-output");
+            BashScript.supply(process, BashScript.stdin(command));
 
             // An output beyond the limit stops the process the way a timeout does
             boolean timedOut = false;
@@ -152,9 +158,11 @@ public final class HostCommandRunner implements CommandRunner {
             if (process.isAlive()) {
                 ProcessTree.terminate(process);
                 process.waitFor(ProcessTree.GRACE.toSeconds() + 2, TimeUnit.SECONDS);
-                reader.join(2000);
+                output.end(AFTER_STOP_MILLIS);
             } else {
-                reader.join(5000);
+                // A process the command left behind may still write: its output counts for this long, then the
+                // reading ends and the process finds the output closed
+                output.end(AFTER_END_MILLIS);
             }
             List<String> truncated = output.exceeded() ? List.of(CommandResult.STDOUT) : List.of();
             if (timedOut) {
