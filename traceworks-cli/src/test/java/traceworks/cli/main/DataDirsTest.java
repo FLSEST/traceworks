@@ -451,7 +451,7 @@ class DataDirsTest {
             Result verify = exec("verify", id);
             assertThat(verify.out()).as(verify.all()).containsPattern("(?m)^ledger +ok$");
             assertThat(new ProcessBuilder("git", "-C", ledger.toString(), "ls-files").start().inputReader().lines()
-                    .toList()).as("the lock is no part of the ledger").containsExactly("runs/" + id + ".json");
+                    .toList()).as("the lock is no part of the ledger").containsExactly("runs/" + id + ".json", "starts/" + id + ".json");
         } finally {
             Files.setPosixFilePermissions(mount, PosixFilePermissions.fromString("rwx------"));
         }
