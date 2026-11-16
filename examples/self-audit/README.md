@@ -244,8 +244,9 @@ time, and it sees a change only where the changed lines lie in an area.
 
 [`security-changes`](security-changes/README.md) is the check for the time between two long audits, after a day's
 work or before a merge. It compares the files of the workspace with a base commit (`--input since=<commit|tag|date>`, or
-without the input the commit of the last run of the check), by content and not by what git's diff says, since a
-workspace can make that say less; it maps the changed lines to the areas the same finder produces, and adds the
+without the input the commit of the last run of the check). The tool that compiles the files decides what changed,
+from content: git hands it the trees and the blobs it asks for by id and never sees a path of the workspace, since
+a workspace can make git's diff say less. It maps the changed lines to the areas the same finder produces, and adds the
 areas one call away from a changed member, in both directions and through an interface to every implementation:
 a helper that no rule points at brings in the areas that call it. The model judges only those, each with the
 changed code it is connected with in its prompt. Without a base the run refuses, and so it does for a base that is the workspace commit itself or
@@ -257,7 +258,9 @@ traceworks run examples/self-audit/security-changes --input since=v0.1.0
 traceworks run examples/self-audit/security-changes        # since the workspace commit of the last run of this check
 ```
 
-Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. It
+Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
+changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
+keeps the gate from GREEN for that run; tests and documentation are counted. It
 has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding
 there is asked about in every run until an answer says it is gone or a person decides, whatever the base of the
 run, and an area whose call failed is judged by the next run: the register holds nothing that no run comes back
