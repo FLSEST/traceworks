@@ -1,0 +1,18 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a41",
+  "name": "IT pause-child child",
+  "description": "Notes its start in counted.txt in the workspace, waits until the file go is there, and ends.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "count",
+      "config": {
+        "workspace_writable": true,
+        "timeout_seconds": 120,
+        "command": "echo started >> \"{{ project_path }}/counted.txt\"; n=0; while [ ! -e \"{{ project_path }}/go\" ] && [ $n -lt 900 ]; do sleep 0.1; n=$((n + 1)); done; test -e \"{{ project_path }}/go\"; echo child done"
+      }
+    }
+  ]
+}

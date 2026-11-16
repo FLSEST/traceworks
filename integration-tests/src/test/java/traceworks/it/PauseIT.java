@@ -18,7 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * pauses, Ctrl-C twice cancels, and SIGTERM leaves the run interrupted. A paused or interrupted run goes on with
  * {@code resume}, and its loop runs only the items that did not finish: every item of the loop notes its start in
  * {@code ran.txt} in the workspace, so the file says how often each one ran. The Ctrl-C of these tests goes to the
- * whole process group of the command, as a terminal sends it.
+ * whole process group of the command, as a terminal sends it. A child workflow does not park in the middle (package
+ * {@code pause-child}): it ends, and its parent parks.
  */
 class PauseIT extends IntegrationTest {
 
@@ -34,7 +35,8 @@ class PauseIT extends IntegrationTest {
         }
     }
 
-    private static void await(BooleanSupplier condition, String what) throws InterruptedException {
+    /** Waits for {@code condition}, looking every 100 ms; fails after 90 s, which only a failing test waits. */
+    static void await(BooleanSupplier condition, String what) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
         while (!condition.getAsBoolean()) {
             if (System.nanoTime() >= deadline) {
@@ -175,5 +177,99 @@ class PauseIT extends IntegrationTest {
         } catch (IOException e) {
             return 0;
         }
+    }
+
+    private List<String> counted() {
+        Path file = traceworks.workspace().resolve("counted.txt");
+        try {
+            return Files.isRegularFile(file) ? Files.readAllLines(file) : List.of();
+        } catch (IOException e) {
+            return List.of();   // read while the step writes: the next look sees it
+        }
+    }
+
+    /**
+     * A pause while a child workflow runs (package {@code pause-child}; docs/cli.md, "pause"): a child run has no
+     * checkpoint, so it does not park in the middle. Its step, whose container runs when the pause comes, ends by
+     * itself, the child completes, and the parent parks before its next step. The resume starts no second child.
+     * The child's step notes each start in {@code counted.txt} in the workspace and then waits for the file
+     * {@code go}, which the test writes only after the pause was announced.
+     */
+    @Test
+    void aPauseWhileAChildRuns_letsItEnd_andParksTheParent() throws Exception {
+        Traceworks.Running running = traceworks.startRun("pause-child");
+        await(() -> counted().size() == 1, "the child's step to start");
+
+        running.ctrlC();
+        await(() -> running.errSoFar().contains("Ctrl-C again cancels"), "the pause to be announced");
+        Files.createFile(traceworks.workspace().resolve("go"));
+        Result run = running.await(120);
+
+        // Exit 5 after the child's step: a pause that cut the container would fail the step (its command ends 0
+        // only when it found the file), and one that waited in the process would never exit
+        assertThat(run.code()).as(run.describe()).isEqualTo(5);
+        assertThat(run.status()).isEqualTo("PARKED");
+        assertThat(run.out()).contains("paused before the next step: every step that started is finished.",
+                "traceworks resume '" + run.runId() + "'");
+        RunFolder folder = traceworks.folder(run);
+        assertThat(folder.only("run.parked").path("kind").asText()).isEqualTo("pause");
+        assertThat(folder.stepStatus("slow_child")).isEqualTo("COMPLETED");
+        assertThat(folder.output("slow_child")).isEqualTo("child done");
+        String child = folder.metadata("slow_child").path("subRunId").asText();
+        assertThat(folder.metadata("slow_child").path("subRunStatus").asText()).isEqualTo("COMPLETED");
+        assertThat(folder.eventsOf(child, "run.finished")).extracting(e -> e.path("status").asText())
+                .containsExactly("COMPLETED");
+        assertThat(folder.ownEvents("step.started")).extracting(e -> e.path("name").asText())
+                .as("the step after the child did not start").containsExactly("slow_child");
+        assertThat(counted()).containsExactly("started");
+
+        Result resumed = traceworks.exec("resume", run.runId());
+
+        assertThat(resumed.code()).as(resumed.describe()).isZero();
+        assertThat(resumed.status()).isEqualTo("COMPLETED");
+        // The child ran once: a resume that started its step again would count a second start and add a run id
+        assertThat(counted()).as("the child's command ran exactly once").containsExactly("started");
+        assertThat(folder.runIds()).containsExactlyInAnyOrder(folder.id(), child);
+        assertThat(folder.output("after")).isEqualTo("after the child");
+    }
+
+    /**
+     * SIGTERM while the child's container runs: the process cannot wait for the child. The run is interrupted, its
+     * container is gone, and the resume runs the step that was in flight again, which is the whole child: a second
+     * child run, and a second start of its command.
+     */
+    @Test
+    void sigtermWhileAChildRuns_leavesTheRunInterrupted_andTheResumeRunsTheChildAgain() throws Exception {
+        Traceworks.Running running = traceworks.startRun("pause-child");
+        await(() -> counted().size() == 1, "the child's step to start");
+
+        running.terminate();
+        Result run = running.await(120);
+
+        assertThat(run.code()).as("128 + SIGTERM: " + run.describe()).isEqualTo(143);
+        RunFolder folder = theRun();
+        assertThat(folder.ownEvents("run.finished")).isEmpty();
+        assertThat(folder.ownEvents("run.parked")).isEmpty();
+        Result show = traceworks.exec("show", folder.id());
+        assertThat(show.code()).as(show.describe()).isEqualTo(9);
+        assertThat(show.out()).contains("INTERRUPTED");
+        List<String> cut = folder.runIds().stream().filter(id -> !id.equals(folder.id())).toList();
+        assertThat(cut).as("the child run that was in flight").hasSize(1);
+        assertThat(folder.eventsOf(cut.getFirst(), "run.finished")).as("it never ended").isEmpty();
+        // The child's container carries the id of the run that was started, and the process removed it
+        Containers.assertNoneLeft(traceworks.environment().runtime(), folder.runIds());
+
+        Files.createFile(traceworks.workspace().resolve("go"));
+        Result resumed = traceworks.exec("resume", folder.id());
+
+        assertThat(resumed.code()).as(resumed.describe()).isZero();
+        assertThat(counted()).as("the child's command started again: a child run has no checkpoint of its own")
+                .containsExactly("started", "started");
+        String again = folder.metadata("slow_child").path("subRunId").asText();
+        assertThat(again).isNotEqualTo(cut.getFirst());
+        assertThat(folder.runIds()).containsExactlyInAnyOrder(folder.id(), cut.getFirst(), again);
+        assertThat(folder.eventsOf(again, "run.finished")).extracting(e -> e.path("status").asText())
+                .containsExactly("COMPLETED");
+        assertThat(folder.output("after")).isEqualTo("after the child");
     }
 }

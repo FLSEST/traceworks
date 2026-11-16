@@ -1,0 +1,22 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a30",
+  "name": "IT ai-interrupt-loop",
+  "description": "A loop of three AI calls, each of which waits until the test puts a file of its item into the workspace: for an interrupt during a call.",
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "judged",
+      "config": {
+        "execution_mode": "ai",
+        "items": [
+          "one",
+          "two",
+          "three"
+        ],
+        "command": "[fake:wait=go-{{ item }}] Judge {{ item }}"
+      }
+    }
+  ]
+}
