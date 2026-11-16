@@ -412,6 +412,39 @@ class SubWorkflowLauncherTest {
                     .doesNotContainKey(TriggerSource.PARENT_CONTEXT_KEY);
         }
 
+        /**
+         * A child that ended with untrusted input or a tainted output hands that on with its output: the output the
+         * parent's block records is tainted, and a shell line of the parent refuses it.
+         */
+        @Test
+        void should_taintTheOutputTheParentRecords_when_theChildEndedTainted() {
+            WorkflowDefinition child = child();
+            when(childRuns.run(eq(child), anyMap())).thenReturn(new ChildRun("child-run", RunStatus.COMPLETED,
+                    List.of(StepResult.builder().stepIndex(0).status(StepStatus.COMPLETED).output("x; id").build()),
+                    null, false, true));
+
+            var outcome = launcher.run("child", context);
+            context.recordOutput("sub", outcome.output());
+
+            assertThat(context.hasUntrustedInput()).isTrue();
+            assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.sub.output }}", false))
+                    .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        }
+
+        /** A child that ended clean, and asked no model, leaves the parent as it was. */
+        @Test
+        void should_leaveTheOutputTheParentRecordsRaw_when_theChildEndedClean() {
+            childEnds(child(), RunStatus.COMPLETED,
+                    StepResult.builder().stepIndex(0).status(StepStatus.COMPLETED).output("a | b").build());
+
+            var outcome = launcher.run("child", context);
+            context.recordOutput("sub", outcome.output());
+
+            assertThat(context.hasUntrustedInput()).isFalse();
+            assertThat(context.modelAsked()).isFalse();
+            assertThat(context.resolveShellTemplate("echo {{ block.sub.output }}", false)).isEqualTo("echo a | b");
+        }
+
         /** A context built without child runs refuses them clearly instead of skipping the child. */
         @Test
         void should_failTheChild_when_theRunHasNoChildRuns() {
