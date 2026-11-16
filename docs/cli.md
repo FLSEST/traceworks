@@ -187,7 +187,10 @@ holds; in every other case it runs:
   record redacted a secret's value is not the output the item produced, so that item runs again.
 
 A failed or cancelled item, and the item that was in flight, run again. The loop's output is put together as in one
-pass, so the steps after it read the same text and get the same step indices. The terminal and `run.html` mark a
+pass, so the steps after it read the same text and get the same step indices. No other block takes anything over: a
+`while` that was in flight starts at its first iteration again, a `retry` at its first attempt, a `switch` at the
+first block of its case, and a `sub-workflow` starts a new child run from the child's first block. Write such a step
+so that it can run twice, or let it note in the scratch directory what it has done. The terminal and `run.html` mark a
 taken-over item (`taken over from event <seq>, not run again`), and the record names the earlier event
 (docs/events.md, `foreach.item.finished`). A loop that runs a workflow per item (`workflow_id`) takes nothing over:
 a child run has no checkpoints of its own, so every item runs again.
@@ -231,6 +234,10 @@ What "in flight" means:
   output of the items that finished, and the run `CANCELLED`.
 - A loop that runs a workflow per item (`workflow_id`) and a child workflow do not park in the middle: a resume
   could not take over what they did. They run to their end, and the run parks after that step.
+- A `while` and a `retry` do not park in the middle either: each is one step, and a pause is no cancel. The `while`
+  runs until its condition or its limit ends it, the `retry` until an attempt completes or its attempts are used up,
+  waits between attempts included, and the run parks after that step. The resume runs nothing of it again. The same
+  holds for a `foreach` inside a child workflow. To stop such a step now, cancel the run.
 - A pause during the last step parks nothing: the run ends.
 
 In the terminal of the run itself, the first Ctrl-C does the same (see "run").
@@ -1230,6 +1237,27 @@ reports every other value as the error `invalid-config-value`. The key belongs i
 and `check` reports the error `unknown-block-field`. In a `switch` case, a block's `on_failure` says whether the case
 goes on with its next block; a `switch` step one of whose blocks failed fails, and its own `on_failure` decides for
 the run.
+
+What fails a block that holds a command or blocks:
+
+| Block | A failure inside it |
+|---|---|
+| `switch` | a failed case block fails the step; the case's next blocks do not run unless that block says `on_failure: continue` |
+| `foreach` | a failed item does not stop the loop: the other items run, and the step fails after the last one, naming the failed items. `continue_on_error: true` completes the step all the same. After `max_consecutive_failures` failed items in a row (3 by default) the loop stops and the step fails |
+| `while` | a failed iteration ends the loop and fails the step, with the output of the iterations so far |
+| `retry` | a failed attempt is tried again, one that timed out included, until one completes; when none does, the step fails with the output of the last attempt |
+| `conditional` | a failed branch fails the step |
+| `sub-workflow`, a `foreach` item with `workflow_id` | the child run ends as a run of its own does (`FAILED` at its first failed step without `on_failure: continue`), and a child that ended `FAILED` fails the step or the item, with the child's last output and its error |
+
+A child run's gate is its own: a `gate_status` marker one of its steps printed, and the RED of its failed
+`checked_command`, stand in the record under the child's run id (`gate.reported`, and the `gate` of its
+`run.finished`). The step that ran the child copies the child's output, marker included, and that copy sets no gate
+of the run above it.
+
+A step that is refused before it runs anything ends its run whatever its `on_failure` says, like a setting of the
+wrong type: a shell line, the host path of a mount or a tool's `container_args` that names a protected value
+("Values: how a protected value reaches a command"). In a child workflow such a refusal ends the child run, and the
+`on_failure` of the block that started the child decides for the run above it.
 
 A run that reaches its end completes:
 
