@@ -1858,7 +1858,11 @@ reaches a container: nothing of it is mounted or copied. A subscription is used 
    else. It is in no command line, and the record shows `[redacted:<NAME>]` in its place.
 
 Give a provider only the credential it shall use: when an API key has a value too, both reach the container and the
-CLI chooses. For Pi with such a token, see "The credential" under "**Pi.**" below and docs/security.md.
+CLI chooses.
+
+Pi takes such a token too, and then talks to Anthropic as Claude Code does, although the client is Pi: see "The
+credential" under "**Pi.**" below and docs/security.md. Traceworks allows this and changes nothing about it. Whether
+the terms of your subscription allow that use is yours to check: the responsibility for it lies with you.
 
 **The record.** Each call writes `ai.request`, the CLI's `step.command` and `step.command.finished`, one
 `ai.tool_call` per tool call and `ai.response` (docs/events.md); `show` lists the calls of each step and their tool

@@ -421,7 +421,9 @@ content, and no blob is written through one.
   Traceworks as a normal user.
 - **Pi with a Claude subscription token** (`ANTHROPIC_OAUTH_TOKEN`, or an `sk-ant-oat...` value in
   `ANTHROPIC_API_KEY`) presents itself to Anthropic as Claude Code: its user agent and beta headers say so, and an
-  identity line comes first in its system prompt. That is Pi's own behaviour. Use an API key if you do not want it.
+  identity line comes first in its system prompt. That is Pi's own behaviour, and Traceworks allows it. Whether the
+  terms of your subscription allow that use is yours to check, and the responsibility for it lies with you. Use an
+  API key if you do not want it.
 - **Pi and a writable workspace.** With `workspace_writable: true`, Pi still applies nothing of the workspace's
   `.pi/` (`--no-approve`, measured with Pi 1.5.2 under a home that trusts every project), but it renames a
   `.pi/commands/` folder there to `.pi/prompts/` when it starts. A step before it can have written that folder.
