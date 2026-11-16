@@ -66,7 +66,8 @@ public final class RunSnapshotJson {
     public static final int FORMAT = 4;
 
     /**
-     * The format before {@code context.taint.model_text}: read as a run that asked no model. A version that knows
+     * The format before {@code context.taint.model_text}: it does not say what a model wrote, so it is read as a run
+     * that asked a model, with every output and variable as model text ({@link #unknownModelText}). A version that knows
      * only this format refuses a snapshot of the current one, so it never resumes a run without its model text.
      */
     private static final int THIRD_FORMAT = 3;

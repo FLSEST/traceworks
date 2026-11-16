@@ -41,11 +41,20 @@ public interface ChildRuns {
      * @param error  why it failed, {@code null} otherwise
      * @param modelAsked whether it asked a model, itself or through a child of its own: its output may then hold
      *                   text a model wrote, and the parent protects it in a shell line
+     * @param tainted    whether it ended as a run that carries untrusted input: it was handed some, platform data
+     *                   reached a shell of it, or an output of it is tainted (platform data in a prompt, a protected
+     *                   value in a block). Its output is then tainted in the parent
      */
-    record ChildRun(String runId, RunStatus status, List<StepResult> steps, String error, boolean modelAsked) {
+    record ChildRun(String runId, RunStatus status, List<StepResult> steps, String error, boolean modelAsked,
+                    boolean tainted) {
         public ChildRun {
             Objects.requireNonNull(runId, "runId");
             steps = steps == null ? List.of() : List.copyOf(steps);
+        }
+
+        /** A child run that ended without untrusted input. */
+        public ChildRun(String runId, RunStatus status, List<StepResult> steps, String error, boolean modelAsked) {
+            this(runId, status, steps, error, modelAsked, false);
         }
 
         /** A child run that asked no model. */

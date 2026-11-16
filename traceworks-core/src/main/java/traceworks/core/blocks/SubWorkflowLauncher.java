@@ -145,6 +145,10 @@ class SubWorkflowLauncher {
                 // The child's output, and what it left in the workspace, may hold text a model wrote
                 context.markModelAsked();
             }
+            if (run.tainted()) {
+                // The child's output holds what untrusted input or platform data made of it: tainted here too
+                context.childWasTainted();
+            }
             RunStatus end = run.status();
             return new Outcome(workflowId, name, run.runId(), end, buildOutput(run, context.secretValues()),
                     end == RunStatus.COMPLETED || end == RunStatus.COMPLETED_WITH_ERRORS);

@@ -173,8 +173,9 @@ final class BlockStepRunner {
         // recordOutput/setDerivedVariable, not the plain setters: in a run that carries untrusted input the output
         // is tainted and gets shell-escaped downstream.
         context.recordOutput(block.getName(), step.getOutput());
-        context.setDerivedVariable(StepOutputs.name(step.getStepIndex()),
+        context.setStepOutputVariable(StepOutputs.name(step.getStepIndex()),
                 step.getOutput() != null ? step.getOutput() : "");
+        context.blockEnded();
         context.getSourceSteps().record(block.getName(), step);
 
         reportFinished(step, block, context.getEvents());
@@ -190,6 +191,7 @@ final class BlockStepRunner {
      * is: nothing more can be recorded.
      */
     private void failStep(StepResult step, BlockDefinition block, ExecutionContext context, Throwable error) {
+        context.blockEnded();
         if (error instanceof EventLogException) {
             return;
         }

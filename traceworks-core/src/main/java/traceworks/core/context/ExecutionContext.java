@@ -447,12 +447,38 @@ public class ExecutionContext {
      * quotes just the same, in a run that asked a model.
      */
     public void recordOutput(String blockName, String output) {
-        boolean tainted = taint.consumePlatformPrompt() | hasUntrustedInput(); // | : always consume the flag
+        ExecutionContextTaint.Inherited into = taint.intoTheBlock();
+        boolean tainted = taint.consumePlatformPrompt() | hasUntrustedInput() // | : always consume the flag
+                | into.compareTo(ExecutionContextTaint.Inherited.PLATFORM_DATA) >= 0;
+        if (into == ExecutionContextTaint.Inherited.MODEL_TEXT) {
+            // Model text a parent handed over went into the block: from here on this run holds model text
+            taint.markModelAsked();
+        }
         setPreviousOutput(output);
         setBlockOutput(blockName, output);
         if (tainted) taint.markOutput(blockName);
         else if (taint.modelAsked()) taint.markModelOutput(blockName);
     }
+
+    /**
+     * Sets the variable {@code step_N_output} of the output just recorded ({@link #recordOutput}): protected as that
+     * output is.
+     */
+    public void setStepOutputVariable(String name, Object value) {
+        setTemplateVariable(name, value, "{{ " + PREVIOUS_OUTPUT_NAME + " }}");
+    }
+
+    /**
+     * The block's step ended, with or without an output: what went into it ({@link #recordOutput}) no longer counts
+     * for the next block.
+     */
+    public void blockEnded() { taint.blockEnded(); }
+
+    /**
+     * A child workflow the block ran ended with untrusted input or a tainted output: its output, which the block
+     * hands on, is that too, so the output this block records is tainted.
+     */
+    public void childWasTainted() { taint.wentIntoTheBlock(ExecutionContextTaint.Inherited.EXTERNAL_INPUT); }
 
     /** Re-applies the exported {@link #PLATFORM_IN_SHELL_VARIABLE} flag of an earlier segment or the parent run. */
     public void markPlatformUsedInShell() { taint.markPlatformUsedInShell(); }
@@ -497,8 +523,12 @@ public class ExecutionContext {
         return blockOutputs.get(blockName);
     }
 
+    /**
+     * Fills in a template. Like every resolution, it notes what went into the block that runs now: the output the
+     * block records is protected when a placeholder that resolved here was ({@link #recordOutput}).
+     */
     public String resolveTemplate(String template) {
-        return TemplateResolver.resolve(template, previousOutput, blockOutputs, variables);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, taint::resolved);
     }
 
     /**
@@ -519,7 +549,8 @@ public class ExecutionContext {
         if (runPaths.packageDirectory() != null) hostVariables.put("package_dir", runPaths.packageDirectory());
         hostVariables.put("scratch_dir", runPaths.scratch() != null ? runPaths.scratch() : "");
         if (runPaths.register() != null) hostVariables.put("register_dir", runPaths.register());
-        return TemplateResolver.resolve(template, previousOutput, blockOutputs, hostVariables);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, hostVariables,
+                taint::resolved);
     }
 
     /** Whether a {{ key }} placeholder would resolve to a value (possibly blank) rather than stay literal — the same lookup {@link #resolveTemplate} performs, for a caller that must decide before substituting. */
@@ -527,8 +558,10 @@ public class ExecutionContext {
 
     /** Prompt path: like {@link #resolveTemplate}, but platform data here marks this block's output untrusted. */
     public String resolvePromptTemplate(String template) {
-        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables,
-                taint::substitutedIntoPrompt);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, key -> {
+            taint.substitutedIntoPrompt(key);
+            taint.resolved(key);
+        });
     }
 
     /** A shell command line of a block with {@code shell_escape_variables}: {@link #resolveShellTemplate} with {@code true}. */
@@ -556,8 +589,10 @@ public class ExecutionContext {
      * ({@link ExecutionContextTaint#substitutedIntoShell}).
      */
     public String resolveShellValue(String template) {
-        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables,
-                taint::substitutedIntoShell);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, key -> {
+            taint.resolved(key);   // before the run is tainted by it: what the key was, not what the run is now
+            taint.substitutedIntoShell(key);
+        });
     }
 
     /**

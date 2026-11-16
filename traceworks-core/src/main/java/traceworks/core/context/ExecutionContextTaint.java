@@ -113,16 +113,50 @@ final class ExecutionContextTaint {
     Inherited inheritedBy(String template) {
         Inherited strongest = Inherited.NOTHING;
         if (template == null) return strongest;
-        TemplateResolver.Taint tainted = outputs.snapshot(Set.of());
-        TemplateResolver.Taint model = modelOutputs.snapshot(Set.of());
         for (String key : PlaceholderSyntax.keysIn(template)) {
-            Inherited of = variables.isExternal(key) || TemplateResolver.names(key, tainted) ? Inherited.EXTERNAL_INPUT
-                    : variables.isPlatform(key) ? Inherited.PLATFORM_DATA
-                    : variables.isModel(key) || TemplateResolver.names(key, model) ? Inherited.MODEL_TEXT
-                    : Inherited.NOTHING;
+            Inherited of = markOf(key);
             if (of.compareTo(strongest) > 0) strongest = of;
         }
         return strongest;
+    }
+
+    /** The mark of the value one placeholder key names. */
+    private Inherited markOf(String key) {
+        return variables.isExternal(key) || outputs.names(key) ? Inherited.EXTERNAL_INPUT
+                : variables.isPlatform(key) ? Inherited.PLATFORM_DATA
+                : variables.isModel(key) || modelOutputs.names(key) ? Inherited.MODEL_TEXT
+                : Inherited.NOTHING;
+    }
+
+    /**
+     * The strongest mark among the values that went into the block that runs now: every placeholder a template of
+     * it resolved, for any purpose, and what a child workflow it ran handed back ({@link #wentIntoTheBlock}). The
+     * output the block records is protected as that ({@link ExecutionContext#recordOutput}); the engine clears it
+     * when the block's step ends ({@link #blockEnded}).
+     */
+    private final java.util.concurrent.atomic.AtomicReference<Inherited> intoTheBlock =
+            new java.util.concurrent.atomic.AtomicReference<>(Inherited.NOTHING);
+
+    /** Callback of every resolution: the value of this placeholder key went into the block that runs now. */
+    void resolved(String key) {
+        wentIntoTheBlock(markOf(key));
+    }
+
+    /** A value with this mark went into the block that runs now. */
+    void wentIntoTheBlock(Inherited mark) {
+        if (mark != Inherited.NOTHING) {
+            intoTheBlock.accumulateAndGet(mark, (held, more) -> more.compareTo(held) > 0 ? more : held);
+        }
+    }
+
+    /** The strongest mark of what went into the block that runs now. */
+    Inherited intoTheBlock() {
+        return intoTheBlock.get();
+    }
+
+    /** The block's step ended: the next block starts with nothing. */
+    void blockEnded() {
+        intoTheBlock.set(Inherited.NOTHING);
     }
 
     /** The names of the platform data: the register's and what a step derived from it. */
@@ -194,7 +228,9 @@ final class ExecutionContextTaint {
     /** The whole taint, for a checkpoint: unlike {@link #export}, it keeps the platform data and both flags. */
     ContextState.Taint state() {
         return new ContextState.Taint(variables.externalNames(), variables.platformNames(), outputs.outputNames(),
-                outputs.isPreviousOutputTainted(), platformUsedInShell.get(), platformInPrompt.get(),
+                outputs.isPreviousOutputTainted(), platformUsedInShell.get(),
+                // A block parked in its middle keeps that something protected went into it: its output is tainted
+                platformInPrompt.get() || intoTheBlock.get() != Inherited.NOTHING,
                 new ContextState.ModelText(modelAsked.get(), variables.modelNames(), modelOutputs.outputNames(),
                         modelOutputs.isPreviousOutputTainted()));
     }

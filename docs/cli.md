@@ -626,7 +626,7 @@ included, up to the output limit; a NUL is taken out; and a value that was not d
 hold exactly what was sent) ends the shell with exit code 74 before the command's first line. The engine knows such
 an end from a command that exits 74 by itself, by a token in the line the shell writes: the command counts as not
 run, and a `run_if`, a shell `condition` or the condition of a `while` fails its block instead of reading it as
-"false". A name matches `[A-Z_][A-Z0-9_]*` and is none the run or bash reserves (`invalid-value-name`). A tool step (`container_args`) runs no shell and takes no values.
+"false". A step with `values` needs bash 3.1 or later; an older one ends the same way. A name matches `[A-Z_][A-Z0-9_]*` and is none the run or bash reserves (`invalid-value-name`). A tool step (`container_args`) runs no shell and takes no values.
 
 The record keeps the command as the workflow wrote it and, next to it, the values by name (`step.command`,
 docs/events.md); `show` names a step's values, and prints them with `--outputs`; `run.html` shows each under its

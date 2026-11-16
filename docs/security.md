@@ -335,7 +335,8 @@ content, and no blob is written through one.
     into the variable (`printf %b`): what a variable holds, bash does not parse.
 
     ```
-    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" && -z ${!1@a} ]] || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
+    case "${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}" in [012].*|3.0) echo "traceworks:3f0c9a…: this bash is older than 3.1, which a step with values needs" >&2; exit 74;; esac
+    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" ]] && IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A < <(declare -p "$1") && [[ $TRACEWORKS_A == "declare -- $1=" ]] || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
     TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
     unset -f TRACEWORKS_VALUE
     printf '%s\n' "$REVIEW" > review.md
@@ -353,7 +354,8 @@ content, and no blob is written through one.
     condition of a `while` fail their block on it, and none of them reads it as "false".
   - **Not exported, unless the command exports it.** A value is the shell's own variable. The name is unset before
     the assignment, which takes it out of the environment the step started with, the export attribute is taken off
-    after it, and a variable that still has any attribute fails the delivery; so no process the command starts
+    after it, and a variable that still has any attribute fails the delivery (`declare -p` must begin with
+    `declare -- NAME=`); so no process the command starts
     inherits the value. The author exports it knowingly with `export NAME`. A name that a program reads as its
     configuration (`GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`) then hands a model's text to that
     program, which may run what it says: `check` warns about such a name (`value-name-configures-program`). A name
@@ -369,6 +371,19 @@ content, and no blob is written through one.
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
     static `items` of a `foreach`, a person's answer.
+  - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
+    which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
+    an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
+    part that does not work in some bash fails the delivery and never skips a check. Run and tested with bash 5.2;
+    the built-in images have that.
+  - **An output is protected when a value that went into its block was.** Every template a block fills in, for
+    any purpose (a prompt, a question, a default value, an automatic answer, `values`, a `context` entry, a switch
+    expression), notes the mark of each placeholder, and the output the block records takes the strongest of them
+    together with the state of the run: `{{ block.<name>.output }}`, `{{ previous_output }}` and
+    `{{ step_N_output }}` alike. Untrusted input and platform data make the output tainted, and with it the run
+    from there on; model text a parent handed over makes the run one that holds model text. A child workflow hands
+    back whether it asked a model and whether it ended tainted, so its output is protected in the parent, through
+    any number of levels.
   - **A value built from a protected one is protected.** A variable a block fills in from a template is protected
     when any placeholder that went into it is, whatever the state of the run: an entry of a `foreach`'s `context`,
     the `default_value` of a `human-input` taken after a timeout, an approval's `auto_answer`. Built from platform

@@ -227,7 +227,8 @@ public final class WorkflowEngine {
             }
         }
         try {
-            return new Executed(finish(run, context, events), thrown, context != null && context.modelAsked());
+            return new Executed(finish(run, context, events), thrown, context != null && context.modelAsked(),
+                    context == null || context.hasUntrustedInput());
         } finally {
             budget.releaseTo(held);   // a child's steps are dropped now: its parent keeps only its output
         }
@@ -250,8 +251,11 @@ public final class WorkflowEngine {
      * @param logFailure the {@link EventLogException} that ended the run by being thrown (a record write that
      *                   bypassed the run's sink, such as an AI call's {@code ai.*} events); {@code null} otherwise
      * @param modelAsked whether the run asked a model, itself or through a child workflow
+     * @param tainted    whether the run ended carrying untrusted input; a run that ended before it had a context
+     *                   counts as one, since nothing says it did not
      */
-    private record Executed(RunOutcome outcome, EventLogException logFailure, boolean modelAsked) { }
+    private record Executed(RunOutcome outcome, EventLogException logFailure, boolean modelAsked,
+                            boolean tainted) { }
 
     /** The context of a fresh run, or the one its checkpoint kept for a resumed run. */
     private ExecutionContext context(WorkflowDefinition definition, ResumePoint point, RunState run,
@@ -303,7 +307,7 @@ public final class WorkflowEngine {
             }
             RunOutcome outcome = executed.outcome();
             return new ChildRuns.ChildRun(childRunId, outcome.status(), outcome.steps(), outcome.error(),
-                    executed.modelAsked());
+                    executed.modelAsked(), executed.tainted());
         };
     }
 
