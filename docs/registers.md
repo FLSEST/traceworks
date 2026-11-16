@@ -655,6 +655,15 @@ These cases are said plainly and do not fail `verify`:
   not matching its anchors (a cut end, a changed line) says that too and goes on; `verify` fails for such a register
   until someone decides what to do with it.
 
+**What an anchor does not prove.** It says where the log stood when it was written, by whoever could write the
+ledger then. With write access to the home and the ledger, someone can append a line that chains to the register's
+log (a forged decision, with its state blob) and then append the anchor of the new head, under the message
+`register <key> seq <n> sha256:<the whole file>`: `verify` says `anchor    ok`, and nothing shows it. What the
+ledger does find is a register or an anchor file that was rewritten, since anchors are only added to (docs/events.md,
+"How the ledger is judged"). Signatures of decisions, by a key the writer of the home does not hold, would close
+the gap; they are not built. And the first anchor in a new ledger (docs/events.md, "A new ledger") proves nothing
+about the lines before it.
+
 A ledger that exists and **cannot be read** fails `verify` (exit 8): the comparison was not made, and the line says
 why (`anchor    NOT checked`). That is a ledger whose path is a file, whose `HEAD` names nothing, whose objects
 are gone, or whose branch file was emptied, zeroed or removed (git then answers as for a repository without a

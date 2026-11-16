@@ -518,6 +518,7 @@ the record. It is checked for a run in any state, also one that is running, park
 | `ledger    changed: runs/<run-id>.json is not what commit 4f1d2c3b4a59 ("run ... COMPLETED sha256:...") left: that names the SHA-256 ..., and the ledger holds ...` | an entry of this run is not what the commit that names it left: a later commit changed or removed it, a second commit names it, or no commit does. It is not the entry of this run any more, whatever it holds now (printed on the `ledger` line, for the start entry too) | 8 |
 | `start     NOT checked: ...` | the ledger exists and cannot be read, or holds something that makes git show another history than its commits (a replace ref, a shallow or grafts file, a second branch; docs/events.md, "What the ledger shows, and what it does not") | 8 |
 | `start     not checked` | a copied run folder: this home's ledger does not speak for it | 0 |
+| `ledger    not checked (the ledger does not know this run: it is of a version before this ledger began)` | a finished run of a version that noted no start, of which this ledger holds nothing (docs/events.md, "A new ledger"); the chain and the manifest are checked | 0 |
 
 How a run of an earlier version is told from one whose entry was removed is the field `ledger_start` of its
 `run.started`, which the hash chain covers. Such a run gets its start entry when it is resumed. Whoever can rewrite the whole record of a run that has not finished, and
@@ -531,14 +532,14 @@ ledger says of every run it names, and what every run folder says the ledger sho
 
 ```
 $ traceworks verify
-ledger    6 runs started, 3 ended; 1 run folder of an earlier version
+ledger    6 runs started, 3 ended; 1 run folder from before the ledger
 started, not ended (3)
   3f2a91c4-6d1e-4c0b-9a57-1f0e8a2b7c11  2026-11-16T09:12:44.118Z  self-audit-security  folder INTERRUPTED
   7be01d22-0c4e-4a67-8a3b-52d1c9e7f004  2026-11-16T10:02:10.560Z  self-audit-security  folder GONE
   c40e7d1a-93b5-4e1f-a0d2-6b8f5e3c9a77  2026-11-16T11:30:02.004Z  self-audit-security  folder GONE
 ended, folder gone (1)
   91aa0b6e-2f5d-4a0e-b1c3-7d9e6f4a2c18  COMPLETED
-earlier version, not ended, not in the ledger (1)
+from before the ledger, not ended (1)
   0d2c44f1-7a9e-4b53-8c10-e5f6a7b8c9d0  folder PARKED
 acknowledged (1)
   7be01d22-0c4e-4a67-8a3b-52d1c9e7f004  started, never ended, and the folder is gone
@@ -558,11 +559,9 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
   `INTERRUPTED` like a crash and cannot be told from one, but it never leaves the list.
 - **ended, folder gone** lists the finished runs whose folder is not there, with the status. The ledger still holds
   the manifest of each (`runs/<run-id>.json`), so this is no failure.
-- **earlier version, not ended, not in the ledger** lists the run folders of a version that noted no start whose
-  run has not ended: the ledger never knew them. The first line counts all folders of an earlier version.
-- **pins** lists the pins of the ledger, and **not judged** the entries no hash covers yet (docs/events.md,
-  "Entries from before the hash"): nothing is said of those, the last line then reads `verified, except N entries
-  that no hash covers yet and that were not judged`, and the exit code stays 0 because the next run pins them.
+- **from before the ledger** counts the run folders of a version that noted no start of which the ledger holds
+  nothing (docs/events.md, "A new ledger"), and lists those that have not ended. No failure: the ledger never knew
+  them.
 - **The records.** For every ended run whose folder is there, the check verifies the record against the end entry:
   the chain, the blobs, and that the manifest the record gives is the end entry byte for byte. So a record that
   was rewritten while its manifest was left alone fails here too (`the end entry of the ledger is not the manifest
@@ -590,6 +589,16 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
 - A problem of the anchors of a register is listed under `registers.<key>` and acknowledged under that name.
+- **`--json`** prints the same as one JSON object: `verified`, `records_verified`, the counts `started`, `ended`
+  and `before_ledger`, and the arrays `open`, `ended_folder_gone`, `before_ledger_not_ended`, `in_flight`,
+  `acknowledged` and `problems` (each problem with `run`, `code` and `text`; the codes are `lost`, `unreadable`,
+  `other-record`, `no-start-entry`, `no-end-entry`, `entry-invalid`, `entry-changed`, `manifest-differs`,
+  `record-broken`). `traceworks verify <run> --json` prints `verified`, `chain`, `manifest`, `ledger`,
+  `ledger_reason`, `start`, `seal` and `register`. The exit codes are the same as without it.
+- **Exit codes of `verify`:** 0 when everything that was checked holds; 8 when anything does not, when the ledger
+  cannot be read, or when it is one this version does not accept (the reason is on standard error then, and
+  nothing on standard output); 2 for a wrong call or an unknown run. There is no state that is not verified and
+  exits 0.
 - The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
   another history than its commits: `traceworks: The ledger cannot be relied on ...: it has the replace ref ...`.
 - It exits 8 when there is a problem nobody acknowledged; else 0.

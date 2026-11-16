@@ -179,7 +179,11 @@ register's folder, and nothing else, can append a line that chains (a forged dec
 leaves that was cut off before its anchor, so `verify` holds, names the lines as unproven, and the next write takes
 them and anchors the head. What shows it: `verify` until then, the note of that next write, and the line
 `register.unanchored` it records in the log with the sequence numbers. A register's folder is therefore still worth
-the protection of the ledger's. Whoever can write the ledger too can rewrite both, as with a run.
+the protection of the ledger's. Whoever can write the ledger too cannot rewrite the register unnoticed: the anchors
+are only added to, and a rewritten anchor file is found. But they can **add** to both: append a forged decision that
+chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace
+(docs/events.md, "What the ledger shows, and what it does not"). Signatures of decisions would close that; they are
+not built.
 
 **The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
@@ -265,8 +269,9 @@ three groups:
   The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
   of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
   verifies the record of every ended run against its end entry, unless `--quick` is given.
-- **What nothing in this version finds:** what was done to an entry of an earlier version before this version
-  pinned it (docs/events.md, "Entries from before the hash"); a forged entry made with write access to the ledger (the ledger is not
+- **What nothing in this version finds:** what was before a new ledger (a ledger of an earlier version is moved
+  aside and not read; docs/events.md, "A new ledger"); a well-formed entry or line added with write access to the
+  ledger (the ledger is not
   signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
   or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
   started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
