@@ -30,6 +30,21 @@ images Traceworks brings along (`shell`, `claude`, `pi`, `egress`). `images/` in
 package, which a step names as `./images/<name>`. `traceworks images build` builds both kinds. The pictures of the
 documentation are under `docs/`.
 
+## What lies on disk
+
+![Three columns of files: a package with workflow.json, scripts and a container image; a run with events.jsonl, blobs and a manifest; a register with its chained log, and the ledger as a git repository with one commit per run and register state.](files.svg)
+
+Everything is a file that an editor, `jq` or `git` can show; there is no database and no service.
+
+- **The package** is where the workflow is defined, before anything runs: `traceworks describe` and `traceworks
+  check` read it and start nothing.
+- **A run** is a folder only the tool writes. Each line of `events.jsonl` holds the hash of the line before, and a
+  blob is named by the hash of its content, so `traceworks verify` finds a change in either.
+- **A register** has a chained log of its own. **The ledger** is a git repository outside the run and register
+  folders, with one commit per run and per state of a register.
+- The three point at each other: the first line of a run names the digest of its package, the register names the run
+  that reported each finding, and the ledger names the last line of both.
+
 ## Modules
 
 **Ports and adapters.** The core performs almost no I/O of its own. It reaches processes, containers, AI
