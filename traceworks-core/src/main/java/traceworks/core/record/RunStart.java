@@ -40,13 +40,29 @@ import java.util.Map;
  *                           that is not sealed
  * @param modelChoices       the option the run picked of each model choice its workflow declares; empty for a
  *                           workflow without one, whose {@code run.started} then has no such field
+ * @param register           what the register of an audit workflow handed the run: the head of its log and the files
+ *                           of the run's register folder; {@code null} for a workflow that is no audit, whose
+ *                           {@code run.started} then has no such field
  */
 public record RunStart(String workflowId, String workflowName, String packageDir, String packageDigest,
                        String gitCommit, Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs,
                        TriggerSource trigger, String actor, String version, String execution,
                        Runtime containerRuntime, int outputLimitMib, Map<String, String> aiImages, String workspace,
                        String workspaceSource, String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom,
-                       List<ImageFacts> images, AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices) {
+                       List<ImageFacts> images, AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices,
+                       RegisterHandover register) {
+
+    /** The start of a run of a workflow that is no audit. */
+    public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
+                    Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs, TriggerSource trigger,
+                    String actor, String version, String execution, Runtime containerRuntime, int outputLimitMib,
+                    Map<String, String> aiImages, String workspace, String workspaceSource,
+                    String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom, List<ImageFacts> images,
+                    AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices) {
+        this(workflowId, workflowName, packageDir, packageDigest, gitCommit, gitDirty, workflowJson, inputs, trigger,
+                actor, version, execution, containerRuntime, outputLimitMib, aiImages, workspace, workspaceSource,
+                workspaceSourceSha, runOutputBudgetMib, inputsFrom, images, aiNetwork, seal, modelChoices, null);
+    }
 
     /** The start of a run of a workflow without a model choice. */
     public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,

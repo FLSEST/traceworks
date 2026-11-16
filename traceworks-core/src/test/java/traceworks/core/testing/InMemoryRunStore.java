@@ -99,6 +99,8 @@ public final class InMemoryRunStore implements RunStore {
 
         final InMemoryRunStore store;
 
+        volatile Map<String, byte[]> registerFolder;
+
         RunState(String runId, InMemoryRunStore store) {
             this.runId = runId;
             this.store = store;
@@ -164,6 +166,72 @@ public final class InMemoryRunStore implements RunStore {
                 throw new IllegalStateException("The scratch directory of run " + state.runId + " is a link");
             }
             return scratchDirectory();
+        }
+
+        @Override
+        public String registerDirectory() {
+            return "/runs/" + state.runId + "/register";
+        }
+
+        @Override
+        public String writeRegisterFiles(Map<String, byte[]> files) {
+            synchronized (state) {
+                if (state.registerFolder != null) {
+                    throw new IllegalStateException("The register folder of run " + state.runId + " exists already");
+                }
+                state.registerFolder = new java.util.concurrent.ConcurrentHashMap<>();
+                files.forEach((name, content) -> state.registerFolder.put(name, content.clone()));
+            }
+            return registerDirectory();
+        }
+
+        @Override
+        public Optional<Map<String, String>> registerFileDigests() {
+            Map<String, byte[]> folder = state.registerFolder;
+            if (folder == null) {
+                return Optional.empty();
+            }
+            Map<String, String> digests = new java.util.TreeMap<>();
+            folder.forEach((name, content) -> digests.put(name,
+                    traceworks.core.record.EventChain.sha256Hex(content)));
+            return Optional.of(digests);
+        }
+
+        /**
+         * The register folder as a test reads and changes it, by file name; {@code null} for a run without one. In
+         * the order the files were written.
+         */
+        public Map<String, byte[]> registerFolder() {
+            Map<String, byte[]> folder = state.registerFolder;
+            if (folder == null) {
+                return null;
+            }
+            return new java.util.AbstractMap<>() {
+                @Override
+                public java.util.Set<Entry<String, byte[]>> entrySet() {
+                    Map<String, byte[]> ordered = new java.util.LinkedHashMap<>();
+                    traceworks.core.register.RegisterFiles.NAMES.forEach(name -> {
+                        if (folder.containsKey(name)) ordered.put(name, folder.get(name));
+                    });
+                    new java.util.TreeMap<>(folder).forEach(ordered::putIfAbsent);
+                    return ordered.entrySet();
+                }
+
+                @Override
+                public byte[] put(String name, byte[] content) {
+                    return folder.put(name, content);
+                }
+
+                @Override
+                public byte[] remove(Object name) {
+                    return folder.remove(name);
+                }
+            };
+        }
+
+        /** Removes the register folder, as a person who deleted it from the run folder does. */
+        public void removeRegisterFolder() {
+            state.registerFolder = null;
         }
 
         /** Removes the run from the store; it must have no event yet. */

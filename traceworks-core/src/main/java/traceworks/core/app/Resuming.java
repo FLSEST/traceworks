@@ -169,7 +169,16 @@ final class Resuming {
         pickInputs.putAll(recordedPicks);
         RunPreparation.Prepared prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
                 "Run " + runId + " cannot resume");
-        RunPaths paths = preparation.paths(run, prepared.workspace(), prepared);
+        // The register folder is the one the run started with, whatever the register holds now: a file that is no
+        // longer the one run.started recorded stops the resume, before anything is recorded
+        RegisterFolder folder = view.register() == null ? null : new RegisterFolder(run, view.register());
+        String folderProblem = folder == null ? null : folder.problem();
+        if (folderProblem != null) {
+            throw new RunRefusedException("Run " + runId + " cannot resume: " + folderProblem
+                    + " ('traceworks verify " + runId + "' says the same)");
+        }
+        RunPaths paths = preparation.paths(run, prepared.workspace(), prepared,
+                folder == null ? null : run.registerDirectory());
         // A cancel sent while this resume prepared waits in the inbox, as one left there earlier does: it is meant for
         // this process, which ends the run without a step. The answers taken with it are refused below as stale.
         List<InboxRequest> waiting = run.inbox().take();
@@ -223,7 +232,7 @@ final class Resuming {
                     session.replay(preset.stepIndex(), given.actor());
                 }
                 RunOptions options = preparation.options(runId, session, recorder, paths, prepared,
-                        TriggerSource.RESUME, asker == null, source == null ? null : source.sha())
+                        TriggerSource.RESUME, asker == null, source == null ? null : source.sha(), folder)
                         .toBuilder().resumedPicks(recordedPicks).build();
                 // The loop that was in flight takes over the items the record holds as finished
                 ResumePoint point = new ResumePoint(snapshot, checkpoint.nextPosition(), preset,
