@@ -83,6 +83,11 @@ exit code. On a machine where no container runtime works, a run can go to the ho
 
 ## What it gives
 
+![From an agent to an audit, in four rungs. Rung 0: an agent as it is, nothing is promised. Rung 1: the same agent as the one step of a workflow gets the container and the record. Rung 2: fixed steps around the model, with measurements, checked evidence and gates. Rung 3: an audit with a register, with findings across runs, decisions with who made them, and an end.](docs/ladder.svg)
+
+Nobody has to take it all at once. A workflow with one AI step ([examples/ai-hello](examples/ai-hello/README.md))
+already runs in a container and leaves a record; fixed steps and a register come when a question comes back.
+
 The names are those of [docs/features.html](docs/features.html), where each has its limit written next to it.
 
 | Feature | In one line | Documented in |
