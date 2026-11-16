@@ -371,10 +371,18 @@ final class RunViewBuilder {
                         text(c, "verdict"), c.path("count").asInt())));
                 step.commands.set(i, candidate.withResult(new CommandView.Result(
                         exit.isInt() ? exit.intValue() : null, e.fields().path("duration_ms").asLong(),
-                        e.fields().path("timed_out").asBoolean(), egress)));
+                        e.fields().path("timed_out").asBoolean(), egress, outputCut(e.fields().path("output_cut")))));
                 return;
             }
         }
+    }
+
+    /** The cut a command's end names; {@code null} without the field, as in every record of an earlier version. */
+    private static traceworks.core.port.CommandRunner.OutputCut outputCut(JsonNode cut) {
+        List<String> streams = new ArrayList<>();
+        cut.path("streams").forEach(stream -> streams.add(stream.asText()));
+        return streams.isEmpty() ? null
+                : new traceworks.core.port.CommandRunner.OutputCut(streams, cut.path("after_ms").asLong());
     }
 
     /** A resume: where it went on, which step runs again, which answer it uses, whether the package changed. */

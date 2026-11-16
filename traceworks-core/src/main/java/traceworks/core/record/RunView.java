@@ -160,6 +160,28 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
      */
     public record Egress(int commands, int connections, int denied) {}
 
+    /**
+     * How many commands of the run have an output whose reading ended at its bound, child runs and earlier attempts
+     * of a step included: an observation, which fails no step and changes no gate.
+     */
+    public int outputCuts() {
+        int cuts = 0;
+        for (StepView step : steps) {
+            cuts += cuts(step.commands());
+            for (var attempt : step.earlierAttempts()) {
+                cuts += cuts(attempt.commands());
+            }
+        }
+        for (RunView child : children.values()) {
+            cuts += child.outputCuts();
+        }
+        return cuts;
+    }
+
+    private static int cuts(List<CommandView> commands) {
+        return (int) commands.stream().filter(command -> command.outputCut() != null).count();
+    }
+
     /** The egress of the whole run. */
     public Egress egress() {
         int[] sum = new int[3];

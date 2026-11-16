@@ -124,6 +124,12 @@ public final class RunHtml {
                             : "<strong class=\"problem\">" + egress.denied() + " denied</strong>")
                     .append("</td></tr>\n");
         }
+        int cuts = view.outputCuts();
+        if (cuts > 0) {
+            out.append("<tr><th>output</th><td><strong class=\"problem\">").append(cuts)
+                    .append(cuts == 1 ? " command" : " commands").append(" whose output was cut</strong>")
+                    .append(" at the bound after its end: it may be incomplete</td></tr>\n");
+        }
     }
 
     private static void workflow(StringBuilder out, RunView view, BlobStore blobs) {

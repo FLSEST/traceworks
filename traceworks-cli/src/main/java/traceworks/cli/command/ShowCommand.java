@@ -117,6 +117,24 @@ public final class ShowCommand implements Command {
                     + (egress.commands() == 1 ? " command, " : " commands, ")
                     + (egress.denied() == 0 ? "none denied" : egress.denied() + " DENIED"));
         }
+        int cuts = view.outputCuts();
+        if (cuts > 0) {
+            out.println("Output    " + cuts + (cuts == 1 ? " command" : " commands")
+                    + " whose output was CUT at the bound after its end: it may be incomplete");
+        }
+    }
+
+    /**
+     * The commands of the step whose output was not read to its end: something the command left behind still held it
+     * at the bound. A mark, like a denied connection; the step's status is as it was.
+     */
+    private static void outputCuts(PrintStream out, List<CommandView> commands) {
+        for (CommandView command : commands) {
+            if (command.outputCut() != null) {
+                out.println("      output CUT     " + TerminalFormat.safe(command.outputCut().summary())
+                        + "   <== may be incomplete");
+            }
+        }
     }
 
     /**
@@ -202,6 +220,7 @@ public final class ShowCommand implements Command {
                             + (step.attempts() > 1 ? "  (" + step.attempts() + " attempts)" : "")));
             aiCalls(out, step.aiCalls(), text);
             egress(out, step.commands());
+            outputCuts(out, step.commands());
             values(out, step.commands(), text, outputs, full);
             files(out, step.files());
             BlobRef output = step.output();

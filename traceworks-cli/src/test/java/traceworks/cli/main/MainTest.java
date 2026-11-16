@@ -880,6 +880,49 @@ class MainTest {
         assertThat(approve.out()).contains("traceworks resume").doesNotContain("--allow-host-execution");
     }
 
+    // ---- an output cut at the bound ----
+
+    /**
+     * A host step whose command leaves a writer behind: the reading of its output ends at the bound, and the record
+     * says so in the command's end. The step and the run are as they would be; {@code show}, {@code run.html} and the
+     * live lines mark it, and the record verifies. A step whose output ended has no such field.
+     */
+    @Test
+    void aHostCommandThatLeavesAWriterBehind_hasItsOutputCutInTheRecord_andTheViewsMarkIt() throws IOException {
+        Path pkg = pkg("server", """
+                {"type":"shell","name":"serve","config":{"command":
+                  "(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null) & echo early"}},
+                {"type":"shell","name":"plain","config":{"command":"echo fine"}}""");
+
+        Result run = runHost(pkg);
+        String id = idOf(run);
+        Result show = exec("show", id);
+        Result verify = exec("verify", id);
+
+        assertThat(run.code()).as(run.out() + run.err()).isZero();
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        List<com.fasterxml.jackson.databind.JsonNode> ends = new ArrayList<>();
+        for (String line : Files.readAllLines(runFolder(id).resolve("events.jsonl"))) {
+            com.fasterxml.jackson.databind.JsonNode event = json.readTree(line);
+            if (event.path("type").asText().equals("step.command.finished")) {
+                ends.add(event);
+            }
+        }
+        assertThat(ends).hasSize(2);
+        assertThat(ends.getFirst().path("output_cut"))
+                .isEqualTo(json.readTree("{\"streams\":[\"stdout\"],\"after_ms\":5000}"));
+        assertThat(ends.getFirst().path("exit_code").asInt()).isZero();
+        assertThat(ends.get(1).has("output_cut")).as("an output that ended").isFalse();
+        assertThat(run.out()).contains("(output cut: stdout after 5000 ms)");
+        assertThat(show.out()).contains("Status    COMPLETED\n",
+                "Output    1 command whose output was CUT at the bound after its end: it may be incomplete\n",
+                "      output CUT     stdout after 5000 ms   <== may be incomplete\n");
+        assertThat(show.out().split("output CUT", -1)).as("the other step is not marked").hasSize(2);
+        assertThat(Files.readString(runFolder(id).resolve("run.html")))
+                .contains("<strong class=\"problem\">output cut: stdout after 5000 ms</strong>");
+        assertThat(verify.code()).as(verify.out() + verify.err()).isZero();
+    }
+
     // ---- the output limit ----
 
     /**

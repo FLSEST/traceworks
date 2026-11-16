@@ -819,6 +819,32 @@ class RunViewTest {
         assertThat(view.egress()).isEqualTo(new RunView.Egress(2, 6, 2));
     }
 
+    /**
+     * A command whose end names a cut of its output shows it; one whose end has no such field, as every record of an
+     * earlier version, has none. The run counts them, earlier attempts included.
+     */
+    @Test
+    void aCommandWhoseOutputWasCut_saysSo_andARecordWithoutTheFieldReadsAsBefore() {
+        CommandRunner.OutputCut both = new CommandRunner.OutputCut(List.of("stdout", "stderr"), 2000);
+        CommandRequest serve = new CommandRequest("serve &", "/w", 30, null, null, null, false);
+        fx.emit(new StepStarted(0, "build", "shell", 0, false));
+        fx.recorder.recording(request -> new CommandResult(0, "", "", 1, false).withOutputCut(both)).run(serve);
+        fx.emit(new StepStarted(0, "build", "shell", 0, false));
+        fx.recorder.recording(request -> new CommandResult(0, "", "", 1, false).withOutputCut(both)).run(serve);
+        fx.recorder.recording(request -> new CommandResult(0, "", "", 1, false))
+                .run(new CommandRequest("ls", "/w", 30, null, null, null, false));
+        fx.emit(new StepFinished(0, "build", "shell", StepStatus.COMPLETED, "i", 42, Map.of()));
+
+        RunView view = view(false);
+        List<CommandView> commands = view.steps().getFirst().commands();
+
+        assertThat(commands.getFirst().outputCut()).isEqualTo(both);
+        assertThat(commands.get(1).outputCut()).as("no field: read to its end").isNull();
+        assertThat(commands.get(1).result().exitCode()).isZero();
+        assertThat(view.outputCuts()).as("with the earlier attempt").isEqualTo(2);
+        assertThat(RunView.of(new RecordFixture().started().events(), false).outputCuts()).isZero();
+    }
+
     /** The denied connections of a run count those of earlier attempts and of child runs too. */
     @Test
     void theRunsEgress_countsEarlierAttempts_andChildRuns() {
