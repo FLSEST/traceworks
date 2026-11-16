@@ -468,6 +468,54 @@ class ExecutionContextFactoryTest {
                 .as("what the resumed run records").isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
     }
 
+    /** Model text named without the flag: the run counts as one that asked a model all the same. */
+    @Test
+    void create_modelKeysOrModelOutputsWithoutTheFlag_countAsARunThatAskedAModel() {
+        ExecutionContext keys = factory.create(seed(Map.of("handed", "x; touch pwned",
+                ExecutionContext.MODEL_KEYS_VARIABLE, List.of("handed"))));
+        ExecutionContext outputs = factory.create(seed(Map.of(
+                ExecutionContext.MODEL_OUTPUTS_VARIABLE, List.of("ask"))));
+        ExecutionContext neither = factory.create(seed(Map.of("handed", "plain")));
+
+        assertThat(keys.modelAsked()).isTrue();
+        assertThat(outputs.modelAsked()).isTrue();
+        assertThat(neither.modelAsked()).isFalse();
+        keys.setDerivedVariable("item", "x; touch pwned");
+        assertThatThrownBy(() -> keys.resolveShellTemplate("echo {{ item }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
+    /**
+     * What a block derives while it runs takes the mark of what went into the block so far, in a run whose state
+     * says nothing: a model-text variable (set without the run having asked a model) that a value of the block
+     * resolved, then a loop item derived from the command's output.
+     */
+    @Test
+    void aVariableDerivedWhileABlockRuns_takesTheMarkOfWhatWentIntoTheBlock() {
+        ExecutionContext ctx = factory.create(seed(Map.of("previous_chain_output", "x; touch pwned")));
+        ctx.setModelVariable("handed", "x; touch pwned");
+        assertThat(ctx.modelAsked()).isFalse();
+
+        ctx.setDerivedVariable("before", "plain");
+        ctx.resolveShellValue("{{ handed }}");
+        ctx.setDerivedVariable("item", "x; touch pwned");
+
+        assertThat(ctx.resolveShellTemplate("echo {{ before }}", false)).isEqualTo("echo plain");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ item }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        assertThat(ctx.hasUntrustedInput()).as("model text is no untrusted input").isFalse();
+
+        ctx.blockEnded();
+        ctx.setDerivedVariable("next", "plain");
+        assertThat(ctx.resolveShellTemplate("echo {{ next }}", false)).as("the next block starts with nothing")
+                .isEqualTo("echo plain");
+
+        ctx.resolvePromptTemplate("Judge {{ previous_chain_output }}");
+        ctx.setDerivedVariable("from_platform", "x; touch pwned");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ from_platform }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
     @Test
     void restore_bringsBackTheStateAsItWas() {
         ExecutionContext before = factory.create(seed(Map.of("ticket", "a; reboot", "previous_chain_output", "chain",

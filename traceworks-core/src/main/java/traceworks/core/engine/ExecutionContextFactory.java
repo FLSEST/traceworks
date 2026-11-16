@@ -215,11 +215,14 @@ final class ExecutionContextFactory {
         if (Boolean.parseBoolean(String.valueOf(inputContext.get(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE)))) {
             context.markPlatformUsedInShell();
         }
-        // The parent run asked a model: what it handed over as model text stays that, and so does what this run records
-        if (Boolean.parseBoolean(String.valueOf(inputContext.get(ExecutionContext.MODEL_ASKED_VARIABLE)))) {
+        // The parent run asked a model: what it handed over as model text stays that, and so does what this run
+        // records. A context that names any model text counts as one whose run asked a model, whatever the flag says
+        Set<String> modelOutputs = reservedNames(inputContext, ExecutionContext.MODEL_OUTPUTS_VARIABLE);
+        if (Boolean.parseBoolean(String.valueOf(inputContext.get(ExecutionContext.MODEL_ASKED_VARIABLE)))
+                || !modelKeys.isEmpty() || !modelOutputs.isEmpty()) {
             context.markModelAsked();
         }
-        reservedNames(inputContext, ExecutionContext.MODEL_OUTPUTS_VARIABLE).forEach(context::markOutputModelText);
+        modelOutputs.forEach(context::markOutputModelText);
         if (seed.resumePreviousOutput() != null) {
             context.setPreviousOutput(seed.resumePreviousOutput());
         } else if (inputContext.get("previous_output") != null) {

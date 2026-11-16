@@ -36,9 +36,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * a shell line, by the block's name, as {@code previous_output} and by its index: each is refused, and nothing of
  * the value runs. Through the engine, with the real blocks and a real bash.
  *
- * <p>Two protected values, both in a run that asked no model and carries no untrusted input, so that nothing but
- * the rule protects the output: platform data ({@code previous_chain_output}), and a variable a parent run handed
- * over as model text ({@code handed}, under {@code __model_keys}).
+ * <p>Two protected values. Platform data ({@code previous_chain_output}) in a run that asked no model and carries
+ * no untrusted input, so that nothing but the rule protects the output of a block without a model. And a variable a
+ * parent run handed over as model text ({@code handed}, under {@code __model_keys}): a run that gets one counts as
+ * one that asked a model, so there the state of the run protects every output as well.
  */
 class OutputInheritsTheMarkTest {
 
@@ -63,9 +64,13 @@ class OutputInheritsTheMarkTest {
     private final WorkflowEngine engine = new WorkflowEngine(CoreBlocks.registry(null));
 
     private RunOutcome run(WorkflowDefinition workflow) {
+        return run(workflow, Map.of("previous_chain_output", HOSTILE, "handed", HOSTILE,
+                ExecutionContext.MODEL_KEYS_VARIABLE, List.of("handed")));
+    }
+
+    private RunOutcome run(WorkflowDefinition workflow, Map<String, Object> inputs) {
         claude.otherwise("GOAL_STATUS: ACHIEVED\nRATIONALE: done\nACTION:\nSUMMARY: done");
-        return engine.run(workflow, Map.of("previous_chain_output", HOSTILE, "handed", HOSTILE,
-                        ExecutionContext.MODEL_KEYS_VARIABLE, List.of("handed")),
+        return engine.run(workflow, inputs,
                 RunOptions.builder().runId("run-1").events(new RecordingRunEvents())
                         .commandRunner(commands).aiProviders(claude.asProviders()).workflowResolver(workflows)
                         .clock(() -> Instant.parse("2026-11-16T08:00:00Z")).workingDirectory(work.toString()).build());
@@ -297,6 +302,24 @@ class OutputInheritsTheMarkTest {
         }
     }
 
+    /**
+     * A loop's item from an {@code items_command} that printed a protected value: the item is protected while the
+     * loop runs, before the block's output is recorded.
+     */
+    @Test
+    void foreach_anItemFromACommandThatPrintedAProtectedValue_isProtectedInsideTheLoop() {
+        for (String value : PROTECTED) {
+            RunOutcome outcome = run(workflow("wf", b("foreach", Map.of("execution_mode", "shell",
+                    "items_source", "command", "values", Map.of("V", value),
+                    "items_command", "printf '%s\\n' \"$V\"", "command", "echo {{ item }}"))));
+
+            assertThat(outcome.status()).as(value).isNotEqualTo(RunStatus.COMPLETED);
+            assertThat(outcome.steps().toString() + outcome.error()).as(value)
+                    .contains("shell line refused, nothing ran: {{ item }}");
+            assertNothingOfTheValueRan("the item of " + value);
+        }
+    }
+
     /** What went into one block does not mark the next: a block that took nothing protected records a plain output. */
     @Test
     void aBlockThatTookNothingProtected_recordsAnOutputThatIsInsertedAsBefore() {
@@ -304,7 +327,8 @@ class OutputInheritsTheMarkTest {
                 block("approval", "plain", Map.of("question", "Release?", "mode", "auto", "auto_answer", "Yes")),
                 shell("first", "echo one two"),
                 shell("count", "set -- {{ block.first.output }}; printf '%s' \"$#\""),
-                shell("answer", "printf '%s' {{ block.plain.output }}")));
+                shell("answer", "printf '%s' {{ block.plain.output }}")),
+                Map.of("previous_chain_output", HOSTILE));
 
         assertThat(outcome.status()).as(outcome.error()).isEqualTo(RunStatus.COMPLETED);
         assertThat(outcome.steps().get(2).getOutput()).isEqualTo("2");

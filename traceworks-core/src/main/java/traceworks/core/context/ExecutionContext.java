@@ -338,9 +338,16 @@ public class ExecutionContext {
      * text in a run that asked a model, trusted otherwise.
      */
     public void setDerivedVariable(String name, Object value) {
-        if (hasUntrustedInput()) setUntrustedVariable(name, value);
-        else if (taint.modelAsked()) setModelVariable(name, value);
-        else setVariable(name, value);
+        // What the block derives while it runs (a loop's item from a command's output) takes the mark of what went
+        // into the block so far, not only the state of the run: the output's mark comes only when it is recorded
+        ExecutionContextTaint.Inherited into = taint.intoTheBlock();
+        if (hasUntrustedInput() || into.compareTo(ExecutionContextTaint.Inherited.PLATFORM_DATA) >= 0) {
+            setUntrustedVariable(name, value);
+        } else if (taint.modelAsked() || into == ExecutionContextTaint.Inherited.MODEL_TEXT) {
+            setModelVariable(name, value);
+        } else {
+            setVariable(name, value);
+        }
     }
 
     /**
