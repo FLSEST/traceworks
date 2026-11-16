@@ -11,12 +11,15 @@
 # the register held before this run: what the register makes of this report shows in the gate of the next run.
 # The reason of a rating is the first line of the description, "Rating: ...", one line: the next run reads it from
 # the register folder (scripts/findings.sh). The evidence is what the fact sheet can verify and nothing else.
+# The envelope is an HTML comment, and the reasons in it are a model's text: every < and > of its JSON is written as
+# < and >, so no text can end the comment. A JSON reader gets the text as it was.
 set -euo pipefail
 
 jq -r --rawfile answers /dev/stdin '
   def rank: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}[.] // 0;
   ( [ $answers | split("\n")[] | (capture("(?<json>\\{\"ratings\".*\\})\\s*$")? | .json | fromjson? | .ratings[]?)
-      | select((.method | type) == "string" and ((.severity | ascii_upcase?) | IN("LOW", "MEDIUM", "HIGH")))
+      | select(type == "object") | select((.method | type) == "string" and (.severity | type) == "string")
+      | select(.severity | ascii_upcase | IN("LOW", "MEDIUM", "HIGH"))
       | {key: .method, value: {severity: (.severity | ascii_upcase), why: ((.why // "") | tostring | gsub("\\s+"; " ") | .[:400])}} ]
     | from_entries ) as $rated
   | .mutants as $mutants
@@ -55,4 +58,4 @@ jq -r --rawfile answers /dev/stdin '
           evidence: "undetected: \(.fact)" } ],
         expectedItems: (.packages | length),
         items: [ .packages[] | {name, digest, judged: (.rate and $answered[.name])} ]
-      } | tojson) -->"' "$1/findings.json"
+      } | tojson | gsub("<"; "\\u003c") | gsub(">"; "\\u003e")) -->"' "$1/findings.json"
