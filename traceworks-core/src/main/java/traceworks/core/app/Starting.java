@@ -44,6 +44,9 @@ final class Starting {
     /** The run variable the engine sets to the package directory as a step sees it; no input may set it. */
     static final String PACKAGE_DIR = "package_dir";
 
+    /** The run variable the engine sets to the register folder of an audit run; no input may set it. */
+    static final String REGISTER_DIR = traceworks.core.engine.RunVariables.REGISTER_DIR;
+
     private final RunStore store;
     private final Ledger ledger;
     private final Clock clock;
@@ -93,6 +96,10 @@ final class Starting {
         if (request.inputs().containsKey(PACKAGE_DIR)) {
             throw new RunRefusedException("The input " + PACKAGE_DIR + " is reserved: Traceworks sets it to the"
                     + " package directory");
+        }
+        if (request.inputs().containsKey(REGISTER_DIR)) {
+            throw new RunRefusedException("The input " + REGISTER_DIR + " is reserved: Traceworks sets it to the"
+                    + " register folder of the run of an audit workflow");
         }
         // The seal first: a sealed package that changed is refused whatever else this machine has or lacks, before
         // anything of the package is used, cloned or created. The refusal is recorded in the seal log

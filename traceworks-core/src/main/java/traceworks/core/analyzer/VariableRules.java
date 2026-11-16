@@ -31,7 +31,8 @@ import java.util.regex.Pattern;
  * and the block executors do it:
  * <ul>
  *   <li>the definition's {@code default_context} and the inputs of the run ({@link #apply} gets their names);</li>
- *   <li>the engine: {@code previous_output}, the {@link RunVariables} and {@code package_dir};</li>
+ *   <li>the engine: {@code previous_output}, the {@link RunVariables}, {@code package_dir} and
+ *       {@code register_dir} (which {@code register-dir-outside-audit} judges);</li>
  *   <li>a block, at the top level or nested: the {@code variable_name} of an {@code approval} (default
  *       {@code approval_answer}), of a {@code human-input} (default {@code user_input}) and of each of its
  *       {@code fields}, the {@code variable_name} of a {@code foreach} (default {@code item}) with its
@@ -125,7 +126,8 @@ final class VariableRules {
     /** What the engine provides, or what a rule of its own judges: no unknown variable either way. */
     private static boolean providedOrJudgedElsewhere(String key) {
         return "previous_output".equals(key) || RunVariables.NAMES.contains(key)
-                || RunVariables.PACKAGE_DIR.equals(key) || StepOutputs.isStepOutput(key)
+                || RunVariables.PACKAGE_DIR.equals(key) || RunVariables.REGISTER_DIR.equals(key)
+                || StepOutputs.isStepOutput(key)
                 || WiringRules.CHAIN_ONLY.contains(key) || PlatformVariables.contains(key)
                 || TraceworksRules.unprovided(key);
     }
@@ -208,6 +210,7 @@ final class VariableRules {
         Set<String> known = plainNames(set);
         known.addAll(RunVariables.NAMES);
         known.add(RunVariables.PACKAGE_DIR);
+        known.add(RunVariables.REGISTER_DIR);
         known.add("previous_output");
         List<String> near = new ArrayList<>();
         for (String name : unknown) {

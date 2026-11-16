@@ -226,6 +226,30 @@ class TraceworksRulesTest {
                     .as("a broken audit block is invalid-audit-config, not this").isEmpty();
         }
 
+        /** Only the run of an audit workflow has a register folder: anywhere else the placeholder would stay as text. */
+        @Test
+        void registerDir_outsideAnAuditWorkflow_isAnError() {
+            BlockDefinition lister = block("shell", "known",
+                    config("command", "wc -l {{ register_dir }}/findings.jsonl"));
+
+            assertThat(findings("register-dir-outside-audit", workflow(null, null, null, report, lister)))
+                    .singleElement().satisfies(f -> {
+                        assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                        assertThat(f.blockIndex()).isEqualTo(1);
+                        assertThat(f.detail()).contains("register_dir").contains("metadata.audit");
+                    });
+            assertThat(findings("register-dir-outside-audit", workflow(null, audit("enabled", false), null, report,
+                    lister))).as("an audit that is switched off feeds no register and gets no folder").hasSize(1);
+            WorkflowDefinition auditWorkflow = workflow(null,
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report,
+                    lister);
+            assertThat(findings("register-dir-outside-audit", auditWorkflow)).isEmpty();
+            assertThat(findings("unknown-variable", auditWorkflow)).as("the engine sets it").isEmpty();
+            assertThat(findings("register-dir-outside-audit", workflow(null,
+                    audit("enabled", true, "key", "k", "category", "c"), null, report, lister)))
+                    .as("a broken audit block is invalid-audit-config, not this").isEmpty();
+        }
+
         @Test
         void anInvalidCatalog_isAnError() {
             WorkflowDefinition wf = workflow(null,

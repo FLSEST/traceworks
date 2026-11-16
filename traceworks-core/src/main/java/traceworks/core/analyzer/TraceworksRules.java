@@ -5,6 +5,7 @@ import traceworks.core.context.BlockAiSettings;
 import traceworks.core.context.PlaceholderSyntax;
 import traceworks.core.engine.ExecutionMode;
 import traceworks.core.engine.PlatformVariables;
+import traceworks.core.engine.RunVariables;
 import traceworks.core.engine.RunRequirements;
 import traceworks.core.model.AuditConfig;
 import traceworks.core.register.Catalog;
@@ -68,6 +69,8 @@ import java.util.regex.Pattern;
  *   <li>{@code invalid-audit-config}, {@code invalid-audit-key}, {@code report-block-missing},
  *       {@code catalog-invalid} ({@code ERROR}): a {@code metadata.audit} or {@code catalog.json} the register cannot
  *       use ({@link #auditRules}, {@link #catalog}).</li>
+ *   <li>{@code register-dir-outside-audit} ({@code ERROR}): {@code register_dir} in a workflow that feeds no
+ *       register, so its run has no register folder and the placeholder would stay as text.</li>
  *   <li>{@code previous-report-outside-audit} ({@code ERROR}): {@code previous_report} in a workflow without an audit
  *       block (decided 2026-11-11).</li>
  *   <li>{@code host-dependent-step} ({@code WARNING}): a shell step without {@code container_image} that calls a
@@ -107,7 +110,8 @@ final class TraceworksRules {
      * The audit rules of a definition: {@code invalid-audit-config} and {@code invalid-audit-key} for a broken
      * {@code metadata.audit}, {@code report-block-missing} when {@code report_block} names no top-level block, and
      * {@code previous-report-outside-audit} for {@code previous_report} in a workflow without an audit block
-     * (decided 2026-11-11: an error, not a literal).
+     * (decided 2026-11-11: an error, not a literal), and {@code register-dir-outside-audit} for {@code register_dir}
+     * in a workflow that feeds no register.
      */
     static void auditRules(WorkflowDefinition workflow, List<AnalyzerFinding> out) {
         Map<String, Object> metadata = workflow.metadata();
@@ -134,6 +138,23 @@ final class TraceworksRules {
                         "uses {{ previous_report }}, which only an audit workflow has (metadata.audit with enabled,"
                                 + " key, category and report_block); nothing else fills it, and Traceworks refuses the"
                                 + " run rather than run it with the placeholder left in the text"));
+            }
+        }
+        if (config == null && AuditConfig.problems(metadata).isEmpty()) {
+            // No audit, or one that is switched off: no register, so no folder. A broken audit block has its own error
+            List<BlockDefinition> blocks = workflow.blocks();
+            for (int i = 0; i < blocks.size(); i++) {
+                BlockDefinition block = blocks.get(i);
+                if (block == null
+                        || !PlaceholderSyntax.keysIn(BlockText.joined(block)).contains(RunVariables.REGISTER_DIR)) {
+                    continue;
+                }
+                out.add(AnalyzerFinding.of("register-dir-outside-audit", Severity.ERROR, i, block.getName(),
+                        "uses {{ register_dir }}, the folder with the files of the register, which only the run of an"
+                                + " audit workflow has (metadata.audit with enabled, key, category and report_block);"
+                                + " a workflow an audit starts gets the path from it as a context value. Nothing else"
+                                + " sets it, and Traceworks refuses the run rather than run it with the placeholder"
+                                + " left in the text"));
             }
         }
     }
