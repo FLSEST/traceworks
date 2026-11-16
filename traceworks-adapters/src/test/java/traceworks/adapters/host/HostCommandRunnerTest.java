@@ -747,6 +747,7 @@ class HostCommandRunnerTest {
 
         assertThat(result.exitCode()).isZero();
         assertThat(result.stdout()).isEqualTo("early\nlate\nlater\n");
+        assertThat(result.outputCut()).as("read to its end: no cut").isNull();
     }
 
     /**
@@ -765,6 +766,9 @@ class HostCommandRunnerTest {
         long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
         assertThat(result.exitCode()).isZero();
         assertThat(result.stdout()).startsWith("early\ntick\n");
+        assertThat(result.outputCut()).as("the result says that the reading ended at the bound").isEqualTo(
+                new traceworks.core.port.CommandRunner.OutputCut(List.of(CommandResult.STDOUT),
+                        HostCommandRunner.AFTER_END_MILLIS));
         assertThat(millis).isBetween(HostCommandRunner.AFTER_END_MILLIS, HostCommandRunner.AFTER_END_MILLIS + 3000);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!Files.exists(closed) && System.nanoTime() < deadline) {

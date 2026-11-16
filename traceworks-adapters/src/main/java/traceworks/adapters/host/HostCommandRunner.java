@@ -25,7 +25,11 @@ import java.util.concurrent.TimeUnit;
  *       {@link CommandRunner#OUTPUT_LIMIT_BYTES} by default. An output that goes beyond it stops the process and
  *       everything it started at once, as a timeout does, and the result has exit code
  *       {@value CommandRunner#OUTPUT_LIMIT_EXIT_CODE}, the first bytes up to the limit as stdout, {@code stdout} in
- *       {@link CommandResult#truncatedStreams()} and the limit in {@link CommandResult#outputLimitBytes()}.</li>
+ *       {@link CommandResult#truncatedStreams()} and the limit in {@link CommandResult#outputLimitBytes()}.
+ *       After the command ended, the output is read for a bound ({@value #AFTER_END_MILLIS} ms, or
+ *       {@value #AFTER_STOP_MILLIS} ms after the runner stopped it) for what a process it left behind still writes;
+ *       a reading that ends at that bound is marked in the result ({@link CommandResult#outputCut()}) and fails
+ *       nothing.</li>
  *   <li><b>Environment:</b> only the operator's own variables of the inherited environment
  *       ({@link ChildProcessEnv#operatorEnvironment}), then the request's {@code environment}. Everything else the
  *       JVM was started with, such as API keys, tokens and cloud credentials, stays out; {@link ChildProcessEnv}
@@ -155,21 +159,22 @@ public final class HostCommandRunner implements CommandRunner {
                     break;
                 }
             }
+            long bound = AFTER_END_MILLIS;
             if (process.isAlive()) {
                 ProcessTree.terminate(process);
                 process.waitFor(ProcessTree.GRACE.toSeconds() + 2, TimeUnit.SECONDS);
-                output.end(AFTER_STOP_MILLIS);
-            } else {
-                // A process the command left behind may still write: its output counts for this long, then the
-                // reading ends and the process finds the output closed
-                output.end(AFTER_END_MILLIS);
+                bound = AFTER_STOP_MILLIS;
             }
+            // A process the command left behind may still write: its output counts for this long, then the
+            // reading ends, the process finds the output closed, and the result says that the output was cut
+            output.end(bound);
+            OutputCut cut = output.cut() ? new OutputCut(List.of(CommandResult.STDOUT), bound) : null;
             List<String> truncated = output.exceeded() ? List.of(CommandResult.STDOUT) : List.of();
             if (timedOut) {
-                return result(TIMEOUT_EXIT_CODE, output.text(), start, true, truncated);
+                return result(TIMEOUT_EXIT_CODE, output.text(), start, true, truncated).withOutputCut(cut);
             }
             int exitCode = output.exceeded() ? OUTPUT_LIMIT_EXIT_CODE : process.exitValue();
-            CommandResult ended = result(exitCode, output.text(), start, false, truncated);
+            CommandResult ended = result(exitCode, output.text(), start, false, truncated).withOutputCut(cut);
             return BashScript.notWhole(exitCode, ended.stdout()) ? ended.asNotRun(BashScript.NOT_WHOLE_REASON) : ended;
         } catch (IOException | IllegalArgumentException e) {
             CommandResult failed = result(1, "Error: " + e.getMessage(), start, false, List.of());

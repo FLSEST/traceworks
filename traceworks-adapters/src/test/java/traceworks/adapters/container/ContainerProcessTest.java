@@ -527,6 +527,43 @@ class ContainerProcessTest {
         assertThat(stdout.stdout()).isEqualTo("early\nlate\n");
         assertThat(stderr.exitCode()).isZero();
         assertThat(stderr.stderr()).isEqualTo("early\nlate\n");
+        assertThat(stdout.outputCut()).as("read to its end: no cut").isNull();
+        assertThat(stderr.outputCut()).isNull();
+    }
+
+    /**
+     * A client that leaves a writer behind on one stream: the reading of that stream ends at the bound, and the
+     * result names the stream and the bound. The other stream ended, and is not named.
+     */
+    @Test
+    void execute_ofAClientThatLeavesAWriterBehind_namesTheStreamWhoseReadingEndedAtTheBound(@TempDir Path dir)
+            throws IOException {
+        Path fake = Files.writeString(dir.resolve("writer-on-stderr.sh"),
+                "(exec >&-; trap '' PIPE; while echo tick >&2; do sleep 0.05; done) &\n"
+                        + "echo early\nsleep 0.3\n");
+
+        CommandResult result = execute(fake, null, 30, List.of("true"));
+
+        assertThat(result.exitCode()).as("a mark, not a failure").isZero();
+        assertThat(result.stdout()).isEqualTo("early\n");
+        assertThat(result.stderr()).startsWith("tick\n");
+        assertThat(result.outputCut()).isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                List.of(CommandResult.STDERR), ContainerProcess.AFTER_END_MILLIS));
+    }
+
+    /** A writer that holds both streams: both are named, and the bound is one for the two, not one after the other. */
+    @Test
+    void execute_ofAClientWhoseWriterHoldsBothStreams_namesBoth_afterOneBound(@TempDir Path dir) throws IOException {
+        Path fake = Files.writeString(dir.resolve("writer-on-both.sh"),
+                "(trap '' PIPE; while echo tick && echo tock >&2; do sleep 0.05; done) &\n"
+                        + "echo early\nsleep 0.3\n");
+
+        CommandResult result = execute(fake, null, 30, List.of("true"));
+
+        assertThat(result.outputCut()).isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                List.of(CommandResult.STDOUT, CommandResult.STDERR), ContainerProcess.AFTER_END_MILLIS));
+        assertThat(result.durationMs()).as("one bound for both streams")
+                .isLessThan(2 * ContainerProcess.AFTER_END_MILLIS);
     }
 
     @Test

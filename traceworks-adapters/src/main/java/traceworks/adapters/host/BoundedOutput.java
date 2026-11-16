@@ -36,6 +36,8 @@ public final class BoundedOutput {
     private volatile boolean exceeded;
     /** Set by {@link #end} when the stream outlasted its bound: nothing more is kept. */
     private boolean ended;
+    /** Set by the reader when it read the stream to its end; then {@link #end} cuts nothing. */
+    private boolean complete;
     /** What {@link #drain} reads, and its reader; {@code null} before. */
     private volatile InputStream stream;
     private volatile Thread reader;
@@ -78,6 +80,7 @@ public final class BoundedOutput {
                     for (int n = stream.read(chunk); n != -1; n = stream.read(chunk)) {
                         keep(chunk, n);
                     }
+                    reachedTheEnd();
                 } catch (IOException ignored) {
                     // the process was ended: on a timeout, a cancel or this limit
                 }
@@ -95,7 +98,8 @@ public final class BoundedOutput {
      * logs) must not be read for the rest of the run. Nothing that arrives afterwards is kept, the stream is closed,
      * and the next write of that process fails (EPIPE, or it dies of SIGPIPE). The reader ends with that write: a
      * read that waits is not woken by the close, so the reader of a process that holds the pipe and never writes
-     * stays until that process ends, and keeps nothing.
+     * stays until that process ends, and keeps nothing. This method does not wait for that reader: it returns at
+     * the bound either way, and the stream then counts as {@linkplain #cut() cut}.
      *
      * @throws InterruptedException if the calling thread is interrupted while it waits; the reading goes on
      */
@@ -109,6 +113,9 @@ public final class BoundedOutput {
             return;
         }
         synchronized (this) {
+            if (complete) {
+                return;   // the stream ended in the instant after the wait: nothing is cut
+            }
             ended = true;
         }
         try {
@@ -132,6 +139,19 @@ public final class BoundedOutput {
         if (interrupted) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Whether {@link #end} ended the reading at its bound: the stream had not ended by then, so something still held
+     * it, and what that wrote afterwards is not kept. {@code false} for a stream that was read to its end, also
+     * beyond the limit, and for one that failed.
+     */
+    public synchronized boolean cut() {
+        return ended;
+    }
+
+    private synchronized void reachedTheEnd() {
+        complete = true;
     }
 
     /** How many bytes of the stream are kept at most. */

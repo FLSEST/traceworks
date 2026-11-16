@@ -59,6 +59,8 @@ final class ContainerProcess {
     static final int REMOVE_WAIT_SECONDS = 5;
 
     private static final long POLL_MILLIS = 200;
+    /** How long the output is read after the client ended, for what something it left behind still writes. */
+    static final long AFTER_END_MILLIS = 2000;
 
     private ContainerProcess() {
     }
@@ -163,8 +165,10 @@ final class ContainerProcess {
                 ProcessTree.terminate(process);
                 process.waitFor(ProcessTree.GRACE.toSeconds() + 2, TimeUnit.SECONDS);
             }
-            stdout.end(2000);
-            stderr.end(2000);
+            // One bound for both streams: what is left of it after the first is the wait for the second
+            long bound = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(AFTER_END_MILLIS);
+            stdout.end(AFTER_END_MILLIS);
+            stderr.end(Math.max(1, TimeUnit.NANOSECONDS.toMillis(bound - System.nanoTime())));
             if (timedOut) {
                 return result(TIMEOUT_EXIT_CODE, stdout, stderr, "", started, true);
             }
@@ -248,8 +252,8 @@ final class ContainerProcess {
     }
 
     /**
-     * The result, with what the readers collected so far (a reader still running may add to it afterwards) and the
-     * streams that went beyond the limit.
+     * The result, with what the readers collected so far (a reader still running may add to it afterwards), the
+     * streams that went beyond the limit and the streams whose reading ended at the bound after the client's end.
      */
     private static CommandResult result(int exitCode, BoundedOutput stdout, BoundedOutput stderr, String note,
                                         long started, boolean timedOut) {
@@ -260,7 +264,11 @@ final class ContainerProcess {
         List<String> truncated = new ArrayList<>();
         if (stdout.exceeded()) truncated.add(CommandResult.STDOUT);
         if (stderr.exceeded()) truncated.add(CommandResult.STDERR);
+        List<String> cut = new ArrayList<>();
+        if (stdout.cut()) cut.add(CommandResult.STDOUT);
+        if (stderr.cut()) cut.add(CommandResult.STDERR);
         return new CommandResult(exitCode, stdout.text(), err,
-                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), timedOut, truncated, stdout.limit());
+                TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), timedOut, truncated, stdout.limit())
+                .withOutputCut(cut.isEmpty() ? null : new CommandRunner.OutputCut(cut, AFTER_END_MILLIS));
     }
 }
