@@ -19,19 +19,19 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p><b>Platform data becomes a taint source on use, not on injection.</b> Platform data is what a run receives from
  * outside the workflow without it being an input: the output a chain hands over ({@code previous_chain_output}) and
  * what a register gives an audit workflow ({@code previous_report}, {@code audit_findings}). Treating it as untrusted
- * input from the start would quote every block output of every run that receives it and change the meaning of
- * long-standing shell commands. It is therefore always shell-escaped, but it only taints the run once
- * {@link TemplateResolver} reports back that such a placeholder was really substituted into a shell command line
+ * input from the start would protect every block output of every run that receives it and refuse
+ * long-standing shell commands. It is therefore always protected itself, but it only taints the run once
+ * {@link TemplateResolver} reports back that such a placeholder was really handed to a shell, as the value of a variable
  * ({@link #substitutedIntoShell}). From that moment the run behaves exactly like one carrying external untrusted input:
- * block outputs and derived variables (foreach items, {@code step_N_output}) are escaped too, so platform bytes cannot
+ * block outputs and derived variables (foreach items, {@code step_N_output}) are protected too, so platform bytes cannot
  * re-enter a command line raw.
  *
  * <p><b>Platform data in an AI prompt colours that block's output, not the run.</b> The laundering
- * path platform data → AI prompt → shell block used to bypass the quoting entirely: the prompt path
+ * path platform data → AI prompt → shell block used to bypass the protection entirely: the prompt path
  * reported nothing and {@link ExecutionContext#recordOutput} filed the answer as untrusted-free.
  * Now {@link TemplateResolver#resolvePrompt} reports its substitutions too
  * ({@link #substitutedIntoPrompt}); the flag is consumed by the next recorded output
- * ({@link #consumePlatformPrompt}), which is therefore escaped in later shell command lines. The run
+ * ({@link #consumePlatformPrompt}), which is therefore protected in later shell command lines. The run
  * itself stays clean until an output is really recorded — a prompt alone changes nothing.
  *
  * <p><b>Text a model wrote is protected, and is no untrusted input.</b> A model reads the workspace, which may hold
@@ -125,8 +125,8 @@ final class ExecutionContextTaint {
     }
 
     /**
-     * Snapshot for {@link TemplateResolver#resolveShell} — escaped variable names plus the outputs a shell line
-     * quotes, the tainted ones and those that are model text.
+     * Snapshot for {@link TemplateResolver#shellLine} — the protected variable names plus the protected outputs,
+     * the tainted ones and those that are model text.
      */
     TemplateResolver.Taint snapshot() {
         Set<String> escaped = variables.escapedNames();

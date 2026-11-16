@@ -92,7 +92,7 @@ class AnalyzerFindingLanguagesTest {
                 block("shell", "quoted", Map.of("command", "set -euo pipefail\necho 'LAST={{ previous_output }}'")),
                 block("shell", "unset", Map.of("command", "set -euo pipefail\nX='{{ x }}'\n"
                         + "[ \"$X\" = '{{ x }}' ] && X=default"))), null));
-        // An AI step's output without quotes in a shell command: unquoted-ai-output
+        // An AI step's output in a shell command: protected-value-in-shell
         out.addAll(analyzer.analyze(List.of(
                 block("simple", "review", Map.of("command", "Review the diff")),
                 block("shell", "report", Map.of("command", "set -euo pipefail\nprintf '%s' {{ block.review.output }}"))),

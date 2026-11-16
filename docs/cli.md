@@ -516,7 +516,7 @@ reason the engine's run admission would refuse the run for is an error, such as 
 requirement, an AI step's tools or a package image in a child of another package (`child-package-image`; see
 "Requirements" and "AI steps"). The rules judge the package's own workflow; of the child workflows it reaches by a
 literal `workflow_id`, `check` reports only their package images, their questions (`nested-wait-point`) and, for
-`unquoted-ai-output`, whether one of them asks a model; the shell lines of a child that take values its parent hands
+`protected-value-in-shell`, whether one of them asks a model; the shell lines of a child that take values its parent hands
 over are judged when the child runs ("Values: how a protected value reaches a command"). A child
 that names Codex, which refuses the run at its start ("AI steps"), is reported when you check the child's package. A
 Dockerfile under the package's `images/` whose `FROM` names no `@sha256:` digest gets the warning

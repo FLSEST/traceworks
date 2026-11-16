@@ -43,7 +43,8 @@ class TestingAuditScriptsIT extends IntegrationTest {
                   "type": "shell",
                   "name": "findings",
                   "config": {
-                    "command": "set -euo pipefail; cp -r {{ package_dir }}/pit {{ scratch_dir }}/pit; printf '%s' {{ audit_findings }} > {{ scratch_dir }}/known.txt; printf '%s' {{ audit_items }} > {{ scratch_dir }}/items.txt; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ scratch_dir }}/known.txt {{ scratch_dir }}/items.txt",
+                    "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
+                    "command": "set -euo pipefail; cp -r {{ package_dir }}/pit {{ scratch_dir }}/pit; printf '%s' \\"$KNOWN_FINDINGS\\" > {{ scratch_dir }}/known.txt; printf '%s' \\"$KNOWN_ITEMS\\" > {{ scratch_dir }}/items.txt; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ scratch_dir }}/known.txt {{ scratch_dir }}/items.txt",
                     "shell_escape_variables": true
                   }
                 },

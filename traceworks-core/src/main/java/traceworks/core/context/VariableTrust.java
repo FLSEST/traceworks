@@ -7,21 +7,21 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Trust label per context variable. Three classes of values a shell line protects exist, and they differ
+ * Trust label per context variable. Three classes of protected values exist, which a shell line refuses, and they differ
  * in whether they make the run one that carries untrusted input:
  *
  * <ul>
  *   <li><b>external</b> ({@link ExecutionContext#setUntrustedVariable}) — a webhook payload and the
- *       like: always shell-escaped <em>and</em> a run-level taint source, so every block output of
- *       the run is escaped too ({@link OutputTaint}).</li>
+ *       like: always protected <em>and</em> a run-level taint source, so every block output of
+ *       the run is protected too ({@link OutputTaint}).</li>
  *   <li><b>platform</b> ({@link ExecutionContext#setUntrustedPlatformVariable}) — {@code previous_report}
- *       and {@code open_todos}: always shell-escaped, and a taint source only <em>on use</em>. They are
- *       set in every run whose embedding system provides them, so tainting at injection time would quote every
+ *       and {@code open_todos}: always protected, and a taint source only <em>on use</em>. They are
+ *       set in every run whose embedding system provides them, so tainting at injection time would protect every
  *       block output of such a run and change the meaning of long-standing shell commands; instead the run is tainted
  *       the moment such a placeholder is really substituted into a shell command line
  *       ({@link ExecutionContextTaint#substitutedIntoShell}).</li>
  *   <li><b>model text</b> ({@link ExecutionContext#setDerivedVariable} in a run that asked a model) — a step's
- *       output or a loop item that may hold what a model wrote: always shell-escaped, and never a reason to count
+ *       output or a loop item that may hold what a model wrote: always protected, and never a reason to count
  *       the run as one with untrusted input ({@link ExecutionContextTaint}).</li>
  * </ul>
  *
@@ -46,7 +46,7 @@ final class VariableTrust {
         platform.add(name);
     }
 
-    /** The value may hold what a model wrote: quoted in a shell line, no untrusted input. */
+    /** The value may hold what a model wrote: protected, no untrusted input. */
     void markModel(String name) {
         external.remove(name);
         platform.remove(name);
@@ -75,7 +75,7 @@ final class VariableTrust {
         return !external.isEmpty();
     }
 
-    /** Names that must be shell-escaped — every class. */
+    /** The protected names — every class. */
     Set<String> escapedNames() {
         if (model.isEmpty()) return untrustedNames();
         Set<String> all = new HashSet<>(untrustedNames());

@@ -290,6 +290,34 @@ class MainTest {
         assertThat(unknown.err()).contains("No run matches");
     }
 
+    /**
+     * A block's values reach its command as shell variables, on a real host run. The record keeps the command as
+     * written and the values by name; show names them, and prints them with the outputs; describe lists the names.
+     */
+    @Test
+    void run_values_reachTheCommandAsVariables_andShowAndDescribeNameThem() throws IOException {
+        Path pkg = pkg("valued", """
+                {"type":"shell","name":"say","config":{"values":{"GREETING":"Hello, {{ name }}","EMPTY":""},
+                 "command":"printf '%s|%s' \\"$GREETING\\" \\"$EMPTY\\""}}""");
+
+        Result run = runHost(pkg, "--input", "name=it's $(not run)");
+        Result show = exec("show", idOf(run));
+        Result withValues = exec("show", idOf(run), "--outputs");
+        Result describe = exec("describe", pkg.toString());
+
+        assertThat(run.code()).as(run.err()).isZero();
+        assertThat(run.out()).contains("output: Hello, it's $(not run)|");
+        assertThat(String.join("\n", Files.readAllLines(runFolder(idOf(run)).resolve("events.jsonl"))))
+                .contains("\"type\":\"step.command\"", "\"values\":{\"sha256\":\"");
+        assertThat(show.out()).contains("      values EMPTY, GREETING\n").doesNotContain("value GREETING:");
+        assertThat(withValues.out()).contains("      values EMPTY, GREETING\n", "      value GREETING:\n"
+                + "      | Hello, it's $(not run)\n");
+        assertThat(Files.readString(runFolder(idOf(run)).resolve("run.html")))
+                .contains("<details><summary>value <code>GREETING</code> (22 characters)</summary><pre>Hello,"
+                        + " it&#39;s $(not run)</pre></details>");
+        assertThat(describe.out()).contains("values GREETING, EMPTY");
+    }
+
     @Test
     void run_inContainers_isTheDefault_andTheRecordSaysSo() throws IOException {
         String shellId = "sha256:" + "5".repeat(64);
