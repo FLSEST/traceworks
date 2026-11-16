@@ -5,9 +5,10 @@
 # Each method gets its earlier verdict:
 # - from findings.jsonl, when the register holds a finding of it: the severity, and from the description the reason
 #   ("Rating:"), the ground of the last change ("Ground:") and the kinds of its gaps then ("Kinds:");
-# - LOW, when the register holds no finding and its item has a verdict: a method rated low is no finding. When
-#   resolved.jsonl knows the method, it was a finding before it was rated low, and that rating goes along;
-# - from resolved.jsonl, when the method has no verdict any more: it left the measurement and came back.
+# - LOW, when the last report stated no finding of it and its item has a verdict: a method rated low is no finding.
+#   When resolved.jsonl knows the method (or findings.jsonl still holds its decided finding, which the last report
+#   left out), it was a finding before it was rated low, and that rating goes along;
+# - from that earlier finding, when the method has no verdict any more: it left the measurement and came back.
 # A method whose digest is the one of its last verdict is not put to the model ("ask" is false). The digest is the
 # method, the kinds of its gaps without line numbers (they move with every edit above) and the decision on it.
 # A method without a verdict and without a reason a model gave was never rated: it is rated fresh ("fresh").
@@ -16,23 +17,37 @@ scratch=$1 register=$2
 
 bash "$(dirname "$0")/methods.sh" "$scratch"
 
+# The methods are the items of the register, and a report with more than 1000 items is rejected as a whole: nothing
+# would be kept, and every run would rate every method fresh. So the run ends here, before any call of a model.
+methods=$(jq '.methods | length' "$scratch/methods.json")
+if [ "$methods" -gt 1000 ]; then
+  echo "$methods methods have a change no test detected, and a register takes at most 1000 items in a report:" \
+       "the report of this run would be rejected and no rating kept. Audit less: narrow the inputs classes or" \
+       "modules, and keep them the same from run to run." >&2
+  exit 2
+fi
+
 jq --slurpfile known "$register/findings.jsonl" --slurpfile resolved "$register/resolved.jsonl" \
    --slurpfile items "$register/items.jsonl" '
   def rank: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}[.] // 0;
   def kinds: map(split(" ")[-1]) | sort | join(",");
   def line(name): (.description // "") | capture("(^|\n)" + name + ": (?<text>[^\n]*)").text // null;
   def rating: {severity, why: line("Rating"), ground: line("Ground"), gaps: line("Kinds")};
-  ($known | map({key: .subject, value: .}) | from_entries) as $held
-  | ($resolved | map({key: .subject, value: .}) | from_entries) as $left
+  # A finding the last report stated holds the rating of then. An accepted or dismissed finding stays in
+  # findings.jsonl for a while after a report left it out (absent_reports counts those reports): the method was
+  # rated low then, and the finding is what it was rated before, like a resolved one. Its decision still stands.
+  ($known | map(select((.absent_reports // 0) == 0) | {key: .subject, value: .}) | from_entries) as $held
+  | ($resolved + ($known | map(select((.absent_reports // 0) > 0))) | map({key: .subject, value: .}) | from_entries) as $left
+  | ($known | map({key: .subject, value: .}) | from_entries) as $decisions
   | ($items | map({key: .name, value: .verdict_digest}) | from_entries) as $verdicts
   | .methods |= map(
       $held[.subject] as $finding
       # A decision covers the severity it was made on, and the severity of the finding too: a finding that is still
       # decided at a higher severity is one the register kept there (decision_on_higher_severity)
-      | (if $finding != null and ($finding.status | IN("ACCEPTED_RISK", "DISMISSED"))
-         then ($finding.disposition.severity // $finding.severity) as $on
-              | {text: "\($finding.status) at \($on). Note: \($finding.disposition.note // "" | gsub("\\s+"; " ") | .[:200])",
-                 covers: (if ($on | rank) >= ($finding.severity | rank) then $on else $finding.severity end)}
+      | ($decisions[.subject] | if . != null and (.status | IN("ACCEPTED_RISK", "DISMISSED"))
+         then (.disposition.severity // .severity) as $on
+              | {text: "\(.status) at \($on). Note: \(.disposition.note // "" | gsub("\\s+"; " ") | .[:200])",
+                 covers: (if ($on | rank) >= (.severity | rank) then $on else .severity end)}
          else null end) as $decision
       | . + {gaps: "\(.survived | kinds)/\(.uncovered | kinds)", decided: $decision.text, covers: $decision.covers,
              verdict: $verdicts[.subject],
