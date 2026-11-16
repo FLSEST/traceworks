@@ -6,6 +6,28 @@ writes everything that happened to a run folder, and exits.
 The key features, each explained on one page with drawings: [features.html](features.html). Open it in a browser;
 it loads nothing from the network. The register, round by round: [audit-loop.html](audit-loop.html).
 
+## The terms and how they nest
+
+![How the terms lie inside one another: on the left the package an author writes, with its workflow, blocks, steps and containers; on the right the home the tool keeps, with runs, registers and the ledger; the workspace between them, mounted read-only.](concepts.svg)
+
+What lies inside belongs to what lies outside.
+
+- **A package** is a directory an author writes: a `workflow.json`, its scripts and rule files, and its container
+  images. It does not change while a run runs.
+- **A workflow** holds blocks. A block becomes one or more steps, and each step is one command or one model call
+  in a container.
+- **The workspace** is the project the steps look at. It belongs neither to the package nor to the tool and is
+  mounted read-only unless a step says otherwise.
+- **The home** is the operator's folder, and only the tool writes it: one folder per run, one register per audit,
+  and the ledger that holds the state of both.
+- **`run`** turns the left into the right: a package, its inputs and a workspace give a run.
+
+**Container images.** A folder named `images/` holds container images, one sub-folder with a `Dockerfile` each; it
+has nothing to do with pictures. There are two such folders. `images/` at the root of the repository holds the four
+images Traceworks brings along (`shell`, `claude`, `pi`, `egress`). `images/` in a package holds the images of that
+package, which a step names as `./images/<name>`. `traceworks images build` builds both kinds. The pictures of the
+documentation are under `docs/`.
+
 ## Modules
 
 **Ports and adapters.** The core performs almost no I/O of its own. It reaches processes, containers, AI

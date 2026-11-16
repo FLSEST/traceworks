@@ -24,6 +24,9 @@ its steps in containers, records what happened, and keeps what an audit knows ac
 The format of `workflow.json` is Traceworks' own, and it has one rule: a workflow runs as it is written, or it is
 refused. It never silently runs as something else ([docs/workflow-format.md](docs/workflow-format.md)).
 
+How the terms lie inside one another, package, workflow, block, step and container on one side, run, register and
+ledger on the other, is one drawing: [docs/architecture.md](docs/architecture.md#the-terms-and-how-they-nest).
+
 Two pages explain it with drawings:
 
 - [docs/features.html](docs/features.html): the key features, each by the same four questions: what goes wrong
