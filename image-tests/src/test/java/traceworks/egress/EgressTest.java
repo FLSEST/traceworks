@@ -540,10 +540,28 @@ class EgressTest {
     @Test
     void theForwardedHead_namesThePathOfTheUrl() {
         assertThat(Egress.forwarded("GET http://Host.example:80 HTTP/1.1\r\nHost: host.example\r\n\r\n",
-                new String[] {"GET", "http://Host.example:80", "HTTP/1.1"}))
-                .isEqualTo("GET / HTTP/1.1\r\nHost: host.example\r\nConnection: close\r\n\r\n");
+                new String[] {"GET", "http://Host.example:80", "HTTP/1.1"}, "host.example:80"))
+                .isEqualTo("GET / HTTP/1.1\r\nHost: host.example:80\r\nConnection: close\r\n\r\n");
         assertThat(Egress.forwarded("GET http://h:1?q=A#f HTTP/1.0\r\nKeep-Alive: 5\r\nX-Y: z\r\n\r\n",
-                new String[] {"GET", "http://h:1?q=A#f", "HTTP/1.0"}))
-                .isEqualTo("GET /?q=A HTTP/1.0\r\nX-Y: z\r\nConnection: close\r\n\r\n");
+                new String[] {"GET", "http://h:1?q=A#f", "HTTP/1.0"}, "h:1"))
+                .isEqualTo("GET /?q=A HTTP/1.0\r\nHost: h:1\r\nX-Y: z\r\nConnection: close\r\n\r\n");
+    }
+
+    /**
+     * The server gets the request under the name the operator listed, whatever {@code Host} the client wrote: a
+     * server that serves several names on one port cannot be asked for another through the proxy.
+     */
+    @Test
+    void aForwardedRequest_carriesTheAllowedTargetAsItsHost_notTheOneTheClientWrote() throws Exception {
+        List<String> received = new java.util.concurrent.CopyOnWriteArrayList<>();
+        int upstream = httpServer(received, 0);
+        int proxy = proxy("http://127.0.0.1:" + upstream);
+
+        String answer = exchange(proxy, "GET http://127.0.0.1:" + upstream + "/x HTTP/1.1\r\n"
+                + "Host: admin.internal\r\nhOsT: other.internal\r\nX-Kept: yes\r\n\r\n");
+
+        assertThat(answer).startsWith("HTTP/1.1 200 ");
+        assertThat(received).containsExactly("GET /x HTTP/1.1\r\nHost: 127.0.0.1:" + upstream
+                + "\r\nX-Kept: yes\r\nConnection: close\r\n\r\n");
     }
 }

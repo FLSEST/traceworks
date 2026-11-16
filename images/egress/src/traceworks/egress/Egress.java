@@ -28,7 +28,8 @@ import java.util.regex.Pattern;
  *       port 443. A target written {@code http://host:port} is allowed too, and is a plain target.</li>
  *   <li><b>A plain target</b> is a server of the operator's own that speaks HTTP without TLS (a local model
  *       server). A plain HTTP request whose URL names it ({@code POST http://host:port/path}) is sent on to it: the
- *       request line in origin form, the headers without the ones meant for a proxy, {@code Connection: close}, and
+ *       request line in origin form, {@code Host} set to that target, the other headers without the ones meant
+ *       for a proxy, {@code Connection: close}, and
  *       then every byte both ways until the server closes. One connection carries one request. A tunnel to that
  *       target already carries any bytes, so forwarding reaches nothing a tunnel does not. To every other target a
  *       plain request stays refused.</li>
@@ -379,7 +380,7 @@ public final class Egress {
         if (!authority.matches(".*:[0-9]+")) {
             authority += ":80";
         }
-        return valid(authority) ? new Request(authority, false, forwarded(head, line)) : Request.NONE;
+        return valid(authority) ? new Request(authority, false, forwarded(head, line, authority)) : Request.NONE;
     }
 
     /**
@@ -388,10 +389,15 @@ public final class Egress {
      * naming the connection, and {@code Connection: close}, so the server ends the connection after its answer and
      * no second request travels on it.
      *
-     * @param head the head as the client sent it, with its empty line
-     * @param line the three parts of its request line; the second is an {@code http://} URL
+     * <p>The {@code Host} header is the target the proxy allowed, whatever the client wrote there: a server that
+     * serves several names on one {@code host:port} gets the request under the name the operator listed, and the
+     * client cannot ask it for another.
+     *
+     * @param head      the head as the client sent it, with its empty line
+     * @param line      the three parts of its request line; the second is an {@code http://} URL
+     * @param authority the target of that URL, {@code host:port} in lower case: what the proxy compared
      */
-    static String forwarded(String head, String[] line) {
+    static String forwarded(String head, String[] line, String authority) {
         String rest = line[1].substring(PLAIN.length());
         int end = 0;
         while (end < rest.length() && "/?#".indexOf(rest.charAt(end)) < 0) {
@@ -406,7 +412,7 @@ public final class Egress {
             path = "/" + path;
         }
         StringBuilder out = new StringBuilder(line[0]).append(' ').append(path).append(' ').append(line[2])
-                .append("\r\n");
+                .append("\r\nHost: ").append(authority).append("\r\n");
         String[] lines = head.split("\r\n");
         for (int i = 1; i < lines.length; i++) {
             if (lines[i].isEmpty()) {
@@ -414,7 +420,7 @@ public final class Egress {
             }
             int colon = lines[i].indexOf(':');
             String name = (colon < 0 ? lines[i] : lines[i].substring(0, colon)).strip().toLowerCase(Locale.ROOT);
-            if (!HOP_HEADERS.contains(name)) {
+            if (!HOP_HEADERS.contains(name) && !name.equals("host")) {
                 out.append(lines[i]).append("\r\n");
             }
         }
