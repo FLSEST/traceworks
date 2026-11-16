@@ -1,9 +1,24 @@
 # Security check of the changes
 
-The short check beside the [security self-audit](../security/README.md). The long audit judges every area of the
-sources, about 110 calls for a first run. This one judges only what changed since a base commit, and what is one
-call away from it: a handful of calls after a day's work. It asks the same question with the same tool, the same
-rules, the same judge and the same evidence check, and keeps a register of its own, `security-changes`.
+**What this check is for.** It finds mistakes early, in the time between two full audits: after a day's work or
+before a merge it looks at what changed since a commit and at what is one call away, a handful of calls where the
+[security self-audit](../security/README.md) makes about 110.
+
+**What it does not claim.** It selects what to look at by text and by one call. That catches the ordinary mistake
+in the code somebody just wrote. It does not protect against someone who hides a change on purpose: a selection
+can be steered, and four reviews of this package each found another way past it. The judgement over every area of
+the project is the full audit's (`examples/self-audit/security`), and only that one says that the project was
+looked at. This check asks the same question with the same tool, rules, judge and evidence check, and keeps a
+register of its own, `security-changes`.
+
+**What it cannot see**, whatever its gate says (the list with reasons is at the end, "What it does not see"):
+
+- a change two calls away, and data that flows through more than one call;
+- what is no call: a constant, a field, a default or a configuration key that another file reads;
+- reflection, and calls on library types the compiler could not resolve;
+- every file it names as passed unjudged: scripts, workflows, build files, Java outside the source roots;
+- everything before the base: it takes the base as it is;
+- what the model reads on its own in the workspace and the digest of an area does not hold.
 
 ```
 base      (shell, the shell image)   finds the base; hands over the two trees       -> changes/ (base, head, trees)
@@ -24,6 +39,8 @@ traceworks run examples/self-audit/security-changes --input since=v0.1.0       #
 traceworks run examples/self-audit/security-changes --input since=4f2a91c      # since a commit
 traceworks run examples/self-audit/security-changes --input since=2026-11-10   # since a date
 traceworks run examples/self-audit/security-changes                            # since the last run of this check
+traceworks run examples/self-audit/security-changes --input full_audit=4f2a91c # and name the last full audit
+traceworks run examples/self-audit/security-changes --input green=no           # never say GREEN
 traceworks findings security-changes list
 ```
 
@@ -206,14 +223,39 @@ its reason. A run in which no file differs says `Nothing changed.`
 
 ## The gate speaks about the changes
 
-The gate follows the items of the run, as in the long audit: RED while an open finding of high severity stands,
-YELLOW while an item is open or not judged, a file could not be read or compared, a file changed that this check
-cannot judge (above, "A changed file never drops out silently"), or the run skipped commits (`skip=yes`); GREEN
-when every item is settled and none of that holds. The
-items here are the areas this check ever picked. So GREEN means: nothing stands in what changed and in what
-earlier runs of this check left. It says nothing about the rest of the project, and the description says so in
-every run: `of the changes since 4f2a91c03b7e: no verified finding; 3 of 3 areas judged; ...; 104 of 110 areas of
-the project not looked at`.
+The gate has a category of its own, `changes`, and its description says in one line what its colour covers:
+
+```
+GREEN   12 areas picked since 4e12a3c80b1d (3 commits), all judged, nothing found
+YELLOW  12 areas picked since 4e12a3c80b1d (3 commits), all judged, nothing found; 3 files passed unjudged
+YELLOW  12 areas picked since 4e12a3c80b1d (3 commits), 2 not judged, nothing found; the base does not move
+RED     12 areas picked since 4e12a3c80b1d (3 commits), all judged, 1 finding (1 high)
+GREEN   nothing changed since 4e12a3c80b1d, no area picked
+```
+
+The counts behind it follow as the details (`DETAILS:` in the step's output, `**Details:**` in the report), which
+end with how much of the project was not looked at: `104 of 110 areas of the project not looked at`.
+
+| Gate | When |
+|---|---|
+| RED | an open finding of high severity stands |
+| YELLOW | an item is open or not judged; a file could not be read or compared; a file changed that this check cannot judge and was **passed unjudged**; commits were skipped (`skip=yes`) |
+| GREEN | every picked area was judged, nothing was found for the register, and nothing was passed unjudged |
+
+The items are the areas this check ever picked. GREEN says that about them and about nothing else.
+
+**The switch `green`.** Whether a check that selects by text should say GREEN at all is a decision for whoever
+runs it. With `--input green=no` a run that would be GREEN is YELLOW, and its description begins `nothing found in
+what changed (this check does not say GREEN): ...`; GREEN is then the full audit's word alone. The default is
+`green=yes`. It is one place in the tool (`Report.of`, where the gate is set) and this paragraph.
+
+**The last full audit.** The report has a row for it. A run of this audit gets the register of this audit and no
+other, so the package cannot look up when `security` last ran; it prints what the operator names:
+`--input full_audit=<commit>` gives `last full audit: <commit>, N commits before the workspace commit`, and without
+the input the row says `not given`. The commit is the one the workspace was at when the full audit last ran. A
+run started with `--source` records it (`workspace_source_sha` in `run.started`, docs/events.md); for a run on a
+workspace of your own, note the commit the workspace is at when you start the full audit: the record of such a run
+does not hold it.
 
 ## The register
 
