@@ -77,6 +77,13 @@ public class ExecutionContext {
     /** Reserved input-context key: names of the variables that may hold text a model wrote, handed to a child run. */
     public static final String MODEL_KEYS_VARIABLE = "__model_keys";
 
+    /**
+     * Reserved input-context key: the names of the variables a parent run hands over that it built from platform
+     * data (a foreach {@code context} entry that names {@code audit_findings}, say). The child holds them as
+     * platform data too. The register's own data is not among them: a child never takes it from its input.
+     */
+    public static final String PLATFORM_KEYS_VARIABLE = "__platform_keys";
+
     /** Reserved input-context key: names of the block outputs that may hold text a model wrote, plus {@link #PREVIOUS_OUTPUT_NAME}. */
     public static final String MODEL_OUTPUTS_VARIABLE = "__model_outputs";
 
@@ -335,6 +342,25 @@ public class ExecutionContext {
         else if (taint.modelAsked()) setModelVariable(name, value);
         else setVariable(name, value);
     }
+
+    /**
+     * Sets a variable to a value that was built from {@code template}: it is protected when any placeholder that
+     * went into it is, and as that one is, whatever the state of the run. Untrusted input or a tainted output makes
+     * it untrusted input, platform data makes it platform data (a shell line refuses it, and it taints the run when
+     * it reaches a shell as a value), model text makes it model text. With no protected part it is a derived
+     * variable ({@link #setDerivedVariable}).
+     */
+    public void setTemplateVariable(String name, Object value, String template) {
+        switch (taint.inheritedBy(template)) {
+            case EXTERNAL_INPUT -> setUntrustedVariable(name, value);
+            case PLATFORM_DATA -> setUntrustedPlatformVariable(name, value);
+            case MODEL_TEXT -> setModelVariable(name, value);
+            case NOTHING -> setDerivedVariable(name, value);
+        }
+    }
+
+    /** The names of the variables that are platform data: the register's, and what a step built from one. */
+    public Set<String> platformVariableNames() { return taint.platformVariables(); }
 
     /** Sets a variable that may hold text a model wrote: a shell line protects it, the run stays without untrusted input. */
     public void setModelVariable(String name, Object value) {

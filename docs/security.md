@@ -335,7 +335,7 @@ content, and no blob is written through one.
     into the variable (`printf %b`): what a variable holds, bash does not parse.
 
     ```
-    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && printf -v "$1" '%s' "$TRACEWORKS_V" || { echo "traceworks: the value of $1 did not arrive whole" >&2; exit 74; }; }
+    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" && -z ${!1@a} ]] || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
     TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
     unset -f TRACEWORKS_VALUE
     printf '%s\n' "$REVIEW" > review.md
@@ -343,10 +343,22 @@ content, and no blob is written through one.
 
     Every byte arrives, trailing newlines included, for a value as large as the output limit (16 MiB takes bash
     some seconds, and up to four times its size in the text). A NUL is taken out before the value is sent: no shell
-    variable holds one. Each variable's length in bytes is compared with what was sent; a value that did not arrive
-    whole ends the shell with exit code 74 before the command's first line. The variables are not exported, so no
-    process the command starts inherits them unless the command exports them. A tool step (`container_args`) runs
-    no shell and takes no values.
+    variable holds one. A tool step (`container_args`) runs no shell and takes no values.
+  - **Delivered or nothing runs.** What bash decoded is compared with the length that was sent, and after the
+    assignment the variable itself is compared with what was decoded. A variable that does not hold the value (a
+    readonly one, one bash sets itself) ends the shell with exit code 74 before the command's first line. The line
+    it writes then holds a token, the digest of the lines that carry the values; a value cannot write it, since it
+    would have to hold the digest of a text that holds the value. So the engine tells a failed delivery from a
+    command that ends with 74 by itself: the command counts as not run, a `run_if`, a shell `condition` and the
+    condition of a `while` fail their block on it, and none of them reads it as "false".
+  - **Not exported, unless the command exports it.** A value is the shell's own variable. The name is unset before
+    the assignment, which takes it out of the environment the step started with, the export attribute is taken off
+    after it, and a variable that still has any attribute fails the delivery; so no process the command starts
+    inherits the value. The author exports it knowingly with `export NAME`. A name that a program reads as its
+    configuration (`GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`) then hands a model's text to that
+    program, which may run what it says: `check` warns about such a name (`value-name-configures-program`). A name
+    bash itself sets or uses is refused (`invalid-value-name`): every variable of the sections "Bourne Shell
+    Variables" and "Bash Variables" of the bash manual, `_`, and the names that start with `BASH`.
   - **What is model text.** From the first call of a model on (a `simple` or `agentic` step, a wrapper in AI mode,
     `compress-ai`, a step an AI actor decides, a child workflow that asks one), every step output recorded since
     and every variable made from one: `{{ block.<name>.output }}`, `{{ previous_output }}`, `{{ step_N_output }}`,
@@ -357,6 +369,11 @@ content, and no blob is written through one.
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
     static `items` of a `foreach`, a person's answer.
+  - **A value built from a protected one is protected.** A variable a block fills in from a template is protected
+    when any placeholder that went into it is, whatever the state of the run: an entry of a `foreach`'s `context`,
+    the `default_value` of a `human-input` taken after a timeout, an approval's `auto_answer`. Built from platform
+    data it is platform data, in a child workflow it is handed to as well (`__platform_keys`); built from untrusted
+    input or from model text it is that.
   - **What the author's command does with the variable is the author's.** Traceworks guarantees that the value is
     in the variable and nowhere in the code. Two classic traps remain. An unquoted `$REVIEW` is split into words
     and its `*` matched against file names: write `"$REVIEW"`. And a command that evaluates what it is given runs
@@ -368,9 +385,12 @@ content, and no blob is written through one.
     what the container sees or which workflow runs. The image of a step (`container_image`), its `network` and its
     secrets are read as written, without placeholders; a hook gets its payload on standard input and its program
     and arguments from `traceworks.json`; the git commands of `run --source` take the operator's arguments only.
-  - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it:
-    a run resumed from one treats what those calls wrote as before, until the resumed run asks a model itself. A
-    checkpoint written now has a format number such a version refuses.
+  - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it,
+    so it is read closed: a run resumed from one counts as a run that asked a model, and every output and every
+    variable the checkpoint holds is protected (the run's own variables, such as `project_path` and `scratch_dir`,
+    are set anew and trusted). A step after the resume whose shell line names one of them is refused; hand the
+    value over under `values`, or start the run again. A checkpoint written now has a format number such a version
+    refuses.
 - **A gate from an AI step.** A `simple` or `agentic` step can set the run's gate with a `gate_status:` line, since a
   report step delivers its verdict that way; a model steered by what it reads can therefore set a gate too. Keep the
   verdict in a step that checks the model's work, as `examples/self-audit/security` does. The output of a wrapper in

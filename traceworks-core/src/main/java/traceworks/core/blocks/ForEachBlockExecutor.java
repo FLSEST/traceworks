@@ -334,12 +334,14 @@ public class ForEachBlockExecutor implements BlockExecutor {
     /**
      * One item as a run of workflow {@code workflowId}, through the same {@link SubWorkflowLauncher} as the
      * sub-workflow block. The child sees the item variables and, per {@code context} entry, the resolved value under
-     * its own name; those derived values carry the run's taint like the item itself.
+     * its own name; such a value is protected when a placeholder that went into it is
+     * ({@link ExecutionContext#setTemplateVariable}), and carries the run's taint like the item itself.
      */
     private StepResult runWorkflow(String workflowId, Map<String, Object> mapping, ExecutionContext context) {
         Instant start = context.getClock().now();
         mapping.forEach((name, template) ->
-                context.setDerivedVariable(name, context.resolvePromptTemplate(String.valueOf(template))));
+                context.setTemplateVariable(name, context.resolvePromptTemplate(String.valueOf(template)),
+                        String.valueOf(template)));
         SubWorkflowLauncher.Outcome outcome = subWorkflows.run(workflowId, context);
         Instant end = context.getClock().now();
         StepResult result = CancelledSteps.mark(StepResult.builder()

@@ -93,7 +93,7 @@ final class TemplateResolver {
     }
 
     /** Whether the placeholder key names a value of {@code taint}. */
-    private static boolean names(String key, Taint taint) {
+    static boolean names(String key, Taint taint) {
         if (taint.variables().contains(key)) return true;
         if ("previous_output".equals(key)) return taint.previousOutput();
         return key.startsWith("block.") && key.endsWith(".output")

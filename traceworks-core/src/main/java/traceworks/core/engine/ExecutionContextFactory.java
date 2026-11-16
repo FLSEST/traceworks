@@ -187,10 +187,14 @@ final class ExecutionContextFactory {
 
         Set<String> untrustedKeys = reservedNames(inputContext, ExecutionContext.UNTRUSTED_KEYS_VARIABLE);
         Set<String> modelKeys = reservedNames(inputContext, ExecutionContext.MODEL_KEYS_VARIABLE);
+        Set<String> platformKeys = reservedNames(inputContext, ExecutionContext.PLATFORM_KEYS_VARIABLE);
         inputContext.forEach((name, value) -> {
             if (!readsFromInput(name)) return;
             if (untrustedKeys.contains(name)) {
                 context.setUntrustedVariable(name, value);
+            } else if (platformKeys.contains(name)) {
+                // Built from platform data in the parent run: platform data here too
+                context.setUntrustedPlatformVariable(name, value);
             } else if (modelKeys.contains(name)) {
                 // Derived from an output of the parent run after it asked a model: quoted in a shell line here too
                 context.setModelVariable(name, value);

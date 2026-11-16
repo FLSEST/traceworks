@@ -102,6 +102,34 @@ final class ExecutionContextTaint {
         else modelOutputs.markBlockOutput(name);
     }
 
+    /** What a value built from a template inherits from the placeholders that went into it, weakest first. */
+    enum Inherited { NOTHING, MODEL_TEXT, PLATFORM_DATA, EXTERNAL_INPUT }
+
+    /**
+     * The strongest mark among the placeholders of {@code template}: external input (an untrusted variable, a
+     * tainted output), then platform data, then model text (a variable or an output that may hold what a model
+     * wrote). A value built from the template is protected as that part of it is, whatever the state of the run.
+     */
+    Inherited inheritedBy(String template) {
+        Inherited strongest = Inherited.NOTHING;
+        if (template == null) return strongest;
+        TemplateResolver.Taint tainted = outputs.snapshot(Set.of());
+        TemplateResolver.Taint model = modelOutputs.snapshot(Set.of());
+        for (String key : PlaceholderSyntax.keysIn(template)) {
+            Inherited of = variables.isExternal(key) || TemplateResolver.names(key, tainted) ? Inherited.EXTERNAL_INPUT
+                    : variables.isPlatform(key) ? Inherited.PLATFORM_DATA
+                    : variables.isModel(key) || TemplateResolver.names(key, model) ? Inherited.MODEL_TEXT
+                    : Inherited.NOTHING;
+            if (of.compareTo(strongest) > 0) strongest = of;
+        }
+        return strongest;
+    }
+
+    /** The names of the platform data: the register's and what a step derived from it. */
+    Set<String> platformVariables() {
+        return variables.platformNames();
+    }
+
     /** Names persisted as run taint ({@code __untrusted_keys}) — external input only. */
     Set<String> untrustedVariables() {
         return variables.externalNames();
@@ -140,12 +168,17 @@ final class ExecutionContextTaint {
     /** Taint as reserved input-context keys for persistence and hand-over; empty for a clean run. */
     Map<String, Object> export() {
         Map<String, Object> exported = outputs.export(variables.externalNames());
-        if (!platformUsedInShell.get() && !modelAsked.get()) return exported;
+        Set<String> modelNames = variables.modelNames();
+        if (!platformUsedInShell.get() && !modelAsked.get() && modelNames.isEmpty()) return exported;
         Map<String, Object> withFlags = new HashMap<>(exported);
         if (platformUsedInShell.get()) withFlags.put(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE, true);
+        if (!modelNames.isEmpty() && !modelAsked.get()) {
+            // A variable built from model text a parent handed over, in a run that asked no model itself
+            withFlags.put(ExecutionContext.MODEL_KEYS_VARIABLE, modelNames.stream().sorted().toList());
+        }
         if (modelAsked.get()) {
             withFlags.put(ExecutionContext.MODEL_ASKED_VARIABLE, true);
-            withFlags.put(ExecutionContext.MODEL_KEYS_VARIABLE, variables.modelNames().stream().sorted().toList());
+            withFlags.put(ExecutionContext.MODEL_KEYS_VARIABLE, modelNames.stream().sorted().toList());
             Set<String> names = new TreeSet<>(modelOutputs.outputNames());
             if (modelOutputs.isPreviousOutputTainted()) names.add(ExecutionContext.PREVIOUS_OUTPUT_NAME);
             withFlags.put(ExecutionContext.MODEL_OUTPUTS_VARIABLE, List.copyOf(names));

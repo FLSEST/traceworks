@@ -65,6 +65,16 @@ final class VariableTrust {
         return external.contains(name) || platform.contains(name) || model.contains(name);
     }
 
+    /** True for external input only — the class that taints the run from the moment it is set. */
+    boolean isExternal(String name) {
+        return external.contains(name);
+    }
+
+    /** True for a variable that may hold what a model wrote. */
+    boolean isModel(String name) {
+        return model.contains(name);
+    }
+
     /** True for platform data only — the class that taints the run on use instead of on injection. */
     boolean isPlatform(String name) {
         return platform.contains(name);
