@@ -30,11 +30,23 @@ import java.util.TreeSet;
  * @param models       the distinct models the steps' metadata names, sorted
  * @param gate         the run's verdict; {@code null} when no step reported one
  * @param seal         the seal the run's package carried at the start; {@code null} for a package that was not sealed
+ * @param runStarted   the SHA-256 of the {@code run.started} line, which the start entry of the ledger names too, so
+ *                     an end entry can be matched to its start entry without the run folder; {@code null} for a
+ *                     manifest of a version that did not name it, which then has no such field
  */
 public record Manifest(String runId, String workflowId, String workflowName, String packageDigest,
                        String inputsDigest, String execution, List<Image> images, List<String> models, int events,
                        String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
-                       String version, SealView seal) {
+                       String version, SealView seal, String runStarted) {
+
+    /** A manifest that does not name the {@code run.started} line, as an earlier version wrote it. */
+    public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
+                    String inputsDigest, String execution, List<Image> images, List<String> models, int events,
+                    String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
+                    String version, SealView seal) {
+        this(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images, models, events, head,
+                status, gate, startedAt, finishedAt, version, seal, null);
+    }
 
     /** The manifest of a run whose package was not sealed. */
     public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
@@ -84,7 +96,7 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
         return new Manifest(view.runId(), view.workflowId(), view.workflowName(), view.packageDigest(),
                 view.inputs() == null ? null : view.inputs().sha256(), view.execution(), List.copyOf(images),
                 models, view.eventCount(), view.head(), view.status(), view.gate(), view.startedAt(),
-                view.finishedAt(), version, view.seal());
+                view.finishedAt(), version, view.seal(), view.runStarted());
     }
 
     /**
@@ -138,7 +150,13 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
     /** The same manifest with other models, for a check that cannot tell them from the record. */
     public Manifest withModels(List<String> otherModels) {
         return new Manifest(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images,
-                otherModels, events, head, status, gate, startedAt, finishedAt, version, seal);
+                otherModels, events, head, status, gate, startedAt, finishedAt, version, seal, runStarted);
+    }
+
+    /** The same manifest without the {@code run.started} line, as a version that did not name it wrote it. */
+    public Manifest withoutRunStarted() {
+        return new Manifest(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images,
+                models, events, head, status, gate, startedAt, finishedAt, version, seal, null);
     }
 
     /** The images of the commands that started a container, in the run and its children; a refused one has no ID. */
@@ -201,6 +219,9 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
         root.putObject("tool_versions");
         root.put("events", events);
         root.put("head", head);
+        if (runStarted != null) {
+            root.put("run_started", runStarted);
+        }
         root.put("status", status.name());
         if (gate == null) {
             root.putNull("gate");

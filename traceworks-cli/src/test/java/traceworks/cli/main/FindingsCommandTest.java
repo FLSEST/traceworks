@@ -668,13 +668,13 @@ class FindingsCommandTest {
     @Test
     void verify_ofARegisterTheLedgerDoesNotAnchor_holdsAndSaysSo_andTheNextWriteAnchorsIt() throws Exception {
         run(auditPackage("A.java"));
-        Path ledger = home.resolve("ledger");
-        Process removed = new ProcessBuilder("git", "-C", ledger.toString(), "-c", "user.name=t", "-c",
-                "user.email=t@t.invalid", "rm", "-q", "registers/hello.jsonl").start();
-        assertThat(removed.waitFor()).isZero();
-        Process committed = new ProcessBuilder("git", "-C", ledger.toString(), "-c", "user.name=t", "-c",
-                "user.email=t@t.invalid", "commit", "-q", "-m", "as before anchors").start();
-        assertThat(committed.waitFor()).isZero();
+        // A ledger that never anchored the register: the one of the run is gone, and the next write makes a new one.
+        // (Taking the anchors out of a ledger with a commit is no way to get there: the ledger finds that.)
+        try (java.util.stream.Stream<Path> files = Files.walk(home.resolve("ledger"))) {
+            for (Path file : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                Files.delete(file);
+            }
+        }
 
         Result verify = exec("findings", "hello", "verify");
 

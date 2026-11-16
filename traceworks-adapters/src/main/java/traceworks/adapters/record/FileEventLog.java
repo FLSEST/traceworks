@@ -67,6 +67,26 @@ final class FileEventLog implements EventLog {
         return lines;
     }
 
+    /** Reads up to the first line feed and no further. */
+    @Override
+    public synchronized java.util.Optional<byte[]> first() {
+        if (!Files.exists(file)) {
+            return java.util.Optional.empty();
+        }
+        try (java.io.InputStream in = new java.io.BufferedInputStream(Files.newInputStream(file))) {
+            java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
+            for (int b = in.read(); b >= 0; b = in.read()) {
+                if (b == '\n') {
+                    return java.util.Optional.of(line.toByteArray());
+                }
+                line.write(b);
+            }
+            return java.util.Optional.empty();   // no complete line
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read " + file, e);
+        }
+    }
+
     @Override
     public synchronized byte[] tail() {
         byte[] all = readFile();

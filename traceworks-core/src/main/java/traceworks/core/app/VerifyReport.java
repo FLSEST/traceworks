@@ -21,9 +21,24 @@ import traceworks.core.record.ChainReport;
  * @param register     {@value #NOT_CHECKED} for a run of a workflow that is no audit, which has no register folder;
  *                     for the run of an audit workflow, a text that starts with {@value #OK} when the files of its
  *                     register folder are the ones {@code run.started} recorded, else what differs
+ * @param start        the start entry of the ledger against the first line of the record: a text that starts with
+ *                     {@value #OK} when the ledger noted the start and names this {@code run.started} line; with
+ *                     {@value #NONE} for a record of a version that noted no start, which is no failure; with
+ *                     {@value #MISSING} when the record says the start was noted and the ledger holds no entry; with
+ *                     {@value #MISMATCH} when the entry names another line; {@value #NOT_CHECKED} for a run folder
+ *                     outside this home's runs folder; anything else says why the ledger could not be read
  */
 public record VerifyReport(ChainReport chain, String manifest, String ledger, String ledgerReason, boolean ok,
-                           String seal, String register) {
+                           String seal, String register, String start) {
+
+    /** The run was recorded by a version that noted no start in the ledger. */
+    public static final String NONE = "none";
+
+    /** A report of a run whose start entry was not looked at. */
+    public VerifyReport(ChainReport chain, String manifest, String ledger, String ledgerReason, boolean ok,
+                        String seal, String register) {
+        this(chain, manifest, ledger, ledgerReason, ok, seal, register, NOT_CHECKED);
+    }
 
     /** A report of a run whose register folder was not looked at. */
     public VerifyReport(ChainReport chain, String manifest, String ledger, String ledgerReason, boolean ok,
