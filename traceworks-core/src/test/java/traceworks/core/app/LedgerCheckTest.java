@@ -423,6 +423,61 @@ class LedgerCheckTest {
                 assertThat(ack.said()).contains("commit 4f1d2c3b4a59"));
     }
 
+    /**
+     * A line dated in the future is not a young line: a record whose run.started, or whose run.finished, is dated
+     * 2099 does not stay in flight under a held lock, and the problem says that the date lies ahead.
+     */
+    @Test
+    void aLineDatedInTheFuture_keepsNoRunInFlight() {
+        String starting = parked();
+        String ending = finished();
+        String start = new String(fx.events(starting).getFirst().raw(), StandardCharsets.UTF_8)
+                .replaceFirst("\"at\":\"[^\"]+\"", "\"at\":\"2099-01-01T00:00:00Z\"");
+        java.util.List<String> all = fx.events(ending).stream().map(event -> new String(event.raw(),
+                StandardCharsets.UTF_8).replaceFirst("\"at\":\"[^\"]+\"", "\"at\":\"2099-01-01T00:00:00Z\"")).toList();
+        fx.ledger.startOver();
+        record(starting, start);
+        record(ending, all.toArray(String[]::new));
+        fx.ledger.recordStart(ending, traceworks.core.record.StartEntry.of(
+                all.getFirst().getBytes(StandardCharsets.UTF_8)).toJson());
+        fx.run(starting).simulateOtherWriter(true);
+        fx.run(ending).simulateOtherWriter(true);
+
+        LedgerReport report = services.ledgerReport(false);
+
+        assertThat(report.inFlight()).isEmpty();
+        assertThat(codes(report)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
+                tuple(ending, "no-end-entry"));
+        assertThat(report.problems()).allSatisfy(problem ->
+                assertThat(problem.text()).contains("dated 2099-01-01T00:00:00Z, which lies ahead"));
+    }
+
+    /**
+     * "From before the ledger" is not granted for a missing field alone: a record without ledger_start that started
+     * after the ledger's first commit is a run the ledger should know, in the check of the home and of the run.
+     */
+    @Test
+    void aRecordWithoutLedgerStart_thatStartedAfterTheLedgerBegan_isNoRunFromBeforeTheLedger() throws Exception {
+        String id = loadEarlier();
+        services.cancel(id);
+        fx.ledger.startOver();
+        java.time.Instant started = fx.events(id).getFirst().at();
+
+        fx.ledger.began(started.plusSeconds(1));
+        assertThat(services.ledgerReport().earlier()).isEqualTo(1);
+        assertThat(services.ledgerReport().ok()).isTrue();
+        assertThat(services.verify(id).ok()).isTrue();
+
+        fx.ledger.began(started.minusSeconds(1));
+        LedgerReport report = services.ledgerReport();
+        assertThat(report.earlier()).isZero();
+        assertThat(codes(report)).containsExactly(tuple(id, "unknown-run"));
+        assertThat(report.problems().getFirst().text()).contains("the ledger does not know", "after the ledger began");
+        VerifyReport run = services.verify(id);
+        assertThat(run.ledger()).isEqualTo(VerifyReport.MISSING);
+        assertThat(run.ok()).isFalse();
+    }
+
     /** A folder that was just created and has no line yet, with its process alive: in flight too. */
     @Test
     void aRunFolderWithoutALineYet_whoseProcessIsAlive_isInFlight() {

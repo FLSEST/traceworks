@@ -81,10 +81,22 @@ public final class InMemoryLedger implements Ledger {
                     ? acks.get(id).getBytes(java.nio.charset.StandardCharsets.UTF_8) : null,
                     changes.getOrDefault(id, List.of())));
         }
-        return new LedgerRuns(runs);
+        return new LedgerRuns(runs, began);
     }
 
     private final Map<String, List<String>> changes = new LinkedHashMap<>();
+    private java.time.Instant began;
+
+    @Override
+    public synchronized Optional<java.time.Instant> began() {
+        return Optional.ofNullable(began);
+    }
+
+    /** Says when the ledger began: the time of its oldest commit. */
+    public synchronized void began(java.time.Instant at) {
+        this.began = at;
+    }
+
     /** A problem of the anchors of the register {@code key}, as the git ledger words one. */
     public synchronized void anchorProblem(String key, String sentence) {
         changes.computeIfAbsent("registers." + key, id -> new ArrayList<>()).add(sentence);

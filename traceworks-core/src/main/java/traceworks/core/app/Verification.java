@@ -66,7 +66,8 @@ final class Verification {
         String ledgerState;
         if (ledgerReason != null) {
             ledgerState = VerifyReport.NOT_CHECKED;
-        } else if (copy.isEmpty() && finished && view != null && !view.ledgerStart() && noStart(ledger, run)) {
+        } else if (copy.isEmpty() && finished && view != null && !view.ledgerStart()
+                && beforeTheLedger(ledger, run, view)) {
             // A run of a version that noted no start, of which the ledger holds nothing: from before this ledger
             ledgerState = VerifyReport.NOT_CHECKED;
             ledgerReason = "the ledger does not know this run: it is of a version before this ledger began";
@@ -148,10 +149,16 @@ final class Verification {
         return VerifyReport.OK + " (the ledger noted the start, run.started " + line.substring(0, 12) + ")";
     }
 
-    /** Whether the ledger can be read and holds no start entry of the run. */
-    private static boolean noStart(Ledger ledger, StoredRun run) {
+    /**
+     * Whether the run is from before the ledger: the ledger can be read, holds no start entry of the run, and its
+     * oldest commit is later than the run's {@code run.started}. A run that started after the ledger began is one
+     * the ledger should know.
+     */
+    private static boolean beforeTheLedger(Ledger ledger, StoredRun run, RunView view) {
         try {
-            return ledger.findStart(run.runId()).isEmpty();
+            java.time.Instant began = ledger.began().orElse(null);
+            return ledger.findStart(run.runId()).isEmpty()
+                    && (began == null || view.startedAt() == null || view.startedAt().isBefore(began));
         } catch (RuntimeException e) {
             return false;
         }

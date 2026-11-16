@@ -95,9 +95,10 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      *             {@code no-end-entry} (the record ended, and the ledger holds no end entry), {@code entry-invalid}
      *             (an entry that cannot be read, is not this run's, or an end entry that does not agree with its
      *             commit or its start entry), {@code entry-changed} (an entry is not what the commit that names it
-     *             left: changed, removed, named twice or by no commit), {@code manifest-differs} (the manifest in
+     *             left: changed, removed or named twice; anchors or acknowledgements that were not only added to), {@code manifest-differs} (the manifest in
      *             the run folder is not the end entry), {@code record-broken} (the record of an ended run does not
-     *             verify, or does not give the end entry)
+     *             verify, or does not give the end entry), {@code unknown-run} (a record without
+     *             {@code ledger_start} that is dated after the ledger began, of which the ledger holds nothing)
      * @param text the sentence for a person. It holds what tells this problem from another one of its kind (a
      *             SHA-256, a commit), because an acknowledgement covers a problem by its kind and its sentence
      */
@@ -194,6 +195,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             throw new RecordDamagedException("The ledger cannot be relied on, so it cannot be said which runs it saw: "
                     + e.getMessage());
         }
+        Instant began = named.began();
         Set<String> folders = new LinkedHashSet<>(store.runIds());
         Problems problems = new Problems();
         Map<String, LedgerRuns.Run> known = new LinkedHashMap<>();
@@ -290,6 +292,13 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                             + folder.runStarted() + ")" + held(folder, folder.startedAt(), now));
                 }
             } else if (!folder.ledgerStart() && run == null) {
+                if (began != null && folder.startedAt() != null && !folder.startedAt().isBefore(began)) {
+                    // Not from before the ledger: it began before this run did, and should know it
+                    problems.add(id, "unknown-run", "the ledger does not know this run, and its record (run.started "
+                            + folder.runStarted() + ") is dated " + folder.startedAt() + ", after the ledger began ("
+                            + began + "): a run of that time has entries");
+                    continue;
+                }
                 // From before the ledger: a run of a version that noted no start, of which the ledger holds nothing
                 earlier++;
                 if (!folder.isFinal()) {
@@ -341,9 +350,22 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                 List.copyOf(problems.found.values()), acknowledged, inFlight, records);
     }
 
-    /** Whether a line written at {@code at} is young enough for its entry to be on its way. */
+    /**
+     * How far ahead of this machine's clock a line may be dated and still count as written now: the clock of the
+     * process that wrote it is this machine's, so a few seconds cover a clock that was set back in between.
+     */
+    static final Duration CLOCK_SKEW = Duration.ofSeconds(5);
+
+    /**
+     * Whether a line written at {@code at} is young enough for its entry to be on its way: not older than
+     * {@link #IN_FLIGHT}, and not dated ahead of now, which no line written now is.
+     */
     private static boolean young(Instant at, Instant now) {
-        return at != null && Duration.between(at, now).compareTo(IN_FLIGHT) <= 0;
+        return at != null && !ahead(at, now) && Duration.between(at, now).compareTo(IN_FLIGHT) <= 0;
+    }
+
+    private static boolean ahead(Instant at, Instant now) {
+        return at != null && at.isAfter(now.plus(CLOCK_SKEW));
     }
 
     private static String age(Instant at, Instant now) {
@@ -353,8 +375,11 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
 
     /** What to add for a run whose lock a process holds past the bound: that is no writer of an entry. */
     private static String held(Folder folder, Instant at, Instant now) {
-        return !folder.alive() || at == null ? "" : "; a process holds the lock of the run, and that line is "
-                + age(at, now) + " old, past the " + IN_FLIGHT.toMinutes() + " min an entry may take";
+        return !folder.alive() || at == null ? ""
+                : ahead(at, now) ? "; a process holds the lock of the run, and that line is dated " + at
+                + ", which lies ahead of now: no line written now is"
+                : "; a process holds the lock of the run, and that line is " + age(at, now) + " old, past the "
+                + IN_FLIGHT.toMinutes() + " min an entry may take";
     }
 
     /** Whether the ledger holds the entry now; a ledger that cannot say counts as not holding it. */
