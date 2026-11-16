@@ -14,7 +14,7 @@ host, holds the record and the credentials, and hands each container only what i
 flowchart LR
     subgraph host["the host — your machine"]
         tw["Traceworks process<br>reads the package, starts one container per step,<br>writes the record"]
-        gets["what a step may get, and only this:<br>the workspace, read-only at /workspace<br>the package, read-only at /package<br>the run's scratch directory, writable at /scratch<br>the secrets the step declares, by name<br>(an AI step: its provider's one credential)"]
+        gets["what a step may get, and only this:<br>the workspace, read-only at /workspace<br>the package, read-only at /package<br>the run's scratch directory, writable at /scratch<br>in an audit run, what its register knew, read-only at /register (no AI step)<br>the secrets the step declares, by name<br>(an AI step: its provider's one credential)"]
         never["what no container ever sees:<br>the Traceworks home — record, credentials.json, ledger<br>~/.ssh, ~/.aws, ~/.claude and other logins<br>the Docker or Podman socket<br>other runs, the rest of your environment"]
     end
     subgraph container["one step = one container"]
@@ -88,7 +88,9 @@ is plain ASCII or has a `✓` in every item; text spread over many steps needs l
 either way). That is within the default heap of a machine with 2 GiB of memory.
 
 **Mounts.** A container sees the workspace read-only at `/workspace` unless its block sets `workspace_writable: true`,
-the package read-only at `/package`, and the run's scratch directory writable at `/scratch`. Where a writable
+the package read-only at `/package`, and the run's scratch directory writable at `/scratch`. In the run of an audit
+workflow every container but that of an AI step also sees the run's register folder, read-only at `/register` ("The
+register folder of a run", below). Where a writable
 workspace holds the package, the container sees the package read-only at its place in `/workspace` too, and a
 writable workspace inside the package is refused, so no step changes the package. A block's own `mounts`
 must state `:ro` or `:rw`, and each host path is checked on its real path, with `..` and symbolic links resolved: the
@@ -175,6 +177,28 @@ leaves that was cut off before its anchor, so `verify` holds, names the lines as
 them and anchors the head. What shows it: `verify` until then, the note of that next write, and the line
 `register.unanchored` it records in the log with the sequence numbers. A register's folder is therefore still worth
 the protection of the ledger's. Whoever can write the ledger too can rewrite both, as with a run.
+
+**The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
+gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
+read-only at `/register`. What that means:
+
+- *The content is data from earlier runs, and part of it was written by a model*: titles, evidence, descriptions,
+  the last report; the notes are a person's. A step that passes text from the folder to a model passes untrusted
+  text and should say so (`untrusted_input: true` on that AI step). Traceworks marks the three placeholders as
+  platform data and follows them into a shell line or a prompt; it cannot follow a file a step reads. The markers
+  in `previous-report.md` are defused, and a line of the `.jsonl` files is ASCII without `<`, so the files as they
+  are hold no marker a run or a register evaluates. What a step prints after it decoded a line is its own output.
+- *An AI step's container does not get the folder.* A model sees of the register what a step deliberately put into
+  its prompt (or the capped placeholders), not everything the register holds.
+- *No step changes the folder for a later one in a container run*: the mount is read-only, and a step's own mount
+  of the run folder is refused like any mount inside the Traceworks home. *In a host run nothing keeps a command
+  from writing it*; the files have no write permission, which is a hint. The run therefore compares the files with
+  the digests in `run.started` before every command that gets the folder and starts none once they differ; `resume`
+  and `traceworks verify` compare them too.
+- *A hash protects against a changed file, not against content that was wrong when it was written.* The digests
+  say that the files are what the register gave at the recorded head of its log. Whether a finding in them is
+  true, and whether the register's folder was written only by Traceworks, are other questions: the first is the
+  triage of the findings, the second the register's chain and its anchor in the ledger (above).
 
 **Host runs** are a fallback for a machine where no container runtime works, and need your consent
 (`--allow-host-execution` or `allow_host_execution`), also to resume. The consent never sends a run to the host while

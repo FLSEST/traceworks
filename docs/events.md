@@ -24,6 +24,8 @@ runs/2026-11-03/c0c0f5eb-9c93-4d31-8cc5-b4172baedebd/
   run.html         a self-contained view of the run
   inbox/           requests from other processes, see docs/cli.md
   scratch/         the directory every step of the run shares; step.files records what it holds
+  register/        only for an audit workflow: the files its register handed the run at its start, each for
+                   reading only; run.started records their digests (docs/registers.md)
   run.lock         held by the one process that writes the run
 ```
 
@@ -244,12 +246,19 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `images` | what each image the run may use holds, one object per image: `reference` (a built-in image by name, `shell`, `claude`, `pi`, `egress`; a package image as `./images/<name>`), `base` (the image of the Dockerfile's last `FROM`, without its digest) and `description` (the Dockerfile's label `org.opencontainers.image.description`, on one line, at most 200 characters; `null` without the label). The built-in images of this distribution and the package's own; a registry image a step names has no Dockerfile here and is not listed. A record of an earlier version has no such field |
 | `seal` | the seal the package carried and the seal check accepted (docs/cli.md, "seal, unseal and seals"): `{workflow_id, digest, signer, sealed_at, key, principals, signature}`. `digest` is the seal digest, which covers the package and the packages it calls, so it differs from `package.digest`; `signer` and `sealed_at` are what the seal says; `key` is the fingerprint of the key that signed (`SHA256:...`); `principals` are the names the allowed signers file of the home gave that key when the run started; `signature` is the armored SSH signature. `null` for a package that is not sealed. A record of an earlier version has no such field |
 | `model_choices` | only for a workflow that declares a model choice (docs/cli.md, "Model choices"): an object by the name of the choice, each `{option, default, provider, model}`: the option the run picked, whether it is the choice's default, and the provider and the model of that option, which the steps that refer to the choice ran with. The pick comes from the run's inputs (the `inputs` blob), and a resume keeps it. A run of a workflow without a choice has no such field, so its `run.started` is byte for byte what earlier versions wrote; a child run has no `run.started`, and its calls name their provider and model in `ai.request` |
+| `register` | only for an audit workflow (docs/registers.md, "The register folder of a run"): what the register handed the run before its first step. `key` is the register; `seq` and `head` are the last line of the register's log the run read, its sequence number and its SHA-256, both `null` when the register did not exist yet; `files` lists the files of the run's `register/` folder in the order they were written, each `{name, sha256, size}`. The files are not blobs of the run: the folder is part of the run folder, `traceworks verify` compares it with these digests, a host run does so before each command that gets the folder, and a resume refuses a folder that differs. A run of any other workflow has no such field, so its `run.started` is byte for byte what earlier versions wrote |
 | `workspace` | the directory the steps work in, as its real path (symbolic links resolved); with `--source`, the run's checkout `<home>/workspaces/<run-id>` |
 | `workspace_source` | only with `--source`: the source the workspace is a checkout of, a local path as an absolute path, a URL without its credentials, query and fragment (`https://user:token@host/repo?x=1#y` is `https://host/repo`; an `ssh://` URL keeps its user name, which is no credential) |
 | `workspace_source_sha` | only with `--source`: the full commit the checkout is detached at, which the steps also see as `workspace_source_sha` |
 
 ```json
 {"workflow":{"id":"b1445bda-e182-479a-bf85-f5b519d68ad2","name":"Hello"},"package":{"dir":"/work/hello","digest":"ad91b638...","git_commit":null,"git_dirty":null},"definition":{"sha256":"3915...","size":912},"inputs":{"sha256":"ea6e...","size":2},"trigger":"MANUAL","actor":"anna@laptop","version":"0.1.0","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{},"workspace":"/work/project"}
+```
+
+The `register` field of an audit run:
+
+```json
+"register":{"key":"hello","seq":17,"head":"6f486c7c...","files":[{"name":"findings.jsonl","sha256":"0c1e...","size":48211},{"name":"resolved.jsonl","sha256":"e3b0...","size":0},{"name":"items.jsonl","sha256":"e3b0...","size":0},{"name":"previous-report.md","sha256":"91ab...","size":7304}]}
 ```
 
 ### run.checkpoint
@@ -335,12 +344,14 @@ The fields are the facts the run's command runner resolved before the command st
 every mount it gets and the directory it starts in. In a container run, a command without an image runs in the
 built-in `shell` image, and the standard mounts come first: the workspace at `/workspace` (read-only unless the block
 sets `workspace_writable: true`), the package at `/package` (read-only) and the run's scratch directory at `/scratch`
-(writable); when the workspace is writable and holds the package, the package follows once more, read-only, at its
-place in `/workspace`. In a host run, a command without an image runs on the host, and a container step sees each of
+(writable); in the run of an audit workflow the run's register folder follows at `/register` (read-only), for every
+command but an AI call (docs/registers.md, "The register folder of a run"); when the workspace is writable and holds
+the package, the package follows once more, read-only, at its place in `/workspace`. In a host run, a command without an image runs on the host, and a container step sees each of
 these directories at its host path. A command that cannot run as planned is still recorded, with `image_id` `null`;
 its `step.command.finished` has exit code 125, and nothing was started. That is a command whose image is not present,
 an image reference that is blank or starts with `-`, a `./images/<name>` whose name is not valid, a declared mount on
-or below `/workspace`, `/package` or `/scratch` (in a host run: on or below their host paths), a writable workspace
+or below `/workspace`, `/package`, `/scratch` or `/register` (in a host run: on or below their host paths), a command
+of a host run whose register folder is no longer the one `run.started` recorded, a writable workspace
 that is the package or lies inside it, a command that needs a container in a host run without a container runtime,
 and a container that the runtime refuses before it starts it: a declared mount that the mount check refuses (such as
 one of `~/.ssh`; docs/security.md, "Mounts"), a mount path that the runtime's command line cannot carry (with a comma,

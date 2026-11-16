@@ -6,7 +6,7 @@ is kept with the same means a run uses: an append-only, hash-chained log of plai
 files, blobs, and derived files a reader can check against the log. There is no database and no service.
 
 A register has three readers: the next run of the audit, which gets what the register knows as untrusted data
-(`{{ audit_findings }}`, `{{ previous_report }}`); a person, through `traceworks findings` and `report.html`; and the
+(`{{ audit_findings }}`, `{{ previous_report }}`, and without their caps as files, `{{ register_dir }}`); a person, through `traceworks findings` and `report.html`; and the
 operator's hooks, which get the diff of each run (a TODO tool, an issue tracker).
 
 ## An audit workflow
@@ -99,7 +99,8 @@ dependency, a section of a document. Four things follow from the choice.
   method, only that method.
 - **Coarse hides, fine floods.** Under a coarse subject something new arrives below a decision somebody made about
   something else, and only a higher severity opens it again ("What a decision covers"). A fine subject makes many
-  findings: a report holds at most 1000, and the next run is handed at most 250 rows of `{{ audit_findings }}`.
+  findings: a report holds at most 1000, and the next run is handed at most 250 rows of `{{ audit_findings }}`
+  (all of them as a file: "The register folder of a run").
   Choose the finest subject a person would still decide on one by one.
 - **The subject must stay the same while the thing does.** Nothing is normalised, so a subject that holds a line
   number, a count or a sentence a model wrote is a new finding after every change, and the decision made on the old
@@ -291,6 +292,122 @@ workflow without `metadata.audit` has none of them: `{{ previous_report }}` in i
 A step that reads `{{ audit_items }}` must take anything that is no row, the literal placeholder included, as "no
 item is known" and judge every item: that is what it gets where nothing sets the variable, such as an older
 Traceworks (docs/workflow-format.md).
+
+### The register folder of a run
+
+The three placeholders are capped, because each of them ends up in a shell line or a prompt. A register that knows
+more than they show would lose its memory for the next run, and no placeholder carries the description of a finding.
+So the run of an audit workflow also gets what its register knew as **files**, without those caps. The placeholders
+and their limits stay exactly as they are; use whichever fits the step.
+
+Before the first step, Traceworks writes the folder `register/` into the run's folder, from the same read of the
+register that fills the placeholders:
+
+| File | What it holds |
+|---|---|
+| `findings.jsonl` | the findings `{{ audit_findings }}` lists (open, awaiting verification, accepted, dismissed; with a catalog those of its rules), in its order, one JSON object a line. Every one of them, with its whole evidence and its description: no row is left out and no text is cut |
+| `resolved.jsonl` | the resolved findings, in the same form |
+| `items.jsonl` | the items of the register, one JSON object a line, what needs a look first |
+| `previous-report.md` | the whole text of the last *valid* report, its envelope cut and every marker defused exactly as in `{{ previous_report }}`, without the limit of 3000 characters |
+
+Every file is always there. Before the first applied report each of them is empty, so "nothing is known" is an
+empty file, and a step never has to ask whether a list was cut: none is.
+
+One line of `findings.jsonl` (wrapped here; in the file it is one line, its keys sorted):
+
+```json
+{"absent_reports":0,"description":"The check is lexical: a symbolic link gets past it.",
+ "disposition":{"actor":"anna@laptop","at":"2026-11-12T09:30:00Z","evidence":"path_check: Mounts.java:41",
+                "in_force":true,"kind":"DISMISSED","note":"not ours","severity":"LOW","until":null},
+ "evidence":"path_check: Mounts.java:41 if (path.startsWith(home)) {",
+ "first_seen":{"at":"2026-11-11T10:00:00Z","run_id":"c0c0f5eb-9c93-4d31-8cc5-b4172baedebd"},
+ "id":"9d3692a8...","item":"core/Mounts.java#Mounts.check(Path)",
+ "last_seen":{"at":"2026-11-14T08:15:00Z","run_id":"46aff422-bfd3-441a-a177-75131a9dd2e6"},
+ "occurrences":3,"regressions":0,"resolved_at":null,"rule_key":"path_check","severity":"HIGH","status":"DISMISSED",
+ "subject":"core/Mounts.java#Mounts.check(Path)","tags":[],"title":"A link gets past the path check",
+ "unverified_evidence":false}
+```
+
+| Field | Meaning |
+|---|---|
+| `id`, `rule_key`, `subject` | the finding's identity, as in `findings <key> list --json` and `state.json` |
+| `status` | `OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK` or `DISMISSED`; in `resolved.jsonl`, `RESOLVED` |
+| `severity`, `title`, `description`, `evidence`, `tags` | as the last report that stated the finding gave them. The description is the envelope's `description`, which no placeholder carries |
+| `item` | the item the finding is about; the key is absent for a finding that names none |
+| `first_seen`, `last_seen` | the run and the time of the first and of the last report that stated the finding |
+| `occurrences`, `regressions`, `absent_reports`, `unverified_evidence`, `resolved_at` | as in `state.json` |
+| `disposition` | `null` without a decision. Otherwise `kind` (`ACCEPTED_RISK` or `DISMISSED`), `note`, `actor`, `at`, `until` (the review date of an acceptance), `evidence` (frozen at an acceptance), `severity` (the severity the decision was made on, always given; `null` only where a register of an earlier version does not know it) and `in_force` (always given: `false` for a decision that stays with a finding that is open again) |
+
+One line of `items.jsonl`:
+
+```json
+{"digest":"3fa9c2d1e07b4a55","name":"io.example.Reconciler","state":"clean",
+ "verdict":{"at":"2026-11-14T08:15:00Z","run_id":"46aff422-bfd3-441a-a177-75131a9dd2e6"},
+ "verdict_digest":"3fa9c2d1e07b4a55"}
+```
+
+`state` is `open`, `not judged`, `decided` or `clean` ("Items"); `verdict_digest` and `verdict` are `null` before
+any verdict.
+
+The resolved findings have a file of their own, on purpose. A step that takes every line of `findings.jsonl` as
+something the register still holds (to ask a model about it, or to leave it out of a report) stays right, and a
+step that wants to know what was fixed before reads the other file. Each line is ASCII and holds no `<`: every
+other character is escaped as JSON allows (`<`), so a text from a report can neither break a line nor stand in
+the file as a marker; a JSON reader gets the text as it was.
+
+Do not take `register/findings.jsonl` for the `findings.jsonl` an audit's report step writes into the scratch
+directory ("The detail of a finding"). That one is the audit's own convention and holds a model's words about each
+place; the register never reads it, and it is not in the register folder.
+
+**The placeholder.** `{{ register_dir }}` is the folder as a step sees it, a path the engine sets like
+`{{ scratch_dir }}` and `{{ package_dir }}`:
+
+```json
+{"type": "shell", "name": "known",
+ "config": {"command": "bash \"{{ package_dir }}/scripts/known.sh\" \"{{ register_dir }}/findings.jsonl\""}}
+```
+
+In a container run it is `/register`, a **read-only** mount that every container of the run gets: a shell step, a
+tool-mode step, and the commands of `run_if`, a shell condition and `items_command`. **The container of an AI step
+does not get it.** What a model reads of the register is what a step puts into its prompt, never the folder. In a
+host run it is the folder's own path, and a container step of a host run mounts it there, read-only. Only the run
+of an audit workflow has the folder: in any other workflow, a child workflow included, `traceworks check` reports
+`{{ register_dir }}` as the error `register-dir-outside-audit` and no run starts; no input can set the variable.
+
+**No step changes the folder for a later one.** In a container the mount is read-only. On the host no mount
+protects it: the files are written without write permission, which stops a mistake and not a step that means it.
+So a host run compares the files with the digests it recorded (below) before **every** command that gets the
+folder. Once a file is changed, missing or added, that command and every later one is not started (exit code 125,
+`the register folder of the run changed: findings.jsonl is not the file the run started with ...`), the report
+step fails with them, and the register takes no report from the run.
+
+**What the run records.** `run.started` holds, for an audit workflow only, the field `register` (docs/events.md):
+the register's key, the head of the register's log the run read (`seq` and `head`, the SHA-256 of that line; both
+`null` when the register did not exist yet), and the name, the SHA-256 and the size of each file. So the record
+says what the run knew of earlier runs, and from which state of the register. Before this field no run recorded
+the head of the register it read. The files are not copied into the run's blobs: the folder is part of the run
+folder, and
+
+- `traceworks verify <run>` compares the folder with the recorded digests and fails (exit 8) for a file that is
+  changed, missing or added, also on a copied run folder;
+- a resumed run goes on with the folder it was started with, whatever the register holds by then, and `resume`
+  refuses, before it records anything, when the folder is no longer the recorded one;
+- `show` and `run.html` name the head the run started from (`Register  hello at seq 17 (head 3fa9c2d1e07b), 4 files
+  handed to the steps`), and `traceworks diff` shows it as a field (`register hello`), so two runs that started
+  from the same state of the register can be told from two that did not.
+
+The files are made from the register's log and blobs, which the start check replays: a register that cannot be
+replayed, or one with a blob the replay reads (the findings, the items or the catalog of a report, the last report's
+text) that does not hash to its name, refuses the run and names `findings <key> verify`.
+
+**It is data, and part of it was written by a model.** Titles, subjects, evidence, descriptions and the report
+come from the output of earlier runs, and notes from a person. Treat a file as the placeholders are treated: a
+step that passes text from the folder to a model passes untrusted text, should set `untrusted_input: true` on that
+AI step, and should quote what it puts into a shell line. Traceworks cannot follow a file the way it follows a
+placeholder: a step that reads the folder and prints part of it has an output like any other. The markers in
+`previous-report.md` are defused, and a line of the `.jsonl` files cannot hold one; what a step makes of the
+decoded text is the step's. And a digest says that a file is the one the run was handed, not that what the
+register held was right: a finding a model got wrong is recorded faithfully, wrong.
 
 `run --inputs-from <run>` starts a run with the inputs an earlier run was started with, so an audit can be repeated
 on the same inputs; `run.started` records `inputs_from`.
