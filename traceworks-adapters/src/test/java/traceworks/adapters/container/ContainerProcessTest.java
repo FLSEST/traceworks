@@ -510,8 +510,8 @@ class ContainerProcessTest {
     /**
      * The result holds each stream to its end, not what the reader happened to have when the client ended: here the
      * last line of a stream is written a moment after the client's end, by a child that still holds only that stream.
-     * The client ends a moment after its own last line, so that the reader waits in a read when it does: the JDK
-     * closes a stream nobody reads at that instant, with what is still to come.
+     * The client here ends a moment after its start, so the reader holds the stream by then (BoundedOutput#drain); a
+     * real client ends when the container's streams have ended, and no process outlives it with its pipes.
      */
     @Test
     void execute_readsEachStreamToItsEnd_beforeItReturnsTheResult(@TempDir Path dir) throws IOException {
