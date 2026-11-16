@@ -230,7 +230,22 @@ Traceworks reads the commit and the state of a package that has its own `.git`, 
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 
 **The record** is a hash chain: `traceworks verify` finds a changed or removed line, lines copied from another run, a
-changed blob, and a manifest or ledger entry that does not match the log. `run.html` has no scripts and loads
+changed blob, and a manifest or ledger entry that does not match the log.
+
+**A run that began is named outside its folder.** The ledger gets an entry when a run starts, before its first step,
+and no step runs without it (docs/events.md, "The start entry"). So a run that is killed when an unwelcome result
+shows, and whose folder is then deleted, is visible: `traceworks verify` without a run lists it as started, never
+ended, folder gone, and exits 8; a run folder whose start entry was taken out fails its own `verify`. What this
+does not stop: the ledger is a git repository on the same machine, written as the user who runs the runs, and it is
+not signed. An added commit that removes an entry is found, because the list is read from the messages of the ledger's commits. A rewritten
+history is not: someone who can rewrite the ledger's history, and delete the run folder, can still hide a run.
+What closes that is a copy that others hold. The ledger is a plain git repository, so the operator can push it to a
+remote they do not control alone and that refuses a rewritten history (a protected branch without force push, or
+an append-only mirror); a start entry that was pushed can then not be removed without the remote showing it.
+Traceworks does not push by itself and has no setting for a remote, and it writes the ledger without git hooks, so
+the push is the operator's: a cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are
+not pushed yet are only as safe as the machine, so the time between two pushes is the time in which a run can still
+be hidden. `run.html` has no scripts and loads
 nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
@@ -476,8 +491,9 @@ content, and no blob is written through one.
   in its own environment. Keep the runtime to yourself.
 - **The record is tamper-evident, not signed.** Manifests carry no signature in this version; only the seal of a
   package is signed ("Seals" below). Whoever can write the
-  Traceworks home can rewrite a run folder and its ledger entry together. Keep a copy of the ledger (a git repository)
-  where your runs cannot write. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
+  Traceworks home can rewrite a run folder and its ledger entries together, the start entry too. Keep a copy of the
+  ledger (a git repository) where your runs cannot write: push it to a remote that refuses a rewritten history
+  ("A run that began is named outside its folder" above). Traceworks does not push it. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
   who can write it: Traceworks writes it as the user who runs it.
 - **The places are the operator's.** `runs_dir`, `ledger_dir` and `registers_dir` are read from `traceworks.json`
   only; no workflow, input or environment variable sets them. The check of the file compares the paths as written.
