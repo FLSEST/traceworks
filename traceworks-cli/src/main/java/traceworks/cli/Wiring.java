@@ -29,6 +29,7 @@ import traceworks.core.app.SealSupport;
 import traceworks.core.app.SecretValues;
 import traceworks.core.blocks.CoreBlocks;
 import traceworks.core.port.AiCli;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.ContainerRuntime;
 
 import java.net.InetAddress;
@@ -86,7 +87,7 @@ final class Wiring {
                 CoreBlocks.registry(layout.toolCache()),
                 new HostCommandRunner(settings.outputLimitBytes()), containers,
                 new GitSourceCheckout(layout.workspaces(), layout.runsFolders(),
-                        settings.outputLimitBytes()), aiClis(),
+                        settings.outputLimitBytes()), aiClis(settings.localModels()),
                 () -> new SecretValues(CredentialsFile.read(home), env, CredentialsFile.modified(home),
                         CredentialsFile.location(home), name -> settings.secretFromEnvironmentAllowed(name)
                                 || AI_CREDENTIAL_NAMES.contains(name)), settings,
@@ -118,9 +119,18 @@ final class Wiring {
         return new Credentials(CredentialsFile.store(home));
     }
 
-    /** The AI CLIs a run can use, one per provider: Claude and Pi. */
+    /** The AI CLIs a run can use, one per provider: Claude and Pi, in a home without a model server of its own. */
     static List<AiCli> aiClis() {
-        return List.of(new ClaudeCli(), new PiCli());
+        return aiClis(LocalModels.NONE);
+    }
+
+    /**
+     * The AI CLIs a run can use, one per provider: Claude, and Pi with the operator's model servers
+     * ({@code local_models}). The same CLIs judge a package for {@code check} and describe it for {@code describe},
+     * so a model that names a declared server is no unknown backend there either.
+     */
+    static List<AiCli> aiClis(LocalModels localModels) {
+        return List.of(new ClaudeCli(), new PiCli(localModels));
     }
 
     /**

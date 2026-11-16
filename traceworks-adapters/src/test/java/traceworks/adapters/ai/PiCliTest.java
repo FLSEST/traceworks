@@ -388,10 +388,11 @@ class PiCliTest {
     void credentialNames_ofAnUnknownBackend_areRefused_sayingHowToNameTheBackend() {
         assertThatThrownBy(() -> credentialNames("ollama/llama3"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("The Pi model ollama/llama3 names the backend ollama, and Traceworks cannot tell which"
-                        + " credential that backend takes, so the call gets none; name the model as <backend>/<model>"
-                        + " with one of the backends anthropic, google, openai, openrouter (a model without a backend"
-                        + " goes to anthropic)");
+                .hasMessage("The Pi model ollama/llama3 names the backend ollama, which is no backend of a provider"
+                        + " (anthropic, google, openai, openrouter) and no model server that local_models in"
+                        + " traceworks.json declares (it declares none); Traceworks cannot tell which credential the"
+                        + " backend takes, so the call gets none and does not run. A model without a backend goes to"
+                        + " anthropic");
         assertThatThrownBy(() -> credentialNames("OpenAI/gpt-5.5")).as("a backend is compared as the arguments"
                 + " carry it").isInstanceOf(IllegalArgumentException.class).hasMessageContaining("backend OpenAI");
     }

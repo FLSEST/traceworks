@@ -288,6 +288,11 @@ final class StepCards {
         if (call.model() != null) {
             out.append(" model <code>").append(Html.line(call.model())).append("</code>");
         }
+        if (call.local() != null) {
+            // A call that went to a model server of the operator's, not to a provider
+            out.append(" local backend <code>").append(Html.line(call.local().backend())).append("</code> at <code>")
+                    .append(Html.line(call.local().url())).append("</code>");
+        }
         if (call.effort() != null) {
             out.append(" effort <code>").append(Html.line(call.effort())).append("</code>");
         }

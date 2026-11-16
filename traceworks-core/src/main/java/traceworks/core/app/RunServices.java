@@ -10,6 +10,7 @@ import traceworks.core.engine.BlockTypeRegistry;
 import traceworks.core.engine.EventLogException;
 import traceworks.core.engine.WorkflowEngine;
 import traceworks.core.port.AiCli;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.AiProviders;
 import traceworks.core.port.Clock;
 import traceworks.core.port.CommandRunner;
@@ -177,7 +178,8 @@ public final class RunServices {
                 checkouts);
         StoredRunPackage storedPackage = new StoredRunPackage(packages, preparation);
         this.resuming = new Resuming(clock, actor, settings.allowHostExecution(), settings.outputLimitMib(),
-                settings.runOutputBudgetMib(), settings.aiImages(), settings.aiNetwork(), storedPackage,
+                settings.runOutputBudgetMib(), settings.aiImages(), settings.aiNetwork(), settings.localModels(),
+                storedPackage,
                 containers.runtime(), checkouts, outputs, engine, preparation, active, cancelling, sealAdmission);
         this.pausing = new Pausing(clock, ids, actor, answerWait);
         this.answering = new Answering(clock, ids, actor, answerWait, settings.allowHostExecution(),
@@ -457,7 +459,22 @@ public final class RunServices {
      */
     public WorkflowDescription describe(Path packageLocation) {
         LoadedPackage pkg = load(packageLocation);
-        return WorkflowDescriber.describe(pkg, new PackageWorkflowResolver(pkg, settings.packagePath(), packages));
+        return WorkflowDescriber.describe(pkg, new PackageWorkflowResolver(pkg, settings.packagePath(), packages),
+                this::localServer);
+    }
+
+    /**
+     * The model server of the operator's that a step of {@code provider} with {@code model} runs against, as the
+     * provider's CLI tells it; {@code null} for a step that goes to the provider.
+     */
+    private LocalModels.Use localServer(String provider, String model) {
+        for (AiCli cli : aiClis) {
+            if (cli.id().equalsIgnoreCase(provider)) {
+                return cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null, null, null, 1))
+                        .orElse(null);
+            }
+        }
+        return null;
     }
 
     /** The findings use case: what the registers of this home hold. */
@@ -512,6 +529,8 @@ public final class RunServices {
             settings.aiNetwork().hosts().forEach((cli, hosts) -> notes.add("ai_hosts: the containers of " + cli
                     + " also reach " + String.join(", ", hosts)));
         }
+        settings.localModels().list().forEach(backend -> notes.add("local_models: a step with the model "
+                + backend.id() + "/<model> runs against " + backend.url() + " and reaches nothing else"));
         return notes;
     }
 

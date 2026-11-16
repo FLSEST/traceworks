@@ -33,6 +33,21 @@ Without a credential, `run` is refused before it starts (exit 6) and names the t
 `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`. To use Pi instead, set `"provider": "PI"`; Pi takes the
 credentials listed in [docs/cli.md](../../docs/cli.md) ("AI steps").
 
+## With a model of your own
+
+With a model server on your own machine or network (Ollama, llama.cpp's server, vLLM), nothing of the step goes to
+a provider. Declare the server in `~/.traceworks/traceworks.json`; only the operator can:
+
+```json
+{"local_models": {"llm": {"url": "http://192.168.1.20:11434/v1", "api": "openai-completions",
+                          "models": ["qwen2.5-coder:7b"]}}}
+```
+
+Then set `"provider": "PI"` and `"model": "llm/qwen2.5-coder:7b"` in the block's `config`. The run needs no credential, its
+container reaches `192.168.1.20:11434` and nothing else, and the record says `local backend llm at
+http://192.168.1.20:11434/v1` with the call. `localhost` is refused: a container's loopback is its own, so the
+server must listen on an address of the machine. See [docs/cli.md](../../docs/cli.md) ("Local models").
+
 ## What happens
 
 - The Claude CLI runs in the built-in `claude` image, with the prompt on stdin. The workspace is mounted read-only at

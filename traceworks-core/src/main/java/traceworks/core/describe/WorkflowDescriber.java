@@ -66,8 +66,23 @@ public final class WorkflowDescriber {
     /** How many workflows of another package the walk is inside: there {@code ./images/} is not this package's. */
     private int otherPackages;
 
-    private WorkflowDescriber(Map<String, PackageImage> images) {
+    /** Finds the model server of the operator's a step runs against. */
+    private final LocalServers local;
+
+    /** Tells which model server of the operator's a step of a provider with a model runs against. */
+    @FunctionalInterface
+    public interface LocalServers {
+
+        /** No server: every step goes to its provider. */
+        LocalServers NONE = (provider, model) -> null;
+
+        /** The server of the step; {@code null} for a step that goes to its provider. */
+        traceworks.core.port.LocalModels.Use of(String provider, String model);
+    }
+
+    private WorkflowDescriber(Map<String, PackageImage> images, LocalServers local) {
         this.images = images;
+        this.local = local == null ? LocalServers.NONE : local;
     }
 
     /**
@@ -77,8 +92,18 @@ public final class WorkflowDescriber {
      *                 {@code null} shows none
      */
     public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children) {
+        return describe(pkg, children, LocalServers.NONE);
+    }
+
+    /**
+     * {@link #describe(LoadedPackage, WorkflowResolver)} in a home with model servers of the operator's: an AI step
+     * whose model names one says so, with the server's URL.
+     *
+     * @param local finds the server of a step, from the operator's {@code local_models}
+     */
+    public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children, LocalServers local) {
         WorkflowDefinition definition = pkg.definition();
-        WorkflowDescriber describer = new WorkflowDescriber(pkg.images());
+        WorkflowDescriber describer = new WorkflowDescriber(pkg.images(), local);
         List<Block> blocks = describer.workflow(definition, children, List.of(definition));
         Map<String, String> inputs = new LinkedHashMap<>();
         definition.defaultContext().forEach((key, value) -> inputs.put(key, shown(value)));
@@ -279,6 +304,23 @@ public final class WorkflowDescriber {
         return "model choice " + reference + ": not declared in model_choices";
     }
 
+    /**
+     * Says that a step with {@code model} runs against a model server of the operator's, and which: nothing for a
+     * step that goes to its provider.
+     */
+    private void localFact(String provider, String model, List<String> facts) {
+        traceworks.core.port.LocalModels.Use use = local.of(provider, model);
+        if (use == null) {
+            return;
+        }
+        String fact = "model " + model + " runs on the local backend " + use.backend().id() + " at "
+                + use.backend().url() + " (local_models in traceworks.json)"
+                + (use.listed() ? "" : ", which does not list it");
+        if (!facts.contains(fact)) {
+            facts.add(fact);
+        }
+    }
+
     private static void timeout(List<String> facts, BlockSettings settings, Map<String, Object> config) {
         if (config.get("timeout_seconds") != null) {
             Integer seconds = read(() -> settings.number("timeout_seconds"));
@@ -293,6 +335,11 @@ public final class WorkflowDescriber {
         List<String> facts = new ArrayList<>();
         if (config.get(ModelChoices.KEY) != null) {
             facts.add(modelChoice(config.get(ModelChoices.KEY), workflow));
+            for (ModelChoices.Choice choice : ModelChoices.declared(workflow)) {
+                if (choice.name().equals(config.get(ModelChoices.KEY))) {
+                    choice.options().forEach(option -> localFact(option.provider(), option.model(), facts));
+                }
+            }
         } else {
             boolean named = config.get(BlockAiSettings.PROVIDER_KEY) instanceof String own && !own.isBlank()
                     || workflow.provider() != null && !workflow.provider().isBlank();
@@ -301,6 +348,9 @@ public final class WorkflowDescriber {
             String model = read(() -> BlockAiSettings.modelFor(block, workflow.provider(), workflow.model()), "");
             facts.add(model == null ? "model: the provider's default" : model.isEmpty() ? "model" + INVALID
                     : "model " + model);
+            if (model != null && !model.isEmpty()) {
+                localFact(BlockAiSettings.providerOf(config, workflow.provider()), model, facts);
+            }
         }
         String effort = read(() -> BlockAiSettings.effortFor(block, workflow.effort()), "");
         if (effort != null) {

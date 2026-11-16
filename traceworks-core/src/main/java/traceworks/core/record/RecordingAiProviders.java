@@ -27,7 +27,9 @@ import java.util.function.Supplier;
  * The run's AI providers, recorded: every call of a provider they resolve writes {@code ai.request}
  * before the call, and once it returns one {@code ai.tool_call} per tool call, in order, then {@code ai.response}. The
  * provider runs its CLI through the recording command runner, so the CLI's {@code step.command} and
- * {@code step.command.finished} stand between the request and the tool calls. Every event is attributed like a
+ * {@code step.command.finished} stand between the request and the tool calls. The request of a call to a model
+ * server of the operator's names that server ({@code local}: its backend id, URL and API), so a reader can tell a
+ * local call from a provider call. Every event is attributed like a
  * command, to the step running now and its foreach item, and all of them to the attribution of the request.
  *
  * <p>A reasoning call that fails throws an {@link AiCallFailedException}: its tool calls and its response with the exit
@@ -112,6 +114,11 @@ final class RecordingAiProviders implements AiProviders {
         }
 
         @Override
+        public java.util.Optional<traceworks.core.port.LocalModels.Use> local(String model) {
+            return provider.local(model);
+        }
+
+        @Override
         public ReasoningResult reason(ReasoningRequest request) throws IOException {
             Attribution where = request(request.model(), request.effort(), request.tools(), request.web(),
                     request.prompt(), request.systemPrompt());
@@ -162,6 +169,13 @@ final class RecordingAiProviders implements AiProviders {
                     ArrayNode hosts = f.putArray("web_hosts");
                     access.hosts().forEach(hosts::add);
                 }
+                provider.local(model).ifPresent(local -> {
+                    // Only for a call to a model server of the operator's: every other ai.request keeps its bytes
+                    ObjectNode server = f.putObject("local");
+                    server.put("backend", local.backend().id());
+                    server.put("url", local.backend().url());
+                    server.put("api", local.backend().api());
+                });
                 f.set("prompt", blobs.of(prompt));
                 f.set("system_prompt", blobs.of(systemPrompt));
                 return recorder.appendCommand(RecordTypes.AI_REQUEST, f, null);

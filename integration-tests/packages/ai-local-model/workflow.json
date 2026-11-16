@@ -1,0 +1,40 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "8c1b6d1e-4a52-4f6e-9d0b-5e2f7a3c9b10",
+  "name": "IT ai-local-model",
+  "description": "One simple Pi step on a model server of the operator's: the run's home declares the backend llm, and the run picks which of its two models the step asks for.",
+  "provider": "PI",
+  "requires": [
+    "ai.model_choice"
+  ],
+  "default_context": {
+    "name": "world"
+  },
+  "model_choices": {
+    "local": {
+      "default": "plain",
+      "options": {
+        "plain": {
+          "provider": "PI",
+          "model": "llm/stand-in-1"
+        },
+        "tagged": {
+          "provider": "PI",
+          "model": "llm/stand-in:7b"
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "ask",
+      "config": {
+        "command": "Reply to {{ name }} with one sentence.",
+        "model_choice": "local",
+        "timeout_seconds": 90
+      }
+    }
+  ]
+}

@@ -257,7 +257,7 @@ final class Starting {
                 runtime == null ? null : new RunStart.Runtime(runtime.name(), runtime.version()),
                 settings.outputLimitMib(), settings.aiImages(), workspace, checkout == null ? null : checkout.checkout().source(),
                 checkout == null ? null : checkout.checkout().sha(), settings.runOutputBudgetMib(), inputsFrom,
-                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover);
+                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover, settings.localModels());
     }
 
     /** The seal as {@code run.started} records it; {@code null} for a package that is not sealed. */
