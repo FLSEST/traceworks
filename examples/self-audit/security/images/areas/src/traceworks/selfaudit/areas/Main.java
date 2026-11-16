@@ -32,6 +32,7 @@ import java.util.stream.Stream;
  * <pre>
  * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY [--known FILE] [--items FILE]
  *        [--verdict-version 1] [--max-areas 200] [--max-lines 160] [--context 15] [--judge NAME --judge-provider ID --judge-model MODEL]
+ *        [--changes DIR] [--items-file FILE] [--register KEY]
  * report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT   (and findings.jsonl next to REPORT)
  * </pre>
  *
@@ -43,7 +44,15 @@ import java.util.stream.Stream;
  * run picked of the workflow's model choice, as Traceworks hands it to the step. {@code find} writes the three into
  * the summary, for the head of the report and for {@code findings.jsonl}; no digest holds them ({@link Judge}). Without {@code --source-root} it reads every {@code src/main/java} up to six levels below the
  * root, except below {@code target}, {@code build}, {@code node_modules} and hidden directories. {@code report} prints
- * the gate first, then checks the verdicts and writes the report. Every name from the workspace is escaped on
+ * the gate first, then checks the verdicts and writes the report.
+ *
+ * <p>With {@code --changes}, {@code find} is the check of the changes: of all the areas it writes only the ones the
+ * changes pick ({@link Changes}: a changed line, or one call from a changed member) and the ones the register left
+ * open or without a verdict, each with its reason. {@code DIR} is the folder a step before wrote with git's word on
+ * what changed. An area the register does not know and the changes do not pick is no item of such a run: nothing
+ * looked at it. {@code --items-file} takes the items as the register folder of a run holds them
+ * ({@code items.jsonl}), which no cap cuts, in place of {@code --items}. {@code --register} is the key of the
+ * audit's register, for the commands the report names. Every name from the workspace is escaped on
  * standard output, and no text of a model reaches it, so neither can add a line of its own. Exit codes: 0 done, 1 the
  * input does not hold, 2 a usage error.
  */
@@ -54,9 +63,13 @@ public final class Main {
                               [--known FILE] [--items FILE] [--verdict-version N]
                               [--max-areas N] [--max-lines N] [--context N]
                               [--judge NAME --judge-provider ID --judge-model MODEL]
+                              [--changes DIR] [--items-file FILE] [--register KEY]
                    areas report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT""";
 
     private static final int SOURCE_ROOT_DEPTH = 6;
+    /** The line between an area's code and the code it is connected with, in what its digest holds. */
+    private static final String CONNECTED = "# connected";
+    private static final int MAX_UNMAPPED_NAMED = 50;
     private static final Set<String> SKIPPED = Set.of("target", "node_modules", "build");
 
     private Main() {
@@ -113,6 +126,13 @@ public final class Main {
         // Before anything is written: what the run was told about its judge must be something a report can name
         Judge judge = judged ? Judge.of(required(options, "judge"), required(options, "judge-provider"),
                 required(options, "judge-model")) : null;
+        String register = options.containsKey("register") ? required(options, "register") : "security";
+        if (!register.matches("[a-z0-9][a-z0-9._-]{0,127}")) throw new Usage("--register is no key of a register");
+        if (options.containsKey("items") && options.containsKey("items-file")) {
+            throw new Usage("--items and --items-file do not go together");
+        }
+        // The check of the changes: what git said changed since the base, as a step before wrote it down
+        Changes.Base base = options.containsKey("changes") ? Changes.read(Path.of(required(options, "changes"))) : null;
         RuleFile rules = RuleFile.parse(Files.readString(rulesFile));
         if (!Files.isDirectory(root)) throw new IllegalArgumentException(root + " is no directory");
 
@@ -149,7 +169,16 @@ public final class Main {
         // area it calls clean or decided, with the digest it has now, is not judged again. The places, at most
         // --max-areas, go first to the areas that changed or were never judged, then to the open ones
         Map<String, Items.Row> knownItems = options.containsKey("items")
-                ? Items.parse(Files.readString(Path.of(required(options, "items")), StandardCharsets.UTF_8)) : Map.of();
+                ? Items.parse(Files.readString(Path.of(required(options, "items")), StandardCharsets.UTF_8))
+                : options.containsKey("items-file")
+                ? Items.parseJsonl(Files.readString(Path.of(required(options, "items-file")), StandardCharsets.UTF_8))
+                : Map.of();
+        Map<String, Changes.Pick> picks = base == null ? Map.of() : Changes.picks(all, result, base.lines());
+        int changedAreas = 0;
+        int neighbourAreas = 0;
+        int carriedAreas = 0;
+        int judgedAsTheyAre = 0;
+        int notLookedAt = 0;
         int verdictVersion = number(options, "verdict-version", 1);
         List<String> names = Items.names(all.stream().map(a -> new String[] {a.file(), a.firstMember()}).toList());
         List<Map<String, Object>> changed = new ArrayList<>();
@@ -157,9 +186,14 @@ public final class Main {
         List<Map<String, Object>> items = new ArrayList<>();
         Map<Area, Map<String, Object>> itemOf = new java.util.IdentityHashMap<>();
         Map<Map<String, Object>, Area> areaOf = new java.util.IdentityHashMap<>();
+        Map<Area, String> reasonOf = new java.util.IdentityHashMap<>();
         for (int i = 0; i < all.size(); i++) {
             Area area = all.get(i);
-            String digest = Items.digest(verdictVersion, area.file(), area.rules(), area.code());
+            Changes.Pick pick = picks.get(area.id());
+            // What the verdict of a picked area sees beside its own code: the changed members it is connected with
+            String connected = pick == null ? "" : Changes.connectedText(pick.connected(), result, base.lines());
+            String digest = Items.digest(verdictVersion, area.file(), area.rules(),
+                    connected.isEmpty() ? area.code() : area.code() + "\n" + CONNECTED + "\n" + connected);
             Items.Row row = knownItems.get(Known.shown(names.get(i)));
             Map<String, Object> json = new LinkedHashMap<>(area.toJson(token, fence));
             json.put("item", names.get(i));
@@ -168,6 +202,42 @@ public final class Main {
             // A finding of a run before items existed names no item, so its area may read clean: the finding decides
             boolean hasOpen = !((List<?>) json.get("known")).isEmpty();
             boolean same = row != null && row.digest().equals(digest);
+            String reason = null;
+            if (base != null) {
+                boolean judgedAsItIs = same && row.settled() && !hasOpen;
+                if (pick != null && !judgedAsItIs) {
+                    reason = pick.reason();
+                    if (pick.changed()) changedAreas++;
+                    else neighbourAreas++;
+                } else if (hasOpen || row != null && row.state().equals("open")) {
+                    // A model's finding is not resolved by silence: every run asks about what the register holds open
+                    reason = "an open finding of an earlier run";
+                    carriedAreas++;
+                } else if (row != null && row.state().equals("not judged")) {
+                    reason = "not judged by an earlier run";
+                    carriedAreas++;
+                }
+                if (reason == null) {
+                    notLookedAt++;
+                    if (pick != null) judgedAsTheyAre++;
+                    // An area the register does not know is no item of this audit: nothing ever looked at it. One
+                    // it calls settled stays as it is: listed with the digest of its verdict, which is not this
+                    // run's to change, so that the list is whole and an area that is gone leaves the register
+                    if (row == null || !row.settled() || row.digest().isEmpty()) continue;
+                    Map<String, Object> settled = new LinkedHashMap<>();
+                    settled.put("name", names.get(i));
+                    settled.put("digest", row.digest());
+                    settled.put("chosen", false);
+                    settled.put("state", row.state());
+                    settled.put("settled", true);
+                    settled.putAll(Known.counts(json));
+                    items.add(settled);
+                    continue;
+                }
+                json.put("reason", reason);
+                reasonOf.put(area, reason);
+                json.put("connected", connected.isEmpty() ? Known.NONE : connected);
+            }
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("name", names.get(i));
             item.put("digest", digest);
@@ -176,9 +246,14 @@ public final class Main {
             items.add(item);
             itemOf.put(area, item);
             areaOf.put(json, area);
-            item.put("settled", same && row.settled() && !hasOpen);
+            item.put("settled", base == null && same && row.settled() && !hasOpen);
             // For the report, which says in what state the item is after the run: what the register holds of it
             item.putAll(Known.counts(json));
+            if (base != null) {
+                // Under the cap the areas of the changes go first, then what earlier runs left
+                (pick != null && reason.equals(pick.reason()) ? changed : openUnchanged).add(json);
+                continue;
+            }
             if (same && row.settled() && !hasOpen) continue;
             (same && (row.state().equals("open") || hasOpen) ? openUnchanged : changed).add(json);
         }
@@ -240,8 +315,45 @@ public final class Main {
         summary.put("knownMissingOpen", (long) Known.missingOpen(knownText));
         // Who judges this run: for a reader of the report and of findings.jsonl, never for a digest or the register
         if (judge != null) summary.put("judge", judge.toJson());
+        // The key of the audit's register, for the commands the report names
+        summary.put("register", register);
+        List<String> unmapped = base == null ? List.of() : Changes.unmapped(result, base.lines());
+        if (base != null) {
+            Map<String, Object> changes = new LinkedHashMap<>();
+            changes.put("base", base.base());
+            changes.put("head", base.head());
+            changes.put("from", base.from());
+            changes.put("since", base.since());
+            changes.put("previousHead", base.previousHead());
+            changes.put("dirty", base.dirty());
+            changes.put("changedFiles", (long) base.lines().size());
+            changes.put("unmappedFiles", (long) unmapped.size());
+            changes.put("unmapped", unmapped.subList(0, Math.min(unmapped.size(), MAX_UNMAPPED_NAMED)));
+            changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
+            changes.put("areasOfProject", (long) all.size());
+            changes.put("changedAreas", (long) changedAreas);
+            changes.put("neighbourAreas", (long) neighbourAreas);
+            changes.put("carriedAreas", (long) carriedAreas);
+            changes.put("judgedAsTheyAre", (long) judgedAsTheyAre);
+            changes.put("notLookedAt", (long) notLookedAt);
+            summary.put("changes", changes);
+        }
         Files.writeString(summaryFile, Json.write(summary) + "\n", StandardCharsets.UTF_8);
 
+        if (base != null) {
+            out.println("FACT changes_base: " + base.base());
+            out.println("FACT changes_head: " + base.head());
+            out.println("FACT changes_base_from: " + (base.from().equals("input") ? "the input since"
+                    : "the last run of this audit"));
+            out.println("FACT changes_uncommitted: " + base.dirty());
+            out.println("FACT changes_files: " + base.lines().size());
+            out.println("FACT changes_files_not_mapped: " + unmapped.size());
+            out.println("FACT changes_areas_of_project: " + all.size());
+            out.println("FACT changes_areas_changed: " + changedAreas);
+            out.println("FACT changes_areas_neighbours: " + neighbourAreas);
+            out.println("FACT changes_areas_carried: " + carriedAreas);
+            out.println("FACT changes_areas_not_looked_at: " + notLookedAt);
+        }
         out.println("FACT areas_source_roots: " + safe(String.join(", ", roots)));
         out.println("FACT areas_java_files: " + result.files().size());
         out.println("FACT areas_not_read: " + notRead.size());
@@ -249,8 +361,9 @@ public final class Main {
         out.println("FACT areas_unresolved_targets: " + String.join(", ", result.unresolvedTargets()));
         out.println("FACT areas_hits: " + result.hits().size());
         perRule.forEach((rule, n) -> out.println("FACT areas_hits_" + rule + ": " + n));
-        out.println("FACT areas_items: " + all.size());
-        out.println("FACT areas_items_settled: " + (all.size() - kept.size() - cut.size()));
+        out.println("FACT areas_items: " + (base == null ? all.size() : items.size()));
+        out.println("FACT areas_items_settled: " + (base == null ? all.size() - kept.size() - cut.size()
+                : items.size() - kept.size() - cut.size()));
         out.println("FACT areas: " + kept.size());
         out.println("FACT areas_cut: " + cut.size());
         if (judge != null) {
@@ -266,7 +379,8 @@ public final class Main {
         }
         for (Area a : kept) {
             out.println("AREA " + a.id() + " " + safe(a.file()) + ":" + a.start() + "-" + a.end() + " "
-                    + safe(a.member()) + " " + a.rules().stream().collect(Collectors.joining(", ", "[", "]")));
+                    + safe(a.member()) + " " + a.rules().stream().collect(Collectors.joining(", ", "[", "]"))
+                    + (reasonOf.containsKey(a) ? " because: " + safe(reasonOf.get(a)) : ""));
         }
         return 0;
     }
@@ -299,6 +413,16 @@ public final class Main {
         out.println("gate_status: " + outcome.gate());
         out.println("gate_category: security");
         out.println("gate_description: " + outcome.description());
+        // Right after the gate, before any name of the workspace: the next run of the audit reads its base from
+        // the first changes_head line of this output, which the register hands it as the previous report
+        if (summary.get("changes") instanceof Map<?, ?> changes) {
+            out.println("FACT changes_base: " + safe(String.valueOf(changes.get("base"))));
+            out.println("FACT changes_head: " + safe(String.valueOf(changes.get("head"))));
+            out.println("FACT changes_areas_changed: " + count(changes.get("changedAreas")));
+            out.println("FACT changes_areas_neighbours: " + count(changes.get("neighbourAreas")));
+            out.println("FACT changes_areas_carried: " + count(changes.get("carriedAreas")));
+            out.println("FACT changes_areas_not_looked_at: " + count(changes.get("notLookedAt")));
+        }
         out.println("FACT report_areas: " + outcome.areas());
         out.println("FACT report_judged: " + outcome.judged());
         out.println("FACT report_findings_verified: " + outcome.verified().size());
@@ -320,7 +444,8 @@ public final class Main {
         if (args.length == 0) throw new IllegalArgumentException("a command is missing");
         Set<String> known = switch (args[0]) {
             case "find" -> Set.of("rules", "root", "source-root", "out", "summary", "max-areas", "max-lines",
-                    "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model");
+                    "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model",
+                    "changes", "items-file", "register");
             case "report" -> Set.of("areas", "summary", "verdicts", "out");
             default -> throw new IllegalArgumentException("unknown command '" + args[0] + "'");
         };
@@ -388,6 +513,10 @@ public final class Main {
         roots.sort(null);
         linked.sort(null);
         return new Discovery(List.copyOf(roots), List.copyOf(linked));
+    }
+
+    private static long count(Object value) {
+        return value instanceof Long n ? n : 0;
     }
 
     private static byte[] bytes(SecureRandom random) {

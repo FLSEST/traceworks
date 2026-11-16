@@ -41,6 +41,11 @@ import java.util.regex.Pattern;
  * open or not judged. RED while an open finding of high severity stands: a verified high one, or a high one of the
  * register that this run did not answer as gone. YELLOW while an item is open or not judged, a file was not read, or
  * no Java file was read at all. GREEN when every item is settled.
+ *
+ * <p>The report of a check of the changes (a summary with {@code changes}, which {@code find --changes} writes) says
+ * so in its title and in the gate's description, names the base, and counts what was looked at and what was not;
+ * each area is listed with the reason it was in. Its items are the areas this run picked and the ones the register
+ * knew, so its gate speaks about those and about no other area of the project.
  */
 final class Report {
 
@@ -289,10 +294,14 @@ final class Report {
                 highUnanswered || unownedHigh(summary) || verified.stream().anyMatch(f -> f.severity().equals("high")),
                 openMissing);
         String gate = gate(states, summary);
-        String description = description(verified, unverified, notAnswered, areas.size(), judged, summary, low, states);
+        String register = summary.get("register") instanceof String key && key.matches("[a-z0-9][a-z0-9._-]{0,127}")
+                ? key : "security";
+        String description = sinceBase(summary)
+                + description(verified, unverified, notAnswered, areas.size(), judged, summary, low, states)
+                + notLookedAt(summary);
         String markdown = markdown(verified, unverified, low, notJudged, gone, notAnswered, areas.size(), judged, summary,
-                gate, description, states) + unowned(summary, "findings", "area", "security")
-                + decided(decided) + unseen(missing, "area");
+                gate, description, states, areas) + unowned(summary, "findings", "area", register)
+                + decided(decided, register) + unseen(missing, "area");
         // An area without a verdict (its call failed, or it got no place) is an item not judged, which the envelope
         // says. Only a file nobody could read makes the snapshot partial: nothing looked for findings there
         boolean complete = list(summary.get("notRead")).isEmpty();
@@ -491,6 +500,80 @@ final class Report {
         return "GREEN";
     }
 
+    /** The changes a check of the changes is about, or nothing for an audit of everything. */
+    private static Map<String, Object> changes(Map<String, Object> summary) {
+        return summary.get("changes") instanceof Map<?, ?> ? object(summary.get("changes")) : null;
+    }
+
+    /** How the gate of a check of the changes begins: it speaks about the changes since the base, and says so. */
+    private static String sinceBase(Map<String, Object> summary) {
+        Map<String, Object> changes = changes(summary);
+        return changes == null ? "" : "of the changes since " + shortId(text(changes.get("base"))) + ": ";
+    }
+
+    /** How the gate of a check of the changes ends: how much of the project it does not speak about. */
+    private static String notLookedAt(Map<String, Object> summary) {
+        Map<String, Object> changes = changes(summary);
+        return changes == null ? "" : "; " + number(changes.get("notLookedAt")) + " of "
+                + count(number(changes.get("areasOfProject")), "area") + " of the project not looked at";
+    }
+
+    /** A commit id as a reader names it: its first twelve digits, and nothing that is no commit id. */
+    private static String shortId(String commit) {
+        return commit.matches("[0-9a-f]{40}|[0-9a-f]{64}") ? commit.substring(0, 12) : "an unknown base";
+    }
+
+    private static String fullId(String commit) {
+        return commit.matches("[0-9a-f]{40}|[0-9a-f]{64}") ? "`" + commit + "`" : "unknown";
+    }
+
+    /** The part of the report only a check of the changes has: the base, the counts, and why each area was in. */
+    private static void changesSection(StringBuilder md, Map<String, Object> changes, List<Map<String, Object>> areas) {
+        String base = text(changes.get("base"));
+        String head = text(changes.get("head"));
+        String previous = text(changes.get("previousHead"));
+        boolean input = "input".equals(changes.get("from"));
+        boolean dirty = Boolean.TRUE.equals(changes.get("dirty"));
+        md.append("**This gate speaks about the changes only.** It says nothing about the ")
+                .append(number(changes.get("notLookedAt"))).append(" of ")
+                .append(count(number(changes.get("areasOfProject")), "area"))
+                .append(" of the project that this run did not look at; the long audit judges every area.\n\n");
+        md.append("## What was looked at\n\n| | |\n|---|---|\n");
+        row(md, "Base: the commit the changes are measured from", fullId(base));
+        row(md, "Where the base is from", input ? "the input `since`: " + code(text(changes.get("since")))
+                : "the workspace commit of the last run of this audit, as its report names it");
+        row(md, "Workspace commit", fullId(head) + (dirty ? ", with changes that are in no commit; they count as changed"
+                : ", with nothing uncommitted"));
+        if (input && !previous.isEmpty() && !previous.equals(base)) {
+            row(md, "Workspace commit of the last run of this audit", fullId(previous) + ": not the base of this run."
+                    + " What changed between the two was looked at only where this run's changes reach");
+        }
+        row(md, "Changed files", number(changes.get("changedFiles")) + ", " + number(changes.get("unmappedFiles"))
+                + " of them no Java source the tool read (not mapped to an area)");
+        row(md, "Changed members", String.valueOf(number(changes.get("changedMembers"))));
+        row(md, "Areas of the project", String.valueOf(number(changes.get("areasOfProject"))));
+        row(md, "Areas with a changed line", String.valueOf(number(changes.get("changedAreas"))));
+        row(md, "Neighbours: areas one call from a changed member", String.valueOf(number(changes.get("neighbourAreas"))));
+        row(md, "Areas an earlier run left open or without a verdict", String.valueOf(number(changes.get("carriedAreas"))));
+        row(md, "Areas of the project not looked at", number(changes.get("notLookedAt")) + " ("
+                + number(changes.get("judgedAsTheyAre")) + " of them changed or a neighbour, and judged by an earlier"
+                + " run as they are now)");
+        List<?> unmapped = list(changes.get("unmapped"));
+        if (!unmapped.isEmpty()) {
+            md.append("\nChanged files that are no Java source the tool read");
+            if (number(changes.get("unmappedFiles")) > unmapped.size()) md.append(", the first ").append(unmapped.size());
+            md.append(": ").append(String.join(", ", unmapped.stream().map(f -> code(String.valueOf(f))).toList()))
+                    .append("\n");
+        }
+        md.append("\n## Why each area was in\n\n");
+        if (areas.isEmpty()) md.append("No area: nothing changed in an area or next to one, and nothing was left open.\n");
+        for (Map<String, Object> area : areas) {
+            md.append("- ").append(plain(text(area.get("id")))).append(" ").append(code(text(area.get("subject"))))
+                    .append(": ").append(plain(text(area.get("reason")))).append("\n");
+        }
+        md.append("\n");
+    }
+
     private static String description(List<Finding> verified, List<Finding> unverified, List<String> notAnswered,
                                       int areas, int judged, Map<String, Object> summary, List<Finding> low,
                                       States.Counts states) {
@@ -533,10 +616,12 @@ final class Report {
                                    List<NotJudged> notJudged,
                                    List<Gone> gone, List<String> notAnswered, int areas, int judged,
                                    Map<String, Object> summary, String gate, String description,
-                                   States.Counts states) {
+                                   States.Counts states, List<Map<String, Object>> areaLines) {
         StringBuilder md = new StringBuilder();
-        md.append("# Security self-audit\n\n");
+        Map<String, Object> changes = changes(summary);
+        md.append(changes == null ? "# Security self-audit\n\n" : "# Security check of the changes\n\n");
         md.append("**Gate:** ").append(gate).append(": ").append(description).append("\n\n");
+        if (changes != null) changesSection(md, changes, areaLines);
         Judge judge = Judge.fromJson(summary.get("judge"));
         if (judge != null) {
             md.append("**Judged by:** provider ").append(code(judge.provider())).append(", model ")
@@ -560,7 +645,8 @@ final class Report {
         row(md, "Areas cut by the cap", String.valueOf(list(summary.get("cut")).size()));
         if (summary.get("items") instanceof List<?>) {
             int[] settled = settledItems(summary);
-            row(md, "Items (every area that could be judged)", String.valueOf(settled[2]));
+            row(md, changes == null ? "Items (every area that could be judged)"
+                    : "Items (the areas of this run, and the ones the register knew)", String.valueOf(settled[2]));
             row(md, "Items settled and unchanged, not judged again", (settled[0] + settled[1]) + " (" + settled[0]
                     + " clean, " + settled[1] + " decided)");
             row(md, "Items after this run", states.text());
@@ -674,13 +760,13 @@ final class Report {
     }
 
     /** The stated findings the register holds a decision for; empty when there are none. */
-    private static String decided(List<String> decided) {
+    private static String decided(List<String> decided, String register) {
         if (decided.isEmpty()) return "";
         StringBuilder md = new StringBuilder("\n## Findings the register holds a decision for (" + decided.size()
                 + ")\n\nA person accepted or dismissed a finding of the same rule and area as each of these, and this"
                 + " run states one again. A decision covers the severity it was made on: when the register takes"
                 + " this report, a finding stated above that severity is open again, and one stated at or below it"
-                + " keeps its decision, unless a person reopens it (`traceworks findings security reopen <id>`). Each"
+                + " keeps its decision, unless a person reopens it (`traceworks findings " + register + " reopen <id>`). Each"
                 + " line says which; with `\"decision_on_higher_severity\": \"keep\"` in the operator's"
                 + " `traceworks.json`, which a run does not see, the register keeps every decision. Whether this is"
                 + " what was decided, or something else of the rule in the area, is not told here: the gate counts"

@@ -58,6 +58,27 @@ final class Items {
     }
 
     /**
+     * The rows of {@code items.jsonl} in the register folder of a run (docs/registers.md, "The register folder of a
+     * run"), by the name as the register shows it: one JSON object a line, with {@code name}, {@code state} and
+     * {@code verdict_digest}. The file holds every item, where the block of {@link #parse} is cut at its limit. An
+     * empty file is a register that knows no item. A line that is no such object is refused: the file is the
+     * register's own, and half a list must not pass for a whole one.
+     */
+    static Map<String, Row> parseJsonl(String itemsJsonl) {
+        Map<String, Row> rows = new LinkedHashMap<>();
+        for (String line : itemsJsonl.split("\n")) {
+            if (line.isBlank()) continue;
+            if (!(Json.parse(line) instanceof Map<?, ?> item) || !(item.get("name") instanceof String name)
+                    || !(item.get("state") instanceof String state) || !STATES.contains(state)) {
+                throw new IllegalArgumentException("a line of the register's items is no item");
+            }
+            rows.put(Known.shown(name), new Row(state, item.get("verdict_digest") instanceof String digest
+                    ? digest : ""));
+        }
+        return rows;
+    }
+
+    /**
      * The item names of areas, each given as its file and its first member, in order: {@code <file>#<member>}, and
      * {@code ~2}, {@code ~3} for a further area of the same member. The first member names an area better than all
      * its members do: an area takes in a neighbour when the code between them shrinks, and its name should not
