@@ -336,7 +336,7 @@ One line of `findings.jsonl` (wrapped here; in the file it is one line, its keys
 | `item` | the item the finding is about; the key is absent for a finding that names none |
 | `first_seen`, `last_seen` | the run and the time of the first and of the last report that stated the finding |
 | `occurrences`, `regressions`, `absent_reports`, `unverified_evidence`, `resolved_at` | as in `state.json` |
-| `disposition` | `null` without a decision. Otherwise `kind` (`ACCEPTED_RISK` or `DISMISSED`), `note`, `actor`, `at`, `until` (the review date of an acceptance), `evidence` (frozen at an acceptance), `severity` (the severity the decision was made on, always given; `null` only where a register of an earlier version does not know it) and `in_force` (always given: `false` for a decision that stays with a finding that is open again) |
+| `disposition` | `null` without a decision. More than `{{ audit_findings }}` shows, which has the note only: who decided and when are here too. Otherwise `kind` (`ACCEPTED_RISK` or `DISMISSED`), `note`, `actor`, `at`, `until` (the review date of an acceptance), `evidence` (frozen at an acceptance), `severity` (the severity the decision was made on, always given; `null` only where a register of an earlier version does not know it) and `in_force` (always given: `false` for a decision that stays with a finding that is open again) |
 
 One line of `items.jsonl`:
 
@@ -370,16 +370,39 @@ place; the register never reads it, and it is not in the register folder.
 In a container run it is `/register`, a **read-only** mount that every container of the run gets: a shell step, a
 tool-mode step, and the commands of `run_if`, a shell condition and `items_command`. **The container of an AI step
 does not get it.** What a model reads of the register is what a step puts into its prompt, never the folder. In a
-host run it is the folder's own path, and a container step of a host run mounts it there, read-only. Only the run
-of an audit workflow has the folder: in any other workflow, a child workflow included, `traceworks check` reports
-`{{ register_dir }}` as the error `register-dir-outside-audit` and no run starts; no input can set the variable.
+host run it is the folder's own path, and a container step of a host run mounts it there, read-only. In a container
+run of an audit, `/register` is reserved like `/workspace`: a step's own mount on or below it is refused. Any other
+run reserves nothing there.
 
-**No step changes the folder for a later one.** In a container the mount is read-only. On the host no mount
-protects it: the files are written without write permission, which stops a mistake and not a step that means it.
-So a host run compares the files with the digests it recorded (below) before **every** command that gets the
-folder. Once a file is changed, missing or added, that command and every later one is not started (exit code 125,
-`the register folder of the run changed: findings.jsonl is not the file the run started with ...`), the report
-step fails with them, and the register takes no report from the run.
+Only the run of an audit workflow has the folder, and no input can set the variable. `traceworks check` judges a
+workflow by its own `metadata.audit`: in a workflow that feeds no register (no audit block, or `enabled: false`)
+`{{ register_dir }}` is the error `register-dir-outside-audit`, and no run of it starts. The folder itself belongs
+to the run, so for a child workflow the two can differ:
+
+- A child of an audit run sees that run's folder and has the variable, whatever its own metadata say. `check` of
+  the child alone still refuses the placeholder; read the folder in the audit workflow, or hand its path on under
+  another name (a `foreach` `context` entry such as `"known_dir": "{{ register_dir }}"`; the name `register_dir`
+  itself is reserved).
+- A workflow started by a run that is no audit has no folder, also when it carries an audit block of its own. A
+  step of it that names the folder fails before it runs anything: `{{ register_dir }} names the register folder of a
+  run, and this run has none: ...`. The placeholder never reaches a command as text.
+
+In the prompt of an AI step the placeholder is an error in every workflow (`register-dir-in-ai-prompt`): the
+container of the call has no such folder, and in a host run the prompt would carry a path of the run folder. A run
+that gets that far fails the step before the call. A `run_if` of an AI step is a shell command and may name it.
+
+**Who can change the folder.** In a container run, no step: the mount is read-only, and that is the strong
+guarantee. In a host run no mount protects the folder. The files are written without write permission, which stops
+a mistake and not a step that means it. What a host run does instead is detect: before every command that gets the
+folder it compares the files with the digests it recorded (below), and once a file is changed, missing or added it
+starts neither that command nor any later one that gets the folder (exit code 125, `the register folder of the run
+changed: findings.jsonl is not the file the run started with ...`). The report step is one of them, so the register
+takes no report from such a run. Two limits of that, both of the host run only:
+
+- The comparison comes before the command, not while it reads. A process that an earlier host step left running
+  can write between the comparison and the read, and that command then reads what was written. The next
+  comparison, a resume and `traceworks verify` find it; the step that read it has run.
+- An AI call gets no folder and is not compared, so it still runs after a change. It reads nothing of the folder.
 
 **What the run records.** `run.started` holds, for an audit workflow only, the field `register` (docs/events.md):
 the register's key, the head of the register's log the run read (`seq` and `head`, the SHA-256 of that line; both
@@ -401,7 +424,10 @@ replayed, or one with a blob the replay reads (the findings, the items or the ca
 text) that does not hash to its name, refuses the run and names `findings <key> verify`.
 
 **It is data, and part of it was written by a model.** Titles, subjects, evidence, descriptions and the report
-come from the output of earlier runs, and notes from a person. Treat a file as the placeholders are treated: a
+come from the output of earlier runs, and notes from a person. The files also hold what the placeholders leave out:
+the actor of each decision (`disposition.actor`, a name such as `anna@laptop`) and its time, and the ids of earlier
+runs. Every step of the audit that gets the folder can read them, and a step that prints them puts them into the
+run's record. Treat a file as the placeholders are treated: a
 step that passes text from the folder to a model passes untrusted text, should set `untrusted_input: true` on that
 AI step, and should quote what it puts into a shell line. Traceworks cannot follow a file the way it follows a
 placeholder: a step that reads the folder and prints part of it has an output like any other. The markers in

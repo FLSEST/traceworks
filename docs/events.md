@@ -350,7 +350,8 @@ the package, the package follows once more, read-only, at its place in `/workspa
 these directories at its host path. A command that cannot run as planned is still recorded, with `image_id` `null`;
 its `step.command.finished` has exit code 125, and nothing was started. That is a command whose image is not present,
 an image reference that is blank or starts with `-`, a `./images/<name>` whose name is not valid, a declared mount on
-or below `/workspace`, `/package`, `/scratch` or `/register` (in a host run: on or below their host paths), a command
+or below `/workspace`, `/package` or `/scratch`, and in the run of an audit workflow `/register` (in a host run: on
+or below their host paths), a command
 of a host run whose register folder is no longer the one `run.started` recorded, a writable workspace
 that is the package or lies inside it, a command that needs a container in a host run without a container runtime,
 and a container that the runtime refuses before it starts it: a declared mount that the mount check refuses (such as

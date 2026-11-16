@@ -578,9 +578,10 @@ An audit workflow (`metadata.audit`, docs/registers.md) is understood completely
 the number 1, or an `enabled` that is no boolean is the error `invalid-audit-config`; a `key` that is no register key
 (`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `report_block` that names no top-level block is
 `report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
-in a workflow without `metadata.audit` is `previous-report-outside-audit`; and `{{ register_dir }}` in a workflow
-that feeds no register (no `metadata.audit`, or `enabled: false`) is `register-dir-outside-audit`. Each of them
-refuses a run at its start: a broken audit block is never ignored, and only an audit workflow has a previous report
+in a workflow that feeds no register (no `metadata.audit`, or `enabled: false`) is `previous-report-outside-audit`,
+and `{{ register_dir }}` there is `register-dir-outside-audit`; and `{{ register_dir }}` in the prompt of an AI step
+is `register-dir-in-ai-prompt` in every workflow, since the container of an AI call does not get the folder. Each
+of them refuses a run at its start: a broken audit block is never ignored, and only an audit workflow has a previous report
 and a register folder (docs/workflow-format.md).
 
 Every block setting is checked against the type and range the run accepts, at the top level and in nested blocks (a

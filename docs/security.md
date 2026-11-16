@@ -182,6 +182,11 @@ the protection of the ledger's. Whoever can write the ledger too can rewrite bot
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
 read-only at `/register`. What that means:
 
+- *The files hold more than the placeholders.* Besides every finding with its whole evidence and its description,
+  each decision is there with who made it and when (`disposition.actor`, `disposition.at`), which
+  `{{ audit_findings }}` does not carry, and the ids of the runs that reported a finding. Every shell and tool step
+  of the audit can read that, and what a step prints of it is in the run's record. An audit package you run is
+  trusted with the names of the people who decided on its findings.
 - *The content is data from earlier runs, and part of it was written by a model*: titles, evidence, descriptions,
   the last report; the notes are a person's. A step that passes text from the folder to a model passes untrusted
   text and should say so (`untrusted_input: true` on that AI step). Traceworks marks the three placeholders as
@@ -189,12 +194,17 @@ read-only at `/register`. What that means:
   in `previous-report.md` are defused, and a line of the `.jsonl` files is ASCII without `<`, so the files as they
   are hold no marker a run or a register evaluates. What a step prints after it decoded a line is its own output.
 - *An AI step's container does not get the folder.* A model sees of the register what a step deliberately put into
-  its prompt (or the capped placeholders), not everything the register holds.
-- *No step changes the folder for a later one in a container run*: the mount is read-only, and a step's own mount
-  of the run folder is refused like any mount inside the Traceworks home. *In a host run nothing keeps a command
-  from writing it*; the files have no write permission, which is a hint. The run therefore compares the files with
-  the digests in `run.started` before every command that gets the folder and starts none once they differ; `resume`
-  and `traceworks verify` compare them too.
+  its prompt (or the capped placeholders), not everything the register holds. `{{ register_dir }}` in a prompt is
+  refused by `check` (`register-dir-in-ai-prompt`) and fails the step at run time, so no model is handed the path
+  of a run folder either.
+- *No step changes the folder for a later one in a container run*: the mount is read-only, a step's own mount on
+  `/register` is refused, and so is one of the run folder, like any mount inside the Traceworks home. That is the
+  strong guarantee. *In a host run nothing keeps a command from writing the folder*; the files have no write
+  permission, which is a hint. A host run detects instead: it compares the files with the digests in `run.started`
+  before every command that gets the folder and starts no such command once they differ; `resume` and `traceworks
+  verify` compare them too. The comparison is made before a command, not while it reads: a process an earlier host
+  step left running can write in between, and that one command reads it. An AI call gets no folder and is not
+  compared.
 - *A hash protects against a changed file, not against content that was wrong when it was written.* The digests
   say that the files are what the register gave at the recorded head of its log. Whether a finding in them is
   true, and whether the register's folder was written only by Traceworks, are other questions: the first is the
