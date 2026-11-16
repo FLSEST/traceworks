@@ -101,7 +101,7 @@ public final class ContainerCommandRunner implements CommandRunner {
 
     @Override
     public CommandResult run(CommandRequest request) {
-        return plan(request).execution().get();
+        return request.delivered(plan(request).execution().get());
     }
 
     /** What the run's image catalog resolves {@code image} to, the reference this runner runs; {@code null} if unknown. */
@@ -173,7 +173,7 @@ public final class ContainerCommandRunner implements CommandRunner {
             // Nothing starts from the image, so the record names none
             return refused(facts(request, null, mounts), refusedByRuntime.get());
         }
-        return new CommandPlan(facts, () -> runtime.run(run));
+        return new CommandPlan(facts, () -> request.delivered(runtime.run(run)));
     }
 
     private CommandFacts facts(CommandRequest request, String imageId, List<Mount> mounts) {

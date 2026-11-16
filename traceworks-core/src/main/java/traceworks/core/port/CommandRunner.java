@@ -217,6 +217,23 @@ public interface CommandRunner {
             return command == null ? null : ShellVariables.preamble(values) + command;
         }
 
+        /**
+         * The result of a runner that ran {@link #script}, as the engine reads it: when a value was not delivered
+         * ({@link ShellVariables#notDelivered}) the command's own text did not run, and the result says so
+         * ({@link CommandResult#notRunReason}), so that no condition takes the exit code for an answer. Every
+         * runner passes its result through this.
+         */
+        public CommandResult delivered(CommandResult result) {
+            if (result == null || result.didNotRun() || values.isEmpty()) {
+                return result;
+            }
+            // A runner may hand both streams over as one
+            boolean failed = ShellVariables.notDelivered(values, result.exitCode(), result.stderr())
+                    || ShellVariables.notDelivered(values, result.exitCode(), result.stdout());
+            return failed ? result.asNotRun("a value of the block (values) was not delivered to the shell, so the"
+                    + " command did not run") : result;
+        }
+
         /** Whether this request runs the image's entrypoint (tool mode) instead of a shell command. */
         public boolean runsEntrypoint() {
             return entrypointArgs != null;

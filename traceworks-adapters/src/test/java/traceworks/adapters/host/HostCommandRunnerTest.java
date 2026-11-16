@@ -8,6 +8,7 @@ import traceworks.core.port.CommandRunner.Mount;
 import traceworks.core.testing.BackgroundChild;
 import traceworks.core.testing.RecordingTracker;
 import traceworks.core.util.ProcessTracking;
+import traceworks.core.util.ShellVariables;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -142,7 +143,8 @@ class HostCommandRunnerTest {
 
     /**
      * A value that does not arrive whole ends the shell before the command's first line: the length bash finds is
-     * compared with the length that was sent, here made wrong on purpose.
+     * compared with the length that was sent, here made wrong on purpose. Run as a script of its own, the result is
+     * what bash gave; the marker is the one of the values.
      */
     @Test
     void run_aValueThatDidNotArriveWhole_endsTheShell_beforeTheCommandRuns(@TempDir Path dir) {
@@ -154,8 +156,101 @@ class HostCommandRunnerTest {
         CommandResult result = run(cut, 30);
 
         assertThat(result.exitCode()).isEqualTo(74);
-        assertThat(result.stdout() + result.stderr()).contains("traceworks: the value of VALUE did not arrive whole");
+        assertThat(result.stdout() + result.stderr())
+                .contains(ShellVariables.failureMarker(request.values()) + " the value of VALUE was not delivered");
         assertThat(marker).doesNotExist();
+    }
+
+    /**
+     * A name bash does not keep a value under ({@code _}, which it sets anew after every command): the delivery is
+     * checked on the variable itself, so it fails, the command does not run, and the runner's result says that it
+     * did not run, which no condition takes for an answer. The name rule refuses such a name before; this is what
+     * happens if one gets through.
+     */
+    @Test
+    void run_aNameBashDoesNotKeepAValueUnder_failsTheDelivery_andTheResultSaysTheCommandDidNotRun(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+
+        CommandResult result = runner.run(shell("touch '" + marker + "'", null, 30).withValues(Map.of("_", "x")));
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.didNotRun()).isTrue();
+        assertThat(result.notRunReason()).contains("was not delivered");
+        assertThat(marker).doesNotExist();
+    }
+
+    /** A readonly variable cannot take the value: the delivery fails closed, before the command's first line. */
+    @Test
+    void run_aReadonlyName_failsTheDelivery(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "new"));
+
+        CommandResult result = run("readonly VALUE=old\n" + request.script(), 30);
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.stdout() + result.stderr())
+                .contains(ShellVariables.failureMarker(request.values()) + " the value of VALUE was not delivered");
+        assertThat(marker).doesNotExist();
+    }
+
+    /** A command that ends with 74 by itself ran, whatever it prints: only the marker of its values is a failure. */
+    @Test
+    void run_aCommandThatExits74ByItself_withValues_ran() {
+        CommandResult result = runner.run(shell("echo \"traceworks:00: the value of VALUE was not delivered $VALUE\""
+                + " >&2; exit 74", null, 30).withValues(Map.of("VALUE", "traceworks:")));
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.didNotRun()).isFalse();
+    }
+
+    /**
+     * A name that is exported in the step's environment is taken out of it: the command finds the value, and no
+     * process it starts inherits it, also when the shell was started to export everything it sets
+     * ({@code SHELLOPTS=allexport}).
+     */
+    @Test
+    void run_aNameExportedInTheStepsEnvironment_isSet_andNoLongerExported() {
+        String value = "it's $(not run)\n";
+        for (String name : List.of("HOSTNAME", "GIT_SSH_COMMAND", "NODE_OPTIONS", "PYTHONPATH", "JAVA_TOOL_OPTIONS",
+                "REVIEW")) {
+            for (Map<String, String> environment : List.of(Map.of(name, "from the environment"),
+                    Map.of(name, "from the environment", "SHELLOPTS", "allexport"))) {
+                // env is a process the command starts: it prints what such a process inherits
+                CommandRequest request = new CommandRequest("printf '%s|' \"$" + name + "\"; env | grep '^" + name
+                        + "=' || echo 'not inherited'", null, 30, environment, null, null, false)
+                        .withValues(Map.of(name, value));
+
+                CommandResult result = runner.run(request);
+
+                assertThat(result.exitCode()).as("%s %s: %s", name, environment, result.stdout()).isZero();
+                assertThat(result.stdout()).as("%s %s", name, environment)
+                        .isEqualTo(value + "|not inherited\n");
+            }
+        }
+    }
+
+    /**
+     * The variables bash sets itself or reads as its own settings: the name rule refuses them
+     * ({@code ShellValues}). If one gets through, the delivery either sets the variable to exactly the value
+     * (unset first, a special variable is an ordinary one) or fails; it never leaves another value under the name
+     * while the command runs.
+     */
+    @Test
+    void run_aNameBashSetsOrUses_holdsExactlyTheValue_orTheDeliveryFails() {
+        for (String name : List.of("EPOCHSECONDS", "EPOCHREALTIME", "SRANDOM", "RANDOM", "SECONDS", "HISTCMD",
+                "DIRSTACK", "LINENO", "FUNCNEST", "EXECIGNORE", "TIMEFORMAT", "INPUTRC", "HISTFILE", "PS1", "_",
+                "BASHPID", "GROUPS", "UID", "PPID", "BASH_VERSINFO", "SHELLOPTS", "BASHOPTS", "FUNCNAME")) {
+            CommandResult result = runner.run(shell("printf '%s' \"${" + name + "}\"", null, 30)
+                    .withValues(Map.of(name, "what was sent")));
+
+            if (result.exitCode() == 0) {
+                assertThat(result.stdout()).as(name).isEqualTo("what was sent");
+            } else {
+                assertThat(result.exitCode()).as("%s: %s", name, result.stdout()).isEqualTo(74);
+                assertThat(result.didNotRun()).as(name).isTrue();
+                assertThat(result.stdout()).as(name).doesNotContain("what was sent");
+            }
+        }
     }
 
     @Test

@@ -49,13 +49,19 @@ class ValueRulesTest {
                         + " digit; the step fails when it is reached");
         invalid.put(Map.of("values", Map.of("1ST", "x"), "command", "echo"), "values: \"1ST\" is not a variable name");
         invalid.put(Map.of("values", Map.of("PATH", "x"), "command", "echo \"$PATH\""),
-                "values: \"PATH\" is reserved — the step's environment or the container client uses it");
+                "values: \"PATH\" is reserved — bash sets or uses it");
+        for (String name : List.of("_", "EPOCHSECONDS", "EPOCHREALTIME", "SRANDOM", "HISTCMD", "DIRSTACK",
+                "POSIXLY_CORRECT", "FUNCNEST", "EXECIGNORE", "TMOUT", "PS1", "HISTFILE", "TIMEFORMAT", "INPUTRC",
+                "LANGUAGE", "HOSTNAME", "IFS", "BASH_ENV", "BASHFUL", "GLOBSORT", "MAPFILE", "COPROC")) {
+            invalid.put(Map.of("values", Map.of(name, "x"), "command", "echo \"$" + name + "\""),
+                    "values: \"" + name + "\" is reserved — bash sets or uses it");
+        }
         invalid.put(Map.of("values", Map.of("HOME", "x"), "command", "echo"), "values: \"HOME\" is reserved");
         invalid.put(Map.of("values", Map.of("TRACEWORKS_VALUE", "x"), "command", "echo"),
                 "values: \"TRACEWORKS_VALUE\" is reserved — names that start with TRACEWORKS_ are Traceworks' own");
         invalid.put(Map.of("values", Map.of("LC_ALL", "x"), "command", "echo"), "values: \"LC_ALL\" is reserved");
         invalid.put(Map.of("values", Map.of("IFS", "x"), "command", "echo"),
-                "values: \"IFS\" is reserved — the shell uses it; choose another name");
+                "values: \"IFS\" is reserved — bash sets or uses it; choose another name");
         invalid.put(Map.of("values", Map.of("BASH_ENV", "x"), "command", "echo"), "values: \"BASH_ENV\" is reserved");
         invalid.put(Map.of("values", Map.of("ANTHROPIC_API_KEY", "x"), "command", "echo"),
                 "values: \"ANTHROPIC_API_KEY\" is reserved — it is the credential of an AI provider");
@@ -87,6 +93,23 @@ class ValueRulesTest {
         assertThat(findings(block("foreach", Map.of("execution_mode", "ai", "items", List.of("a"),
                 "values", Map.of("NOTE", "x"), "command", "Judge with $NOTE")))).as("a prompt is no shell line")
                 .singleElement().satisfies(f -> assertThat(f.rule()).isEqualTo("unused-value"));
+    }
+
+    /** A name programs read as configuration is allowed, since the variable is not exported; the author is told. */
+    @Test
+    void aNameOfAFamilyProgramsReadAsConfiguration_isAWarning() {
+        for (String name : List.of("GIT_SSH_COMMAND", "NODE_OPTIONS", "JAVA_TOOL_OPTIONS", "PYTHONPATH",
+                "MAVEN_OPTIONS", "NODE_PATH", "JAVA_HOME")) {
+            assertThat(findings(block("shell", Map.of("values", Map.of(name, "x"), "command", "echo \"$" + name + "\""))))
+                    .as(name).singleElement().satisfies(f -> {
+                        assertThat(f.rule()).isEqualTo("value-name-configures-program");
+                        assertThat(f.severity()).isEqualTo(Severity.WARNING);
+                        assertThat(f.detail()).startsWith("values sets " + name + ", a name programs read as their"
+                                + " configuration").contains("is not exported");
+                    });
+        }
+        assertThat(findings(block("shell", Map.of("values", Map.of("REVIEW", "x", "OPTIONS", "y", "GITHUB", "z"),
+                "command", "echo \"$REVIEW$OPTIONS$GITHUB\"")))).isEmpty();
     }
 
     @Test

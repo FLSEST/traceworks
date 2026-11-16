@@ -108,9 +108,9 @@ public final class HostCommandRunner implements CommandRunner {
         // started, and a Ctrl-C is a pause, which must not fail the step in flight
         if (!ProcessTracking.current().cancelled() && !Thread.currentThread().isInterrupted()
                 && OwnSession.killedAtStart(result.exitCode(), start)) {
-            return runOnce(request);
+            return request.delivered(runOnce(request));
         }
-        return result;
+        return request.delivered(result);
     }
 
     private CommandResult runOnce(CommandRequest request) {

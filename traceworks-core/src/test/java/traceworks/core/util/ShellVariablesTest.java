@@ -28,14 +28,41 @@ class ShellVariablesTest {
         values.put("EMPTY", "");
         values.put("EURO", "5 €\n");
 
+        String marker = ShellVariables.failureMarker(values);
+        assertThat(marker).matches("traceworks:[0-9a-f]{32}:");
         assertThat(ShellVariables.preamble(values)).isEqualTo(
                 "TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' \"$3\""
-                        + " && [[ ${#TRACEWORKS_V} -eq $2 ]] && printf -v \"$1\" '%s' \"$TRACEWORKS_V\""
-                        + " || { echo \"traceworks: the value of $1 did not arrive whole\" >&2; exit 74; }; }\n"
+                        + " && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v \"$1\""
+                        + " && printf -v \"$1\" '%s' \"$TRACEWORKS_V\" && export -n \"$1\""
+                        + " && [[ ${!1} == \"$TRACEWORKS_V\" && -z ${!1@a} ]]"
+                        + " || { echo \"" + marker + " the value of $1 was not delivered\" >&2; exit 74; }; }\n"
                         + "TRACEWORKS_VALUE REVIEW 15 'it\\x27s\\x20\\x24\\x28not\\x20run\\x29'\n"
                         + "TRACEWORKS_VALUE EMPTY 0 ''\n"
                         + "TRACEWORKS_VALUE EURO 6 '5\\x20\\xe2\\x82\\xac\\x0a'\n"
                         + "unset -f TRACEWORKS_VALUE\n");
+    }
+
+    /**
+     * The marker of a failed delivery is the digest of the lines that carry the values, so it differs with every
+     * value, and a failure is one only with the exit code and the marker of these values at the start of a line.
+     */
+    @Test
+    void aFailedDelivery_isKnownByItsExitCodeAndTheMarkerOfItsValues() {
+        Map<String, String> values = Map.of("REVIEW", "one");
+        String marker = ShellVariables.failureMarker(values);
+
+        assertThat(ShellVariables.failureMarker(Map.of("REVIEW", "two"))).isNotEqualTo(marker);
+        assertThat(ShellVariables.failureMarker(Map.of("OTHER", "one"))).isNotEqualTo(marker);
+        assertThat(ShellVariables.failureMarker(Map.of())).isNull();
+        assertThat(ShellVariables.notDelivered(values, 74, marker + " the value of REVIEW was not delivered\n")).isTrue();
+        assertThat(ShellVariables.notDelivered(values, 74, "a warning of the runtime\n" + marker + " …")).isTrue();
+        assertThat(ShellVariables.notDelivered(values, 1, marker + " …")).as("another exit code").isFalse();
+        assertThat(ShellVariables.notDelivered(values, 74, "said: " + marker)).as("not at the start of a line").isFalse();
+        assertThat(ShellVariables.notDelivered(values, 74, ShellVariables.failureMarker(Map.of("REVIEW", "two"))))
+                .as("the marker of other values").isFalse();
+        assertThat(ShellVariables.notDelivered(values, 74, "traceworks: the value of REVIEW was not delivered"))
+                .isFalse();
+        assertThat(ShellVariables.notDelivered(Map.of(), 74, "traceworks:")).isFalse();
     }
 
     /**

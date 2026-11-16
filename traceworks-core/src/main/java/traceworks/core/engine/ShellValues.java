@@ -27,8 +27,10 @@ import java.util.regex.Pattern;
  * is taken out. What the command does with the variable is the workflow's: {@code "$REVIEW"} is one argument.
  *
  * <p>A name matches {@code [A-Z_][A-Z0-9_]*} and is none the run or the shell reserves: what a secret may not be
- * called ({@link SecretNames#problem}), {@code IFS} and the names that start with {@code BASH}, and no secret of the
- * same block. A tool step ({@code container_args}) runs no shell and takes no values. One rule for the analyzer and
+ * called ({@link SecretNames#problem}), every variable bash sets or uses ({@link #BASH_VARIABLES}, {@code _} and
+ * the names that start with {@code BASH}), and no secret of the same block. A name of a family that programs read
+ * as their configuration ({@link #configuresAProgram}) is allowed and the analyzer warns: the variable is not
+ * exported, but a command that exports it hands the value to that program. A tool step ({@code container_args}) runs no shell and takes no values. One rule for the analyzer and
  * the step, so they cannot drift apart.
  */
 public final class ShellValues {
@@ -38,9 +40,33 @@ public final class ShellValues {
 
     private static final Pattern NAME = Pattern.compile("[A-Z_][A-Z0-9_]*");
 
-    private static final Set<String> SHELL_OWN = Set.of("IFS", "SHELLOPTS", "ENV", "PS4", "OPTIND", "OPTARG",
-            "REPLY", "RANDOM", "SECONDS", "LINENO", "FUNCNAME", "PIPESTATUS", "COMP_WORDBREAKS", "GLOBIGNORE",
-            "CDPATH", "PROMPT_COMMAND", "EUID", "UID", "PPID", "SHLVL", "OLDPWD", "PWD");
+    /**
+     * Every variable bash sets or uses, by the Bash Reference Manual (5.3), chapter "Shell Variables": the sections
+     * "Bourne Shell Variables" and "Bash Variables", complete, in the manual's order (its lower-case
+     * {@code histchars} is here in capitals; no value can be named in lower case anyway). {@code LANGUAGE} and
+     * {@code TEXTDOMAIN}, {@code TEXTDOMAINDIR} are not in those sections; bash's message catalogue reads them.
+     * A value of such a name would change how bash itself works, or bash would replace it.
+     */
+    static final Set<String> BASH_VARIABLES = Set.of(
+            // Bourne Shell Variables
+            "CDPATH", "HOME", "IFS", "MAIL", "MAILPATH", "OPTARG", "OPTIND", "PATH", "PS1", "PS2",
+            // Bash Variables
+            "_", "BASH", "BASHOPTS", "BASHPID", "BASH_ALIASES", "BASH_ARGC", "BASH_ARGV", "BASH_ARGV0", "BASH_CMDS",
+            "BASH_COMMAND", "BASH_COMPAT", "BASH_ENV", "BASH_EXECUTION_STRING", "BASH_LINENO",
+            "BASH_LOADABLES_PATH", "BASH_MONOSECONDS", "BASH_REMATCH", "BASH_SOURCE", "BASH_SUBSHELL",
+            "BASH_TRAPSIG", "BASH_VERSINFO", "BASH_VERSION", "BASH_XTRACEFD", "CHILD_MAX", "COLUMNS", "COMP_CWORD",
+            "COMP_KEY", "COMP_LINE", "COMP_POINT", "COMP_TYPE", "COMP_WORDBREAKS", "COMP_WORDS", "COMPREPLY",
+            "COPROC", "DIRSTACK", "EMACS", "ENV", "EPOCHREALTIME", "EPOCHSECONDS", "EUID", "EXECIGNORE", "FCEDIT",
+            "FIGNORE", "FUNCNAME", "FUNCNEST", "GLOBIGNORE", "GLOBSORT", "GROUPS", "HISTCHARS", "HISTCMD",
+            "HISTCONTROL", "HISTFILE", "HISTFILESIZE", "HISTIGNORE", "HISTSIZE", "HISTTIMEFORMAT", "HOSTFILE",
+            "HOSTNAME", "HOSTTYPE", "IGNOREEOF", "INPUTRC", "INSIDE_EMACS", "LANG", "LC_ALL", "LC_COLLATE",
+            "LC_CTYPE", "LC_MESSAGES", "LC_NUMERIC", "LC_TIME", "LINENO", "LINES", "MACHTYPE", "MAILCHECK",
+            "MAPFILE", "OLDPWD", "OPTERR", "OSTYPE", "PIPESTATUS", "POSIXLY_CORRECT", "PPID", "PROMPT_COMMAND",
+            "PROMPT_DIRTRIM", "PS0", "PS3", "PS4", "PWD", "RANDOM", "READLINE_ARGUMENT", "READLINE_LINE",
+            "READLINE_MARK", "READLINE_POINT", "REPLY", "SECONDS", "SHELL", "SHELLOPTS", "SHLVL", "SRANDOM",
+            "TIMEFORMAT", "TMOUT", "TMPDIR", "UID",
+            // read by bash's message catalogue
+            "LANGUAGE", "TEXTDOMAIN", "TEXTDOMAINDIR");
 
     private ShellValues() {
     }
@@ -82,13 +108,23 @@ public final class ShellValues {
         if (!NAME.matcher(name).matches()) {
             return quoted + " is not a variable name — use capital letters, digits and _, not starting with a digit";
         }
-        if (SHELL_OWN.contains(name) || name.startsWith("BASH")) {
-            return quoted + " is reserved — the shell uses it; choose another name";
+        if (BASH_VARIABLES.contains(name) || name.startsWith("BASH")) {
+            return quoted + " is reserved — bash sets or uses it; choose another name";
         }
         if (secretsOfTheBlock.contains(name)) {
             return quoted + " is a secret of this block — a value needs a name of its own";
         }
         return SecretNames.problem(name);
+    }
+
+    /**
+     * Whether programs read a variable of this name as their configuration, so that a command which exports it
+     * hands the value to them: the families {@code GIT_*}, {@code *_OPTIONS}, {@code LD_*}, {@code PYTHON*},
+     * {@code NODE_*} and {@code JAVA_*}.
+     */
+    public static boolean configuresAProgram(String name) {
+        return name.startsWith("GIT_") || name.endsWith("_OPTIONS") || name.startsWith("LD_")
+                || name.startsWith("PYTHON") || name.startsWith("NODE_") || name.startsWith("JAVA_");
     }
 
     /** The names in the {@code values} of a block's config, in the order written; empty without the key. */

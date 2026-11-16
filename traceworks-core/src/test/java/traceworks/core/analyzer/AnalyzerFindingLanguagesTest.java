@@ -97,9 +97,11 @@ class AnalyzerFindingLanguagesTest {
                 block("simple", "review", Map.of("command", "Review the diff")),
                 block("shell", "report", Map.of("command", "set -euo pipefail\nprintf '%s' {{ block.review.output }}"))),
                 null));
-        // The shell variables of a block: invalid-value-name, unused-value
+        // The shell variables of a block: invalid-value-name, value-name-configures-program, unused-value
         out.addAll(analyzer.analyze(List.of(
                 block("shell", "named", Map.of("command", "set -euo pipefail\necho", "values", Map.of("lower", "x"))),
+                block("shell", "family", Map.of("command", "set -euo pipefail\necho \"$NODE_OPTIONS\"",
+                        "values", Map.of("NODE_OPTIONS", "x"))),
                 block("shell", "unused", Map.of("command", "set -euo pipefail\necho", "values", Map.of("NOTE", "x")))),
                 null));
         // Heredoc bodies: heredoc-placeholder (interpreter source, unquoted delimiter, escaped block)
