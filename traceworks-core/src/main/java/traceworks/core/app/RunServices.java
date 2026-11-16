@@ -313,7 +313,7 @@ public final class RunServices {
      * @throws RecordDamagedException if the ledger exists and cannot be read
      */
     public LedgerReport ledgerReport() {
-        return LedgerReport.of(ledger, store);
+        return LedgerReport.of(ledger, store, clock);
     }
 
     /**

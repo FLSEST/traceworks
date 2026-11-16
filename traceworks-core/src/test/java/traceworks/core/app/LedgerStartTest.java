@@ -304,7 +304,7 @@ class LedgerStartTest {
         LedgerReport after = services.ledgerReport();
         assertThat(after.problems()).singleElement().satisfies(problem -> {
             assertThat(problem.runId()).isEqualTo(kept);
-            assertThat(problem.code()).isEqualTo("entry-removed");
+            assertThat(problem.code()).isEqualTo("entry-changed");
         });
         assertThat(after.started()).as("the history still names the start").isEqualTo(2);
         assertThat(after.ok()).isFalse();

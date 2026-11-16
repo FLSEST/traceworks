@@ -119,6 +119,12 @@ public final class InMemoryLedger implements Ledger {
     /** Takes the start entry of {@code runId} out, as a later commit to the ledger would: its message stays. */
     public synchronized void removeStart(String runId) {
         starts.remove(runId);
+        missing(runId, "starts/" + runId + ".json");
+    }
+
+    private void missing(String runId, String path) {
+        changes.computeIfAbsent(runId, id -> new ArrayList<>()).add("commit 000000000000 names " + path
+                + ", and the ledger does not hold it: a later commit removed it, or the commit added none");
     }
 
     /** Puts {@code json} in the place of the start entry of {@code runId}, with the message of a start. */
@@ -136,6 +142,7 @@ public final class InMemoryLedger implements Ledger {
     /** A commit whose message says that {@code runId} started, and that adds no entry. */
     public synchronized void nameStart(String runId) {
         startNamed.add(runId);
+        missing(runId, "starts/" + runId + ".json");
     }
 
     /** Forgets everything, as a ledger that was deleted and made again. */
@@ -145,6 +152,7 @@ public final class InMemoryLedger implements Ledger {
         endNamed.clear();
         manifests.clear();
         acks.clear();
+        changes.clear();
     }
 
     /** How many start entries the ledger holds. */

@@ -114,7 +114,7 @@ class LedgerCheckTest {
         ObjectNode manifest = JSON.createObjectNode().put("run_id", id).put("status", "FAILED");
         fx.ledger.forgeEnd(id, "COMPLETED", JSON.writeValueAsBytes(manifest));
         assertThat(services.ledgerReport().problems()).anySatisfy(problem ->
-                assertThat(problem.text()).contains("the end entry says FAILED", "its commit says COMPLETED"));
+                assertThat(problem.text()).contains(") says FAILED", "its commit says COMPLETED"));
 
         manifest.put("status", "COMPLETED");
         fx.ledger.forgeEnd(id, "COMPLETED", JSON.writeValueAsBytes(manifest));
@@ -196,8 +196,8 @@ class LedgerCheckTest {
         assertThat(flying.problems()).isEmpty();
         assertThat(flying.ok()).isTrue();
         assertThat(flying.inFlight()).extracting(LedgerReport.Named::runId, LedgerReport.Named::detail)
-                .containsExactlyInAnyOrder(tuple(starting, "its start entry is not written yet"),
-                        tuple(ending, "its end entry is not written yet"));
+                .containsExactlyInAnyOrder(tuple(starting, "its start entry is not written yet (run.started 0 s ago)"),
+                        tuple(ending, "its end entry is not written yet (run.finished 0 s ago)"));
 
         fx.run(starting).simulateWriterDied();
         fx.run(ending).simulateWriterDied();
@@ -206,6 +206,147 @@ class LedgerCheckTest {
         assertThat(dead.inFlight()).isEmpty();
         assertThat(codes(dead)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
                 tuple(ending, "no-end-entry"));
+    }
+
+    private static traceworks.core.port.Clock later(AppFixture fx, java.time.Duration by) {
+        java.time.Instant then = fx.clock.now().plus(by);
+        return () -> then;
+    }
+
+    /**
+     * Holding the lock of a run is not writing its entry: a process that keeps the lock (a sleep will do) keeps a
+     * run in flight only as long as an entry may take. Past that the missing entry fails the check, and says that a
+     * process holds the lock.
+     */
+    @Test
+    void aLockHeldPastTheBound_doesNotKeepARunInFlight() {
+        String starting = parked();
+        String ending = finished();
+        byte[] start = fx.ledger.findStart(ending).orElseThrow();
+        fx.ledger.startOver();
+        fx.ledger.replaceStart(ending, start);
+        fx.run(starting).simulateOtherWriter(true);
+        fx.run(ending).simulateOtherWriter(true);
+
+        LedgerReport soon = LedgerReport.of(fx.ledger, fx.store, later(fx, java.time.Duration.ofSeconds(90)));
+        assertThat(soon.ok()).isTrue();
+        assertThat(soon.inFlight()).extracting(LedgerReport.Named::detail).allSatisfy(detail ->
+                assertThat(detail).containsPattern("is not written yet \\(run\\.(started|finished) 9\\d s ago\\)"));
+
+        LedgerReport late = LedgerReport.of(fx.ledger, fx.store, later(fx, LedgerReport.IN_FLIGHT.plusSeconds(60)));
+        assertThat(late.inFlight()).isEmpty();
+        assertThat(codes(late)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
+                tuple(ending, "no-end-entry"));
+        assertThat(late.problems()).allSatisfy(problem -> assertThat(problem.text())
+                .contains("a process holds the lock of the run", "6 min old"));
+    }
+
+    /** The sentence of the one problem of {@code code} the check reports of the run. */
+    private String said(String id, String code) {
+        return services.ledgerReport().problems().stream()
+                .filter(problem -> problem.runId().equals(id) && problem.code().equals(code))
+                .map(LedgerReport.Problem::text).reduce((a, b) -> b).orElseThrow(() -> new AssertionError(
+                        "no " + code + " of " + id + " in " + services.ledgerReport().problems()));
+    }
+
+    private void record(String id, String... lines) {
+        if (fx.store.runIds().contains(id)) {
+            fx.store.forget(id);
+        }
+        try (var again = fx.store.create(id, fx.clock.now())) {
+            for (String line : lines) {
+                again.events().append(line.getBytes(StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    /**
+     * An acknowledgement covers a problem by its kind and its sentence, so the sentence of every kind must hold what
+     * tells one case from another: for each kind, the same run with other content says something else.
+     */
+    @Test
+    void theSentenceOfEveryKindOfProblem_changesWhenItsContentDoes() throws Exception {
+        java.util.Map<String, String[]> said = new java.util.LinkedHashMap<>();
+
+        // entry-invalid: an end entry that is no manifest, one with another status, a start entry that is none
+        String forged = parked();
+        fx.ledger.forgeEnd(forged, "COMPLETED", "anything".getBytes(StandardCharsets.UTF_8));
+        String first = said(forged, "entry-invalid");
+        fx.ledger.forgeEnd(forged, "COMPLETED", "something else".getBytes(StandardCharsets.UTF_8));
+        said.put("entry-invalid: no manifest", new String[] {first, said(forged, "entry-invalid")});
+        ObjectNode manifest = JSON.createObjectNode().put("run_id", forged).put("status", "FAILED");
+        fx.ledger.forgeEnd(forged, "COMPLETED", JSON.writeValueAsBytes(manifest));
+        first = said(forged, "entry-invalid");
+        fx.ledger.forgeEnd(forged, "COMPLETED", JSON.writeValueAsBytes(manifest.put("gate", "GREEN")));
+        said.put("entry-invalid: status", new String[] {first, said(forged, "entry-invalid")});
+        String line = EventChain.sha256Hex(fx.events(forged).getFirst().raw());
+        manifest.put("status", "COMPLETED").put("run_started", "0".repeat(64));
+        fx.ledger.forgeEnd(forged, "COMPLETED", JSON.writeValueAsBytes(manifest));
+        first = said(forged, "entry-invalid");
+        fx.ledger.forgeEnd(forged, "COMPLETED", JSON.writeValueAsBytes(manifest.put("gate", "RED")));
+        said.put("entry-invalid: start", new String[] {first, said(forged, "entry-invalid")});
+        assertThat(first).contains(line);
+        String noStart = parked();
+        fx.ledger.replaceStart(noStart, "garbage".getBytes(StandardCharsets.UTF_8));
+        first = said(noStart, "entry-invalid");
+        fx.ledger.replaceStart(noStart, "other garbage".getBytes(StandardCharsets.UTF_8));
+        said.put("entry-invalid: start entry", new String[] {first, said(noStart, "entry-invalid")});
+
+        // entry-changed: another commit
+        String changed = finished();
+        byte[] end = fx.run(changed).readManifest().orElseThrow();
+        fx.ledger.changeEnd(changed, end, "aaaaaaaaaaaa");
+        first = said(changed, "entry-changed");
+        fx.ledger.changeEnd(changed, end, "bbbbbbbbbbbb");
+        said.put("entry-changed", new String[] {first, said(changed, "entry-changed")});
+
+        // manifest-differs: another manifest in the folder
+        String differs = finished();
+        String text = new String(fx.run(differs).readManifest().orElseThrow(), StandardCharsets.UTF_8);
+        fx.run(differs).writeManifest(text.replace("COMPLETED", "FAILED").getBytes(StandardCharsets.UTF_8));
+        first = said(differs, "manifest-differs");
+        fx.run(differs).writeManifest(text.replace("COMPLETED", "CANCELLED").getBytes(StandardCharsets.UTF_8));
+        said.put("manifest-differs", new String[] {first, said(differs, "manifest-differs")});
+
+        // lost: the start entry names another first line
+        String lost = parked();
+        traceworks.core.record.StartEntry noted = traceworks.core.record.StartEntry.parse(
+                fx.ledger.findStart(lost).orElseThrow()).orElseThrow();
+        fx.store.forget(lost);
+        first = said(lost, "lost");
+        fx.ledger.replaceStart(lost, new traceworks.core.record.StartEntry(lost, noted.startedAt(), "f".repeat(64),
+                noted.workflowId(), noted.packageDigest(), null, noted.version()).toJson());
+        said.put("lost", new String[] {first, said(lost, "lost")});
+
+        // other-record and unreadable: another first line in the folder
+        String other = parked();
+        String started = new String(fx.events(other).getFirst().raw(), StandardCharsets.UTF_8);
+        record(other, started.replace("\"actor\":\"" + AppFixture.ACTOR + "\"", "\"actor\":\"someone\""));
+        first = said(other, "other-record");
+        record(other, started.replace("\"actor\":\"" + AppFixture.ACTOR + "\"", "\"actor\":\"someone else\""));
+        said.put("other-record", new String[] {first, said(other, "other-record")});
+        record(other, "no event");
+        first = said(other, "unreadable");
+        record(other, "no event either");
+        said.put("unreadable", new String[] {first, said(other, "unreadable")});
+
+        // no-start-entry and no-end-entry: another record in a folder the ledger does not know
+        String unknown = "11111111-2222-3333-4444-555555555555";
+        String its = started.replace(other, unknown);
+        String finish = new String(fx.events(changed).getLast().raw(), StandardCharsets.UTF_8).replace(changed, unknown);
+        record(unknown, its, finish);
+        String firstStart = said(unknown, "no-start-entry");
+        String firstEnd = said(unknown, "no-end-entry");
+        record(unknown, its.replace("\"actor\":\"" + AppFixture.ACTOR + "\"", "\"actor\":\"someone\""),
+                finish.replace("\"status\":\"COMPLETED\"", "\"status\":\"FAILED\""));
+        said.put("no-start-entry", new String[] {firstStart, said(unknown, "no-start-entry")});
+        said.put("no-end-entry", new String[] {firstEnd, said(unknown, "no-end-entry")});
+
+        assertThat(said.keySet().stream().map(kind -> kind.replaceFirst(":.*", "")).distinct())
+                .as("every kind of problem the check knows").containsExactlyInAnyOrder("entry-invalid",
+                        "entry-changed", "manifest-differs", "lost", "other-record", "unreadable", "no-start-entry",
+                        "no-end-entry");
+        said.forEach((kind, sentences) -> assertThat(sentences[1]).as(kind).isNotEqualTo(sentences[0]));
     }
 
     /** A folder that was just created and has no line yet, with its process alive: in flight too. */
@@ -312,7 +453,7 @@ class LedgerCheckTest {
 
         LedgerReport report = services.ledgerReport();
 
-        assertThat(codes(report)).containsExactly(tuple(id, "entry-removed"), tuple(id, "lost"));
+        assertThat(codes(report)).containsExactly(tuple(id, "entry-changed"), tuple(id, "lost"));
         assertThat(report.problems().getFirst().text()).contains("a later commit removed it, or the commit added none");
 
         LedgerReport after = services.acknowledge(id, "a commit made by hand while testing the ledger");
@@ -397,7 +538,8 @@ class LedgerCheckTest {
             assertThat(java.time.Instant.parse(run.at())).isNotNull();
             assertThat(run.note()).isEqualTo("deleted by hand on 2026-11-16, the disk was full");
             assertThat(run.problem()).isEqualTo("lost");
-            assertThat(run.said()).isEqualTo("started, never ended, and the folder is gone");
+            assertThat(run.said()).startsWith("started, never ended, and the folder is gone (the ledger noted"
+                    + " run.started ");
             assertThat(run.covers()).isTrue();
         });
         JsonNode held = JSON.readTree(fx.ledger.runs().runs().getFirst().acks());
