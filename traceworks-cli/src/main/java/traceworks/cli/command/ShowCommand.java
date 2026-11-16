@@ -226,6 +226,10 @@ public final class ShowCommand implements Command {
             if (call.model() != null) {
                 line.append("  model ").append(TerminalFormat.safe(call.model()));
             }
+            if (call.local() != null) {
+                // A call that went to a model server of the operator's, not to a provider
+                line.append("  ").append(TerminalFormat.safe(call.localSummary()));
+            }
             line.append("  tools ").append(TerminalFormat.safe(call.tools()));
             if (call.hasWeb()) {
                 line.append("  web ").append(TerminalFormat.safe(call.web()));

@@ -7,6 +7,7 @@ import traceworks.core.port.ContainerLimits;
 
 import traceworks.core.port.AiCli;
 import traceworks.core.port.AiNetwork;
+import traceworks.core.port.LocalModels;
 import traceworks.core.container.ImageCatalog;
 import traceworks.core.register.DecisionOnHigherSeverity;
 
@@ -59,6 +60,9 @@ import java.util.TreeSet;
  * @param allowedModels      the provider and model pairs that may run in this home ({@code allowed_models}); a run
  *                           with an AI step outside them is refused before it starts. By default
  *                           {@link AllowedModels#ANY}: no restriction. No workflow can set it
+ * @param localModels        the model servers of the operator's own ({@code local_models}): a {@code PI} step whose
+ *                           model names one of them runs against that server and reaches nothing else. By default
+ *                           {@link LocalModels#NONE}. No workflow can set it
  * @throws IllegalArgumentException for an output limit or a budget outside its range, a budget below twice the output
  *                                  limit, an AI CLI that does not exist, or an image reference that cannot name one
  */
@@ -66,7 +70,26 @@ public record OperatorSettings(boolean allowHostExecution, String actor, List<Pa
                                String containerRuntime, ContainerLimits containerLimits, int outputLimitMib,
                                Map<String, String> aiImages, int runOutputBudgetMib, List<String> secretNames,
                                Hooks hooks, AiNetwork aiNetwork, SealSettings seals,
-                               DecisionOnHigherSeverity decisionOnHigherSeverity, AllowedModels allowedModels) {
+                               DecisionOnHigherSeverity decisionOnHigherSeverity, AllowedModels allowedModels,
+                               LocalModels localModels) {
+
+    /** Settings without {@code local_models}: no model server of the operator's. */
+    public OperatorSettings(boolean allowHostExecution, String actor, List<Path> packagePath,
+                            String containerRuntime, ContainerLimits containerLimits, int outputLimitMib,
+                            Map<String, String> aiImages, int runOutputBudgetMib, List<String> secretNames,
+                            Hooks hooks, AiNetwork aiNetwork, SealSettings seals,
+                            DecisionOnHigherSeverity decisionOnHigherSeverity, AllowedModels allowedModels) {
+        this(allowHostExecution, actor, packagePath, containerRuntime, containerLimits, outputLimitMib, aiImages,
+                runOutputBudgetMib, secretNames, hooks, aiNetwork, seals, decisionOnHigherSeverity, allowedModels,
+                LocalModels.NONE);
+    }
+
+    /** These settings, with {@code local} as the model servers of the operator's. */
+    public OperatorSettings withLocalModels(LocalModels local) {
+        return new OperatorSettings(allowHostExecution, actor, packagePath, containerRuntime, containerLimits,
+                outputLimitMib, aiImages, runOutputBudgetMib, secretNames, hooks, aiNetwork, seals,
+                decisionOnHigherSeverity, allowedModels, local);
+    }
 
     /** Settings without {@code allowed_models}: every model may run. */
     public OperatorSettings(boolean allowHostExecution, String actor, List<Path> packagePath,
@@ -148,6 +171,7 @@ public record OperatorSettings(boolean allowHostExecution, String actor, List<Pa
         aiNetwork = aiNetwork == null ? AiNetwork.RESTRICTED : aiNetwork;
         seals = seals == null ? SealSettings.DEFAULTS : seals;
         allowedModels = allowedModels == null ? AllowedModels.ANY : allowedModels;
+        localModels = localModels == null ? LocalModels.NONE : localModels;
         decisionOnHigherSeverity = decisionOnHigherSeverity == null ? DecisionOnHigherSeverity.DEFAULT
                 : decisionOnHigherSeverity;
         if (decisionOnHigherSeverity.word() == null) {
@@ -169,14 +193,14 @@ public record OperatorSettings(boolean allowHostExecution, String actor, List<Pa
     public OperatorSettings withDecisionOnHigherSeverity(DecisionOnHigherSeverity decision) {
         return new OperatorSettings(allowHostExecution, actor, packagePath, containerRuntime, containerLimits,
                 outputLimitMib, aiImages, runOutputBudgetMib, secretNames, hooks, aiNetwork, seals, decision,
-                allowedModels);
+                allowedModels, localModels);
     }
 
     /** These settings, with {@code allowed} as the models that may run in this home. */
     public OperatorSettings withAllowedModels(AllowedModels allowed) {
         return new OperatorSettings(allowHostExecution, actor, packagePath, containerRuntime, containerLimits,
                 outputLimitMib, aiImages, runOutputBudgetMib, secretNames, hooks, aiNetwork, seals,
-                decisionOnHigherSeverity, allowed);
+                decisionOnHigherSeverity, allowed, localModels);
     }
 
     /** Without settings for seals: no run needs one, and seals can be removed. */
@@ -192,7 +216,7 @@ public record OperatorSettings(boolean allowHostExecution, String actor, List<Pa
     public OperatorSettings withSeals(SealSettings seals) {
         return new OperatorSettings(allowHostExecution, actor, packagePath, containerRuntime, containerLimits,
                 outputLimitMib, aiImages, runOutputBudgetMib, secretNames, hooks, aiNetwork, seals,
-                decisionOnHigherSeverity, allowedModels);
+                decisionOnHigherSeverity, allowedModels, localModels);
     }
 
     /** With the restricted AI network: an AI call reaches its provider's hosts only. */
@@ -208,7 +232,7 @@ public record OperatorSettings(boolean allowHostExecution, String actor, List<Pa
     public OperatorSettings withAiNetwork(AiNetwork aiNetwork) {
         return new OperatorSettings(allowHostExecution, actor, packagePath, containerRuntime, containerLimits,
                 outputLimitMib, aiImages, runOutputBudgetMib, secretNames, hooks, aiNetwork, seals,
-                decisionOnHigherSeverity, allowedModels);
+                decisionOnHigherSeverity, allowedModels, localModels);
     }
 
     /** Without hooks. */

@@ -156,7 +156,7 @@ final class RunViewBuilder {
                     step.aiCalls.add(new AiCallView(e.seq(), item(e), text(e.fields(), "provider"),
                             text(e.fields(), "model"), text(e.fields(), "effort"), text(e.fields(), "tools"),
                             text(e.fields(), "web"), webHosts(e.fields()),
-                            e.blob("prompt"), e.blob("system_prompt"), List.of(), null));
+                            e.blob("prompt"), e.blob("system_prompt"), List.of(), null, local(e.fields())));
                 }
             }
             case RecordTypes.AI_TOOL_CALL -> {
@@ -573,6 +573,13 @@ final class RunViewBuilder {
     }
 
     // ---- accumulators ----
+
+    /** The model server of the operator's an {@code ai.request} names; {@code null} for a call to the provider. */
+    private static AiCallView.Local local(JsonNode fields) {
+        JsonNode local = fields.path("local");
+        return local.isObject() ? new AiCallView.Local(text(local, "backend"), text(local, "url"),
+                text(local, "api")) : null;
+    }
 
     private static final class RunAcc {
         String aiNetwork;

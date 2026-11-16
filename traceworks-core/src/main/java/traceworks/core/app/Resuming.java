@@ -13,6 +13,7 @@ import traceworks.core.model.RunStatus;
 import traceworks.core.model.TriggerSource;
 import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.AiNetwork;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.Clock;
 import traceworks.core.port.ContainerRuntime;
 import traceworks.core.port.InboxRequest;
@@ -50,6 +51,8 @@ final class Resuming {
     private final int runOutputBudgetMib;
     private final Map<String, String> aiImages;
     private final AiNetwork aiNetwork;
+    /** The model servers of the operator's now ({@code local_models}), which {@code run.resumed} names. */
+    private final LocalModels localModels;
     private final StoredRunPackage storedPackage;
     private final Supplier<Optional<ContainerRuntime>> findRuntime;
     private final Checkouts checkouts;
@@ -78,7 +81,8 @@ final class Resuming {
      * @param seals          the seal check: a run whose package's seal does not hold does not go on
      */
     Resuming(Clock clock, String actor, boolean hostConsent, int outputLimitMib, int runOutputBudgetMib,
-             Map<String, String> aiImages, AiNetwork aiNetwork, StoredRunPackage storedPackage,
+             Map<String, String> aiImages, AiNetwork aiNetwork, LocalModels localModels,
+             StoredRunPackage storedPackage,
              Supplier<Optional<ContainerRuntime>> findRuntime, Checkouts checkouts, RunOutputs outputs,
              WorkflowEngine engine, RunPreparation preparation, ActiveRuns active, Cancelling cancelling,
              SealAdmission seals) {
@@ -90,6 +94,7 @@ final class Resuming {
         this.runOutputBudgetMib = runOutputBudgetMib;
         this.aiImages = Map.copyOf(aiImages);
         this.aiNetwork = aiNetwork;
+        this.localModels = localModels == null ? LocalModels.NONE : localModels;
         this.storedPackage = storedPackage;
         this.findRuntime = findRuntime;
         this.checkouts = checkouts;
@@ -212,6 +217,10 @@ final class Resuming {
                 resumed.put("ai_images", new TreeMap<>(aiImages));
                 resumed.put("ai_network", aiNetwork.mode());
                 resumed.put("ai_hosts", aiNetwork.hosts());
+                if (!localModels.isEmpty()) {
+                    // Only for a home that declares a model server: every other run.resumed keeps its fields
+                    resumed.put("local_models", traceworks.core.record.RunRecorder.localModels(localModels));
+                }
                 if (restored != null) {
                     resumed.put("workspace_cloned", restored.cloned());
                 }

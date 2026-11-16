@@ -170,6 +170,26 @@ class ContainerArgumentsTest {
                 "--label", "traceworks.run=r1", "traceworks-r1-out");
     }
 
+    /** A model server of the operator's that speaks http: the proxy gets it marked, so it forwards plain HTTP to it. */
+    @Test
+    void proxy_marksAPlainTarget_andNoOther() {
+        ContainerRun run = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, null, List.of("call"), "/workspace",
+                STANDARD, DIRECTORIES, Egress.server("llm.internal:8080", true), Map.of(), null, 60,
+                ContainerLimits.DEFAULTS, EGRESS_ID);
+        ContainerRun tls = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, null, List.of("call"), "/workspace",
+                STANDARD, DIRECTORIES, Egress.server("llm.example.org:443", false), Map.of(), null, 60,
+                ContainerLimits.DEFAULTS, EGRESS_ID);
+
+        List<String> plain = ContainerArguments.proxy(Client.DOCKER, run, USER);
+        List<String> tunnelled = ContainerArguments.proxy(Client.DOCKER, tls, USER);
+
+        assertThat(plain.getLast()).isEqualTo("http://llm.internal:8080");
+        assertThat(tunnelled.getLast()).isEqualTo("llm.example.org:443");
+        assertThat(plain.subList(0, plain.size() - 1)).isEqualTo(tunnelled.subList(0, tunnelled.size() - 1));
+        assertThat(ContainerArguments.proxy(Client.DOCKER, listedHosts(Map.of()), USER))
+                .as("the hosts of a provider are never marked").noneMatch(argument -> argument.startsWith("http://"));
+    }
+
     @Test
     void proxy_refusesAnImageThatIsNoLocalImageId() {
         ContainerRun run = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, null, List.of(), "/workspace",

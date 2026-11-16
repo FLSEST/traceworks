@@ -89,6 +89,41 @@ class CliAiProviderTest {
         assertThat(requestWith(new AiNetwork(true, Map.of())).network()).isEqualTo(Egress.OPEN);
     }
 
+    /**
+     * A step of a workflow the start check never saw (a child named by a placeholder): the provider holds no
+     * credential at all. A call to a model server of the operator's without a secret runs all the same, since it
+     * needs none; what the step itself still holds is the closed list of the server's models and the server as its
+     * only host. A server with a secret has no value in such a run, and its call is refused.
+     */
+    @Test
+    void aLocalCallTheStartCheckNeverSaw_runsWithoutASecret_andStillHoldsTheModelListAndTheOneHost() throws IOException {
+        traceworks.core.port.LocalModels local = new traceworks.core.port.LocalModels(Map.of(
+                "llm", new traceworks.core.port.LocalModels.Backend("llm", "http://llm.internal:8080/v1",
+                        traceworks.core.port.LocalModels.OPENAI_COMPLETIONS, List.of("qwen"), null),
+                "keyed", new traceworks.core.port.LocalModels.Backend("keyed", "http://keyed.internal/v1",
+                        traceworks.core.port.LocalModels.OPENAI_COMPLETIONS, List.of("qwen"), "LLM_KEY")));
+        cli.localModels(local).answers("fine");
+        CliAiProvider unseen = new CliAiProvider(cli, runner, TAG, Map.of(), new AiNetwork(true, Map.of()));
+
+        ActionResult result = unseen.executeAction(new ActionRequest("p", "llm/qwen", null, "/work", 90, null,
+                ToolPolicy.NONE, false, null));
+
+        assertThat(result.text()).isEqualTo("fine");
+        assertThat(requests).hasSize(1);
+        assertThat(requests.getFirst().network()).isEqualTo(Egress.server("llm.internal:8080", true));
+        assertThat(requests.getFirst().environment()).containsOnlyKeys("FAKE_CLI");
+        assertThatThrownBy(() -> unseen.executeAction(new ActionRequest("p", "llm/llama3", null, "/work", 90, null,
+                ToolPolicy.NONE, false, null))).isInstanceOf(IOException.class)
+                .hasMessageContaining("The local backend llm does not serve the model llama3");
+        assertThatThrownBy(() -> unseen.executeAction(new ActionRequest("p", "keyed/qwen", null, "/work", 90, null,
+                ToolPolicy.NONE, false, null))).isInstanceOf(IOException.class)
+                .hasMessageContaining("The local backend keyed needs the secret LLM_KEY");
+        assertThatThrownBy(() -> unseen.executeAction(new ActionRequest("p", "opus", null, "/work", 90, null,
+                ToolPolicy.NONE, false, null))).as("a call to the provider is refused as before")
+                .isInstanceOf(IOException.class).hasMessageContaining("has no credential in this run");
+        assertThat(requests).as("none of the three refused calls ran").hasSize(1);
+    }
+
     /** A backend without a built-in host, and none from the operator: the call cannot reach anything, so it fails. */
     @Test
     void aCallWithoutAnyHost_failsBeforeAnythingRuns_andSaysWhatToSet() {

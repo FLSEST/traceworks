@@ -657,6 +657,18 @@ class CliContainerRuntimeTest {
     }
 
     /**
+     * A version that is no number counts as one that cannot (a Docker built from source reports {@code dev}): the
+     * option an older daemon refuses is not sent on a guess.
+     */
+    @Test
+    void run_withListedHosts_onADockerWhoseVersionIsNoNumber_createsThePlainInternalNetwork() throws IOException {
+        runtime(client("docker", proxied("dev", "READY\\n"))).run(listedHosts());
+
+        assertThat(calls().get(1)).containsExactly("network", "create", "--internal", "--label", LABEL,
+                "traceworks-r1-net");
+    }
+
+    /**
      * The operator's output limit is for what a step prints. The proxy's log is the record of where the container
      * went: a small limit must not cut the connections off it.
      */

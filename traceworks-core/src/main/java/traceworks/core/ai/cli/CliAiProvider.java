@@ -12,8 +12,10 @@ import traceworks.core.port.CommandRunner;
 import traceworks.core.port.CommandRunner.CommandRequest;
 import traceworks.core.port.CommandRunner.CommandResult;
 import traceworks.core.port.Egress;
+import traceworks.core.port.LocalModels;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +43,12 @@ import java.util.Objects;
  * backend in its place. A call with no host at all (a CLI that names none for it, and none from the operator) is
  * refused too, since it could reach nothing: a guard for a CLI to come, which neither built-in CLI reaches, since
  * Claude always names its host and Pi refuses a backend it knows no host of for its credentials first.
+ *
+ * <p>A call to a model server of the operator's ({@link AiCli#local}, {@link LocalModels}) is different in three
+ * ways: it needs no credential of the provider and gets none, only the server's secret when it has one; its
+ * container reaches that one server and nothing else, through the proxy, also when the operator opened the AI
+ * network, and neither the provider's hosts nor {@code ai_hosts} are on its list; and a model the server does not
+ * list is refused before anything runs.
  * A call that ran out of time failed, whatever its CLI made of the output it had so far, and so did a call whose
  * stream went beyond the runner's output limit ({@link CommandResult#truncationNote()}): its CLI read only the first
  * part of the stream, so neither its answer nor its error about a missing end is the call's outcome. Of such a stream
@@ -125,8 +133,21 @@ public final class CliAiProvider implements AiProvider {
         return outcome.failed() && outcome.exitCode() == 0 ? 1 : outcome.exitCode();
     }
 
+    /** The model server of the operator's a call with {@code model} goes to, as the CLI tells it. */
+    @Override
+    public Optional<LocalModels.Use> local(String model) {
+        return cli.local(new AiCall(AiCall.Kind.ACTION, "", null, model, null, null, null, 1));
+    }
+
     private AiOutcome run(AiCall call, String workingDirectory, boolean writableWorkspace) throws IOException {
-        if (credentials.isEmpty()) {
+        Optional<LocalModels.Use> local = cli.local(call);
+        if (local.isPresent()) {
+            String problem = local.get().problem();
+            if (problem != null) {
+                throw new IOException(problem);
+            }
+        }
+        if (credentials.isEmpty() && local.isEmpty()) {
             throw new IOException("AI provider " + cli.id() + " has no credential in this run: the start check did"
                     + " not see the workflow of this step, so it read none of "
                     + String.join(", ", AiCli.credentialNamesOf(cli.id())) + "; name the workflow by a literal"
@@ -137,7 +158,8 @@ public final class CliAiProvider implements AiProvider {
                     + call.web().value() + " cannot run on it; remove web, or run the step on a provider that has"
                     + " one");
         }
-        Map<String, String> environment = new LinkedHashMap<>(credentialsOf(call));
+        Map<String, String> environment = new LinkedHashMap<>(local.isPresent() ? secretOf(local.get())
+                : credentialsOf(call));
         AiInvocation invocation;
         try {
             invocation = cli.invocation(call);
@@ -149,7 +171,11 @@ public final class CliAiProvider implements AiProvider {
         // a step that may fetch pages reaches its web_hosts too; the star stays one of the hosts, for the proxy
         hosts.addAll(call.web().hosts());
         // No built-in CLI gets here without a host (see the class comment); the allowlist is never empty
-        Egress egress = network.egress(cli.id(), hosts).orElseThrow(() -> new IOException("AI provider "
+        // A call to a model server of the operator's reaches that server and nothing else, whatever ai_network and
+        // ai_hosts say: neither the provider's hosts nor the operator's other hosts are on its list
+        Egress egress = local.isPresent()
+                ? Egress.server(local.get().backend().host(), local.get().backend().plainHttp())
+                : network.egress(cli.id(), hosts).orElseThrow(() -> new IOException("AI provider "
                 + cli.id() + " knows no host for a call with the model " + call.model() + ", so its container could"
                 + " reach nothing; name the host of its API in ai_hosts." + cli.id().toLowerCase(Locale.ROOT)
                 + " of traceworks.json (host:port), or set ai_network to \"" + AiNetwork.OPEN_MODE + "\""));
@@ -211,6 +237,28 @@ public final class CliAiProvider implements AiProvider {
                     + " an environment variable of Traceworks");
         }
         return ofCall;
+    }
+
+    /**
+     * What the container of a call to a model server of the operator's gets: the server's secret, when it has one,
+     * and no credential of the provider. The value is the one the start check read under the secret's name.
+     *
+     * @throws IOException when the server has a secret and this run holds no value for it
+     */
+    private Map<String, String> secretOf(LocalModels.Use local) throws IOException {
+        String name = local.backend().secret();
+        if (name == null) {
+            return Map.of();
+        }
+        String value = credentials.get(name);
+        if (value == null) {
+            throw new IOException("The local backend " + local.backend().id() + " needs the secret " + name
+                    + " (" + LocalModels.SETTING + "." + local.backend().id() + ".secret in traceworks.json), and this"
+                    + " run holds no value for it: the start check did not see the workflow of this step; store it"
+                    + " with 'traceworks credentials set " + name + "' and name the workflow by a literal"
+                    + " workflow_id");
+        }
+        return Map.of(name, value);
     }
 
     /**

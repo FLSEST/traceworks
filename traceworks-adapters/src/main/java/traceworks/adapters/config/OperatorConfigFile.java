@@ -7,6 +7,7 @@ import traceworks.core.engine.AllowedModels;
 import traceworks.core.app.OperatorSettings;
 import traceworks.core.app.SealSettings;
 import traceworks.core.port.AiNetwork;
+import traceworks.core.port.LocalModels;
 import traceworks.core.register.DecisionOnHigherSeverity;
 import traceworks.core.port.Egress;
 import traceworks.core.engine.SecretNames;
@@ -40,7 +41,9 @@ import java.util.TreeMap;
  * relative one is relative to the home), and {@code decision_on_higher_severity} ({@code "reopen"}, the default: a
  * finding a person accepted or dismissed is open again when a report states it with a severity above the one the
  * decision was made on; or {@code "keep"}), and {@code allowed_models} (a list of {@code {provider, model}}: the
- * models that may run in this home; missing or null is no restriction). The keys {@code runs_dir}, {@code ledger_dir} and {@code registers_dir}
+ * models that may run in this home; missing or null is no restriction), and {@code local_models} (an object of
+ * backend id to {@code {url, api, models, secret}}: the model servers of the operator's own that a {@code PI} step
+ * may name; missing or null is none). The keys {@code runs_dir}, {@code ledger_dir} and {@code registers_dir}
  * are read by {@link HomeLayout}. An unknown key or a value of the wrong type is an error that names the key.
  */
 public final class OperatorConfigFile {
@@ -48,7 +51,7 @@ public final class OperatorConfigFile {
     static final String FILE = "traceworks.json";
     private static final Set<String> KEYS = Set.of("allow_host_execution", "actor", "package_path", "secret_names", "hooks",
             "container_runtime", "container_limits", "output_limit_mib", "run_output_budget_mib", "ai_images", "ai_network",
-            "ai_hosts", "allowed_models", "decision_on_higher_severity", "require_seal", "seal_immutable", "signing_key", "allowed_signers", HomeLayout.RUNS_KEY,
+            "ai_hosts", "allowed_models", LocalModels.SETTING, "decision_on_higher_severity", "require_seal", "seal_immutable", "signing_key", "allowed_signers", HomeLayout.RUNS_KEY,
             HomeLayout.LEDGER_KEY, HomeLayout.REGISTERS_KEY);
     private static final Set<String> LIMIT_KEYS = Set.of("memory", "pids", "cpus");
     private static final Set<String> RUNTIMES = Set.of("podman", "docker");
@@ -149,9 +152,64 @@ public final class OperatorConfigFile {
         if (root.has(AllowedModels.SETTING) && !root.get(AllowedModels.SETTING).isNull()) {
             allowedModels = allowedModels(file, root.get(AllowedModels.SETTING));
         }
+        LocalModels localModels = LocalModels.NONE;
+        if (root.has(LocalModels.SETTING) && !root.get(LocalModels.SETTING).isNull()) {
+            localModels = localModels(file, root.get(LocalModels.SETTING));
+        }
         return new OperatorSettings(allowHost, actor, packagePath, runtime, limits, outputLimit, aiImages, budget,
                 secretNames, hooks, new AiNetwork(openAiNetwork, aiHosts), seals(home, file, root), higherSeverity,
-                allowedModels);
+                allowedModels, localModels);
+    }
+
+    private static final Set<String> LOCAL_MODEL_KEYS = Set.of("url", "api", "models", "secret");
+
+    /**
+     * {@code local_models}: the model servers of the operator's own, an object of backend id to
+     * {@code {url, api, models, secret}}: the base URL of the server's API, the API it speaks
+     * ({@value LocalModels#OPENAI_COMPLETIONS}), the model names a step may ask for, and optionally the name of the
+     * secret that holds the server's key. Everything is checked here, so a wrong entry refuses every command that
+     * reads the file and never a step in the middle of a run.
+     */
+    private static LocalModels localModels(Path file, JsonNode value) {
+        String shape = "an object of backend id to {url, api, models, secret}";
+        if (!value.isObject()) throw wrongType(file, LocalModels.SETTING, shape);
+        Map<String, LocalModels.Backend> backends = new java.util.TreeMap<>();
+        for (Map.Entry<String, JsonNode> entry : value.properties()) {
+            String id = entry.getKey();
+            String key = LocalModels.SETTING + "." + id;
+            JsonNode node = entry.getValue();
+            if (!node.isObject()) throw wrongType(file, key, "an object {url, api, models, secret}");
+            for (Map.Entry<String, JsonNode> field : node.properties()) {
+                if (!LOCAL_MODEL_KEYS.contains(field.getKey())) {
+                    throw new IllegalArgumentException("Unknown key '" + field.getKey() + "' in '" + key + "' of "
+                            + file + "; known keys are url, api, models and secret");
+                }
+            }
+            if (!node.path("url").isTextual()) throw wrongType(file, key + ".url", "a string, such as"
+                    + " \"http://llm.internal:8080/v1\"");
+            if (!node.path("api").isTextual()) throw wrongType(file, key + ".api", "a string, one of "
+                    + String.join(", ", LocalModels.APIS));
+            if (!node.path("models").isArray()) throw wrongType(file, key + ".models", "a list of model names");
+            List<String> models = new ArrayList<>();
+            for (JsonNode model : node.get("models")) {
+                if (!model.isTextual()) throw wrongType(file, key + ".models", "a list of model names, each a string");
+                models.add(model.textValue());
+            }
+            String secret = null;
+            if (node.has("secret") && !node.get("secret").isNull()) {
+                if (!node.get("secret").isTextual()) throw wrongType(file, key + ".secret", "the name of a secret, a"
+                        + " string, or null");
+                secret = node.get("secret").textValue();
+            }
+            try {
+                backends.put(id, new LocalModels.Backend(id, node.get("url").textValue(),
+                        node.get("api").textValue(), models, secret));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("'" + LocalModels.SETTING + "' in " + file + ": "
+                        + e.getMessage(), e);
+            }
+        }
+        return new LocalModels(backends);
     }
 
     /**

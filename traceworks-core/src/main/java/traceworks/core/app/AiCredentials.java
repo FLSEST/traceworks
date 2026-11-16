@@ -3,6 +3,7 @@ package traceworks.core.app;
 import traceworks.core.ai.ToolPolicy;
 import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.AiCli;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.WorkflowResolver;
 import traceworks.core.record.Redactor;
 
@@ -26,6 +27,10 @@ import java.util.TreeSet;
  * run picked of a model choice; a placeholder in a model refuses the workflow. A value follows the rules of a secret's ({@link Redactor#problem}), since the record redacts it. The
  * values are read only for a run that uses a provider, so a credential nobody uses never refuses a run. No refusal
  * shows a value.
+ *
+ * <p>A model that names a model server of the operator's ({@link LocalModels}, {@link AiCli#local}) needs no
+ * credential of the provider: when every model the definition tells is such a model, none is asked for and none is
+ * read. It needs the server's secret, when the server has one, and a model its server does not list refuses the run.
  *
  * <p>A provider without a configured CLI is not checked here: its steps fail when they run, naming the configured
  * providers.
@@ -83,24 +88,36 @@ final class AiCredentials {
         List<String> refusals = new ArrayList<>();
         Map<String, Map<String, String>> credentials = new LinkedHashMap<>();
         for (AiCli cli : used) {
+            Set<String> ofCli = models.getOrDefault(cli.id().toLowerCase(Locale.ROOT), Set.of());
+            Map<String, String> found = new TreeMap<>();
+            // The models that go to the provider; a model of a server of the operator's needs no credential of it
+            Set<String> ofProvider = new java.util.LinkedHashSet<>();
+            boolean local = localSecrets(cli, ofCli, ofProvider, source, found, refusals);
+            if (local && ofProvider.isEmpty()) {
+                // Every model the definition tells runs on a server of the operator's: no provider credential is
+                // asked for, and none is read
+                secretProblems(cli, found, refusals);
+                credentials.put(cli.id(), found);
+                continue;
+            }
             List<String> names = AiCli.credentialNamesOf(cli.id());
             if (names.isEmpty()) {
                 refusals.add("AI provider " + cli.id() + " has no credential names in Traceworks (it knows those of "
                         + String.join(", ", new TreeSet<>(AiCli.CREDENTIALS.keySet())) + "), so its CLI can get none");
                 continue;
             }
-            Map<String, String> found = new TreeMap<>();
+            Map<String, String> ofTheProvider = new TreeMap<>();
             for (String name : names) {
-                source.value(name).ifPresent(value -> found.put(name, value));
+                source.value(name).ifPresent(value -> ofTheProvider.put(name, value));
             }
-            if (found.isEmpty()) {
+            if (ofTheProvider.isEmpty()) {
                 refusals.add("AI provider " + cli.id() + " has no credential: " + source.whereToPut(false)
                         + ", under one of the names "
                         + String.join(", ", names) + subscriptionHint(cli.id()));
                 continue;
             }
-            missingForAModel(cli, found.keySet(), models.getOrDefault(cli.id().toLowerCase(Locale.ROOT), Set.of()),
-                    source, refusals);
+            missingForAModel(cli, ofTheProvider.keySet(), ofProvider, source, refusals);
+            found.putAll(ofTheProvider);
             found.forEach((name, value) -> {
                 Redactor.ValueProblem problem = Redactor.problem(value);
                 if (problem != null) {
@@ -118,11 +135,66 @@ final class AiCredentials {
     }
 
     /**
+     * Sorts the models of a CLI's steps into those of a model server of the operator's ({@link AiCli#local}) and
+     * those of the provider, and reads the secret of each server a model names. A model its server does not list
+     * and a secret without a value each refuse the run, here, before its first step.
+     *
+     * @param models     the literal models of the CLI's steps; {@code null} among them for a step without one
+     * @param ofProvider gets the models that go to the provider
+     * @param found      gets the secrets of the servers, by name
+     * @return whether a model goes to a server of the operator's
+     */
+    private static boolean localSecrets(AiCli cli, Set<String> models, Set<String> ofProvider, SecretValues source,
+                                        Map<String, String> found, List<String> refusals) {
+        boolean any = false;
+        for (String model : models) {
+            LocalModels.Use use = cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null,
+                    ToolPolicy.NONE, null, 1)).orElse(null);
+            if (use == null) {
+                ofProvider.add(model);
+                continue;
+            }
+            any = true;
+            if (use.problem() != null) {
+                refusals.add(use.problem());
+                continue;
+            }
+            String secret = use.backend().secret();
+            if (secret == null || found.containsKey(secret)) {
+                continue;
+            }
+            String value = source.value(secret).orElse(null);
+            if (value == null) {
+                String missing = "The local backend " + use.backend().id() + " needs the secret " + secret + " ("
+                        + LocalModels.SETTING + "." + use.backend().id() + ".secret in traceworks.json), which has"
+                        + " no value: " + source.whereToPut(false) + ", under the name " + secret;
+                if (!refusals.contains(missing)) {
+                    refusals.add(missing);
+                }
+            } else {
+                found.put(secret, value);
+            }
+        }
+        return any;
+    }
+
+    /** A refusal for each value the record could not redact ({@link Redactor#problem}). */
+    private static void secretProblems(AiCli cli, Map<String, String> found, List<String> refusals) {
+        found.forEach((name, value) -> {
+            Redactor.ValueProblem problem = Redactor.problem(value);
+            if (problem != null) {
+                refusals.add("the secret " + name + " of a local backend of AI provider " + cli.id()
+                        + " has a value " + problem.what() + " — " + problem.why());
+            }
+        });
+    }
+
+    /**
      * A refusal for each model the provider's steps name as a literal ({@code null}: a step without a model) whose
      * call would get none of the credentials that have a value: a CLI of several backends hands a call only the
      * credential of its model's backend ({@link AiCli#credentialNames}), so the step would fail when it runs, after
-     * the steps before it. A model the CLI cannot tell the backend of is not judged here: {@code check} reports it
-     * ({@code unknown-model-backend}), and its call is refused at the step.
+     * the steps before it. A model the CLI cannot tell the backend of refuses the run too, with the CLI's
+     * message, as {@code check} reports it ({@code unknown-model-backend}).
      */
     private static void missingForAModel(AiCli cli, Set<String> withValue, Set<String> models, SecretValues source,
                                          List<String> refusals) {
@@ -133,6 +205,11 @@ final class AiCredentials {
             try {
                 names = cli.credentialNames(call);
             } catch (IllegalArgumentException e) {
+                // A backend that is neither a provider's nor a declared server of the operator's: the call could
+                // not run, so the run does not start
+                if (!refusals.contains(e.getMessage())) {
+                    refusals.add(e.getMessage());
+                }
                 continue;
             }
             if (names.stream().anyMatch(withValue::contains)) {
