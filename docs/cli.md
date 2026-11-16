@@ -515,7 +515,7 @@ the record. It is checked for a run in any state, also one that is running, park
 | `start     none: the run was recorded by a version that noted no start in the ledger (Traceworks 0.1.0)` | `run.started` has no `ledger_start`: a run of an earlier version, which has no entry | 0 |
 | `start     missing: run.started says the ledger noted the start of this run, and the ledger holds no start entry of it` | the entry was taken out of the ledger; the ledger was deleted or replaced, or another `ledger_dir` was in force when the run started; the process was killed between `run.started` and the commit of the entry (a power cut at that moment: the honest cause); or the run ended because its start could not be noted. A `resume` writes the entry before it goes on, or completes a run that ended | 8 |
 | `start     mismatch: the ledger noted the start of run ... with the run.started line ..., and the first line of this record is ...` | the record is not the one that started under this id, or its first line was changed | 8 |
-| `ledger    changed: commit 4f1d2c3b4a59 ("tidy") changed runs/<run-id>.json, which commit ... added: ...` | a commit other than the one that added an entry of this run changed or removed it, or the entry came in under another message: it is not the entry of this run any more, whatever it holds now (printed on the `ledger` line, for the start entry too) | 8 |
+| `ledger    changed: runs/<run-id>.json is not what commit 4f1d2c3b4a59 ("run ... COMPLETED sha256:...") left: that names the SHA-256 ..., and the ledger holds ...` | an entry of this run is not what the commit that names it left: a later commit changed or removed it, a second commit names it, or no commit does. It is not the entry of this run any more, whatever it holds now (printed on the `ledger` line, for the start entry too) | 8 |
 | `start     NOT checked: ...` | the ledger exists and cannot be read, or holds something that makes git show another history than its commits (a replace ref, a shallow or grafts file, a second branch; docs/events.md, "What the ledger shows, and what it does not") | 8 |
 | `start     not checked` | a copied run folder: this home's ledger does not speak for it | 0 |
 
@@ -561,22 +561,23 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 - **earlier version, not ended, not in the ledger** lists the run folders of a version that noted no start whose
   run has not ended: the ledger never knew them. The first line counts all folders of an earlier version.
 - **in flight** appears for a run whose process is alive and has not written an entry yet: `its start entry is not
-  written yet` (it may wait for the ledger's lock), `its end entry is not written yet`, `its record has no line
-  yet`. No failure. The same record without a live process is a problem.
+  written yet (run.started 12 s ago)` (it may wait for the ledger's lock), `its end entry is not written yet
+  (run.finished 3 s ago)`, `its record has no line yet`. No failure, for five minutes after that line: then the
+  missing entry is a problem that says `a process holds the lock of the run, and that line is 6 min old`. The same
+  record without a live process is a problem at once.
 - **acknowledged** lists every problem someone acknowledged, for good, with what the check said, who, when and the
   note. `[no longer what the check finds]` marks one the check no longer says in those words.
 - **problems** is what fails the check, one line per problem, every problem of a run:
 
 | Problem | What it means |
 |---|---|
-| `started, never ended, and the folder is gone` | the case the start entry is for |
+| `started, never ended, and the folder is gone (the ledger noted run.started ...)` | the case the start entry is for |
 | `... holds no record that can be read` | a run folder, known to the ledger or not, without a record that starts with its `run.started` |
 | `the record in the folder is not the one the ledger saw start` | another first line than the start entry names |
 | `the record says the ledger noted the start (<status>), and the ledger holds no start entry of the run` | the ledger was deleted or replaced, another `ledger_dir` was in force, the entry was removed, or the process was killed between `run.started` and the commit |
 | `the record ended <STATUS>, and the ledger holds no end entry of the run` | as `ledger    missing` of `traceworks verify <run>`; `resume` writes it |
-| `commit <id> ("<message>") changed (removed, added again) starts/<run-id>.json, which commit <id> added` | an ordinary later commit touched an entry, which Traceworks never does; also `... added <path> under another message`, and `... took lines out of acks/<run-id>.jsonl` |
-| `the manifest in the run folder is not the end entry of the ledger` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
-| `a commit says the run started (or ended), and the ledger holds no ... entry of it` | a later commit removed the entry, or a commit made by hand named the run and added nothing. An end entry that is not valid does not end the run: a run without a folder is then `started, never ended, and the folder is gone` as well |
+| `starts/<run-id>.json is not what commit <id> ("<message>") left: that names the SHA-256 ..., and the ledger holds ...` | an ordinary later commit changed an entry, which Traceworks never does; also `commit <id> names <path>, and the ledger does not hold it`, `2 commits name <path>`, `no commit names <path>`, and `commit <id> names <path> without a SHA-256, after a commit that named one` |
+| `the manifest in the run folder (SHA-256 ...) is not the end entry of the ledger (SHA-256 ...)` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
 - The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
@@ -589,8 +590,9 @@ ledger. `<run>` is the run id or a prefix of at least four characters that one r
 required; a run the check does not report cannot be acknowledged, and there is no way to acknowledge several runs
 at once. The ledger gets one commit for it (docs/events.md, "Acknowledging a run") that names every problem the
 check reports of the run at that moment, the command prints the check again, and from then on those problems are
-listed under `acknowledged` and do not fail the check. The acknowledgement covers them as the check worded them: a
-problem that comes later, also one of the same kind with another content, fails the check again.
+listed under `acknowledged` and do not fail the check. The acknowledgement covers them as the check worded them, and
+every sentence holds what tells its case from another (a SHA-256, a commit, a line of the record): a problem that
+comes later, also one of the same kind with another content, fails the check again.
 
 What the check cannot find is said in docs/events.md, "What the ledger shows, and what it does not".
 

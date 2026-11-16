@@ -877,6 +877,7 @@ one per write of a register:
 ledger/starts/<run-id>.json   the start entry: the run began, and with which first line
 ledger/runs/<run-id>.json     a byte-identical copy of the manifest
 ledger/acks/<run-id>.jsonl    the acknowledgements of a run: one line per acknowledgement
+ledger/pins/<sha256>.txt      a pin: the SHA-256 and the path of every entry that had no hash in its message
 ledger/registers/<key>.jsonl  the anchors of a register: one line {"seq":N,"head":"<sha256>"} per write
 ```
 
@@ -886,9 +887,10 @@ repository cannot be created. If the manifest or the ledger entry still cannot b
 
 The commit message is `run <run-id> STARTED` for a start, `run <run-id> <STATUS>` for an end (`COMPLETED`,
 `COMPLETED_WITH_ERRORS`, `FAILED`, `CANCELLED`), `run <run-id> ACKNOWLEDGED` for an acknowledgement, or
-`register <key> seq <N>` for an anchor. The message of a start and of an end has a second paragraph,
-`sha256 <hex>`: the SHA-256 of the entry the commit adds. Author and committer are
-`Traceworks <traceworks@localhost.invalid>`.
+`register <key> seq <N>` for an anchor. Every such message ends with ` sha256:<hex>`,
+the SHA-256 of the file after the commit (`run 3f2a91c4-… STARTED sha256:9ec5…`): it is what the file is judged by
+later. A pin has the message `ledger PINNED sha256:<hex>` ("Entries from before the hash" below). The ledger holds
+regular files at these paths and nothing else.
 
 ### The start entry
 
@@ -948,21 +950,24 @@ follows is what that gives, in three groups.
 
 - a run that started, never ended, and whose folder is gone, is empty, or holds another record than the one that
   started (the start entry names the first line);
-- **an entry that is not what its own commit added.** A start entry and an end entry are added once, by the commit
-  whose message names them, and never touched again. The message holds the SHA-256 of the entry, so the check
-  compares what the ledger holds now with what the one commit that names the entry said it added: a later commit
-  that changes, removes or adds an entry again, a second commit under the same message, and an entry that came in
-  under another message is a problem of that run, named with the commit and the path
-  (`commit 4f1d2c3b4a59 ("tidy") changed runs/<run-id>.json, which commit ... added`). This reads the messages and
-  the entries once and no old tree, so it grows with the ledger and not with its square; only for a path that does
-  not compare are the commits that touched it looked up. An entry of a version whose messages held no hash is
-  judged by the commits that touched its path instead (a walk up to the last such commit, and since then the same
-  object or a problem).
-  `traceworks verify <run>` says the same on its `ledger` line. So a new manifest committed over the end entry, after
-  the record was rewritten to match it, is found although no history was rewritten. The acknowledgements of a run
-  and the anchors of a register are only added to: a commit that takes a line out of them, removes them or touches
-  them under another message is found the same way (for the anchors, the whole check fails). A merge commit fails
-  the check, since a merge can carry a change that no commit of its own shows;
+- **an entry that is not what its own commit left.** A start entry and an end entry are added once, by the commit
+  whose message names them and their SHA-256, and never touched again; the acknowledgements of a run and the
+  anchors of a register are added to, and each commit names the SHA-256 of the whole file after it. The check
+  compares what the ledger holds now with that hash: of the one commit that names an entry, or of the newest that
+  names a file that is added to. A later commit that changes or removes a file, a second commit under the message
+  of an entry, a file no commit names, and a commit that names a file without a hash after one named it with a
+  hash, is a problem of that run, with the commit, the path and both hashes
+  (`runs/<run-id>.json is not what commit 4f1d2c3b4a59 ("run ... COMPLETED sha256:...") left: that names the SHA-256
+  ..., and the ledger holds ...`); for the anchors and the pins, the whole check fails. So a new manifest committed
+  over the end entry, after the record was rewritten to match it, is found although no history was rewritten;
+  `traceworks verify <run>` says the same on its `ledger` line. Nothing here walks old trees or reads a message
+  body: the subjects are read as records that end with a NUL, which no message can hold, and only a record that is,
+  as a whole, a commit id and one of the subjects above names anything. The commit that did the change is not
+  named; `git log -- <path>` in the ledger shows it. A merge commit fails the check;
+- **something in the ledger that is no entry.** One listing of what HEAD holds is the only source, and content is
+  read by the object id it gives, never by a path. A path listed twice (a tree can be made to hold a name twice),
+  a link, an executable file, a submodule or a file at any other path fails the check, and every other reader, by
+  name;
 - a commit that names a run without adding its entry: the runs are taken from the messages of the commits, which a
   later commit cannot take back;
 - an end entry added by hand that is no manifest of the run, does not have the status its commit says, or does
@@ -970,9 +975,10 @@ follows is what that gives, in three groups.
   not ended; and a manifest in the run folder that is not the end entry byte for byte;
 - a run folder whose record says the ledger noted its start, without a start entry: a ledger that was deleted and
   made again, another `ledger_dir` that was in force for the run, a process killed between `run.started` and the
-  commit; and a finished run without its end entry. A run whose process is alive is not among them: between
-  `run.started` and its start entry (it may wait for the lock) and between `run.finished` and its end entry it is
-  listed as in flight, and that is no failure;
+  commit; and a finished run without its end entry. A run whose process is alive is in flight for five minutes
+  after `run.started` without its start entry (it may wait for the lock), and for five minutes after `run.finished`
+  without its end entry: listed with the age of that line, and no failure. Past that the missing entry is a problem
+  although a process holds the run's lock, since holding a lock is not writing an entry;
 - a ledger that git would show otherwise than its commits hold it. The ledger is read with replace objects off, and
   the check fails on replace refs, `.git/info/grafts`, `.git/shallow`, `.git/objects/info/alternates`, a `.git`
   that is a file or a link or has a `commondir`, a HEAD that names no branch, a second branch, a merge commit, a
@@ -996,6 +1002,11 @@ push and has no setting for a remote. It writes the ledger without git hooks, so
 the push is the operator's, by a cron entry, a timer or CI that runs `git push` in the ledger folder.
 
 **What nothing in this version finds:**
+
+- **What was done to an entry before it was pinned.** An entry of a version whose messages named no hash is as
+  trustworthy as the ledger was at the moment of its pin ("Entries from before the hash").
+- **A run folder without a line whose lock a process holds.** It is listed as in flight for as long as the lock is
+  held: it has no record, so it claims nothing, and there is no line whose age could be told.
 
 - **A forged entry made with write access to the ledger.** The ledger is not signed. Whoever can commit to it can
   add, as a new entry under the right message, an end entry that is a well-formed manifest and names the right
@@ -1022,12 +1033,29 @@ line of the push (`git -c <key>=... push`), or push from a clone.
 | Allowed | Why it cannot change what the history reads as |
 |---|---|
 | `core.repositoryformatversion`, `core.filemode`, `core.bare`, `core.logallrefupdates`, `core.ignorecase`, `core.precomposeunicode`, `core.symlinks`, `extensions.objectformat` | what `git init` writes: the format of the repository and what the file system can do |
-| `remote.*`, `branch.*`, `push.*`, `fetch.*`, `pull.*`, `url.*`, `http.*`, `credential.*`, `core.sshCommand` | where and how a push or a fetch connects, and as whom. Traceworks never fetches or pulls; a pull an operator makes that rewinds or merges the history is found by the check |
+| `remote.*`, `branch.*`, `push.*`, `fetch.*`, `pull.*`, `url.*`, `http.*`, `credential.*`, `core.sshCommand` | where and how a push or a fetch connects, and as whom. Traceworks never fetches or pulls; a pull an operator makes that rewinds or merges the history is found by the check. Refused among them: `remote.<name>.promisor` and `remote.<name>.partialclonefilter`, which let git fetch a missing object by itself (Traceworks also sets `GIT_NO_LAZY_FETCH`, which an older git may not know) |
 | `user.*` | the identity of commits made by hand; Traceworks sets its own for every commit |
-| `gc.*`, `maintenance.*` | when git packs or prunes objects: how they are stored, not what they are |
+| `gc.*`, `maintenance.*` | the housekeeping of git calls the operator makes. Traceworks runs every call of its own with `gc.auto=0` and `maintenance.auto=false`, so none of these (`gc.recentObjectsHook`, which names a command, among them) takes effect in a call Traceworks makes; the ledger is packed only when the operator runs `git gc` |
 
 A ledger whose `.git` is not a plain directory of its own (a `.git` file, a link, a `commondir`) is refused the same
-way, for writing too: the commits would go to another repository.
+way, for writing too: the commits would go to another repository. So is one with an attributes file
+(`.gitattributes`, `.git/info/attributes`), which could make git store other bytes than it is given. Traceworks
+reads no attributes and no configuration of the user (`HOME` and `XDG_CONFIG_HOME` name no directory for its git
+calls), and after every commit it compares the object git stored with the bytes it gave; a difference fails the
+write.
+
+### Entries from before the hash
+
+A version before this one wrote `run <run-id> <STATUS>` and `register <key> seq <N>` without a hash. Such entries
+are pinned once: before a run starts, when the ledger holds an entry no hash covers, Traceworks commits
+`ledger PINNED sha256:<hex>` with the file `pins/<hex>.txt`, one line `<sha256>  <path>` per such entry as the
+ledger holds it then. It needs no command of its own, because a pin decides nothing: it says what the ledger
+holds. From then on these entries are judged by the pinned hash, like every other. The pin file is named by its own
+SHA-256, so a changed pin fails the check; the oldest pin that lists a path counts, and a pin does not cover a path
+a hash already covers; and once a hash covers a path, a commit that names it without one is a problem, so a version
+that writes no hashes must not write to a ledger this version has pinned. Until the first run of this version such
+entries are not judged at all, and **what was done to them before the pin cannot be found: they are as trustworthy
+as the ledger was at the moment of the pin.**
 
 ### Acknowledging a run
 
@@ -1036,15 +1064,16 @@ although nothing was hidden. `traceworks verify --acknowledge <run> --note "..."
 record: one commit `run <run-id> ACKNOWLEDGED` adds a line to `acks/<run-id>.jsonl`:
 
 ```json
-{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"operator@box","note":"deleted by hand, the disk was full","problems":[{"problem":"lost","said":"started, never ended, and the folder is gone"}]}
+{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"operator@box","note":"deleted by hand, the disk was full","problems":[{"problem":"lost","said":"started, never ended, and the folder is gone (the ledger noted run.started b7a1…)"}]}
 ```
 
 `actor` and `at` are who acknowledged and when, as a decision in a register records them; `note` is required;
 `problems` holds every problem the check reported of the run at that moment, each with its kind and its sentence.
 Only a run the check reports can be acknowledged, one run per call. The acknowledgement covers exactly those
 problems, by what was said: the check lists them under `acknowledged` with the note, for good, and does not fail
-for them. A problem of the run that comes later, or the same kind with another content (another commit that touched
-the entry, say), is open again. The line is not signed, like everything in the ledger.
+for them. Every sentence holds what tells its case from another of its kind (the SHA-256 of the entry or of the
+manifest, the commit, the line of the record), so a problem of the run that comes later, also one of the same kind
+with another content, is open again. The line is not signed, like everything in the ledger.
 
 The ledger is written with an empty git configuration, no hooks and no signing, so the operator's git setup does
 not change it. Writers take `ledger.lock` (beside the ledger, or in the ledger folder when `ledger_dir` places it;

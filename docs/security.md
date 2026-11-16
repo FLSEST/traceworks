@@ -237,13 +237,15 @@ and no step runs without it, at a start and at a resume (docs/events.md, "The st
 three groups:
 
 - **What the check finds on this machine** (`traceworks verify` without a run, exit 8): a run that started, never
-  ended, and whose folder is gone, empty or holds another record; an entry that is not what its own commit added,
-  because a later, ordinary commit changed it, removed it or added it again, named with the commit and the path
-  (so a rewritten record with a new manifest committed over the end entry is found, also by `verify <run>`); a
+  ended, and whose folder is gone, empty or holds another record; an entry that is not what the commit that names
+  it left, by the SHA-256 in that commit's message, because a later, ordinary commit changed or removed it (so a
+  rewritten record with a new manifest committed over the end entry is found, also by `verify <run>`); anything in
+  the ledger that is no regular file at the path of an entry, and a path a tree lists twice; a
   commit that names a run without its entry; an end entry added by hand that is no manifest of the run or does not
   agree with its commit and its start entry, and a manifest in the run folder that is not the end entry; a run
   folder whose record says its start was noted and that has no start entry (a ledger deleted and made again,
-  another `ledger_dir`, a kill between `run.started` and the commit), unless its process is alive; and a ledger
+  another `ledger_dir`, a kill between `run.started` and the commit), unless its process is alive and that line
+  is younger than five minutes; and a ledger
   with replace refs, a shallow or grafts file, alternates, a `.git` that is not a plain directory, a second
   branch, a merge, a detached HEAD, a commit HEAD does not reach, or a setting of its own that is not allowed
   there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). An honest
@@ -257,7 +259,8 @@ three groups:
   by itself, has no setting for a remote and writes the ledger without git hooks, so the push is the operator's: a
   cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are not pushed yet are only as
   safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
-- **What nothing in this version finds:** a forged entry made with write access to the ledger (the ledger is not
+- **What nothing in this version finds:** what was done to an entry of an earlier version before this version
+  pinned it (docs/events.md, "Entries from before the hash"); a forged entry made with write access to the ledger (the ledger is not
   signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
   or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
   started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
