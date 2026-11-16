@@ -6,7 +6,7 @@ writes everything that happened to a run folder, and exits.
 The key features, each explained on one page with drawings: [features.html](features.html). Open it in a browser;
 it loads nothing from the network. The register, round by round: [audit-loop.html](audit-loop.html).
 
-## The system and what it talks to
+## System context: the system and what it talks to
 
 ![Traceworks is one process on the operator's machine. Around it on the machine: the package, the workspace, the home, git and ssh-keygen, and Docker or Podman. Outside the machine: a model provider, reached only through the proxy, an image registry, and by the operator's choice a remote for the ledger and the target of a hook.](context.svg)
 
