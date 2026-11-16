@@ -211,6 +211,30 @@ class HostCommandRunnerTest {
         }
     }
 
+    /**
+     * The lines that set the values use no syntax that depends on the shell's mode: under {@code bash --posix} they
+     * set the variable, byte for byte and unexported, and a name bash does not keep fails the delivery with its
+     * marker there too.
+     */
+    @Test
+    void theLinesThatSetTheValues_workInPosixMode(@TempDir Path dir) throws Exception {
+        String value = "it's $(not run)\n\n";
+        CommandRequest request = shell("printf '%s' \"$VALUE\"; env | grep -c '^VALUE=' || true", null, 30)
+                .withValues(Map.of("VALUE", value));
+        Path script = Files.writeString(dir.resolve("script"), request.script());
+        Path unkept = Files.writeString(dir.resolve("unkept"),
+                shell("echo ran", null, 30).withValues(Map.of("_", "x")).script());
+
+        CommandResult set = run("bash --posix '" + script + "'", 30);
+        CommandResult failed = run("bash --posix '" + unkept + "'", 30);
+
+        assertThat(set.exitCode()).as(set.stdout()).isZero();
+        assertThat(set.stdout()).isEqualTo(value + "0\n");
+        assertThat(failed.exitCode()).as(failed.stdout()).isEqualTo(74);
+        assertThat(failed.stdout() + failed.stderr()).doesNotContain("ran")
+                .contains(ShellVariables.failureMarker(Map.of("_", "x")) + " the value of _ was not delivered");
+    }
+
     /** A readonly variable cannot take the value: the delivery fails closed, before the command's first line. */
     @Test
     void run_aReadonlyName_failsTheDelivery(@TempDir Path dir) {

@@ -336,7 +336,7 @@ content, and no blob is written through one.
 
     ```
     case "${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}" in [012].*|3.0) echo "traceworks:3f0c9a…: this bash is older than 3.1, which a step with values needs" >&2; exit 74;; esac
-    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" ]] && IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A < <(declare -p "$1") && [[ $TRACEWORKS_A == "declare -- $1=" ]] || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
+    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" ]] && { trap '' PIPE; declare -p "$1" 2>/dev/null; :; } | { IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A; [[ $TRACEWORKS_A == "declare -- $1=" ]]; } || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
     TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
     unset -f TRACEWORKS_VALUE
     printf '%s\n' "$REVIEW" > review.md
@@ -354,8 +354,8 @@ content, and no blob is written through one.
     condition of a `while` fail their block on it, and none of them reads it as "false".
   - **Not exported, unless the command exports it.** A value is the shell's own variable. The name is unset before
     the assignment, which takes it out of the environment the step started with, the export attribute is taken off
-    after it, and a variable that still has any attribute fails the delivery (`declare -p` must begin with
-    `declare -- NAME=`); so no process the command starts
+    after it, and a variable that still has any attribute fails the delivery (`declare -p`, read through a plain pipe, must
+    begin with `declare -- NAME=`); so no process the command starts
     inherits the value. The author exports it knowingly with `export NAME`. A name that a program reads as its
     configuration (`GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`) then hands a model's text to that
     program, which may run what it says: `check` warns about such a name (`value-name-configures-program`). A name
@@ -374,7 +374,8 @@ content, and no blob is written through one.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
-    part that does not work in some bash fails the delivery and never skips a check. Run and tested with bash 5.2;
+    part that does not work in some bash fails the delivery and never skips a check; they use no syntax that depends on the shell's mode, so they read the same in POSIX mode.
+    Run and tested with bash 5.2, also as `bash --posix`;
     the built-in images have that.
   - **An output is protected when a value that went into its block was.** Every template a block fills in, for
     any purpose (a prompt, a question, a default value, an automatic answer, `values`, a `context` entry, a switch

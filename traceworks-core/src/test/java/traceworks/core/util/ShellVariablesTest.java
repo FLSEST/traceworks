@@ -38,8 +38,9 @@ class ShellVariablesTest {
                         + " && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v \"$1\""
                         + " && printf -v \"$1\" '%s' \"$TRACEWORKS_V\" && export -n \"$1\""
                         + " && [[ ${!1} == \"$TRACEWORKS_V\" ]]"
-                        + " && IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A < <(declare -p \"$1\")"
-                        + " && [[ $TRACEWORKS_A == \"declare -- $1=\" ]]"
+                        + " && { trap '' PIPE; declare -p \"$1\" 2>/dev/null; :; }"
+                        + " | { IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A;"
+                        + " [[ $TRACEWORKS_A == \"declare -- $1=\" ]]; }"
                         + " || { echo \"" + marker + " the value of $1 was not delivered\" >&2; exit 74; }; }\n"
                         + "TRACEWORKS_VALUE REVIEW 15 'it\\x27s\\x20\\x24\\x28not\\x20run\\x29'\n"
                         + "TRACEWORKS_VALUE EMPTY 0 ''\n"
@@ -104,6 +105,8 @@ class ShellVariablesTest {
                 + " echo \"traceworks:[0-9a-f]{32}: this bash is older than 3\\.1, which a step with values needs\""
                 + " >&2; exit 74;; esac");
         assertThat(first).doesNotContain("[[").doesNotContain("((").doesNotContain("@").doesNotContain("$'");
+        assertThat(ShellVariables.preamble(Map.of("V", "x"))).as("no process substitution, which POSIX mode refuses")
+                .doesNotContain("<(").doesNotContain(">(");
     }
 
     /** A NUL is taken out before the value is encoded, so the length sent is the length that can arrive. */
