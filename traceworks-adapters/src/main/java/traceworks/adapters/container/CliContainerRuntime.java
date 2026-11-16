@@ -521,7 +521,8 @@ public final class CliContainerRuntime implements ContainerRuntime {
         }
         String[][] named = {{"the workspace", run.directories().workspace()},
                 {"the package", run.directories().packageDirectory()},
-                {"the scratch directory", run.directories().scratch()}};
+                {"the scratch directory", run.directories().scratch()},
+                {"the register folder", run.directories().register()}};
         for (String[] directory : named) {
             if (directory[1] == null || directory[1].isBlank()) {
                 continue;

@@ -186,19 +186,25 @@ public interface ContainerRuntime {
 
     /**
      * The host directories of a run that every one of its containers mounts: the workspace, the package and the run's
-     * scratch directory, each {@code null} (or blank) when the run has none. The container policy decides where and how
+     * scratch directory, each {@code null} (or blank) when the run has none; and the register folder of an audit
+     * run ({@code register}), which every container but that of an AI call mounts, read-only. The container policy decides where and how
      * they are mounted; the runtime knows them so that it can tell them from a step's own mounts, and checks those
      * against them (a writable mount inside the workspace or the package is refused).
      */
-    record RunDirectories(String workspace, String packageDirectory, String scratch) {
+    record RunDirectories(String workspace, String packageDirectory, String scratch, String register) {
 
-        /** A run without any of the three. */
+        /** A run without any of them. */
         public static final RunDirectories NONE = new RunDirectories(null, null, null);
 
-        /** The directories the run has, in the order they are mounted: workspace, package, scratch. */
+        /** The directories of a container that does not get the register folder. */
+        public RunDirectories(String workspace, String packageDirectory, String scratch) {
+            this(workspace, packageDirectory, scratch, null);
+        }
+
+        /** The directories the run has, in the order they are mounted: workspace, package, scratch, register. */
         public List<String> present() {
-            List<String> present = new ArrayList<>(3);
-            for (String directory : new String[] {workspace, packageDirectory, scratch}) {
+            List<String> present = new ArrayList<>(4);
+            for (String directory : new String[] {workspace, packageDirectory, scratch, register}) {
                 if (directory != null && !directory.isBlank()) present.add(directory);
             }
             return List.copyOf(present);

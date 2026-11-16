@@ -101,14 +101,42 @@ class RunPathsTest {
     /** In a host run a declared mount must not cover any of the run's directories, each at its own host path. */
     @Test
     void standardMountPoints_areTheFixedPathsInAContainerRun_andEachDirectorysHostPathInAHostRun() {
-        assertThat(fixed.standardMountPoints()).containsExactly("/workspace", "/package", "/scratch");
+        assertThat(fixed.standardMountPoints()).containsExactly("/workspace", "/package", "/scratch", "/register");
         assertThat(host.standardMountPoints())
                 .containsExactly("/home/a/project", "/home/a/project/pkg", "/th/runs/r/scratch");
+        assertThat(new RunPaths("/w", "/p", "/s", "/th/runs/r/register/", false).standardMountPoints())
+                .as("the register folder of an audit run too").containsExactly("/w", "/p", "/s", "/th/runs/r/register");
         assertThat(new RunPaths("/w/", null, "/s/", false).standardMountPoints())
                 .as("without a trailing slash, and only the directories the run has").containsExactly("/w", "/s");
         assertThat(new RunPaths(null, null, null, true).standardMountPoints())
                 .as("a container run has the fixed paths whether it has the directory or not")
-                .containsExactly("/workspace", "/package", "/scratch");
+                .containsExactly("/workspace", "/package", "/scratch", "/register");
+    }
+
+    /**
+     * The register folder of an audit run is the run's fourth directory: read-only, after the scratch directory and
+     * before the package's second mount, which is not one of the run's directories.
+     */
+    @Test
+    void theRegisterFolder_isMountedReadOnly_afterTheScratch_forWhoeverGetsIt() {
+        RunPaths audit = new RunPaths("/home/a/project", "/home/a/project/pkg", "/th/runs/r/scratch",
+                "/th/runs/r/register", true);
+
+        assertThat(audit.standardMounts(true, true)).containsExactly(
+                new Mount("/home/a/project", "/workspace", false),
+                new Mount("/home/a/project/pkg", "/package", true),
+                new Mount("/th/runs/r/scratch", "/scratch", false),
+                new Mount("/th/runs/r/register", "/register", true),
+                new Mount("/home/a/project/pkg", "/workspace/pkg", true));
+        assertThat(audit.standardMounts(false, false)).as("an AI call goes without it")
+                .isEqualTo(audit.standardMounts(false)).hasSize(3);
+        assertThat(audit.registerInContainer()).isEqualTo("/register");
+        assertThat(audit.containerPathOf("/th/runs/r/register/findings.jsonl")).isEqualTo("/register/findings.jsonl");
+        assertThat(new RunPaths("/p", "/p", "/s", "/r", false).standardMounts(false, true))
+                .as("a host run: at its host path, after a workspace that is the package and is mounted once")
+                .containsExactly(new Mount("/p", "/p", true), new Mount("/s", "/s", false), new Mount("/r", "/r", true));
+        assertThat(fixed.standardMounts(false, true)).as("a run without the folder").hasSize(3);
+        assertThat(fixed.registerInContainer()).isNull();
     }
 
     @Test

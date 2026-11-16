@@ -108,12 +108,16 @@ public interface CommandRunner {
      * @param stdin             what the command reads on its standard input; {@code null} for nothing (closed)
      * @param writableWorkspace whether a container may write the workspace ({@code workspace_writable: true}); by
      *                          default it sees it read-only
+     * @param noRegisterFolder  whether the container goes without the register folder of an audit run, which every
+     *                          other container of such a run mounts read-only: an AI call, whose model reads of the
+     *                          register only what a step put into its prompt
      * @throws IllegalArgumentException if the request has both a command and entrypoint arguments, neither, or
      *                                  entrypoint arguments without an image
      */
     record CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                           Map<String, String> environment, String image, List<Mount> mounts, Egress network,
-                          List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
+                          List<String> entrypointArgs, String stdin, boolean writableWorkspace,
+                          boolean noRegisterFolder) {
         public CommandRequest {
             network = network == null ? Egress.NONE : network;
             environment = environment == null ? Map.of() : Map.copyOf(environment);
@@ -130,6 +134,14 @@ public interface CommandRunner {
             } else if (command == null) {
                 throw new IllegalArgumentException("A request needs a command or entrypoint arguments");
             }
+        }
+
+        /** A request that gets the register folder of an audit run, as every request but an AI call does. */
+        public CommandRequest(String command, String workingDirectory, int timeoutSeconds,
+                              Map<String, String> environment, String image, List<Mount> mounts, Egress network,
+                              List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
+            this(command, workingDirectory, timeoutSeconds, environment, image, mounts, network, entrypointArgs,
+                    stdin, writableWorkspace, false);
         }
 
         /** A request with the network on ({@link Egress#OPEN}) or off ({@link Egress#NONE}). */
@@ -168,7 +180,13 @@ public interface CommandRunner {
         /** This request, with {@code network} as where its container can connect. */
         public CommandRequest withNetwork(Egress network) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder);
+        }
+
+        /** This request, without the register folder of an audit run among its mounts. */
+        public CommandRequest withoutRegisterFolder() {
+            return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
+                    entrypointArgs, stdin, writableWorkspace, true);
         }
 
         /** Whether this request runs the image's entrypoint (tool mode) instead of a shell command. */
@@ -179,13 +197,13 @@ public interface CommandRunner {
         /** This request, with {@code stdin} on its standard input; {@code null} closes it. */
         public CommandRequest withStdin(String stdin) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder);
         }
 
         /** This request, with the workspace writable or read-only. */
         public CommandRequest withWritableWorkspace(boolean writable) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writable);
+                    entrypointArgs, stdin, writable, noRegisterFolder);
         }
 
         /** The request with the names of its environment variables, never their values (a secret's among them). */
@@ -195,7 +213,7 @@ public interface CommandRunner {
                     + ", timeoutSeconds=" + timeoutSeconds + ", environment=" + new TreeSet<>(environment.keySet())
                     + ", image=" + image + ", mounts=" + mounts + ", network=" + network + ", entrypointArgs="
                     + entrypointArgs + ", stdin=" + (stdin == null ? null : stdin.length() + " characters")
-                    + ", writableWorkspace=" + writableWorkspace + "]";
+                    + ", writableWorkspace=" + writableWorkspace + ", noRegisterFolder=" + noRegisterFolder + "]";
         }
     }
 
@@ -218,7 +236,8 @@ public interface CommandRunner {
      *                         the host
      * @param imageId          the local ID of the image the container starts from; {@code null} on the host and for an
      *                         image that is not present
-     * @param mounts           every mount the container gets, the standard ones (workspace, package, scratch) first
+     * @param mounts           every mount the container gets, the standard ones (workspace, package, scratch, and
+     *                         the register folder of an audit run) first
      * @param network          where the container can connect; absent is {@link Egress#NONE}
      * @param environmentNames the names of the environment variables the command gets, sorted; never their values
      * @param host             whether the command runs on the host

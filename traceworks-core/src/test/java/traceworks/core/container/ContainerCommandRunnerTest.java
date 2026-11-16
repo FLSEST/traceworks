@@ -504,6 +504,98 @@ class ContainerCommandRunnerTest {
                 .as("in a host run too").isNull();
     }
 
+    // ---- the register folder of an audit run ----
+
+    private static final RunPaths AUDIT_PATHS = new RunPaths("/w", "/p", "/s", "/r", true);
+    private static final RunPaths AUDIT_HOST_PATHS = new RunPaths("/w", "/p", "/s", "/r", false);
+    private static final Mount REGISTER = new Mount("/r", "/register", true);
+
+    private ContainerCommandRunner auditRun(RunPaths paths, java.util.function.Supplier<String> problem) {
+        return new ContainerCommandRunner(runtime, paths.fixedContainerPaths() ? null : host, paths, IMAGES,
+                ContainerLimits.DEFAULTS, "run-1", problem);
+    }
+
+    /** The register folder of an audit run is one of the run's directories: after the scratch, and only to read. */
+    @Test
+    void anAuditRun_mountsItsRegisterFolder_readOnly_afterTheScratch() {
+        ContainerCommandRunner runner = auditRun(AUDIT_PATHS, () -> null);
+        Mount data = new Mount("/data", "/data", true);
+
+        CommandPlan plan = runner.plan(shell("cat /register/findings.jsonl", null, List.of(data)));
+        plan.execution().get();
+
+        assertThat(plan.facts().mounts()).containsExactly(FIXED.get(0), FIXED.get(1), FIXED.get(2), REGISTER, data);
+        ContainerRun run = runtime.runs().getFirst();
+        assertThat(run.directories()).isEqualTo(new RunDirectories("/w", "/p", "/s", "/r"));
+        assertThat(run.declaredMounts()).as("the folder is the run's own, not a mount the step declared")
+                .containsExactly(data);
+    }
+
+    /** What a model reads of the register is what a step puts into its prompt: its container has no such mount. */
+    @Test
+    void aRequestWithoutTheRegisterFolder_anAiCall_doesNotGetIt() {
+        ContainerCommandRunner runner = auditRun(AUDIT_PATHS, () -> "never asked");
+
+        CommandPlan plan = runner.plan(CommandRequest.entrypoint(ALPINE, List.of("-p"), "/w", 60, Map.of(), List.of(),
+                false).withoutRegisterFolder());
+        plan.execution().get();
+
+        assertThat(plan.facts().mounts()).containsExactlyElementsOf(FIXED);
+        assertThat(runtime.runs().getFirst().directories()).isEqualTo(new RunDirectories("/w", "/p", "/s"));
+    }
+
+    @Test
+    void aDeclaredMountOnTheRegisterFolder_isRefused_likeOneOnAnyOfTheRunsMounts() {
+        CommandPlan plan = auditRun(AUDIT_PATHS, () -> null)
+                .plan(shell("x", ALPINE, List.of(new Mount("/mine", "/register/findings.jsonl", false))));
+
+        assertThat(plan.execution().get().stderr()).contains("lies on the run's mount at /register");
+        assertThat(runtime.runs()).isEmpty();
+    }
+
+    /** In a host run a container step sees the folder at its host path, read-only, as it sees the package. */
+    @Test
+    void hostRun_aContainerStep_mountsTheRegisterFolderAtItsHostPath() {
+        CommandPlan plan = auditRun(AUDIT_HOST_PATHS, () -> null).plan(shell("x", ALPINE, List.of()));
+
+        assertThat(plan.facts().mounts()).containsExactly(new Mount("/w", "/w", true), new Mount("/p", "/p", true),
+                new Mount("/s", "/s", false), new Mount("/r", "/r", true));
+    }
+
+    /**
+     * A command on the host could write the folder, whatever its permissions say. So a host run compares the files
+     * with what the run recorded before every command that gets the folder, and starts none once they differ.
+     */
+    @Test
+    void hostRun_aRegisterFolderThatChanged_refusesEveryCommandThatWouldGetIt() {
+        java.util.concurrent.atomic.AtomicReference<String> problem = new java.util.concurrent.atomic.AtomicReference<>();
+        ContainerCommandRunner runner = auditRun(AUDIT_HOST_PATHS, problem::get);
+
+        assertThat(runner.run(new CommandRequest("ls", "/w", 10, null, null, null, false)).stdout())
+                .isEqualTo("on the host");
+        problem.set("findings.jsonl of the run's register folder is not the file the run started with");
+        CommandPlan onTheHost = runner.plan(new CommandRequest("ls", "/w", 10, null, null, null, false));
+        CommandPlan inAContainer = runner.plan(shell("x", ALPINE, List.of()));
+
+        assertThat(onTheHost.facts().host()).isTrue();
+        assertThat(onTheHost.execution().get()).isEqualTo(CommandResult.notRun(125,
+                "findings.jsonl of the run's register folder is not the file the run started with",
+                CommandRunner.OUTPUT_LIMIT_BYTES));
+        assertThat(inAContainer.execution().get().didNotRun()).isTrue();
+        assertThat(host.requests()).as("only the command before the change ran").hasSize(1);
+        assertThat(runtime.runs()).isEmpty();
+    }
+
+    /** A container run's steps cannot write the folder: its mount is read-only, and no host command runs. */
+    @Test
+    void containerRun_doesNotAskForTheFolder() {
+        ContainerCommandRunner runner = auditRun(AUDIT_PATHS, () -> {
+            throw new AssertionError("a container run does not compare the files");
+        });
+
+        assertThat(runner.plan(shell("x", ALPINE, List.of())).execution().get().exitCode()).isZero();
+    }
+
     /** A host run that found no runtime runs its host commands, and refuses what needs a container. */
     @Test
     void withoutRuntime_aContainerCommandIsRefused_andAHostCommandRunsOnTheHost() {
