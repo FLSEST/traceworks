@@ -340,13 +340,14 @@ public interface CommandRunner {
     }
 
     /**
-     * The reading of a command's output that ended at its bound, not at the end of the stream: after the command
-     * ended, something it left behind still held the output, and what that wrote afterwards was not kept. The output
-     * may be incomplete. A mark: it fails nothing.
+     * The reading of a command's output that ended before the end of the stream: at its bound, because after the
+     * command ended something it left behind still held the output, or at once, because the wait for the command was
+     * interrupted. What was written afterwards was not kept. The output may be incomplete. A mark: it fails nothing.
      *
-     * @param streams the streams whose reading ended at the bound, {@value CommandResult#STDOUT} before
+     * @param streams the streams whose reading ended so, {@value CommandResult#STDOUT} before
      *                {@value CommandResult#STDERR}; never empty, a read-only copy
-     * @param afterMs how long the runner waited for the end of the output after the command ended: the bound
+     * @param afterMs how long the runner waited for the end of the output after the command ended: the bound; 0 for
+     *                an interrupted wait
      */
     record OutputCut(List<String> streams, long afterMs) {
 

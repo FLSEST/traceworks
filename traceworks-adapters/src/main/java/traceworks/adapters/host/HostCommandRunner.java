@@ -27,9 +27,10 @@ import java.util.concurrent.TimeUnit;
  *       {@value CommandRunner#OUTPUT_LIMIT_EXIT_CODE}, the first bytes up to the limit as stdout, {@code stdout} in
  *       {@link CommandResult#truncatedStreams()} and the limit in {@link CommandResult#outputLimitBytes()}.
  *       After the command ended, the output is read for a bound ({@value #AFTER_END_MILLIS} ms, or
- *       {@value #AFTER_STOP_MILLIS} ms after the runner stopped it) for what a process it left behind still writes;
- *       a reading that ends at that bound is marked in the result ({@link CommandResult#outputCut()}) and fails
- *       nothing.</li>
+ *       {@value #AFTER_STOP_MILLIS} ms after the runner stopped it or a cancel ended it) for what a process it left
+ *       behind still writes; a reading that ends at that bound is marked in the result
+ *       ({@link CommandResult#outputCut()}) and fails nothing. An interrupted wait ends the reading at once, and
+ *       is marked the same way, after 0 ms.</li>
  *   <li><b>Environment:</b> only the operator's own variables of the inherited environment
  *       ({@link ChildProcessEnv#operatorEnvironment}), then the request's {@code environment}. Everything else the
  *       JVM was started with, such as API keys, tokens and cloud credentials, stays out; {@link ChildProcessEnv}
@@ -62,7 +63,7 @@ public final class HostCommandRunner implements CommandRunner {
     private static final long POLL_MILLIS = 200;
     /** How long the output is read after a command ended by itself, for what a process it left behind still writes. */
     static final long AFTER_END_MILLIS = 5000;
-    /** The same after the runner stopped the command: on a timeout or an output beyond the limit. */
+    /** The same after the command was stopped: on a timeout, an output beyond the limit or a cancel. */
     static final long AFTER_STOP_MILLIS = 2000;
 
     private final Map<String, String> inheritedEnvironment;
@@ -127,6 +128,7 @@ public final class HostCommandRunner implements CommandRunner {
         ProcessTracking.Tracker tracker = ProcessTracking.current();
         Process process = null;
         ProcessTracking.StopHandle stop = null;
+        BoundedOutput output = new BoundedOutput(outputLimit);
         try {
             // In a session of its own: Ctrl-C in the terminal must not reach the command (it pauses the run)
             ProcessBuilder pb = ChildProcessEnv.builder(
@@ -146,7 +148,6 @@ public final class HostCommandRunner implements CommandRunner {
             // Read the output on a thread of its own, so a full pipe never blocks the process. The reading starts
             // before bash gets its script: bash cannot end before the reader holds the stream, and so the output is
             // read to the end of the pipe, also what a child of the command writes after the command ended
-            BoundedOutput output = new BoundedOutput(outputLimit);
             output.drain(process.getInputStream(), "host-command-output");
             BashScript.supply(process, BashScript.stdin(command));
 
@@ -163,6 +164,9 @@ public final class HostCommandRunner implements CommandRunner {
             if (process.isAlive()) {
                 ProcessTree.terminate(process);
                 process.waitFor(ProcessTree.GRACE.toSeconds() + 2, TimeUnit.SECONDS);
+                bound = AFTER_STOP_MILLIS;
+            } else if (tracker.cancelled()) {
+                // The cancel ended it, not the command itself
                 bound = AFTER_STOP_MILLIS;
             }
             // A process the command left behind may still write: its output counts for this long, then the
@@ -182,7 +186,10 @@ public final class HostCommandRunner implements CommandRunner {
             return process == null ? failed.asNotRun("the process could not start: " + e.getMessage()) : failed;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return result(INTERRUPTED_EXIT_CODE, "Command interrupted", start, false, List.of());
+            CommandResult interrupted = result(INTERRUPTED_EXIT_CODE, "Command interrupted", start, false, List.of());
+            // The reading ends here, before the end of the output: the result says so
+            return output.endNow() ? interrupted.withOutputCut(new OutputCut(List.of(CommandResult.STDOUT), 0))
+                    : interrupted;
         } finally {
             if (stop != null) {
                 tracker.finished(stop);

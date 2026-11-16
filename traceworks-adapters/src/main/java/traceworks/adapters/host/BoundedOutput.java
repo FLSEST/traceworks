@@ -109,12 +109,24 @@ public final class BoundedOutput {
             return;
         }
         reading.join(millis);
-        if (!reading.isAlive()) {
-            return;
+        endNow();
+    }
+
+    /**
+     * Ends the reading now, without a wait: for a caller whose wait was interrupted. As after the bound of
+     * {@link #end}, nothing more is kept and the stream is closed.
+     *
+     * @return whether the reading was cut: {@code false} for a stream that was read to its end or failed, and before
+     *         {@link #drain}
+     */
+    public boolean endNow() {
+        Thread reading = reader;
+        if (reading == null || !reading.isAlive()) {
+            return cut();
         }
         synchronized (this) {
             if (complete) {
-                return;   // the stream ended in the instant after the wait: nothing is cut
+                return false;   // the stream ended in this instant: nothing is cut
             }
             ended = true;
         }
@@ -123,6 +135,7 @@ public final class BoundedOutput {
         } catch (IOException ignored) {
             // closed already
         }
+        return true;
     }
 
     /** Waits for the reader to hold its stream, which takes no longer than its start; an interrupt stays set. */
@@ -142,9 +155,10 @@ public final class BoundedOutput {
     }
 
     /**
-     * Whether {@link #end} ended the reading at its bound: the stream had not ended by then, so something still held
-     * it, and what that wrote afterwards is not kept. {@code false} for a stream that was read to its end, also
-     * beyond the limit, and for one that failed.
+     * Whether {@link #end} ended the reading at its bound, or {@link #endNow} at once: the stream had not ended by
+     * then, so something still held it, and what that wrote afterwards is not kept. {@code false} for a stream that
+     * was read to its end, also beyond the limit, and for one whose reading failed: of that one only what came
+     * before the failure is kept, and nothing says so.
      */
     public synchronized boolean cut() {
         return ended;

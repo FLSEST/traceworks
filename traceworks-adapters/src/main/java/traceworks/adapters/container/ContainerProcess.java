@@ -170,22 +170,27 @@ final class ContainerProcess {
             stdout.end(AFTER_END_MILLIS);
             stderr.end(Math.max(1, TimeUnit.NANOSECONDS.toMillis(bound - System.nanoTime())));
             if (timedOut) {
-                return result(TIMEOUT_EXIT_CODE, stdout, stderr, "", started, true);
+                return result(TIMEOUT_EXIT_CODE, stdout, stderr, "", started, true, AFTER_END_MILLIS);
             }
             if (container && tracker.cancelled()) {
                 // the cancel ended the client, or this loop did; either way its own exit code says nothing
-                return result(CANCELLED_EXIT_CODE, stdout, stderr, "", started, false);
+                return result(CANCELLED_EXIT_CODE, stdout, stderr, "", started, false, AFTER_END_MILLIS);
             }
             if (stdout.exceeded() || stderr.exceeded()) {
                 // also when the client ended by itself before the loop saw it: the output is not whole
-                return result(CommandRunner.OUTPUT_LIMIT_EXIT_CODE, stdout, stderr, "", started, false);
+                return result(CommandRunner.OUTPUT_LIMIT_EXIT_CODE, stdout, stderr, "", started, false,
+                        AFTER_END_MILLIS);
             }
-            return result(process.exitValue(), stdout, stderr, "", started, false);
+            return result(process.exitValue(), stdout, stderr, "", started, false, AFTER_END_MILLIS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return result(CANCELLED_EXIT_CODE, stdout, stderr, "Command interrupted", started, false);
+            // The reading ends here, before the end of the streams: the result names them, after 0 ms
+            stdout.endNow();
+            stderr.endNow();
+            return result(CANCELLED_EXIT_CODE, stdout, stderr, "Command interrupted", started, false, 0);
         } catch (IOException | IllegalArgumentException e) {
-            CommandResult failed = result(1, stdout, stderr, "Error: " + e.getMessage(), started, false);
+            CommandResult failed = result(1, stdout, stderr, "Error: " + e.getMessage(), started, false,
+                    AFTER_END_MILLIS);
             // Thrown before the client started (the JDK refused its environment, or it could not start), or after
             return process == null ? failed.asNotRun("the container client could not start: " + e.getMessage())
                     : failed;
@@ -253,10 +258,11 @@ final class ContainerProcess {
 
     /**
      * The result, with what the readers collected so far (a reader still running may add to it afterwards), the
-     * streams that went beyond the limit and the streams whose reading ended at the bound after the client's end.
+     * streams that went beyond the limit and the streams whose reading ended before their end: after
+     * {@code cutAfterMillis}, the bound after the client's end, or 0 for an interrupted wait.
      */
     private static CommandResult result(int exitCode, BoundedOutput stdout, BoundedOutput stderr, String note,
-                                        long started, boolean timedOut) {
+                                        long started, boolean timedOut, long cutAfterMillis) {
         String err = stderr.text();
         if (!note.isEmpty()) {
             err = err.isEmpty() || err.endsWith("\n") ? err + note : err + "\n" + note;
@@ -269,6 +275,6 @@ final class ContainerProcess {
         if (stderr.cut()) cut.add(CommandResult.STDERR);
         return new CommandResult(exitCode, stdout.text(), err,
                 TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started), timedOut, truncated, stdout.limit())
-                .withOutputCut(cut.isEmpty() ? null : new CommandRunner.OutputCut(cut, AFTER_END_MILLIS));
+                .withOutputCut(cut.isEmpty() ? null : new CommandRunner.OutputCut(cut, cutAfterMillis));
     }
 }
