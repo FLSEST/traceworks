@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.OutputBudget;
 import traceworks.core.context.RecordedItems;
@@ -1004,7 +1005,7 @@ class ForEachBlockExecutorTest {
     @Test
     void execute_shellMode_untrustedVariable_isEscapedInItemsCommandAndCommand() {
         context.setUntrustedVariable("dir", "src; id");
-        when(commands.runCommand(eq("ls 'src; id'"), eq(300), any())).thenReturn(printed("a.txt"));
+        when(commands.runCommand(eq(FakeCommandRunner.value(1, "src; id") + "ls \"${TRACEWORKS_VALUE_1}\""), eq(300), any())).thenReturn(printed("a.txt"));
         when(commands.shellStep(any(), anyInt(), eq(300), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = new HashMap<>();
@@ -1018,7 +1019,8 @@ class ForEachBlockExecutorTest {
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("cat 'src; id'/'a.txt'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(
+                FakeCommandRunner.value(1, "src; id") + FakeCommandRunner.value(2, "a.txt") + "cat \"${TRACEWORKS_VALUE_1}\"/\"${TRACEWORKS_VALUE_2}\"");
     }
 
     @Test
@@ -1026,7 +1028,7 @@ class ForEachBlockExecutorTest {
         // previous_report is quoted in the items_command, but its content becomes the items:
         // substituting it into a shell line taints the run, so the items are escaped too
         context.setUntrustedPlatformVariable("previous_report", "report");
-        when(commands.runCommand(eq("echo 'report'"), eq(300), any())).thenReturn(printed("a.txt; id"));
+        when(commands.runCommand(eq(FakeCommandRunner.value(1, "report") + "echo \"${TRACEWORKS_VALUE_1}\""), eq(300), any())).thenReturn(printed("a.txt; id"));
         when(commands.shellStep(any(), anyInt(), eq(300), any())).thenReturn(ok("ok"));
 
         Map<String, Object> config = new HashMap<>();
@@ -1040,7 +1042,7 @@ class ForEachBlockExecutorTest {
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("cat 'a.txt; id'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "a.txt; id") + "cat \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -1080,7 +1082,7 @@ class ForEachBlockExecutorTest {
         assertThat(context.isUntrusted("feature")).isTrue();
         assertThat(context.isUntrusted("feature.id")).isTrue();
         assertThat(context.isUntrusted("feature_index")).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ feature.id }}", false)).isEqualTo("echo 'x; rm'");
+        assertThat(context.resolveShellTemplate("echo {{ feature.id }}", false)).isEqualTo(FakeCommandRunner.value(1, "x; rm") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test

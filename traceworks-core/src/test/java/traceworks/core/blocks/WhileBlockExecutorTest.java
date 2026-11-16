@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.StepFailureSummary;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -632,14 +633,14 @@ class WhileBlockExecutorTest {
         config.put("execution_mode", "shell");
         config.put("timeout_seconds", 60);
 
-        when(commands.runCommand(eq("check 'x; id'"), eq(60), any())).thenReturn(exit(0)).thenReturn(exit(1));
+        when(commands.runCommand(eq(FakeCommandRunner.value(1, "x; id") + "check \"${TRACEWORKS_VALUE_1}\""), eq(60), any())).thenReturn(exit(0)).thenReturn(exit(1));
         when(commands.shellStep(any(), anyInt(), eq(60), any())).thenReturn(step(StepStatus.COMPLETED, "ok"));
 
         executor.execute(whileOf(config), context);
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), eq(60), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("build 'x; id'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "build \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -658,7 +659,7 @@ class WhileBlockExecutorTest {
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands, times(2)).shellStep(captor.capture(), anyInt(), eq(60), any());
         assertThat(captor.getAllValues().get(0).getConfig().get("command")).isEqualTo("echo ");
-        assertThat(captor.getAllValues().get(1).getConfig().get("command")).isEqualTo("echo 'x; id'");
+        assertThat(captor.getAllValues().get(1).getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test

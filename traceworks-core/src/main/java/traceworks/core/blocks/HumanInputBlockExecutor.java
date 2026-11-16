@@ -118,7 +118,7 @@ public class HumanInputBlockExecutor implements BlockExecutor {
 
     /**
      * Sets a variable to an answer. A person's answer is trusted, as it always was. Any other is derived from the
-     * run: untrusted when the run carries untrusted input, so a shell step quotes it and a mount refuses it, as for a
+     * run: untrusted when the run carries untrusted input, so a shell step protects it and a mount refuses it, as for a
      * step's output.
      */
     private static void store(ExecutionContext context, String name, String value, boolean typed) {

@@ -1,5 +1,6 @@
 package traceworks.core.app;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.compat.EarlierNames;
 import traceworks.core.model.RunStatus;
 import traceworks.core.port.RegisterStore;
@@ -467,7 +468,7 @@ class RegistersTest {
         fixture.services().start(request(READER), null, null);
 
         String command = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./use")).findFirst().orElseThrow();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./use")).findFirst().orElseThrow();
         assertThat(command).contains("<audit_findings>", "OPEN | MEDIUM | size | A.java | Big A.java | Evidence: files 3",
                 "OPEN | MEDIUM | size | B.java |", "# Report").doesNotContain("traceworks:audit-result")
                 .doesNotContain("{{ audit_findings }}");
@@ -479,7 +480,7 @@ class RegistersTest {
         fixture.services().start(request(READER), null, null);
 
         String command = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./use")).findFirst().orElseThrow();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./use")).findFirst().orElseThrow();
         assertThat(command).contains("(no known findings)", "(no previous report)");
     }
 
@@ -494,7 +495,7 @@ class RegistersTest {
         fixture.services().start(request(READER), null, null);
 
         String command = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("# Report").doesNotContain("(no previous report)").contains("<audit_findings>");
         assertThat(state().lastReport().valid()).isFalse();
     }
@@ -653,7 +654,7 @@ class RegistersTest {
         fixture.services().start(request(ITEM_READER), null, null);
 
         List<String> commands = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./facts")).toList();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./facts")).toList();
         assertThat(commands.get(0)).contains("(no known items)").doesNotContain("{{ audit_items }}");
         assertThat(commands.get(1)).contains("<audit_items>", "clean | bb | p.B", "open | aa | p.A", "'");
     }
@@ -717,7 +718,7 @@ class RegistersTest {
         fixture.services().start(request(READER), null, null);
 
         String command = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("OPEN | CRITICAL | size | A.java | Big A.java | Evidence: files 9\n")
                 .doesNotContain("DISMISSED | ");
         assertThat(fixture.services().findings().verify("hello").problems()).isEmpty();
@@ -745,7 +746,7 @@ class RegistersTest {
         fixture.services().start(request(READER), null, null);
 
         String command = fixture.commands.requests().stream().map(r -> r.command())
-                .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
+                .filter(c -> traceworks.core.testing.FakeCommandRunner.line(c).startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("DISMISSED | CRITICAL | size | A.java | Big A.java | Evidence: files 9"
                 + " | Disposition: false positive | Decided on: LOW, not on CRITICAL\n");
         assertThat(fixture.services().findings().verify("hello").problems()).isEmpty();

@@ -1,4 +1,4 @@
-package traceworks.core.analyzer;
+package traceworks.core.context;
 
 import org.junit.jupiter.api.Test;
 

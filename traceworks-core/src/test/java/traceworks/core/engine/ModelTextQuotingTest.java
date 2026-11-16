@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.blocks.CoreBlocks;
 import traceworks.core.model.BlockDefinition;
 import traceworks.core.model.RunStatus;
@@ -23,8 +24,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The output of an AI step is always quoted where it goes into a shell line: runs through the engine with the real
- * blocks, a scripted model and a real bash, so the tests see what the shell made of the value. No block here sets
+ * The output of an AI step reaches a shell line as one value, never as shell code: runs through the engine with the
+ * real blocks, a scripted model and a real bash, so the tests see what the shell made of the value. No block here sets
  * {@code shell_escape_variables}: the analyzer refuses the direct forms before a run, and these are the engine's
  * answer for a run that got past it ({@code --no-check}, a child workflow) and for the paths the analyzer cannot see.
  */
@@ -121,8 +122,9 @@ class ModelTextQuotingTest {
             assertThat(outcome.steps()).as("%s: %s", type, outcome.error()).isNotEmpty();
             String line = commandLines.getLast();
             assertThat(line).as("%s: %s", type, outcome.steps().stream().map(StepResult::getOutput).toList())
-                    .startsWith("printf '%s' '").endsWith("'").doesNotContain("{{");
-            assertThat(line.substring("printf '%s' ".length())).as(type).matches("(?s)'.*' '.*'");
+                    .startsWith("IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :\n")
+                    .doesNotContain("{{")
+                    .endsWith("\nprintf '%s' \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
         });
     }
 
@@ -136,8 +138,10 @@ class ModelTextQuotingTest {
                         "command", "set -- {{ item }}; printf '%s|%s' \"$#\" \"$1\""))));
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(commandLines).containsExactly("printf '%s\\n' 'a b; $(echo pwned)'",
-                "set -- 'a b; $(echo pwned)'; printf '%s|%s' \"$#\" \"$1\"");
+        assertThat(commandLines).containsExactly(
+                FakeCommandRunner.value(1, "a b; $(echo pwned)") + "printf '%s\\n' \"${TRACEWORKS_VALUE_1}\"",
+                FakeCommandRunner.value(1, "a b; $(echo pwned)") + "set -- \"${TRACEWORKS_VALUE_1}\";"
+                        + " printf '%s|%s' \"$#\" \"$1\"");
         assertThat(output(outcome, 1)).contains("1|a b; $(echo pwned)").doesNotContain("1|pwned");
     }
 
@@ -154,8 +158,9 @@ class ModelTextQuotingTest {
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(output(outcome, 1)).isEqualTo("ran");
-        assertThat(commandLines).contains("test 'x; echo pwned' = 'x; echo pwned'",
-                "printf '%s' 'x; echo pwned'");
+        assertThat(commandLines).contains(
+                FakeCommandRunner.value(1, "x; echo pwned") + "test \"${TRACEWORKS_VALUE_1}\" = 'x; echo pwned'",
+                FakeCommandRunner.value(1, "x; echo pwned") + "printf '%s' \"${TRACEWORKS_VALUE_1}\"");
     }
 
     /**
@@ -204,7 +209,8 @@ class ModelTextQuotingTest {
                 block("simple", "ask", Map.of("command", "Say something", "on_failure", "continue")),
                 shell("use", "printf '%s' {{ block.ask.output }}")));
 
-        assertThat(commandLines).containsExactly("printf '%s' '$(echo pwned)'");
+        assertThat(commandLines)
+                .containsExactly(FakeCommandRunner.value(1, "$(echo pwned)") + "printf '%s' \"${TRACEWORKS_VALUE_1}\"");
         assertThat(outcome.steps().getLast().getOutput()).isEqualTo("$(echo pwned)");
     }
 
@@ -238,10 +244,13 @@ class ModelTextQuotingTest {
                 block("sub-workflow", "child", Map.of("workflow_id", "child"))));
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(commandLines.getFirst()).startsWith("set -- 'parent; echo pwned'; ")
-                .contains("set -- 'parent; echo pwned'; printf '%s' \"$#\"");
+        assertThat(commandLines.getFirst()).isEqualTo(FakeCommandRunner.value(1, "parent; echo pwned")
+                + FakeCommandRunner.value(2, "parent; echo pwned") + ""
+                + "set -- \"${TRACEWORKS_VALUE_1}\"; printf '%s|%s|' \"$#\" \"$1\";"
+                + " set -- \"${TRACEWORKS_VALUE_2}\"; printf '%s' \"$#\"");
         assertThat(commandLines.getLast()).as("the child's own output, recorded after the parent's call")
-                .startsWith("set -- 'a b");
+                .startsWith("IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :\na b\n")
+                .endsWith("set -- \"${TRACEWORKS_VALUE_1}\"; printf '%s' \"$#\"");
     }
 
     /**
@@ -280,7 +289,9 @@ class ModelTextQuotingTest {
                         "command", "echo \"{{ item }}\""))));
 
         assertThat(outcome.status()).as(outcome.error()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(commandLines).containsExactly("printf '%s\\n' 'x y'", "echo 'x y'", "echo \"a b\"");
+        assertThat(commandLines).containsExactly(
+                FakeCommandRunner.value(1, "x y") + "printf '%s\\n' \"${TRACEWORKS_VALUE_1}\"",
+                FakeCommandRunner.value(1, "x y") + "echo \"${TRACEWORKS_VALUE_1}\"", "echo \"a b\"");
     }
 
     /** Model text is quoted; it does not make the run one with untrusted input, so an AI actor still decides. */

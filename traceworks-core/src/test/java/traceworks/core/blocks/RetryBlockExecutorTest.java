@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.ExecutionMode;
 import traceworks.core.model.BlockDefinition;
@@ -300,7 +301,7 @@ class RetryBlockExecutorTest {
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("npm install 'left-pad; id'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "left-pad; id") + "npm install \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -328,7 +329,7 @@ class RetryBlockExecutorTest {
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), eq(300), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("npm install 'pkg; id'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "pkg; id") + "npm install \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test

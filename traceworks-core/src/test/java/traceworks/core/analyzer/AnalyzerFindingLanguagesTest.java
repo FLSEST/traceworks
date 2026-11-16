@@ -100,7 +100,7 @@ class AnalyzerFindingLanguagesTest {
         // Heredoc bodies: heredoc-placeholder (interpreter source, unquoted delimiter, escaped block)
         out.addAll(analyzer.analyze(List.of(
                 block("shell", "source", Map.of("command", "set -euo pipefail\npython3 - <<'PY'\n"
-                        + "x = '''{{ previous_output }}'''\nPY\ncat <<EOF\n{{ previous_chain_output }}\nEOF")),
+                        + "x = '''{{ previous_output }}'''\nPY\ncat <<EOF\n{{ previous_output }}\nEOF")),
                 block("shell", "escaped", Map.of("command", "set -euo pipefail\ncat > out.txt <<'EOF'\n{{ x }}\nEOF",
                         "shell_escape_variables", true))), null));
         // Isolation setting: legacy-install-npm (metadata and first block), unknown-workspace-mode,

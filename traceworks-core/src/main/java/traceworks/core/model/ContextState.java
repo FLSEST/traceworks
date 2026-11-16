@@ -19,7 +19,7 @@ import java.util.Set;
  * ({@code StepIndexCounter#preAllocate}) is needed any more, because the next block reserves its own.
  *
  * @param variables           the run's variables, {@code null} values included
- * @param taint               which variables and block outputs a shell line quotes and whether the run carries
+ * @param taint               which variables and block outputs a shell line protects and whether the run carries
  *                            untrusted input
  * @param blockOutputs        the outputs of the named blocks, for {@code {{ block.<name>.output }}}
  * @param previousOutput      the output of the last block, {@code {{ previous_output }}}; {@code null} before the first
@@ -73,7 +73,7 @@ public record ContextState(Map<String, Object> variables, Taint taint, Map<Strin
     }
 
     /**
-     * What of a run may hold text a model wrote: a shell line quotes it, and the run does not count as one with
+     * What of a run may hold text a model wrote: a shell line protects it, and the run does not count as one with
      * untrusted input for it (see {@code ExecutionContextTaint}).
      *
      * @param asked          whether the run asked a model, itself or through a child workflow: from then on every

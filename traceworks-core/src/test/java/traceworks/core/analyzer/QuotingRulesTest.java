@@ -52,18 +52,28 @@ class QuotingRulesTest {
 
     /**
      * Chain output and the platform data Traceworks keeps ({@code previous_report}, {@code audit_findings}) are
-     * outside text. The TODO and goal variables are not: Traceworks does not provide them
-     * ({@code unprovided-variable} reports them).
+     * outside text, which a run hands to the shell by reference: inside single quotes no reference expands, the run
+     * refuses the line, and so does the check. Inside double quotes a reference is fine. The TODO and goal variables
+     * are no outside text: Traceworks does not provide them ({@code unprovided-variable} reports them).
      */
     @Test
-    void should_reportChainOutputAndPlatformData_asErrorInOneFinding() {
-        assertThat(apply(shell("echo 'CHAIN={{ previous_chain_output }}'\nPREV='{{ previous_report }}'\n"
-                + "echo '{{ audit_findings }}' '{{ previous_output }}'")))
-                .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }}, {{ previous_report }}, "
-                            + "{{ audit_findings }}, {{ previous_output }} inside quotes in shell code");
-                });
+    void should_reportChainOutputAndPlatformDataInSingleQuotes_asError_andAcceptThemInDoubleQuotes() {
+        List<AnalyzerFinding> findings = apply(shell("echo 'CHAIN={{ previous_chain_output }}'\nPREV='{{ previous_report }}'\n"
+                + "echo '{{ audit_findings }}' '{{ previous_output }}'"));
+
+        assertThat(findings).hasSize(2).allMatch(f -> f.rule().equals("quoted-placeholder"));
+        assertThat(findings).filteredOn(f -> f.severity() == Severity.ERROR).singleElement().satisfies(f ->
+                assertThat(f.detail()).startsWith("{{ previous_chain_output }} stands inside single quotes, where the"
+                        + " shell expands no reference; {{ previous_report }} stands inside single quotes, where the"
+                        + " shell expands no reference; {{ audit_findings }} stands inside single quotes, where the"
+                        + " shell expands no reference — its value is text a model wrote or comes from outside the"
+                        + " run;").endsWith("Correct: the placeholder as a bare word or inside double quotes"
+                        + " (X={{ previous_chain_output }}, then use \"$X\"), or pass the value through a file or"
+                        + " standard input (printf '%s\\n' {{ previous_chain_output }} > file)"));
+        assertThat(findings).filteredOn(f -> f.severity() == Severity.WARNING).singleElement().satisfies(f ->
+                assertThat(f.detail()).startsWith("puts {{ previous_output }} inside quotes in shell code"));
+        assertThat(apply(shell("echo \"CHAIN={{ previous_chain_output }}\" \"{{ previous_report }}\""
+                + " \"{{ audit_findings }}\""))).isEmpty();
         assertThat(apply(shell("echo 'TITLE={{ todo_title }}' '{{ open_todos }}' '{{ goal_status }}'"))).isEmpty();
     }
 
@@ -156,23 +166,41 @@ class QuotingRulesTest {
 
     @Test
     void should_reportFreeTextPipedIntoAShell_asError() {
-        assertThat(apply(shell("cat <<'EOF' | sh\necho {{ previous_chain_output }}\nEOF"))).singleElement()
+        assertThat(apply(shell("cat <<EOF | sh\necho {{ previous_chain_output }}\nEOF"))).singleElement()
                 .satisfies(f -> {
                     assertThat(f.rule()).isEqualTo("heredoc-placeholder");
                     assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }} into the body of a heredoc"
+                    assertThat(f.detail()).startsWith("{{ previous_chain_output }} stands in the body of a heredoc"
+                            + " that sh reads as its program, so the value would be program text — ");
+                });
+        assertThat(apply(shell("cat <<'EOF' | sh\necho {{ previous_output }}\nEOF"))).singleElement()
+                .satisfies(f -> {
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                    assertThat(f.detail()).startsWith("puts {{ previous_output }} into the body of a heredoc"
                             + " that sh reads");
                 });
     }
 
-    /** Files, script input, inline code, command substitution, a grep check. */
+    /**
+     * Files, script input, a grep check: a block output the run inserts as it is. Outside text is handed over by
+     * reference, and in a heredoc with a quoted delimiter none expands: an error there, fine without the quotes.
+     */
     @Test
-    void should_acceptQuotedHeredocs_whoseReaderTakesTheBodyAsInput() {
+    void should_acceptQuotedHeredocs_whoseReaderTakesTheBodyAsInput_forInsertedValues() {
         assertThat(apply(shell("cat > \"$OUT/raw.txt\" <<'RAW'\n{{ previous_output }}\nRAW\n"
                 + "python3 -I bin/backlog.py candidates --max \"$MAX\" <<'JIRA'\n{{ block.jira_issues.output }}\nJIRA\n"
-                + "python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<'IN'\n{{ previous_report }}\nIN\n"
-                + "BODY=$(cat <<'B'\n{{ previous_chain_output }}\nB\n)\n"
                 + "if cat <<\\STEP | grep -qiE \"error|failed\"\n{{ step_1_output }}\nSTEP\nthen echo red; fi"))).isEmpty();
+        assertThat(apply(shell("python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<'IN'\n{{ previous_report }}\nIN\n"
+                + "BODY=$(cat <<'B'\n{{ previous_chain_output }}\nB\n)"))).singleElement().satisfies(f -> {
+                    assertThat(f.rule()).isEqualTo("heredoc-placeholder");
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                    assertThat(f.detail()).startsWith("{{ previous_report }} stands in the body of a heredoc with a"
+                            + " quoted delimiter (<<'IN'), where the shell expands no reference (leave the delimiter"
+                            + " unquoted); {{ previous_chain_output }} stands in the body of a heredoc with a quoted"
+                            + " delimiter (<<'B')");
+                });
+        assertThat(apply(shell("python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<IN\n{{ previous_report }}\nIN\n"
+                + "BODY=$(cat <<B\n{{ previous_chain_output }}\nB\n)"))).isEmpty();
     }
 
     @Test
@@ -181,22 +209,21 @@ class QuotingRulesTest {
                 .isEmpty();
     }
 
+    /** An inserted output in an unquoted heredoc is run by the shell: a warning. Outside text there is a reference. */
     @Test
-    void should_reportFreeTextInAnUnquotedHeredoc_asWarningForOutputs_andErrorForOutsideText() {
+    void should_reportAnInsertedOutputInAnUnquotedHeredoc_asWarning_andAcceptOutsideText() {
         assertThat(apply(shell("cat > report.md <<EOF\n{{ previous_output }}\nEOF"))).singleElement().satisfies(f -> {
             assertThat(f.rule()).isEqualTo("heredoc-placeholder");
             assertThat(f.severity()).isEqualTo(Severity.WARNING);
             assertThat(f.detail()).startsWith("puts {{ previous_output }} into the body of a heredoc with an unquoted"
-                    + " delimiter (<<EOF)");
+                    + " delimiter (<<EOF)").endsWith("printf '%s\\n' {{ previous_output }} > file");
         });
         assertThat(apply(shell("cat <<-END\n\t{{ previous_chain_output }} {{ step_2_output }}\n\tEND")))
                 .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }}, {{ step_2_output }} into"
-                            + " the body");
-                    assertThat(f.detail()).contains("quote the delimiter (<<'END')");
+                    assertThat(f.severity()).isEqualTo(Severity.WARNING);
+                    assertThat(f.detail()).startsWith("puts {{ step_2_output }} into the body");
                 });
-        assertThat(apply(shell("cat <<EOF\nin {{ project_path }}\nEOF"))).isEmpty();
+        assertThat(apply(shell("cat <<EOF\nin {{ project_path }} {{ previous_report }}\nEOF"))).isEmpty();
     }
 
     @Test
@@ -283,54 +310,94 @@ class QuotingRulesTest {
                 .singleElement().satisfies(f -> {
                     assertThat(f.severity()).isEqualTo(Severity.ERROR);
                     assertThat(f.blockIndex()).isEqualTo(1);
-                    assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into shell code without"
-                            + " shell_escape_variables, the output of the AI step review — a model reads the"
-                            + " workspace, and what it reads can steer its answer, so a run quotes what a model wrote"
-                            + " in every shell line and this command would not run as written; Traceworks refuses"
-                            + " the workflow. Correct: shell_escape_variables: true on this block, which quotes"
-                            + " every value; to hand the text on as standard input or as a file, write"
-                            + " printf '%s\\n' {{ block.review.output }} | tool, or > file");
+                    assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into shell code as a bare word"
+                            + " without shell_escape_variables, the output of the AI step review — a model reads the"
+                            + " workspace, and what it reads can steer its answer, so a run hands what a model wrote"
+                            + " to the shell as one value, never as shell code, and this command would not run as"
+                            + " written; Traceworks refuses the workflow. Correct: shell_escape_variables: true on"
+                            + " this block, or the placeholder inside double quotes; to hand the text on as standard"
+                            + " input or as a file, write printf '%s\\n' {{ block.review.output }} | tool, or > file");
                 });
     }
 
     /**
-     * In the author's quotes the run's quotes cancel out, in a block that escapes every value too: an error for what a
-     * model wrote, where the output of a step of a workflow without AI stays a warning.
+     * What a model wrote is handed to the shell by reference. Inside double quotes that is one piece of text, as
+     * the author wrote: no finding, with or without escaping. Inside single quotes no reference expands: the run
+     * refuses the line and the check reports it, where the output of a step of a workflow without AI is a warning.
      */
     @Test
-    void should_reportTheOutputOfAnAiStepInsideQuotes_asError_withOrWithoutEscaping() {
+    void should_acceptTheOutputOfAnAiStepInDoubleQuotes_andReportItInSingleQuotes_asError() {
         for (BlockDefinition use : List.of(shell("echo \"{{ block.review.output }}\""),
-                shell("X='{{ previous_output }}'"), escapedShell("echo \"{{ step_0_output }}\""))) {
-            assertThat(rule("quoted-placeholder", apply(REVIEW, use))).as(BlockText.joined(use)).singleElement()
-                    .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
-            assertThat(unquotedAi(REVIEW, use)).isEmpty();
+                shell("X=\"{{ previous_output }}\""), escapedShell("echo \"{{ step_0_output }}\""))) {
+            assertThat(apply(REVIEW, use)).as(BlockText.joined(use)).isEmpty();
+        }
+        for (BlockDefinition use : List.of(shell("echo '{{ block.review.output }}'"),
+                shell("X='{{ previous_output }}'"), escapedShell("echo '{{ step_0_output }}'"))) {
+            assertThat(apply(REVIEW, use)).as(BlockText.joined(use)).singleElement().satisfies(f -> {
+                assertThat(f.rule()).isEqualTo("quoted-placeholder");
+                assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                assertThat(f.detail()).contains(" stands inside single quotes, where the shell expands no reference");
+            });
         }
         assertThat(rule("quoted-placeholder", apply(named("shell", "review", Map.of("command", "make")),
-                shell("echo \"{{ block.review.output }}\"")))).singleElement()
+                shell("echo '{{ block.review.output }}'")))).singleElement()
                 .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.WARNING));
     }
 
     /**
-     * No heredoc body takes what a model wrote: the run quotes it there too, and a line of it that equals the
-     * delimiter ends the body. A quoted heredoc that only stores the output of a step without AI stays fine.
+     * The check reports as an error what the run would refuse, with the run's words, and no other place of a value
+     * the run protects: the places where the shell or the command evaluates what a value holds.
      */
     @Test
-    void should_reportTheOutputOfAnAiStepInAnyHeredocBody_asError() {
+    void should_reportThePlacesTheRunRefuses_asError_andNoOthers() {
+        Map<String, String> refused = new java.util.LinkedHashMap<>();
+        refused.put("eval {{ block.review.output }}", "in an argument of eval, which runs its argument as shell code");
+        refused.put("bash -c \"echo {{ block.review.output }}\"", "in the code argument of bash -c, which runs it");
+        refused.put("{{ block.review.output }} --help", "where the command's name stands");
+        refused.put("echo $(( {{ block.review.output }} + 1 ))", "inside an arithmetic expression");
+        refused.put("[[ {{ block.review.output }} -eq 1 ]]", "in a [[ … ]] with an arithmetic comparison");
+        refused.put("echo `echo {{ block.review.output }}`", "inside backticks");
+        refused.put("echo \\{{ block.review.output }}", "after a backslash");
+        refused.put("echo {{ previous_report }}; read {{ previous_report }}", "in an argument of read");
+        refused.forEach((command, place) -> {
+            for (BlockDefinition use : List.of(shell(command), escapedShell(command))) {
+                assertThat(apply(REVIEW, use)).as(command)
+                        .filteredOn(f -> f.severity() == Severity.ERROR && !f.rule().equals("unquoted-ai-output"))
+                        .singleElement().satisfies(f -> {
+                            assertThat(f.rule()).isEqualTo("placeholder-refused-place");
+                            assertThat(f.detail()).contains(" stands " + place).contains("the run refuses this shell"
+                                    + " line before anything runs");
+                        });
+            }
+        });
+        for (String fine : List.of("printf '%s' {{ block.review.output }}", "X={{ block.review.output }}; echo \"$X\"",
+                "echo \"$(printf '%s' {{ block.review.output }})\"", "cat <<EOF\n{{ block.review.output }}\nEOF",
+                "true # {{ block.review.output }}", "bash -c 'echo \"$1\"' _ {{ block.review.output }}",
+                "echo \"${x:-\"{{ block.review.output }}\"}\"")) {
+            assertThat(apply(REVIEW, escapedShell(fine))).as(fine).isEmpty();
+        }
+    }
+
+    /**
+     * In a heredoc with an unquoted delimiter a reference to what a model wrote expands as one piece of text: fine.
+     * With a quoted delimiter none expands, and a program an interpreter reads would take the value as code: both
+     * refused by the run, and errors here. A quoted heredoc that stores the output of a step without AI stays fine.
+     */
+    @Test
+    void should_reportTheOutputOfAnAiStepInAHeredocThatTakesNoReference_asError() {
         for (BlockDefinition use : List.of(shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"),
                 escapedShell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"),
-                shell("cat > out.md <<EOF\n{{ block.review.output }}\nEOF"),
-                shell("python3 - <<'PY'\nprint('''{{ block.review.output }}''')\nPY"))) {
+                shell("python3 - <<PY\nprint(\'\'\'{{ block.review.output }}\'\'\')\nPY"),
+                shell("python3 - <<'PY'\nprint(\'\'\'{{ block.review.output }}\'\'\')\nPY"))) {
             assertThat(rule("heredoc-placeholder", apply(REVIEW, use))).as(BlockText.joined(use)).singleElement()
                     .satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
         }
         assertThat(rule("heredoc-placeholder", apply(REVIEW,
                 shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF")))).singleElement()
-                .satisfies(f -> assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into the body of a"
-                        + " heredoc, the output of the AI step review — a run quotes what a model wrote wherever it"
-                        + " stands in shell code, so the quotes land in the text, and a line of the value that equals"
-                        + " the delimiter ends the body and the rest runs as commands; Traceworks refuses the"
-                        + " workflow. Correct: pass the value outside the body with shell_escape_variables: true,"
-                        + " e.g. printf '%s\\n' {{ block.review.output }} > file instead of cat <<'EOF'"));
+                .satisfies(f -> assertThat(f.detail()).startsWith("{{ block.review.output }} stands in the body of a"
+                        + " heredoc with a quoted delimiter (<<'EOF'), where the shell expands no reference (leave"
+                        + " the delimiter unquoted) — "));
+        assertThat(apply(REVIEW, escapedShell("cat > out.md <<EOF\n{{ block.review.output }}\nEOF"))).isEmpty();
         assertThat(apply(named("shell", "review", Map.of("command", "make")),
                 shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"))).isEmpty();
     }
@@ -349,11 +416,11 @@ class QuotingRulesTest {
         assertThat(unquotedAi(list, REVIEW, build, shell("echo {{ block.build.output }}"))).singleElement()
                 .satisfies(f -> {
                     assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ block.build.output }} into shell code without"
-                            + " shell_escape_variables, the output of the step build, which runs after the AI step"
-                            + " review and may hold what the model wrote — ");
+                    assertThat(f.detail()).startsWith("puts {{ block.build.output }} into shell code as a bare"
+                            + " word without shell_escape_variables, the output of the step build, which runs after"
+                            + " the AI step review and may hold what the model wrote — ");
                 });
-        assertThat(rule("quoted-placeholder", apply(list, REVIEW, build, shell("echo \"{{ previous_output }}\""))))
+        assertThat(rule("quoted-placeholder", apply(list, REVIEW, build, shell("echo '{{ previous_output }}'"))))
                 .singleElement().satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
         assertThat(unquotedAi(list, REVIEW, build, escapedShell("echo {{ block.build.output }}"))).isEmpty();
     }
@@ -445,11 +512,11 @@ class QuotingRulesTest {
                 "command", "lint"));
         assertThat(unquotedAi(lint, REVIEW, shell("echo {{ step_1_output }}"))).singleElement().satisfies(f -> {
             assertThat(f.severity()).isEqualTo(Severity.ERROR);
-            assertThat(f.detail()).startsWith("puts {{ step_1_output }} into shell code without"
+            assertThat(f.detail()).startsWith("puts {{ step_1_output }} into shell code as a bare word without"
                     + " shell_escape_variables, an output whose step the workflow does not tell, in a run that asks a"
                     + " model before it (the AI step review), so it may hold what the model wrote — ");
         });
-        assertThat(rule("quoted-placeholder", apply(lint, REVIEW, shell("echo \"{{ step_4_output }}\""))))
+        assertThat(rule("quoted-placeholder", apply(lint, REVIEW, shell("echo '{{ step_4_output }}'"))))
                 .singleElement().satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
         assertThat(unquotedAi(lint, shell("echo {{ step_1_output }}"), REVIEW)).as("before the AI step").isEmpty();
         assertThat(unquotedAi(lint, shell("echo {{ step_1_output }}"))).as("no AI step").isEmpty();
@@ -478,7 +545,7 @@ class QuotingRulesTest {
         Map<String, Object> probe = Map.of("type", "shell", "name", "probe", "config", Map.of("command", "ls"));
         Map<String, Object> draft = Map.of("type", "simple", "name", "draft", "config", Map.of("command", "Draft"));
         Map<String, Object> echo = Map.of("type", "shell", "name", "echo", "config",
-                Map.of("command", "echo \"{{ previous_output }}\""));
+                Map.of("command", "echo '{{ previous_output }}'"));
         Map<String, Object> store = Map.of("type", "shell", "name", "store", "config", Map.of("command", "cat"));
         BlockDefinition route = named("switch", "route", Map.of("expression", "x",
                 "cases", List.of(Map.of("value", "a", "blocks", List.of(probe, draft, echo, store)))));
@@ -557,7 +624,8 @@ class QuotingRulesTest {
     void auditItems_insideQuotesInShellCode_areAnError() {
         assertThat(apply(shell("echo '{{ audit_items }}'"))).singleElement().satisfies(f -> {
             assertThat(f.severity()).isEqualTo(Severity.ERROR);
-            assertThat(f.detail()).startsWith("puts {{ audit_items }} inside quotes in shell code");
+            assertThat(f.detail()).startsWith("{{ audit_items }} stands inside single quotes, where the shell"
+                    + " expands no reference");
         });
     }
 }

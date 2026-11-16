@@ -21,11 +21,14 @@ import java.util.regex.Pattern;
  * command reads it, {@link #read} reports separately.
  *
  * <p>Two readers share it, so both see a shell text the same way: the analyzer ({@code core.analyzer.QuotingRules}),
- * which judges a workflow before it runs, and the resolver of a run ({@link TemplateResolver#resolveShell}), which
- * asks through {@link #occurrences} where each placeholder stands before it inserts a value the shell must take as
- * one argument. For the run a misread must never call a place bare that is not: {@code $'…'} with its backslash,
- * backticks, arithmetic, a {@code case} pattern's {@code )} inside {@code $(…)}, a comment and a placeholder after a
- * backslash are told apart, and a placeholder the pass did not come by is {@link Context#UNREAD}.
+ * which judges a workflow before it runs, and the resolver of a run ({@link TemplateResolver}), which asks through
+ * {@link #occurrences} where each placeholder stands ({@link ShellValuePlace}). It is no shell and never will read
+ * every text as bash does. Nothing depends on that: the run puts no value it has to protect into the text, only a
+ * reference to a variable, and the place this reader names decides the form of the reference. A place it gets wrong
+ * costs a value that is split into words or printed as a reference, never a command.
+ *
+ * <p>Only a placeholder with a plain key (letters, digits, {@code _}, {@code .}, {@code -} and spaces) is read as
+ * one. Any other stays in the text for the shell, a quote in it included, and is read as the text it is.
  */
 public final class ShellQuoteScanner {
 
@@ -36,42 +39,31 @@ public final class ShellQuoteScanner {
     /** One placeholder occurrence: its name as written between the braces, its quoting, its 1-based line. */
     public record Placeholder(String name, Quote quote, int line) {}
 
-    /** Where a placeholder stands in a shell text, as the shell reads the value put there. */
+    /** Where a placeholder stands in a shell text. */
     public enum Context {
-        /** A word of its own or part of one: a single-quoted value there is one literal argument. */
-        BARE("as a bare word"),
-        SINGLE_QUOTES("inside single quotes"),
-        DOUBLE_QUOTES("inside double quotes"),
-        BACKTICKS("inside backticks"),
-        ARITHMETIC("inside an arithmetic expression"),
-        HEREDOC("in the body of a heredoc"),
-        COMMENT("in a comment"),
-        /**
-         * How the shell reads it is not known: after a backslash, or anywhere in a text the pass did not leave
-         * balanced (an open quote, an open {@code $(}), which it then has not understood.
-         */
-        UNREAD("where Traceworks cannot tell how the shell reads it (after a backslash, or in shell code with an"
-                + " open quote or bracket)");
-
-        private final String words;
-
-        Context(String words) {
-            this.words = words;
-        }
-
-        /** The place in words, such as {@code inside double quotes}. */
-        public String words() {
-            return words;
-        }
+        /** A word of its own or part of one. */
+        BARE,
+        SINGLE_QUOTES,
+        DOUBLE_QUOTES,
+        BACKTICKS,
+        ARITHMETIC,
+        HEREDOC,
+        COMMENT,
+        /** After a backslash. */
+        UNREAD
     }
 
     /**
      * One placeholder of a shell text, comments and heredoc bodies included.
      *
-     * @param key   the placeholder's key exactly as the resolver reads it ({@link PlaceholderSyntax#PLACEHOLDER})
-     * @param start where it starts in the text
+     * @param key     the placeholder's key exactly as the resolver reads it ({@link PlaceholderSyntax#PLACEHOLDER})
+     * @param start   where it starts in the text
+     * @param before  the text of its command up to it: from the start of the simple command it stands in; empty in
+     *                a comment and a heredoc body
+     * @param after   the text after it up to the end of its line
+     * @param heredoc the heredoc whose body it stands in; {@code null} elsewhere
      */
-    public record Occurrence(String key, int start, Context context) {}
+    public record Occurrence(String key, int start, Context context, String before, String after, Heredoc heredoc) {}
 
     /**
      * One heredoc: its delimiter, whether the delimiter is quoted (then the shell leaves the body alone), the
@@ -86,8 +78,18 @@ public final class ShellQuoteScanner {
      */
     public record Result(List<Placeholder> placeholders, List<Heredoc> heredocs, List<Occurrence> occurrences) {}
 
-    /** A heredoc delimiter in all its quoting forms ({@code <<EOF}, {@code <<-'EOF'}, {@code <<"EOF"}, {@code <<\EOF}). */
-    private static final Pattern HEREDOC = Pattern.compile("<<-?\\s*(['\"]?)(\\\\?)([A-Za-z_][A-Za-z0-9_]*)\\1");
+    /**
+     * A heredoc operator with its delimiter in all its quoting forms ({@code <<EOF}, {@code <<-'EOF'},
+     * {@code <<"EOF"}, {@code <<\EOF}); the delimiter is any word ({@code <<1}, {@code <<.E}, {@code <<'E-F'}).
+     */
+    private static final Pattern HEREDOC =
+            Pattern.compile("<<(-?)[ \\t]*(['\"]?)(\\\\?)([^\\s'\"\\\\<>|&;()`$]+)\\2");
+
+    /** The keys the pass reads as a placeholder; any other is text for the shell. */
+    private static final Pattern PLAIN_KEY = Pattern.compile("[A-Za-z0-9_. -]+");
+
+    /** A heredoc whose operator the pass has read and whose body starts after the line. */
+    private record Pending(Heredoc heredoc, boolean stripTabs) {}
 
     /**
      * Quoting context of one nesting level: the top level, the inside of a {@code $(…)}, or arithmetic
@@ -99,6 +101,8 @@ public final class ShellQuoteScanner {
         /** The single quotes are {@code $'…'}, in which a backslash escapes the next character. */
         boolean ansi;
         int parens;
+        /** Per open {@code (}: whether it opens an array literal ({@code name=(}), whose words are values. */
+        final Deque<Boolean> arrays = new ArrayDeque<>();
         /** Open {@code case} statements: the {@code )} of a pattern closes nothing. */
         int cases;
         int commandStart;
@@ -136,10 +140,10 @@ public final class ShellQuoteScanner {
         List<Heredoc> heredocs = new ArrayList<>();
         if (code == null || code.isEmpty()) return new Result(found, heredocs, List.of());
         Map<Integer, MatchResult> placeholders = placeholderStarts(code);
-        Map<Integer, Context> contexts = new HashMap<>();
+        Map<Integer, Occurrence> occurrences = new HashMap<>();
         Deque<Frame> frames = new ArrayDeque<>();
         frames.push(new Frame(0, false));
-        Heredoc heredoc = null;
+        Deque<Pending> pending = new ArrayDeque<>();
         boolean backticks = false;
         int line = 1;
         int n = code.length();
@@ -148,7 +152,11 @@ public final class ShellQuoteScanner {
             MatchResult placeholder = placeholders.get(i);
             if (placeholder != null) {
                 found.add(new Placeholder(placeholder.group(2).strip(), frame.quote, line));
-                contexts.put(i, context(frame, backticks));
+                // In an array literal the words are values, on whichever line: no command starts there
+                boolean inArray = Boolean.TRUE.equals(frame.arrays.peek());
+                occurrences.put(i, new Occurrence(placeholder.group(2), i, context(frame, backticks),
+                        (inArray ? "=( " : "") + code.substring(Math.min(frame.commandStart, i), i),
+                        code.substring(placeholder.end(), endOfLine(code, placeholder.end())), null));
                 i = placeholder.end() - 1;
                 continue;
             }
@@ -157,15 +165,24 @@ public final class ShellQuoteScanner {
                 line++;
                 if (frame.quote != Quote.NONE) continue;
                 frame.commandStart = i + 1;
-                if (heredoc != null) {
-                    int[] skipped = skipHeredocBody(code, i + 1, heredoc.delimiter());
+                // The bodies of the line's heredocs follow one another, each up to its own delimiter line
+                int bodyStart = i + 1;
+                while (!pending.isEmpty()) {
+                    Pending first = pending.poll();
+                    int[] skipped = skipHeredocBody(code, bodyStart, first.heredoc().delimiter(), first.stripTabs());
                     int bodyEnd = Math.min(code.length(), skipped[0] + 1);
-                    heredocs.add(new Heredoc(heredoc.delimiter(), heredoc.quoted(), heredoc.command(), heredoc.rest(),
-                            placeholderNames(code.substring(i + 1, bodyEnd))));
-                    mark(placeholders, contexts, i + 1, bodyEnd, Context.HEREDOC);
-                    i = skipped[0] - 1;
+                    Heredoc heredoc = new Heredoc(first.heredoc().delimiter(), first.heredoc().quoted(),
+                            first.heredoc().command(), first.heredoc().rest(),
+                            placeholderNames(code.substring(Math.min(bodyStart, bodyEnd), bodyEnd)));
+                    heredocs.add(heredoc);
+                    mark(placeholders, occurrences, bodyStart, bodyEnd, Context.HEREDOC, heredoc, code);
                     line += skipped[1];
-                    heredoc = null;
+                    if (pending.isEmpty()) {
+                        i = skipped[0] - 1;   // the loop handles the newline of the delimiter line itself
+                    } else {
+                        bodyStart = Math.min(n, skipped[0] + 1);
+                        line++;
+                    }
                 }
                 continue;
             }
@@ -188,17 +205,21 @@ public final class ShellQuoteScanner {
                     else if (c == '`') backticks = !backticks;
                     else if (c == '$' && next == '\'') { frame.quote = Quote.SINGLE; frame.ansi = true; i++; }
                     else if (c == '#' && wordStart(code, i)) {
-                        mark(placeholders, contexts, i, endOfLine(code, i), Context.COMMENT);
+                        mark(placeholders, occurrences, i, endOfLine(code, i), Context.COMMENT, null, code);
                         i = endOfLine(code, i) - 1;
                     }
                     else if (c == '$' && next == '(') { frames.push(Frame.substitution(code, i)); i++; }
                     else if (c == '(' && next == '(' && !frame.arithmetic) { frames.push(Frame.arithmeticCommand(i)); i++; }
-                    else if (c == '(') { frame.parens++; frame.commandStart = i + 1; }
+                    else if (c == '(') {
+                        frame.parens++;
+                        frame.arrays.push(i > 0 && code.charAt(i - 1) == '=');
+                        frame.commandStart = i + 1;
+                    }
                     else if (separator(code, i)) frame.commandStart = i + 1;
                     else if (c == 'c' && keyword(code, frame, i, "case")) { frame.cases++; i += 3; }
                     else if (c == 'e' && frame.cases > 0 && keyword(code, frame, i, "esac")) { frame.cases--; i += 3; }
                     else if (c == ')') {
-                        if (frame.parens > 0) frame.parens--;
+                        if (frame.parens > 0) { frame.parens--; frame.arrays.poll(); }
                         else if (frame.cases > 0) frame.commandStart = i + 1;   // the end of a case pattern
                         else if (frames.size() > 1) frames.pop();
                     } else if (c == '<' && next == '<' && frame.arithmetic) {
@@ -206,9 +227,11 @@ public final class ShellQuoteScanner {
                     } else if (c == '<' && next == '<') {
                         Matcher m = HEREDOC.matcher(code).region(i, endOfLine(code, i));
                         if (m.lookingAt()) {
-                            boolean quoted = !m.group(1).isEmpty() || !m.group(2).isEmpty();
-                            heredoc = new Heredoc(m.group(3), quoted, code.substring(frame.commandStart, i).strip(),
-                                    code.substring(m.end(), endOfLine(code, m.end())).strip(), List.of());
+                            boolean quoted = !m.group(2).isEmpty() || !m.group(3).isEmpty();
+                            pending.add(new Pending(new Heredoc(m.group(4), quoted,
+                                    code.substring(frame.commandStart, i).strip(),
+                                    code.substring(m.end(), endOfLine(code, m.end())).strip(), List.of()),
+                                    !m.group(1).isEmpty()));
                             i = m.end() - 1;
                         } else {
                             i++;   // a here-string (<<<) or a shift: nothing to remember
@@ -217,35 +240,35 @@ public final class ShellQuoteScanner {
                 }
             }
         }
-        // A text the pass leaves with something open was not understood: no place in it counts as bare
-        Frame last = frames.peek();
-        boolean understood = frames.size() == 1 && last.quote == Quote.NONE && !backticks && last.cases == 0
-                && last.parens == 0;
-        List<Occurrence> occurrences = new ArrayList<>();
+        List<Occurrence> inOrder = new ArrayList<>();
         placeholders.keySet().stream().sorted().forEach(start -> {
-            Context context = contexts.getOrDefault(start, Context.UNREAD);
-            occurrences.add(new Occurrence(placeholders.get(start).group(2), start,
-                    context == Context.BARE && !understood ? Context.UNREAD : context));
+            Occurrence occurrence = occurrences.get(start);
+            inOrder.add(occurrence != null ? occurrence
+                    : new Occurrence(placeholders.get(start).group(2), start, Context.UNREAD, "", "", null));
         });
-        return new Result(found, heredocs, occurrences);
+        return new Result(found, heredocs, inOrder);
     }
 
     /** The place of a placeholder the pass stands on: the innermost quoting decides, backticks first. */
     private static Context context(Frame frame, boolean backticks) {
         if (backticks) return Context.BACKTICKS;
+        if (frame.arithmetic) return Context.ARITHMETIC;   // quotes do not keep arithmetic from evaluating
         return switch (frame.quote) {
             case SINGLE -> Context.SINGLE_QUOTES;
             case DOUBLE -> Context.DOUBLE_QUOTES;
-            case NONE -> frame.arithmetic ? Context.ARITHMETIC : Context.BARE;
+            case NONE -> Context.BARE;
         };
     }
 
     /** Gives every placeholder that starts in {@code [from, to)} the place {@code context}. */
-    private static void mark(Map<Integer, MatchResult> placeholders, Map<Integer, Context> contexts, int from, int to,
-                             Context context) {
-        for (Integer start : placeholders.keySet()) {
-            if (start >= from && start < to) contexts.put(start, context);
-        }
+    private static void mark(Map<Integer, MatchResult> placeholders, Map<Integer, Occurrence> occurrences, int from,
+                             int to, Context context, Heredoc heredoc, String code) {
+        placeholders.forEach((start, match) -> {
+            if (start >= from && start < to) {
+                occurrences.put(start, new Occurrence(match.group(2), start, context, "",
+                        code.substring(match.end(), endOfLine(code, match.end())), heredoc));
+            }
+        });
     }
 
     /** The reserved words after which a command starts: {@code then case …}. */
@@ -271,7 +294,9 @@ public final class ShellQuoteScanner {
     private static Map<Integer, MatchResult> placeholderStarts(String code) {
         Map<Integer, MatchResult> starts = new HashMap<>();
         Matcher m = PlaceholderSyntax.PLACEHOLDER.matcher(code);
-        while (m.find()) starts.put(m.start(), m.toMatchResult());
+        while (m.find()) {
+            if (PLAIN_KEY.matcher(m.group(2)).matches()) starts.put(m.start(), m.toMatchResult());
+        }
         return starts;
     }
 
@@ -294,20 +319,26 @@ public final class ShellQuoteScanner {
     private static List<String> placeholderNames(String text) {
         List<String> names = new ArrayList<>();
         Matcher m = PlaceholderSyntax.PLACEHOLDER.matcher(text);
-        while (m.find()) names.add(m.group(2).strip());
+        while (m.find()) {
+            if (PLAIN_KEY.matcher(m.group(2)).matches()) names.add(m.group(2).strip());
+        }
         return names;
     }
 
     /**
      * Skips a heredoc body starting at {@code from}: returns the index of the newline that ends the closing
-     * delimiter line (the caller's loop handles that newline itself) and the newlines skipped before it.
+     * delimiter line (the caller's loop handles that newline itself) and the newlines skipped before it. The body
+     * ends at a line that is the delimiter and nothing else, as for the shell; {@code <<-} takes leading tabs off
+     * the line first. A line with spaces around the delimiter is body.
      */
-    private static int[] skipHeredocBody(String code, int from, String delimiter) {
+    private static int[] skipHeredocBody(String code, int from, String delimiter, boolean stripTabs) {
         int pos = from;
         int lines = 0;
         while (pos < code.length()) {
             int end = endOfLine(code, pos);
-            boolean last = code.substring(pos, end).strip().equals(delimiter);
+            String text = code.substring(pos, end);
+            if (stripTabs) text = text.replaceFirst("^\\t+", "");
+            boolean last = text.equals(delimiter);
             pos = end < code.length() ? end + 1 : end;
             lines++;
             if (last) break;
@@ -324,6 +355,7 @@ public final class ShellQuoteScanner {
     private static boolean wordStart(String code, int i) {
         if (i == 0) return true;
         char before = code.charAt(i - 1);
-        return Character.isWhitespace(before) || before == ';' || before == '&' || before == '|' || before == '(';
+        return Character.isWhitespace(before) || before == ';' || before == '&' || before == '|' || before == '('
+                || before == ')';
     }
 }

@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.port.WebAccess;
 import traceworks.core.ai.AiProviderCapabilities;
 import traceworks.core.ai.ToolPolicy;
@@ -182,7 +183,7 @@ class SimpleBlockExecutorTest {
         context.recordOutput("analysis", "a | b");
 
         assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false))
-                .isEqualTo("echo 'a | b'");
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test

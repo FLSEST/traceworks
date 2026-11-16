@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.model.BlockDefinition;
 import traceworks.core.model.StepResult;
@@ -181,7 +182,7 @@ class RunIfGateTest {
     void untrustedValue_isQuoted() {
         ExecutionContext ctx = context();
         ctx.setUntrustedVariable("x", "a; touch /tmp/pwned");
-        when(commandRunner.run(request("test 'a; touch /tmp/pwned' = y"))).thenReturn(exit(1));
+        when(commandRunner.run(request(FakeCommandRunner.value(1, "a; touch /tmp/pwned") + "test \"${TRACEWORKS_VALUE_1}\" = y"))).thenReturn(exit(1));
 
         assertThat(new RunIfGate(commandRunner, CLOCK)
                 .skipIfUnmet(block(Map.of("run_if", "test {{ x }} = y")), ctx)).isPresent();

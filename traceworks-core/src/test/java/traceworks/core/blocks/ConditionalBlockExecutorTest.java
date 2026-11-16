@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.WorkflowExecutionException;
 import traceworks.core.model.BlockDefinition;
@@ -587,7 +588,7 @@ class ConditionalBlockExecutorTest {
     @Test
     void execute_shellMode_untrustedVariableInCondition_isSingleQuoted() {
         context.setUntrustedVariable("branch", "main; id");
-        when(commands.runCommand(eq("test 'main; id' = main"), anyInt(), any())).thenReturn(exit(1));
+        when(commands.runCommand(eq(FakeCommandRunner.value(1, "main; id") + "test \"${TRACEWORKS_VALUE_1}\" = main"), anyInt(), any())).thenReturn(exit(1));
 
         Map<String, Object> config = new HashMap<>();
         config.put("execution_mode", "shell");
@@ -597,7 +598,8 @@ class ConditionalBlockExecutorTest {
         StepResult result = executor.execute(conditional(config), context);
 
         assertThat(result.getInput()).contains("false");
-        verify(commands).runCommand(eq("test 'main; id' = main"), anyInt(), any());
+        verify(commands).runCommand(eq(FakeCommandRunner.value(1, "main; id") + "test \"${TRACEWORKS_VALUE_1}\" = main"),
+                anyInt(), any());
     }
 
     @Test

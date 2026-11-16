@@ -1,5 +1,6 @@
 package traceworks.core.context;
 
+import traceworks.core.testing.FakeCommandRunner;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -15,7 +16,7 @@ class TemplateResolverTest {
     @Test
     void nullTemplate_staysNull_onEveryPath() {
         assertThat(TemplateResolver.resolve(null, "p", Map.of(), Map.of())).isNull();
-        assertThat(TemplateResolver.resolveShellSafe(null, "p", Map.of(), Map.of(), k -> { })).isNull();
+        assertThat(TemplateResolver.resolveShellSafe(null, "p", Map.of(), Map.of(), TemplateResolver.Taint.NONE, k -> { })).isNull();
         assertThat(TemplateResolver.resolveShell(null, "p", Map.of(), Map.of(),
                 new TemplateResolver.Taint(Set.of("x"), Set.of(), true), k -> { })).isNull();
     }
@@ -89,11 +90,12 @@ class TemplateResolverTest {
         var taint = new TemplateResolver.Taint(Set.of("evil", "unused"), Set.of("build"), true);
 
         String out = TemplateResolver.resolveShell(
-                "{{ evil }} {{evil}} {{ safe }} {{ block.build.output }} {{ block.clean.output }} {{ previous_output }}",
+                "echo {{ evil }} {{evil}} {{ safe }} {{ block.build.output }} {{ block.clean.output }} {{ previous_output }}",
                 "prev", outputs, vars, taint, reported::add);
 
-        assertThat(out).isEqualTo("'$(rm -rf /)' '$(rm -rf /)' ok 'out'\\''put' c 'prev'");
-        assertThat(reported).containsExactly("evil");
+        assertThat(out).isEqualTo(FakeCommandRunner.value(1, "$(rm -rf /)") + FakeCommandRunner.value(2, "out'put") + FakeCommandRunner.value(3, "prev") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_1}\" ok \"${TRACEWORKS_VALUE_2}\" c \"${TRACEWORKS_VALUE_3}\"");
+        assertThat(reported).containsExactly("evil", "evil", "safe", "block.build.output", "block.clean.output",
+                "previous_output");
     }
 
     @Test
@@ -109,7 +111,7 @@ class TemplateResolverTest {
         var taint = new TemplateResolver.Taint(Set.of(), Set.of(), true);
 
         assertThat(TemplateResolver.resolveShell("cat {{ previous_output }}", null, Map.of(), Map.of(), taint, k -> { }))
-                .isEqualTo("cat ''");
+                .isEqualTo(FakeCommandRunner.value(1, "") + "cat \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -117,9 +119,27 @@ class TemplateResolverTest {
         Map<String, Object> vars = new HashMap<>(Map.of("evil", "{{ safe }} \u0000untrusted-0\u0000", "safe", "S"));
         var taint = new TemplateResolver.Taint(Set.of("evil"), Set.of(), false);
 
-        String out = TemplateResolver.resolveShell("{{ evil }}", "", Map.of(), vars, taint, k -> { });
+        String out = TemplateResolver.resolveShell("echo {{ evil }}", "", Map.of(), vars, taint, k -> { });
 
-        assertThat(out).isEqualTo("'{{ safe }} \u0000untrusted-0\u0000'");
+        assertThat(out).isEqualTo(FakeCommandRunner.value(1, "{{ safe }} \u0000untrusted-0\u0000") + "echo \"${TRACEWORKS_VALUE_1}\"");
+    }
+
+    /**
+     * A value is set from a heredoc that holds it as it is; the delimiter is one no line of the value is, so no
+     * line of the value ends the heredoc.
+     */
+    @Test
+    void valueAssignment_holdsTheValueAsItIs_underADelimiterNoLineOfItIs() {
+        assertThat(TemplateResolver.valueAssignment("TRACEWORKS_VALUE_1", "it's $(x)\n"))
+                .isEqualTo("IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :\nit's $(x)\n\n"
+                        + "TRACEWORKS_VALUE_1_END\nTRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\\n'}\n");
+        assertThat(TemplateResolver.valueAssignment("V", "a\nV_END\nV_END_\nrm -rf /"))
+                .startsWith("IFS= read -r -d '' V <<'V_END__' || :\na\nV_END\nV_END_\nrm -rf /\nV_END__\n");
+        assertThat(TemplateResolver.valueAssignment("V", "V_END")).contains("<<'V_END_'");
+        assertThat(TemplateResolver.valueAssignment("V", " V_END\nV_END x\nxV_END")).as("no whole line")
+                .contains("<<'V_END'");
+        assertThat(TemplateResolver.valueAssignment("V", "")).isEqualTo("IFS= read -r -d '' V <<'V_END' || :\n\n"
+                + "V_END\nV=${V%$'\\n'}\n");
     }
 
     @Test

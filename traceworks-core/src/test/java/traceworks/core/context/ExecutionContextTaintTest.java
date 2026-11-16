@@ -60,11 +60,10 @@ class ExecutionContextTaintTest {
 
         assertThat(taint.modelAsked()).isTrue();
         assertThat(taint.hasUntrustedInput()).isFalse();
-        assertThat(taint.isUntrusted("step_0_output")).isFalse();
+        assertThat(taint.isUntrusted("step_0_output")).isTrue();
         assertThat(taint.untrustedVariables()).isEmpty();
         assertThat(taint.snapshot()).isEqualTo(
                 new TemplateResolver.Taint(java.util.Set.of("step_0_output"), java.util.Set.of("ask"), true));
-        assertThat(taint.untrustedSnapshot()).isSameAs(TemplateResolver.Taint.NONE);
         assertThat(taint.export()).containsOnly(
                 java.util.Map.entry(ExecutionContext.MODEL_ASKED_VARIABLE, true),
                 java.util.Map.entry(ExecutionContext.MODEL_KEYS_VARIABLE, List.of("step_0_output")),

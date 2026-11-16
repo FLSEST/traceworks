@@ -40,7 +40,7 @@ public interface ChildRuns {
      * @param steps  its top-level steps in the order they ran; a read-only list
      * @param error  why it failed, {@code null} otherwise
      * @param modelAsked whether it asked a model, itself or through a child of its own: its output may then hold
-     *                   text a model wrote, and the parent quotes it in a shell line
+     *                   text a model wrote, and the parent protects it in a shell line
      */
     record ChildRun(String runId, RunStatus status, List<StepResult> steps, String error, boolean modelAsked) {
         public ChildRun {

@@ -213,7 +213,9 @@ class WorkflowEngineResumeTest {
         assertThat(uninterrupted.checkpoint(2).snapshot().context().taint().modelText())
                 .isEqualTo(new ContextState.ModelText(true, Set.of("step_1_output"), Set.of("ask"), true));
         assertThat(resumed.commands.commands())
-                .containsExactly("cat", "echo one two 'a; rm -rf ~' 'a; rm -rf ~' 'three four'");
+                .containsExactly("cat", FakeCommandRunner.value(1, "a; rm -rf ~") + FakeCommandRunner.value(2, "a; rm -rf ~")
+                        + FakeCommandRunner.value(3, "three four") + "echo one two \"${TRACEWORKS_VALUE_1}\""
+                        + " \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
         assertThat(uninterrupted.commands.commands()).endsWith(resumed.commands.commands().getLast());
     }
 
@@ -246,7 +248,8 @@ class WorkflowEngineResumeTest {
                 .containsEntry("{{ topic }}", false);
         assertThat(afterResume).as("the taint after resume").isEqualTo(wentOn);
         assertThat(resumed.commands.commands()).as("the resumed shell line quotes as the uninterrupted one")
-                .containsExactly("echo 'do this; rm -rf ~' 'chain text' release")
+                .containsExactly(FakeCommandRunner.value(1, "do this; rm -rf ~") + FakeCommandRunner.value(2, "chain text") + ""
+                        + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" release")
                 .isEqualTo(uninterrupted.commands.commands());
     }
 

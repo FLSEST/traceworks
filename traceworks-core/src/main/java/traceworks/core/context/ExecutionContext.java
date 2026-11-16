@@ -336,7 +336,7 @@ public class ExecutionContext {
         else setVariable(name, value);
     }
 
-    /** Sets a variable that may hold text a model wrote: a shell line quotes it, the run stays without untrusted input. */
+    /** Sets a variable that may hold text a model wrote: a shell line protects it, the run stays without untrusted input. */
     public void setModelVariable(String name, Object value) {
         put(name, value);
         taint.markModelVariable(name);
@@ -344,7 +344,7 @@ public class ExecutionContext {
 
     /**
      * The run asks a model now, or a child workflow of it did. Every output recorded from here on, and every
-     * variable derived from one, may hold text a model wrote: a shell line quotes it. See {@link ExecutionContextTaint}.
+     * variable derived from one, may hold text a model wrote: a shell line protects it. See {@link ExecutionContextTaint}.
      */
     public void markModelAsked() { taint.markModelAsked(); }
 
@@ -503,36 +503,34 @@ public class ExecutionContext {
                 taint::substitutedIntoPrompt);
     }
 
-    /** Shell-safe: every value wrapped in POSIX single quotes (internal ones as '\''). See {@link TemplateResolver#resolveShellSafe}. */
+    /** A shell command line of a block with {@code shell_escape_variables}: {@link #resolveShellTemplate} with {@code true}. */
     public String resolveTemplateShellSafe(String template) {
-        TemplateResolver.refuseQuotedValues(template, previousOutput, blockOutputs, variables, taint.snapshot());
-        return TemplateResolver.resolveShellSafe(template, previousOutput, blockOutputs, variables,
-                taint::substitutedIntoShell);
+        return resolveShellTemplate(template, true);
     }
 
     /**
-     * Shell command line: with {@code escapeAll} every placeholder is single-quoted, otherwise only
-     * untrusted variables, tainted block outputs and what may hold text a model wrote are. Substituted platform data taints the run from
-     * here on ({@link ExecutionContextTaint#substitutedIntoShell}). See {@link TemplateResolver#resolveShell}.
+     * Shell command line. A value the run has to protect (an untrusted or platform variable, a tainted block output,
+     * what may hold text a model wrote) never becomes part of the text: it reaches the shell as the value of a
+     * variable the line starts by setting, and a reference stands in its placeholder's place. Every other value is
+     * inserted as it is, or with {@code escapeAll} in single quotes. Substituted platform data taints the run from
+     * here on ({@link ExecutionContextTaint#substitutedIntoShell}). See {@link TemplateResolver#shellLine}.
      *
-     * @throws ShellLineRefusedException when a value the run quotes stands where its quotes do not hold (inside the
-     *                                   author's quotes, a heredoc body and so on); nothing is filled in then, with
-     *                                   {@code escapeAll} too
+     * @throws ShellLineRefusedException when such a value stands where no reference can stand (single quotes, an
+     *                                   arithmetic expression, an argument of {@code eval} and so on,
+     *                                   {@link ShellValuePlace}); nothing is filled in then, with {@code escapeAll} too
      */
     public String resolveShellTemplate(String template, boolean escapeAll) {
-        if (escapeAll) return resolveTemplateShellSafe(template);
-        TemplateResolver.Taint quoted = taint.snapshot();
-        TemplateResolver.refuseQuotedValues(template, previousOutput, blockOutputs, variables, quoted);
-        return TemplateResolver.resolveShell(template, previousOutput, blockOutputs, variables,
-                quoted, taint::substitutedIntoShell);
+        return TemplateResolver.shellLine(template, previousOutput, blockOutputs, variables, taint.snapshot(),
+                escapeAll, taint::substitutedIntoShell);
     }
 
     /**
-     * Whether the template names a value from outside the run (untrusted/platform variable, tainted output), which a
-     * place without a shell refuses. Text a model wrote is not one: an argument list takes it as one argument.
+     * Whether the template names a value the run has to protect (an untrusted or platform variable, a tainted
+     * output, what may hold text a model wrote). A place that passes no shell, where no reference can stand, refuses
+     * such a value: the arguments of a tool step, the host path of a mount.
      */
     public boolean namesEscapedValue(String template) {
-        return TemplateResolver.namesEscapedValue(template, taint.untrustedSnapshot());
+        return TemplateResolver.namesEscapedValue(template, taint.snapshot());
     }
 
     static String shellEscape(String value) { return TemplateResolver.shellEscape(value); }

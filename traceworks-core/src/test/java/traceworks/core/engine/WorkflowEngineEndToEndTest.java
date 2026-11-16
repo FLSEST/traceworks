@@ -111,7 +111,7 @@ class WorkflowEngineEndToEndTest {
         assertThat(claude.prompts()).as("the shell output reaches the prompt").containsExactly("Review: build ok");
         // the untrusted input and the output of a run that carries it are single-quoted in the later shell line
         assertThat(commands.commands()).containsExactly("make build",
-                "notify 'fix it'\\''; rm -rf / #' 'looks fine'");
+                FakeCommandRunner.value(1, "fix it'; rm -rf / #") + FakeCommandRunner.value(2, "looks fine") + "notify \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
         assertThat(outcome.steps()).extracting(StepResult::getOutput).containsExactly("build ok", "looks fine", "sent");
         assertThat(commands.requests()).allSatisfy(request -> {
             assertThat(request.workingDirectory()).isEqualTo("/work/project");
@@ -319,7 +319,8 @@ class WorkflowEngineEndToEndTest {
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
         // in the child, the parent's untrusted input and its tainted output are still quoted
-        assertThat(commands.commands()).containsExactly("cat payload", "deploy 'a; reboot' 'payload text'");
+        assertThat(commands.commands()).containsExactly("cat payload",
+                FakeCommandRunner.value(1, "a; reboot") + FakeCommandRunner.value(2, "payload text") + "deploy \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
         StepResult childStep = outcome.steps().get(1);
         assertThat(childStep.getOutput()).isEqualTo("deployed");
         String childRunId = (String) childStep.getMetadata().get("subRunId");

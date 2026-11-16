@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.model.SourceStep;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -663,7 +664,7 @@ class SwitchBlockExecutorTest {
 
         ArgumentCaptor<BlockDefinition> captor = ArgumentCaptor.forClass(BlockDefinition.class);
         verify(commands).shellStep(captor.capture(), anyInt(), anyInt(), any());
-        assertThat(captor.getValue().getConfig().get("command")).isEqualTo("echo 'x; id'");
+        assertThat(captor.getValue().getConfig().get("command")).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -944,7 +945,7 @@ class SwitchBlockExecutorTest {
         executor.execute(switchOf(config), context);
 
         assertThat(context.resolveShellTemplate("echo {{ block.scan.output }}", false))
-                .isEqualTo("echo 'a; id'");
+                .isEqualTo(FakeCommandRunner.value(1, "a; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -978,7 +979,7 @@ class SwitchBlockExecutorTest {
         executor.execute(switchOf(config), context);
 
         assertThat(context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
-                .isEqualTo("echo 'a | b'");
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     /**

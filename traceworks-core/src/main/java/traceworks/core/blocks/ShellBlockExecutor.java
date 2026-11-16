@@ -123,8 +123,8 @@ public class ShellBlockExecutor implements BlockExecutor {
      * Takes the optional {@code mounts} config (a list of strings {@code host:container:ro|rw}, read through
      * {@link BlockSettings#texts}; {@code null} for none) and resolves
      * placeholders in them against the current execution context ({@link #resolveMount}). A mount passes no shell that
-     * could quote a value, so an entry that names an untrusted value (untrusted input, a tainted block output, platform
-     * data) is refused, as in the arguments of a tool step: such a value could choose which host path the container
+     * could take a reference, so an entry that names an untrusted value (untrusted input, a tainted block output, platform
+     * data, text a model wrote) is refused, as in the arguments of a tool step: such a value could choose which host path the container
      * sees.
      *
      * @throws WorkflowExecutionException for an entry that names an untrusted value
@@ -138,7 +138,7 @@ public class ShellBlockExecutor implements BlockExecutor {
             if (s.isBlank()) continue;
             if (context.namesEscapedValue(s)) {
                 throw new WorkflowExecutionException("mounts must not contain untrusted values (untrusted input,"
-                        + " tainted block output, platform data): " + s);
+                        + " tainted block output, platform data, text a model wrote): " + s);
             }
             resolved.add(resolveMount(s, context));
         }

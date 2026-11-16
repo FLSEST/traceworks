@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.ai.AiProviderCapabilities;
 import traceworks.core.context.ApprovalRequest;
 import traceworks.core.context.ExecutionContext;
@@ -479,8 +480,8 @@ class BlockStepRunnerTest {
 
         assertThat(context.isUntrusted("step_1_output")).isTrue();
         assertThat(context.resolveShellTemplate(
-                "{{ previous_output }} {{ block.report.output }} {{ step_1_output }}", false))
-                .isEqualTo("'x; id' 'x; id' 'x; id'");
+                "echo {{ previous_output }} {{ block.report.output }} {{ step_1_output }}", false))
+                .isEqualTo(FakeCommandRunner.value(1, "x; id") + FakeCommandRunner.value(2, "x; id") + FakeCommandRunner.value(3, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
     }
 
     @Test

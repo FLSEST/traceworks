@@ -102,7 +102,7 @@ public class ApprovalBlockExecutor implements BlockExecutor {
         }
         // A person's answer, a remembered one, an AI actor's (one of the options, as the workflow spells it) and an
         // auto_answer the workflow writes out are trusted. An auto_answer filled in from a placeholder is whatever
-        // that value was, a step's output for one: derived, so a shell line quotes it where it quotes the output.
+        // that value was, a step's output for one: derived, so a shell line protects it where it protects the output.
         boolean filledIn = preset != null && "auto".equals(mode) && autoAnswer != null
                 && rawAutoAnswer != null && rawAutoAnswer.contains("{{");
         if (filledIn) {

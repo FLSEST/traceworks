@@ -7,7 +7,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Trust label per context variable. Three classes of values a shell line quotes exist, and they differ
+ * Trust label per context variable. Three classes of values a shell line protects exist, and they differ
  * in whether they make the run one that carries untrusted input:
  *
  * <ul>
@@ -60,9 +60,9 @@ final class VariableTrust {
         model.remove(name);
     }
 
-    /** True for a value from outside the run, external input or platform data; model text is not one. */
+    /** True for every class: a value the workflow did not write, which a shell line protects. */
     boolean isUntrusted(String name) {
-        return external.contains(name) || platform.contains(name);
+        return external.contains(name) || platform.contains(name) || model.contains(name);
     }
 
     /** True for platform data only — the class that taints the run on use instead of on injection. */

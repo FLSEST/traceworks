@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.context.ChildRuns;
 import traceworks.core.context.ChildRuns.ChildRun;
 import traceworks.core.context.ExecutionContext;
@@ -566,7 +567,8 @@ class SubWorkflowBlockExecutorTest {
                         .commandRunner(commands).workingDirectory("/workspace").build());
 
         String childRunId = (String) outcome.steps().getFirst().getMetadata().get("subRunId");
-        assertThat(commandsRun).containsExactly("echo SUB_WORKFLOW " + childRunId + " 'main; id'");
+        assertThat(commandsRun).containsExactly(FakeCommandRunner.value(1, "main; id") + "echo SUB_WORKFLOW " + childRunId
+                + " \"${TRACEWORKS_VALUE_1}\"");
     }
 
     /** A child that may not start (unknown workflow) fails the step with the reason, not the run. */

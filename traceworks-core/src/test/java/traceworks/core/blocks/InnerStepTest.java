@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.ai.ToolPolicy;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -171,7 +172,7 @@ class InnerStepTest {
         assertThat(shellBlock.getType()).isEqualTo("shell");
         assertThat(shellBlock.getName()).isNull();
         assertThat(shellBlock.getConfig())
-                .containsEntry("command", "build 'x; id'")
+                .containsEntry("command", FakeCommandRunner.value(1, "x; id") + "build \"${TRACEWORKS_VALUE_1}\"")
                 .containsEntry("container_image", "alpine:3")
                 .containsEntry("mount_docker_socket", false)
                 .containsEntry("mounts", List.of("/data:/data:ro"))

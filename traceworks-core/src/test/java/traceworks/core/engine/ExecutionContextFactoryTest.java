@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.container.RunPaths;
 import traceworks.core.model.ContextState;
 import traceworks.core.context.ExecutionContext;
@@ -295,7 +296,7 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.isUntrusted("action")).isTrue();
         assertThat(ctx.isUntrusted("env")).isFalse();
-        assertThat(ctx.resolveShellTemplate("run {{ action }} {{ env }}", false)).isEqualTo("run 'deploy' test");
+        assertThat(ctx.resolveShellTemplate("run {{ action }} {{ env }}", false)).isEqualTo(FakeCommandRunner.value(1, "deploy") + "run \"${TRACEWORKS_VALUE_1}\" test");
     }
 
     @Test
@@ -325,7 +326,7 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.hasUntrustedInput()).isTrue();
         assertThat(ctx.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo("echo 'x; id' 'y && z'");
+                .isEqualTo(FakeCommandRunner.value(1, "x; id") + FakeCommandRunner.value(2, "y && z") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
     }
 
     @Test
@@ -340,7 +341,7 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.isUntrusted("branch")).isTrue();
         assertThat(ctx.resolveShellTemplate("echo {{ branch }} {{ previous_output }}", false))
-                .isEqualTo("echo 'main; id' 'out'");
+                .isEqualTo(FakeCommandRunner.value(1, "main; id") + FakeCommandRunner.value(2, "out") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
     }
 
     /**
@@ -359,7 +360,7 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.hasUntrustedInput()).isTrue();
         assertThat(ctx.isUntrusted("item")).isTrue();
-        assertThat(ctx.resolveShellTemplate("cat {{ item }}", false)).isEqualTo("cat 'a.txt; id'");
+        assertThat(ctx.resolveShellTemplate("cat {{ item }}", false)).isEqualTo(FakeCommandRunner.value(1, "a.txt; id") + "cat \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -376,7 +377,7 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.isUntrusted("previous_chain_output")).isTrue();
         assertThat(ctx.hasUntrustedInput()).isFalse(); // a taint source on use, like previous_report
-        assertThat(ctx.resolveShellTemplate("echo {{ previous_chain_output }}", false)).isEqualTo("echo 'a; rm -rf ~'");
+        assertThat(ctx.resolveShellTemplate("echo {{ previous_chain_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "a; rm -rf ~") + "echo \"${TRACEWORKS_VALUE_1}\"");
         assertThat(ctx.hasUntrustedInput()).isTrue();
     }
 
@@ -454,7 +455,7 @@ class ExecutionContextFactoryTest {
         assertThat(after.getVariable("ticket")).isEqualTo("a; reboot");
         assertThat(after.getPreviousOutput()).isEqualTo("built");
         assertThat(after.resolveShellTemplate("echo {{ block.build.output }} {{ ticket }}", false))
-                .isEqualTo("echo 'built' 'a; reboot'");
+                .isEqualTo(FakeCommandRunner.value(1, "built") + FakeCommandRunner.value(2, "a; reboot") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
         assertThat(after.nextStepIndex()).isEqualTo(2);
         assertThat(after.getRememberedApproval("Deploy?")).isEqualTo("Yes always");
         assertThat(after.getWorkflowRunId()).isEqualTo("run-1");

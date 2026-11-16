@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.container.RunPaths;
 import traceworks.core.context.ApprovalRequest;
 import traceworks.core.context.ChildRuns;
@@ -1393,7 +1394,7 @@ class WorkflowEngineTest {
                 ExecutionContext.UNTRUSTED_KEYS_VARIABLE, List.of("branch"))));
 
         // block 1 sees only the untrusted variable escaped, block 2 also the tainted output
-        assertThat(resolved.get(0)).isEqualTo("echo  {{ step_0_output }} 'main; id'");
-        assertThat(resolved.get(1)).isEqualTo("echo 'x; id' 'x; id' 'main; id'");
+        assertThat(resolved.get(0)).isEqualTo(FakeCommandRunner.value(1, "main; id") + "echo  {{ step_0_output }} \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(resolved.get(1)).isEqualTo(FakeCommandRunner.value(1, "x; id") + FakeCommandRunner.value(2, "x; id") + FakeCommandRunner.value(3, "main; id") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
     }
 }

@@ -1,5 +1,6 @@
 package traceworks.core.context;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.model.BlockDefinition;
 import traceworks.core.port.AiProviders;
 import traceworks.core.port.Clock;
@@ -569,7 +570,7 @@ class ExecutionContextTest {
         context.setUntrustedVariable("branch", "main; rm -rf /");
 
         assertThat(context.resolveShellTemplate("git checkout {{ branch }}", false))
-                .isEqualTo("git checkout 'main; rm -rf /'");
+                .isEqualTo(FakeCommandRunner.value(1, "main; rm -rf /") + "git checkout \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -578,7 +579,7 @@ class ExecutionContextTest {
         context.setVariable("dir", "/repo");
 
         assertThat(context.resolveShellTemplate("cd {{ dir }} && echo {{msg}}", false))
-                .isEqualTo("cd /repo && echo '$(curl evil)`id`'");
+                .isEqualTo(FakeCommandRunner.value(1, "$(curl evil)`id`") + "cd /repo && echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -586,7 +587,7 @@ class ExecutionContextTest {
         context.setUntrustedVariable("v", "x'; id; echo '");
 
         assertThat(context.resolveShellTemplate("echo {{ v }}", false))
-                .isEqualTo("echo 'x'\\''; id; echo '\\'''");
+                .isEqualTo(FakeCommandRunner.value(1, "x'; id; echo '") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -596,7 +597,7 @@ class ExecutionContextTest {
 
         String resolved = context.resolveShellTemplate("echo {{ payload }}", false);
 
-        assertThat(resolved).isEqualTo("echo '{{ secret }}; id'");
+        assertThat(resolved).isEqualTo(FakeCommandRunner.value(1, "{{ secret }}; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
         assertThat(resolved).doesNotContain("danger");
     }
 
@@ -616,7 +617,7 @@ class ExecutionContextTest {
         context.setUntrustedVariable("u", "z");
 
         assertThat(context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }} {{ u }}", false))
-                .isEqualTo("a | b x && y 'z'");
+                .isEqualTo(FakeCommandRunner.value(1, "z") + "a | b x && y \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -624,7 +625,7 @@ class ExecutionContextTest {
         context.setVariable("path", "/tmp/a b");
         context.setUntrustedVariable("u", "z");
 
-        assertThat(context.resolveShellTemplate("ls {{ path }} {{ u }}", true)).isEqualTo("ls '/tmp/a b' 'z'");
+        assertThat(context.resolveShellTemplate("ls {{ path }} {{ u }}", true)).isEqualTo(FakeCommandRunner.value(1, "z") + "ls '/tmp/a b' \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -677,7 +678,7 @@ class ExecutionContextTest {
 
         assertThat(context.isUntrusted("previous_report")).isTrue();
         assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo("echo 'x; rm -rf /'");
+                .isEqualTo(FakeCommandRunner.value(1, "x; rm -rf /") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -715,7 +716,7 @@ class ExecutionContextTest {
 
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.getUntrustedVariables()).containsExactly("previous_report");
-        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false)).isEqualTo("echo 'y; id'");
+        assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false)).isEqualTo(FakeCommandRunner.value(1, "y; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     // ── Platform data taints the run once it really lands in a shell command line ──
@@ -725,7 +726,7 @@ class ExecutionContextTest {
         context.setUntrustedPlatformVariable("previous_report", "x; id");
 
         assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo("echo 'x; id'");
+                .isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
 
         assertThat(context.hasUntrustedInput()).isTrue();
     }
@@ -738,7 +739,7 @@ class ExecutionContextTest {
         context.setDerivedVariable("item", "a.txt; id");
 
         assertThat(context.isUntrusted("item")).isTrue();
-        assertThat(context.resolveShellTemplate("cat {{ item }}", false)).isEqualTo("cat 'a.txt; id'");
+        assertThat(context.resolveShellTemplate("cat {{ item }}", false)).isEqualTo(FakeCommandRunner.value(1, "a.txt; id") + "cat \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -748,8 +749,8 @@ class ExecutionContextTest {
 
         context.recordOutput("scan", "a | b");
 
-        assertThat(context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo("'a | b' 'a | b'");
+        assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + FakeCommandRunner.value(2, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
         assertThat(context.exportTaint()).containsEntry(ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE,
                 List.of(ExecutionContext.PREVIOUS_OUTPUT_NAME, "scan"));
     }
@@ -759,7 +760,7 @@ class ExecutionContextTest {
         context.setUntrustedPlatformVariable("previous_report", "report");
 
         assertThat(context.resolveShellTemplate("echo {{ previous_report }}", true))
-                .isEqualTo("echo 'report'");
+                .isEqualTo(FakeCommandRunner.value(1, "report") + "echo \"${TRACEWORKS_VALUE_1}\"");
 
         assertThat(context.hasUntrustedInput()).isTrue();
     }
@@ -809,9 +810,9 @@ class ExecutionContextTest {
         context.recordOutput("analysis", "a | b");
 
         assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false))
-                .isEqualTo("echo 'a | b'");
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
         assertThat(context.resolveShellTemplate("echo {{ block.analysis.output }}", false))
-                .isEqualTo("echo 'a | b'");
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -847,7 +848,7 @@ class ExecutionContextTest {
         context.recordOutput("late", "a | b");
 
         assertThat(context.resolveShellTemplate("{{ block.early.output }} {{ block.late.output }}", false))
-                .isEqualTo("e | f 'a | b'");
+                .isEqualTo(FakeCommandRunner.value(1, "a | b") + "e | f \"${TRACEWORKS_VALUE_1}\"");
     }
 
     /** Sub-workflow hand-over and resume carry the tainted output via {@code __untrusted_outputs}. */
@@ -881,9 +882,9 @@ class ExecutionContextTest {
 
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.resolveShellTemplate("echo {{ block.summary.output }}", false))
-                .isEqualTo("echo 'c | d'");
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo("echo 'c | d'");
-        assertThat(context.resolveShellTemplate("echo {{ step_1_output }}", false)).isEqualTo("echo 'e | f'");
+                .isEqualTo(FakeCommandRunner.value(1, "c | d") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "c | d") + "echo \"${TRACEWORKS_VALUE_1}\"");
+        assertThat(context.resolveShellTemplate("echo {{ step_1_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "e | f") + "echo \"${TRACEWORKS_VALUE_1}\"");
         assertThat(context.exportTaint())
                 .isNotEmpty()
                 .containsEntry(ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE,
@@ -909,7 +910,7 @@ class ExecutionContextTest {
         assertThat(context.isUntrusted("previous_report")).isTrue();
         assertThat(context.hasUntrustedInput()).isFalse();
         assertThat(context.resolveShellTemplate("echo {{ previous_report }}", false))
-                .isEqualTo("echo '/runs/run/repo/a.java; id'");
+                .isEqualTo(FakeCommandRunner.value(1, "/runs/run/repo/a.java; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -921,7 +922,7 @@ class ExecutionContextTest {
         assertThat(context.isUntrusted("branch")).isTrue();
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.getUntrustedVariables()).containsExactly("branch");
-        assertThat(context.resolveShellTemplate("cd {{ branch }}", false)).isEqualTo("cd '/runs/run/repo; id'");
+        assertThat(context.resolveShellTemplate("cd {{ branch }}", false)).isEqualTo(FakeCommandRunner.value(1, "/runs/run/repo; id") + "cd \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -954,7 +955,7 @@ class ExecutionContextTest {
 
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo("echo 'x; id' 'x; id'");
+                .isEqualTo(FakeCommandRunner.value(1, "x; id") + FakeCommandRunner.value(2, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\"");
     }
 
     @Test
@@ -963,7 +964,7 @@ class ExecutionContextTest {
         context.recordOutput("scan", "x'; id; echo '");
 
         assertThat(context.resolveShellTemplate("echo {{ block.scan.output }}", false))
-                .isEqualTo("echo 'x'\\''; id; echo '\\'''");
+                .isEqualTo(FakeCommandRunner.value(1, "x'; id; echo '") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -974,7 +975,7 @@ class ExecutionContextTest {
 
         String resolved = context.resolveShellTemplate("echo {{ previous_output }}", false);
 
-        assertThat(resolved).isEqualTo("echo '{{ secret }}; id'");
+        assertThat(resolved).isEqualTo(FakeCommandRunner.value(1, "{{ secret }}; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
         assertThat(resolved).doesNotContain("danger");
     }
 
@@ -988,8 +989,8 @@ class ExecutionContextTest {
         context.recordOutput("second", "also tainted");
 
         assertThat(context.resolveShellTemplate(
-                "{{ block.first.output }} {{ block.second.output }} {{ previous_output }}", false))
-                .isEqualTo("'tainted' 'also tainted' 'also tainted'");
+                "echo {{ block.first.output }} {{ block.second.output }} {{ previous_output }}", false))
+                .isEqualTo(FakeCommandRunner.value(1, "tainted") + FakeCommandRunner.value(2, "also tainted") + FakeCommandRunner.value(3, "also tainted") + "echo \"${TRACEWORKS_VALUE_1}\" \"${TRACEWORKS_VALUE_2}\" \"${TRACEWORKS_VALUE_3}\"");
     }
 
     @Test
@@ -998,8 +999,8 @@ class ExecutionContextTest {
         context.setBlockOutput("scan", "raw && stays");
         context.recordOutput(null, "x; id");
 
-        assertThat(context.resolveShellTemplate("{{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo("'x; id' raw && stays");
+        assertThat(context.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
+                .isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\" raw && stays");
     }
 
     @Test
@@ -1025,7 +1026,7 @@ class ExecutionContextTest {
         context.markOutputUntrusted(ExecutionContext.PREVIOUS_OUTPUT_NAME);
 
         assertThat(context.hasUntrustedInput()).isTrue();
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo("echo 'x; id'");
+        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -1035,7 +1036,8 @@ class ExecutionContextTest {
 
         context.setUntrustedVariable("u", "z");
         context.setDerivedVariable("step_1_output", "c; id");
-        assertThat(context.resolveShellTemplate("{{ step_1_output }}", false)).isEqualTo("'c; id'");
+        assertThat(context.resolveShellTemplate("echo {{ step_1_output }}", false))
+                .isEqualTo(FakeCommandRunner.value(1, "c; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test

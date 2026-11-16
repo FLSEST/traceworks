@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.port.Egress;
 import traceworks.core.container.RunPaths;
 import traceworks.core.context.ExecutionContext;
@@ -354,7 +355,7 @@ class ShellBlockExecutorTest {
         assertThatThrownBy(() -> executor.execute(block, context))
                 .isInstanceOf(WorkflowExecutionException.class)
                 .hasMessage("mounts must not contain untrusted values (untrusted input, tainted block output, platform"
-                        + " data): {{ data_dir }}:/data:ro");
+                        + " data, text a model wrote): {{ data_dir }}:/data:ro");
         verifyNoInteractions(commands);
     }
 
@@ -407,7 +408,7 @@ class ShellBlockExecutorTest {
     @Test
     void execute_untrustedVariable_isEscapedWithoutOptIn() {
         context.setUntrustedVariable("branch", "main; rm -rf /");
-        when(commands.run(onHost("git checkout 'main; rm -rf /'", 300))).thenReturn(result("ok", 0, 10));
+        when(commands.run(onHost(FakeCommandRunner.value(1, "main; rm -rf /") + "git checkout \"${TRACEWORKS_VALUE_1}\"", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
@@ -417,14 +418,14 @@ class ShellBlockExecutorTest {
         StepResult result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("git checkout 'main; rm -rf /'");
+        assertThat(result.getInput()).isEqualTo(FakeCommandRunner.value(1, "main; rm -rf /") + "git checkout \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
     void execute_platformDataVariable_isEscapedWithoutOptIn() {
         // platform data carries text from earlier runs
         context.setUntrustedPlatformVariable("previous_report", "x; rm -rf /");
-        when(commands.run(onHost("echo 'x; rm -rf /'", 300))).thenReturn(result("ok", 0, 10));
+        when(commands.run(onHost(FakeCommandRunner.value(1, "x; rm -rf /") + "echo \"${TRACEWORKS_VALUE_1}\"", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
@@ -434,7 +435,7 @@ class ShellBlockExecutorTest {
         StepResult result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("echo 'x; rm -rf /'");
+        assertThat(result.getInput()).isEqualTo(FakeCommandRunner.value(1, "x; rm -rf /") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     @Test
@@ -456,7 +457,7 @@ class ShellBlockExecutorTest {
     void execute_taintedPreviousOutput_isEscapedWithoutOptIn() {
         context.setUntrustedVariable("branch", "main");   // webhook payload: the run is tainted
         context.recordOutput("scan", "x; id");
-        when(commands.run(onHost("echo 'x; id'", 300))).thenReturn(result("ok", 0, 10));
+        when(commands.run(onHost(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
@@ -466,7 +467,7 @@ class ShellBlockExecutorTest {
         StepResult result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("echo 'x; id'");
+        assertThat(result.getInput()).isEqualTo(FakeCommandRunner.value(1, "x; id") + "echo \"${TRACEWORKS_VALUE_1}\"");
     }
 
     private StepResult runCheckedCommand(String scriptOutput, int exitCode) {

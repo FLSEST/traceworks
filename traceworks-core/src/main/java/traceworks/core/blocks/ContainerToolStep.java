@@ -113,7 +113,7 @@ class ContainerToolStep {
         for (String arg : raw) {
             if (context.namesEscapedValue(arg)) {
                 throw new WorkflowExecutionException("container_args must not contain untrusted values (untrusted "
-                        + "input, tainted block output, platform data): " + arg);
+                        + "input, tainted block output, platform data, text a model wrote): " + arg);
             }
             resolved.add(context.resolveTemplate(arg));
         }

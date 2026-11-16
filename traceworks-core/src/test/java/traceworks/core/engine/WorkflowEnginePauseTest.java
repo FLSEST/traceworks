@@ -131,12 +131,13 @@ class WorkflowEnginePauseTest {
     @Test
     void aResumedLoopThatTakesOverAnswers_marksTheRunAsOneThatAskedAModel() {
         Map<String, Map<String, Object>> loops = new java.util.LinkedHashMap<>();
-        loops.put("'[a]: one; id\n[b]: two'", Map.of("execution_mode", "ai", "items", List.of("a", "b"),
+        loops.put(FakeCommandRunner.value(1, "[a]: one; id\n[b]: two") + "./report \"${TRACEWORKS_VALUE_1}\"",
+                Map.of("execution_mode", "ai", "items", List.of("a", "b"),
                 "command", "Judge {{ item }}"));
-        loops.put("[a]: one; id\n[b]: two", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
+        loops.put("./report [a]: one; id\n[b]: two", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
                 "command", "./work"));
 
-        loops.forEach((handedOn, loop) -> {
+        loops.forEach((reportLine, loop) -> {
             WorkflowDefinition workflow = workflow("wf-taken-over", block("foreach", "each", loop),
                     block("shell", "report", Map.of("command", "./report {{ block.each.output }}")));
             Session first = new Session();
@@ -150,7 +151,7 @@ class WorkflowEnginePauseTest {
 
             assertThat(resumed.status()).as(loop + ": " + resumed.error()).isEqualTo(RunStatus.COMPLETED);
             assertThat(second.commands.commands()).as(loop.toString())
-                    .containsExactly("./report " + handedOn.strip());
+                    .containsExactly(reportLine);
         });
     }
 

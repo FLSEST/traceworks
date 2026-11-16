@@ -34,12 +34,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * ({@link #consumePlatformPrompt}), which is therefore escaped in later shell command lines. The run
  * itself stays clean until an output is really recorded — a prompt alone changes nothing.
  *
- * <p><b>Text a model wrote is quoted, and is no untrusted input.</b> A model reads the workspace, which may hold
+ * <p><b>Text a model wrote is protected, and is no untrusted input.</b> A model reads the workspace, which may hold
  * text that steers its answer, so its answer never reaches a shell line as code. From the moment a run asks a model
  * ({@link #markModelAsked}, set where a block resolves its provider, and for a child workflow that asked one) every
  * output recorded and every variable derived from one (a {@code step_N_output}, a loop item, an answer an AI actor
- * gave) is kept as model text, and {@link #snapshot} names it next to the untrusted values, so every shell line
- * quotes it. It stays for the rest of the run, as untrusted input does and for the same reason: a later shell step
+ * gave) is kept as model text, and {@link #snapshot} names it next to the untrusted values, so no shell line
+ * takes it as code. It stays for the rest of the run, as untrusted input does and for the same reason: a later shell step
  * can print what the model wrote, or read a file the model wrote, without naming a placeholder. What was recorded
  * before the first call stays as it was, and so does a run that asks no model. Model text is not untrusted input:
  * {@link #hasUntrustedInput} does not count it, so an approval's {@code actor} and {@code mode} read as before. It
@@ -135,14 +135,6 @@ final class ExecutionContextTaint {
         names.addAll(modelOutputs.outputNames());
         return new TemplateResolver.Taint(escaped, Set.copyOf(names),
                 outputs.isPreviousOutputTainted() || modelOutputs.isPreviousOutputTainted());
-    }
-
-    /**
-     * The values from outside the run alone, without model text: what a place with no shell to quote in refuses
-     * ({@link TemplateResolver#namesEscapedValue}). Model text is one argument there, as it always was.
-     */
-    TemplateResolver.Taint untrustedSnapshot() {
-        return outputs.snapshot(variables.untrustedNames());
     }
 
     /** Taint as reserved input-context keys for persistence and hand-over; empty for a clean run. */
