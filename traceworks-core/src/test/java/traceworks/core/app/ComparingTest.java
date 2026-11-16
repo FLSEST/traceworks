@@ -70,6 +70,22 @@ class ComparingTest {
                 new RunComparison.Input("version", false, false, "\"1.2\"", "\"1.3\""));
     }
 
+    /** A deterministic step whose output was cut at the bound in one run only did not run the same way. */
+    @Test
+    void anOutputCutInOneRunOnly_failsTheCheck_andInBothItDoesNot() {
+        String a = run(BUILD, Map.of());
+        fx.commands.on("./test", traceworks.core.testing.FakeCommandRunner.ok("tested").withOutputCut(
+                new traceworks.core.port.CommandRunner.OutputCut(java.util.List.of("stdout"), 5000)));
+        String b = run(BUILD, Map.of());
+        String c = run(BUILD, Map.of());
+
+        assertThat(fx.services().compare(a, b).differences()).containsExactly(
+                "step test: the output was cut in run B (stdout after 5000 ms), not in run A");
+        assertThat(fx.services().compare(b, a).differences()).containsExactly(
+                "step test: the output was cut in run A (stdout after 5000 ms), not in run B");
+        assertThat(fx.services().compare(b, c).reproduced()).as("cut the same way in both").isTrue();
+    }
+
     @Test
     void aRunThatHasNotFinished_isRefused_withItsStatus() {
         String finished = run(BUILD, Map.of());
