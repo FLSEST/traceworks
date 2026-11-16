@@ -125,6 +125,22 @@ public final class RunRecorder implements RunEvents {
         return this;
     }
 
+    /**
+     * The operator's model servers as {@code run.started} and {@code run.resumed} name them: by backend id, the
+     * URL, the API, the models and the name of the secret ({@code null} for none), never a value.
+     */
+    public static ObjectNode localModels(traceworks.core.port.LocalModels local) {
+        ObjectNode node = Blobs.MAPPER.createObjectNode();
+        for (traceworks.core.port.LocalModels.Backend backend : local.list()) {
+            ObjectNode server = node.putObject(backend.id());
+            server.put("url", backend.url());
+            server.put("api", backend.api());
+            backend.models().forEach(server.putArray("models")::add);
+            server.put("secret", backend.secret());
+        }
+        return node;
+    }
+
     /** Records {@code run.started}. */
     public void runStarted(RunStart start) {
         ObjectNode f = Blobs.MAPPER.createObjectNode();
@@ -159,6 +175,10 @@ public final class RunRecorder implements RunEvents {
         f.put("ai_network", start.aiNetwork().mode());
         ObjectNode aiHosts = f.putObject("ai_hosts");
         start.aiNetwork().hosts().forEach((cli, hosts) -> hosts.forEach(aiHosts.withArray(cli)::add));
+        if (!start.localModels().isEmpty()) {
+            // Only for a home that declares a model server: every other run.started keeps its bytes
+            f.set("local_models", localModels(start.localModels()));
+        }
         ArrayNode images = f.putArray("images");
         for (ImageFacts image : start.images()) {
             ObjectNode node = images.addObject();

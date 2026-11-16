@@ -159,9 +159,18 @@ public record RunComparison(String runA, String runB, List<Field> header, List<I
      * @param model      the model asked for; {@code null} for the CLI's default
      * @param answeredBy the model that answered; {@code null} when the call reported none
      * @param web        the web mode with the hosts of a fetch, such as {@code fetch (example.org:443)}
+     * @param local      the model server of the operator's the call went to, as
+     *                   {@code local backend <id> at <url>}; {@code null} for a call to the provider
      */
     public record Call(String provider, String model, String answeredBy, String effort, String tools, String web,
-                       Integer inputTokens, Integer outputTokens, Double costUsd) {}
+                       Integer inputTokens, Integer outputTokens, Double costUsd, String local) {
+
+        /** One side of a call to the provider. */
+        public Call(String provider, String model, String answeredBy, String effort, String tools, String web,
+                    Integer inputTokens, Integer outputTokens, Double costUsd) {
+            this(provider, model, answeredBy, effort, tools, web, inputTokens, outputTokens, costUsd, null);
+        }
+    }
 
     /**
      * What changed in the register of two audit runs between the state run A left and the state run B left.

@@ -375,6 +375,37 @@ class RunComparerTest {
         assertThat(comparison.reproduced()).isFalse();
     }
 
+    /** A call that moved to a model server of the operator's, or to another one, is another setup. */
+    @Test
+    void aCallOnALocalBackend_andOneAtTheProvider_orAtAnotherServer_differInTheirSetup() {
+        AiCallView.Response response = new AiCallView.Response("m", 100, 20, 0.01, 1, 0, blob("fine"), null);
+        AiCallView provider = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response);
+        AiCallView local = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response,
+                new AiCallView.Local("llm", "http://llm.internal:8080/v1", "openai-completions"));
+        AiCallView moved = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response,
+                new AiCallView.Local("llm", "http://other.internal:8080/v1", "openai-completions"));
+
+        RunComparison toLocal = compare(new Run("run-a").ai("review", "fine", provider),
+                new Run("run-b").ai("review", "fine", local));
+        RunComparison toAnotherServer = compare(new Run("run-a").ai("review", "fine", local),
+                new Run("run-b").ai("review", "fine", moved));
+        RunComparison same = compare(new Run("run-a").ai("review", "fine", local),
+                new Run("run-b").ai("review", "fine", local));
+
+        assertThat(step(toLocal, "review").calls().getFirst().setupDifferences()).containsExactly("local backend");
+        assertThat(toLocal.reproduced()).isFalse();
+        assertThat(step(toLocal, "review").calls().getFirst().a().local()).isNull();
+        assertThat(step(toLocal, "review").calls().getFirst().b().local())
+                .isEqualTo("local backend llm at http://llm.internal:8080/v1");
+        assertThat(step(toAnotherServer, "review").calls().getFirst().setupDifferences())
+                .containsExactly("local backend");
+        assertThat(step(same, "review").calls().getFirst().setupDifferences()).isEmpty();
+        assertThat(same.reproduced()).isTrue();
+    }
+
     @Test
     void aDifferentSystemPrompt_failsTheCheck_alsoWhenThePromptIsTheSame() {
         Run a = new Run("run-a").ai("review", "fine", callWith("none", List.of(), "Be strict"));

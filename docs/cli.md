@@ -572,7 +572,7 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `unused-value` | `INFO` | a name under `values` that no shell line of the block uses as `$NAME` or `${NAME…}`: the variable is set and nothing reads it |
 | `quoted-placeholder` | `WARNING` | a step output the run inserts as it is, inside quotes: an apostrophe or a quote in the value ends them. In a block with `shell_escape_variables`, also any placeholder in single quotes, where the two pairs of quotes cancel out. (A protected placeholder is `protected-value-in-shell`, wherever it stands) |
 | `heredoc-placeholder` | `ERROR` or `WARNING` | a step output the run inserts as it is, in the body of a heredoc. An error where an interpreter reads the body as its program (`python3 - <<'PY'`, `… \| sh`): the value turns into code. A warning under an unquoted delimiter (the shell runs `$(…)` in the value), and for any placeholder in a body of a block with `shell_escape_variables` |
-| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
+| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, and none that `local_models` in the `traceworks.json` of the home declares, such as `ollama/llama3` in a home without an `ollama` entry: Traceworks cannot tell which credential the backend takes, and the run is refused at its start. A model that names a declared backend whose `models` do not list it is reported under the same rule ("Local models"). The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
 | `placeholder-in-model` | `ERROR` | a `model` with a placeholder, the workflow's or that of a block that makes an AI call, such as `"model": "{{ m }}"`: no run resolves it, so the CLI would be asked for a model of that text. Traceworks refuses the workflow. A model a run may pick is a declared choice ("Model choices") |
 | `invalid-model-choice` | `ERROR` | a `model_choices` declaration that is not understood completely (a choice that is no object, a key other than `default` and `options`, an option without `provider` or `model`, a placeholder in either, the provider Codex, a name that is no plain name or one a run sets itself, a `default_context` entry of the choice's name), a `default` that is none of the options, a block whose `model_choice` names no declared choice, and a block that names `provider` or `model` next to `model_choice`. Traceworks refuses the workflow |
 | `unused-model-choice` | `WARNING` | a declared model choice that no block refers to with `model_choice`: a pick of it changes nothing |
@@ -1360,6 +1360,7 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `allowed_signers` | path or `null` | the allowed signers file; a relative path is relative to the home. `null` (the default) is `allowed_signers` in the home. No workspace, package or step mount may be this file or a folder that holds it, nor the `signing_key` (exit 6, the refusal names the setting; docs/security.md): keep each in a folder of its own |
 | `allowed_models` | list of objects or `null` | the models that may run in this home: `[{"provider": "CLAUDE", "model": "claude-fable-*"}, {"provider": "PI"}]`. `provider` is `CLAUDE` or `PI` (any case); `model` is a model name in which `*` stands for any text, and an entry without `model` allows every model of the provider, its default included. Missing or `null` (the default) is no restriction; `[]` allows no model. A run with an AI step whose provider and model no entry allows is refused before it starts (exit 6), whatever the package names or the caller picks. No workflow or environment variable can set it (see "Model choices") |
 | `ai_hosts` | object or `null` | more hosts for the containers of an AI CLI: `{"claude": ["<host>:<port>", ...], "pi": [...]}`. A key is a CLI Traceworks runs (`claude`, `pi`); any other is refused. A host is a name or an IPv4 address (`[a-z0-9]([a-z0-9.-]*[a-z0-9])?`, compared in lower case) with a port from 1 to 65535: no wildcard, no scheme, no path. Missing, `null` and `{}` add none. No workflow or environment variable can set it |
+| `local_models` | object or `null` | the model servers of your own that a `PI` step may name: `{"<backend>": {"url": "http://llm.internal:8080/v1", "api": "openai-completions", "models": ["<model>", ...], "secret": "<NAME>"}}`. A step with the model `<backend>/<model>` runs against that server, needs no credential of a provider and reaches nothing but the server. Every value is checked when the file is read, and a wrong one refuses the command (exit 6). Missing, `null` and `{}` declare none. No workflow, workspace, run input or environment variable can set it (see "Local models") |
 
 ```json
 {
@@ -1484,8 +1485,9 @@ record names every connection it asked for. It needs no configuration.
 - **The hosts** are fixed in Traceworks, never taken from a workflow: `api.anthropic.com:443` for Claude; for Pi the
   API of the backend the call's model names (`anthropic/...` or no backend: `api.anthropic.com:443`, `openai/...`:
   `api.openai.com:443`, `google/...`: `generativelanguage.googleapis.com:443`, `openrouter/...`:
-  `openrouter.ai:443`). A Pi call with another backend has no host and no credential: it fails before anything
-  runs, and the message says how to name a backend Traceworks knows ("AI steps", "Credentials").
+  `openrouter.ai:443`). A Pi call whose backend is a model server you declared reaches that server and none of
+  these hosts ("Local models"). A Pi call with any other backend has no host and no credential: it fails before
+  anything runs, and the message names the backends Traceworks knows ("AI steps", "Credentials").
 - **`ai_hosts`** in `traceworks.json` adds hosts for every container of one CLI: a gateway or a mirror your provider
   traffic goes through.
 
@@ -1497,8 +1499,9 @@ record names every connection it asked for. It needs no configuration.
   egress proxy (the built-in image `egress`, built by `traceworks images build`), which is on that network and on one
   with a way out, and points the container's clients at it (`HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`,
   `http_proxy`; a step cannot set these names itself). The proxy tunnels `CONNECT <host>:<port>` to the listed hosts
-  and answers everything else with 403: another host, a plain HTTP request, an IP address that is not listed. A
-  target is compared as the client writes it. The proxy and both networks carry the run's label and are removed when
+  and answers everything else with 403: another host, a plain HTTP request, an IP address that is not listed. The
+  one plain HTTP request it sends on is one to a model server of yours whose URL starts with `http://` ("Local
+  models"). A target is compared as the client writes it. The proxy and both networks carry the run's label and are removed when
   the call has ended, also after a timeout or a cancel. When the proxy does not listen within 15 seconds, or a
   network cannot be created, nothing of the call runs and it fails: its `step.command.finished` has exit code 125.
 - **The record.** The call's `step.command` says `"network": "hosts"` and lists them in `network_hosts`; its
@@ -1524,6 +1527,128 @@ record names every connection it asked for. It needs no configuration.
   "Many containers on a desktop machine" in docs/security.md.
 
 What it does not close is in docs/security.md, "What they do not protect": the provider's own host stays reachable.
+
+## Local models
+
+A model on a server of your own: with it no prompt, no file and no answer of an AI step goes to a provider. Only a
+`PI` step can use one, and only the operator declares the server, in `traceworks.json`. No workflow, workspace, run
+input or environment variable names a server or its URL.
+
+```json
+{"local_models": {
+  "llm": {
+    "url": "http://llm.internal:8080/v1",
+    "api": "openai-completions",
+    "models": ["qwen2.5-coder:7b", "llama3.3"],
+    "secret": "LLM_KEY"
+  }
+}}
+```
+
+| Key | Value |
+|---|---|
+| the key of an entry | the backend id, of your choosing: `[a-z][a-z0-9-]{0,31}`, and none of `anthropic`, `openai`, `google`, `openrouter` |
+| `url` | the base URL of the server's API, as the server documents it for OpenAI clients: `http://` or `https://`, a host name in small letters or an IPv4 address, an optional port (80 or 443 without one) and an optional path of plain segments. No user, no query, no fragment, no IPv6 literal, and not this machine's loopback (below) |
+| `api` | `openai-completions`: the chat completions API of OpenAI (`POST <url>/chat/completions`), which Ollama, llama.cpp's server, vLLM and LM Studio speak. It is the only kind in this version |
+| `models` | the model names a step may ask the server for, a closed list of 1 to 64 names, each as the server knows it: parts of letters, digits and `. _ : + -` with `/` between them, at most 128 characters. A name cannot end in `:off`, `:minimal`, `:low`, `:medium`, `:high`, `:xhigh` or `:max`, which Pi reads as a thinking level |
+| `secret` | optional: the name of the secret that holds the server's key, for a server that wants one. The value comes from `credentials.json` (`traceworks credentials set LLM_KEY`), or from the environment when `secret_names` lists the name. It is no name of a provider's credential and none the CLI reads as a setting (`PI_...`, `NODE_...`, `TRACEWORKS_...`) |
+
+**In a workflow** a step asks for the model as `<backend>/<model>`, as a literal or as an option of a model choice
+("Model choices"):
+
+```json
+{"type": "simple", "name": "review",
+ "config": {"command": "Review the diff.", "provider": "PI", "model": "llm/qwen2.5-coder:7b"}}
+```
+
+A thinking level goes into `effort`; `llm/qwen2.5-coder:7b:high` is no model of the list.
+
+**`traceworks check`** reads `traceworks.json` of the home it runs with (`--home`, `TRACEWORKS_HOME`, or
+`~/.traceworks`), as every command does. A backend that home declares is known; a backend nobody declared stays the
+error `unknown-model-backend`, and so is a model its server does not list. So a package that uses a local model
+checks clean in the home that declares the server, and has an error in a home that does not: there it could not
+run. `traceworks describe` names the server and its URL next to the model.
+
+**What a run does with it.**
+
+- *The start check* refuses the run (exit 6) before its first step when a model names a backend nobody declared,
+  when the server does not list the model, and when the server's `secret` has no value. It sees the workflow and
+  the children it names by a literal `workflow_id`. A child named through a placeholder is not seen: its step is
+  judged when it runs. There a model its server does not list and a model `allowed_models` does not allow are
+  still refused, and a server with a `secret` has no value and is refused too; a call to a declared server without
+  a `secret` runs, since it needs nothing the start check would have read. It asks for no credential of
+  a provider: a run whose `PI` steps all name local models needs none and reads none. A step that goes to a provider
+  next to them still needs that provider's credential. `allowed_models` applies as to every model:
+  `[{"provider": "PI", "model": "llm/*"}]` allows this server's models and no provider's.
+- *Pi's configuration* is written by Traceworks, from your setting and from nothing else. Pi knows such a server
+  as a provider of its own configuration file, `models.json` in its agent directory; no extension is loaded, and
+  every option of a Pi call stays (`--offline`, `--no-extensions`, `--no-mcp`, `--no-approve`, `--no-skills` and
+  the rest). The file names one provider, always `traceworks-local`, with your URL, the API and the one model of
+  the call:
+
+  ```json
+  {"providers":{"traceworks-local":{"baseUrl":"http://llm.internal:8080/v1","api":"openai-completions","apiKey":"$LLM_KEY","authHeader":true,"models":[{"id":"qwen2.5-coder:7b"}]}}}
+  ```
+
+  It reaches the container as the system prompt does: base64-encoded in the environment variable
+  `TRACEWORKS_PI_MODELS`, which a fixed script decodes into `/tmp/traceworks-pi-agent/models.json` in the
+  container's own `/tmp` and drops, before it starts Pi with `PI_CODING_AGENT_DIR=/tmp/traceworks-pi-agent`. The
+  key is never in the file: `"$LLM_KEY"` is Pi's own way to read it from its environment, where the value travels
+  as every credential does. For a server with a `secret` the file also says `"authHeader": true`, Pi's setting for
+  sending the key as `Authorization: Bearer`, which is off by default. A server without a `secret` gets the word `none` as its key, since Pi offers a model
+  only when its provider has one. Pi is called with `--provider traceworks-local --model <model>`.
+- *The network.* The container reaches that one server, through the egress proxy, and nothing else: not the hosts of
+  any provider, not your `ai_hosts`, which are for calls to a provider. This holds with `ai_network: "open"` too: a
+  local step always runs behind the proxy. Every connection is in the record as for any AI call.
+- *The record.* `run.started` and `run.resumed` name your servers (`local_models`: URL, API, models and the name of
+  the secret, never its value). The `ai.request` of each call to one says `"local": {"backend": "llm", "url":
+  "http://llm.internal:8080/v1", "api": "openai-completions"}`; a call to a provider has no such field. `show` and
+  `run.html` print `local backend llm at http://llm.internal:8080/v1` with the call, and `diff` counts a call that
+  moved between a provider and a server, or to another URL, as another setup. `run` and `resume` print one note per
+  declared server. The secret is redacted like every credential.
+
+**Where the server may be.**
+
+- *Elsewhere in your network, or anywhere a name or an address leads*: supported, by name or by IPv4 address. A
+  name you list is connected to as it is, a private address included: you named it. The proxy resolves the name,
+  from its own container, with the name servers the container runtime gives it: a name that only this machine's
+  `/etc/hosts` knows does not resolve there, so write the address instead. A server that cannot be reached is a
+  `FAIL` in the call's `egress`, and the call fails with Pi's error.
+- *On the machine that runs Traceworks*: supported through an address of the machine that containers reach, not
+  through its loopback. `localhost`, `127.0.0.1` and `0.0.0.0` are refused when the file is read, since the loopback
+  of a container is its own, and the message says what to write instead. The refusal is a hint against a common
+  mistake, not a barrier: any other name or address of the machine is taken as written. Bind the server to one
+  address of the machine that the proxy's container reaches, such as the machine's address in your network (Ollama:
+  `OLLAMA_HOST=192.168.1.20`; llama.cpp's server: `--host 192.168.1.20`), and write that address in `url`; a
+  firewall rule that lets only the container runtime's networks in narrows it further. Listening on every address
+  (`0.0.0.0`) works too, and opens more: the server is then reachable from your whole network, and, with a Docker
+  older than 28 or with Podman, directly from the container of every AI step, a provider's steps included, past the
+  proxy and without a line in `egress`. With Docker 28 or newer the machine has no address on the step's network, so
+  a step's container reaches the server only through the proxy, and only the one `host:port` of the URL. With an
+  older Docker or with Podman that is not so (docs/security.md, "The host's own services, on an older runtime"):
+  what the machine serves on an address of the step's network is reachable from the step, whatever the proxy
+  allows. Traceworks prints no warning for it at a run: `local_models` is checked before a container runtime is
+  looked for, and which address of the machine a network gets is the runtime's choice.
+- *Plain `http://`*: supported, since a local server usually speaks it. The proxy never forwarded plain HTTP
+  before; it now does so to exactly the servers whose `url` starts with `http://`, and to nothing else. A tunnel to
+  that `host:port` already carries any bytes, so forwarding reaches nothing a tunnel does not; the proxy sets the
+  `Host` header of a forwarded request to that `host:port`, whatever the client wrote. What it means for
+  you: the prompt and the key travel unencrypted between this machine and the server. Use it on a network you
+  trust, or `https://`.
+- *`https://`*: supported for a server whose certificate a public authority signed, since the `pi` image holds
+  the certificate authorities of Node.js only. A certificate of a private authority is refused by Pi, and
+  Traceworks has no setting to add one.
+
+**Not verified.** This was built from the documentation of Pi 1.5.2, and no real model was called. A container
+test with the real Pi CLI against a stand-in server exists (`AiLocalModelIT` in `integration-tests`); read
+docs/security.md, "A local model", for what is still open: how Pi sends the key, whether it asks the server for
+anything besides the chat completion, and how it sends a plain HTTP request through a proxy. Two more things are
+open that are no matter of security. The file names a model by its id alone, so Pi takes its own defaults for the
+rest: a context window of 128,000 tokens, at most 16,384 output tokens, no thinking; a model with a smaller window
+may refuse a long prompt. And Traceworks writes none of Pi's `compat` settings, so which request fields Pi sends
+to a server it does not know (the role of the system prompt, the field of the token limit) is Pi's choice; a
+server that rejects one of them fails the call, and the error is in the record. Only Docker is meant; nothing about
+Podman is verified.
 
 ## Web tools of an AI step
 
@@ -1827,9 +1952,11 @@ not follow a reference with a placeholder, nor one that names no workflow:
   without a model; `OPENAI_API_KEY` for `openai/...`; `GEMINI_API_KEY` for `google/...`; `OPENROUTER_API_KEY` for
   `openrouter/...`. A model written as a literal is judged before the run starts: the start check refuses the run
   (exit 6) when the backend of such a model has no credential with a value, naming the model and the names, and a
-  step without a model counts as `anthropic`. A model with another backend is an error of `traceworks check`
-  (`unknown-model-backend`), so `run` starts no run of it, since Traceworks cannot tell which credential it takes:
-  the message says to name the model as `<backend>/<model>` with one of these four backends. The model of a
+  step without a model counts as `anthropic`. A model whose backend is a model server you declared needs none of
+  these: it gets the server's secret, when it has one, and nothing else ("Local models"). A model with any other
+  backend is an error of `traceworks check` (`unknown-model-backend`) and refuses the run at its start, since
+  Traceworks cannot tell which credential it takes: the message names these four backends and the servers
+  `local_models` declares. The model of a
   picked option of a model choice is a literal like any other, so its backend needs its credential at the start. A
   placeholder in `model` refuses the workflow (`placeholder-in-model`).
 - A run that uses a provider with none of them is refused at start (exit 6), naming the names, the command that
@@ -2070,6 +2197,9 @@ traceworks run <package> --input judge=astra    # the option astra: PI with open
   its default meanwhile runs the new one.
 - **A seal** covers the declaration, since it is part of `workflow.json`: the default and the list of options. A
   pick within the list does not touch the package, so it breaks no seal; a caller cannot add an option or a model.
+- **An option may be a local model.** An option with the provider `PI` and a model `<backend>/<model>` of a model
+  server the operator declared runs on that server ("Local models"); the start check then asks for that server's
+  secret, if it has one, and for no credential of a provider, when the run picks it.
 - **The operator narrows, and never widens.** `allowed_models` in `traceworks.json` lists the provider and model
   pairs that may run in a home ("traceworks.json"). A run with an AI step whose provider and model no entry allows
   is refused before it starts, whether the workflow names the model or the run picked it: `the model

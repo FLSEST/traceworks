@@ -468,6 +468,40 @@ class ExecutionContextFactoryTest {
                 .as("what the resumed run records").isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
     }
 
+    /**
+     * The outputs a parent run or an earlier segment names as model text ({@code __model_outputs}) are protected
+     * here too, each by its name, and the run stays one without untrusted input.
+     */
+    @Test
+    void create_modelOutputs_protectThePreviousOutputAndTheNamedBlockOutput_andNoOther() {
+        ExecutionContext ctx = factory.create(seed(Map.of(
+                        ExecutionContext.MODEL_OUTPUTS_VARIABLE,
+                        List.of(ExecutionContext.PREVIOUS_OUTPUT_NAME, "ask")),
+                null, "", "", "", "$(touch pwned)"));
+        ctx.setBlockOutput("ask", "$(touch pwned)");
+        ctx.setBlockOutput("build", "ok");
+
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ block.ask.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(ctx.resolveShellTemplate("echo {{ block.build.output }}", false)).isEqualTo("echo ok");
+        assertThat(ctx.hasUntrustedInput()).as("model text is no untrusted input").isFalse();
+    }
+
+    /** A tainted block output handed over alone is protected by its name; the previous output is not named. */
+    @Test
+    void create_untrustedOutputs_namingOnlyABlock_protectThatBlockOutput() {
+        ExecutionContext ctx = factory.create(seed(Map.of(
+                        ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE, List.of("scan")),
+                null, "", "", "", "plain"));
+        ctx.setBlockOutput("scan", "y && z");
+
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(ctx.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo("echo plain");
+    }
+
     /** Model text named without the flag: the run counts as one that asked a model all the same. */
     @Test
     void create_modelKeysOrModelOutputsWithoutTheFlag_countAsARunThatAskedAModel() {
