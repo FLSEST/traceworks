@@ -10,11 +10,17 @@ import java.util.List;
  * @param runs     every run the ledger names, in the order of their ids. The anchors of a register {@code <key>} are
  *                 among them under the name {@code registers.<key>}, with nothing but their changes: so a problem of
  *                 them is listed, and acknowledged, like one of a run
+ * @param began when the ledger began, the time of its oldest commit; {@code null} for a ledger without a commit
  */
-public record LedgerRuns(List<Run> runs) {
+public record LedgerRuns(List<Run> runs, java.time.Instant began) {
 
     public LedgerRuns {
         runs = List.copyOf(runs);
+    }
+
+    /** The runs of a ledger that does not say when it began. */
+    public LedgerRuns(List<Run> runs) {
+        this(runs, null);
     }
 
     /**

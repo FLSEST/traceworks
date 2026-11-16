@@ -71,6 +71,16 @@ public interface Ledger {
     List<String> changes(String runId);
 
     /**
+     * When the ledger began: the time of its oldest commit. Empty for a ledger without a commit. A run that started
+     * later is one the ledger should know.
+     *
+     * @throws IllegalStateException with the reason when the ledger exists and cannot be read
+     */
+    default java.util.Optional<java.time.Instant> began() {
+        return java.util.Optional.empty();
+    }
+
+    /**
      * Records that a person acknowledged a run the check of the ledger against the runs folder reports: one more
      * entry of that run, which the ledger keeps for good.
      *

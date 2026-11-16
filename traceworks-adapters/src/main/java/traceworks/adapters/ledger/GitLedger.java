@@ -510,7 +510,24 @@ public final class GitLedger implements Ledger {
                     endNamed.get(id), judged.contents().get("runs/" + id + ".json"),
                     judged.contents().get("acks/" + id + ".jsonl"), changed.getOrDefault(id, List.of())));
         }
-        return new LedgerRuns(runs);
+        return new LedgerRuns(runs, oldestCommit());
+    }
+
+    /** When the ledger began: the committer time of its oldest commit. */
+    @Override
+    public Optional<java.time.Instant> began() {
+        requireOneHistory();
+        return Optional.ofNullable(oldestCommit());
+    }
+
+    private java.time.Instant oldestCommit() {
+        if (!hasCommit()) return null;
+        GitProcess.Result root = run("--git-dir=.git", "--work-tree=.", "log", "--max-parents=0", "--format=%ct",
+                "HEAD", "--");
+        requireRead(root, "its oldest commit cannot be read");
+        // One history without a merge has one commit without a parent
+        return java.time.Instant.ofEpochSecond(Long.parseLong(root.outputText().lines().findFirst().orElseThrow()
+                .strip()));
     }
 
     /** The entries of one run, judged alone: only its files are read. */
@@ -677,12 +694,22 @@ public final class GitLedger implements Ledger {
             if (ref.startsWith("refs/replace/")) throw tampered("it has the replace ref " + ref);
             if (ref.startsWith("refs/heads/")) branches.add(ref);
         }
-        if (branches.isEmpty()) return;   // no commit yet, or a damaged HEAD, which reading reports
         GitProcess.Result head = run("--git-dir=.git", "--work-tree=.", "symbolic-ref", "-q", "HEAD");
-        if (head.exitCode() != 0) throw tampered("its HEAD names no branch");
-        if (branches.size() > 1 || !branches.getFirst().equals(head.outputText().strip())) {
-            throw tampered("it has the branches " + String.join(", ", branches) + ", and HEAD is "
-                    + head.outputText().strip());
+        String named = head.exitCode() == 0 ? head.outputText().strip() : null;
+        if (named != null && !named.startsWith("refs/heads/")) {
+            throw tampered("its HEAD names " + named + ", which is no branch under refs/heads/");
+        }
+        if (branches.isEmpty()) {
+            // No commit yet, or a damaged branch, which reading reports: but then no other reference either
+            if (!refs.outputText().isBlank()) {
+                throw tampered("it has references (" + refs.outputText().lines().findFirst().orElse("") + ") and no"
+                        + " branch");
+            }
+            return;
+        }
+        if (named == null) throw tampered("its HEAD names no branch");
+        if (branches.size() > 1 || !branches.getFirst().equals(named)) {
+            throw tampered("it has the branches " + String.join(", ", branches) + ", and HEAD is " + named);
         }
         // A merge can bring in a change to an entry that the walk over each commit's own changes does not show
         GitProcess.Result merges = run("--git-dir=.git", "--work-tree=.", "rev-list", "--merges", "--max-count=1",

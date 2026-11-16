@@ -1253,6 +1253,55 @@ class GitLedgerTest {
         assertTrue(changesOf("r1").getFirst().contains("is no beginning of the file"), changesOf("r1").toString());
     }
 
+    /** A HEAD that names a reference outside refs/heads is no branch: nothing is skipped for it. */
+    @Test
+    void aHeadOutsideRefsHeads_isRefused() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "update-ref", "refs/foo/main", head());
+        git(ME, "symbolic-ref", "HEAD", "refs/foo/main");
+        git(ME, "update-ref", "-d", "refs/heads/main");
+
+        assertNotOneHistory("refs/foo/main");
+        assertThrows(IllegalStateException.class, () -> ledger().prepare());
+    }
+
+    /** When the ledger began: the time of its oldest commit, and none for a ledger without one. */
+    @Test
+    void began_isTheTimeOfTheOldestCommit() throws Exception {
+        assertTrue(ledger().began().isEmpty());
+        ledger().prepare();
+        assertTrue(ledger().began().isEmpty());
+        java.time.Instant before = java.time.Instant.now().minusSeconds(2);
+        ledger().recordStart("r1", start("r1"));
+        java.time.Instant first = ledger().began().orElseThrow();
+        assertTrue(!first.isBefore(before) && !first.isAfter(java.time.Instant.now().plusSeconds(2)), first.toString());
+        ledger().recordStart("r2", start("r2"));
+        assertEquals(first, ledger().began().orElseThrow());
+    }
+
+    /** A repository whose object ids are SHA-256: the ids are longer, and everything is read and judged the same. */
+    @Test
+    void aRepositoryWithSha256ObjectIds_worksTheSame() throws Exception {
+        Files.createDirectories(home.resolve("ledger"));
+        git("init", "-q", "--object-format=sha256", "-b", "main");
+        GitLedger ledger = ledger();
+        ledger.prepare();
+        ledger.recordStart("r1", start("r1"));
+        ledger.record("r1", "COMPLETED", manifest("r1"));
+        ledger.anchorRegister("hello", 0, "a".repeat(64));
+        ledger.anchorRegister("hello", 1, "b".repeat(64));
+        ledger.acknowledge("r1", "{\"note\":\"x\"}".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(64, head().length());
+        assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
+        assertArrayEquals(manifest("r1"), ledger.find("r1").orElseThrow());
+        assertEquals(2, ledger.registerAnchors("hello").size());
+        assertTrue(run("r1").changes().isEmpty(), run("r1").changes().toString());
+        Files.writeString(home.resolve("ledger/starts/r1.json"), "edited in place");
+        assertArrayEquals(start("r1"), run("r1").start());
+        ledger.prepare();
+    }
+
     /** A lock that is never let go must not leave a run waiting for ever: the writer gives up and names the lock. */
     @Test
     void aLockThatIsHeld_isWaitedForABoundedTime_thenTheWriteIsRefused() throws Exception {
