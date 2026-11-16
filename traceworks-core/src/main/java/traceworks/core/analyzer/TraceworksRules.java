@@ -71,6 +71,8 @@ import java.util.regex.Pattern;
  *       use ({@link #auditRules}, {@link #catalog}).</li>
  *   <li>{@code register-dir-outside-audit} ({@code ERROR}): {@code register_dir} in a workflow that feeds no
  *       register, so its run has no register folder and the placeholder would stay as text.</li>
+ *   <li>{@code register-dir-in-ai-prompt} ({@code ERROR}): {@code register_dir} in the prompt of an AI call, whose
+ *       container does not get the folder.</li>
  *   <li>{@code previous-report-outside-audit} ({@code ERROR}): {@code previous_report} in a workflow without an audit
  *       block (decided 2026-11-11).</li>
  *   <li>{@code host-dependent-step} ({@code WARNING}): a shell step without {@code container_image} that calls a
@@ -127,7 +129,9 @@ final class TraceworksRules {
             out.add(AnalyzerFinding.of("report-block-missing", Severity.ERROR, -1, null, "metadata.audit.report_block '"
                     + config.reportBlock() + "' names no top-level block, so no run has a report to feed the register"));
         }
-        if (metadata == null || metadata.get("audit") == null) {
+        registerDirInPrompts(workflow, out);
+        if (config == null && AuditConfig.problems(metadata).isEmpty()) {
+            // No audit, or one that is switched off: no register, so no report. A broken audit block has its own error
             List<BlockDefinition> blocks = workflow.blocks();
             for (int i = 0; i < blocks.size(); i++) {
                 BlockDefinition block = blocks.get(i);
@@ -151,10 +155,40 @@ final class TraceworksRules {
                 }
                 out.add(AnalyzerFinding.of("register-dir-outside-audit", Severity.ERROR, i, block.getName(),
                         "uses {{ register_dir }}, the folder with the files of the register, which only the run of an"
-                                + " audit workflow has (metadata.audit with enabled, key, category and report_block);"
-                                + " a workflow an audit starts gets the path from it as a context value. Nothing else"
-                                + " sets it, and Traceworks refuses the run rather than run it with the placeholder"
-                                + " left in the text"));
+                                + " audit workflow has (metadata.audit with enabled, key, category and report_block)."
+                                + " A workflow that an audit run starts sees that run's folder when it runs, but check"
+                                + " judges it as what it is by itself: read the folder in the audit workflow, or hand"
+                                + " its path on under another name (a foreach context entry such as \"known_dir\":"
+                                + " \"{{ register_dir }}\"; the name register_dir itself is reserved). In a run that"
+                                + " has no folder, a step that names it fails before it runs anything"));
+            }
+        }
+    }
+
+    /**
+     * {@code register-dir-in-ai-prompt}: {@code register_dir} in a text a block sends to a model. The container of
+     * an AI call does not get the folder, and in a host run the prompt would carry a path of the run folder; the run
+     * fails such a step before the call.
+     */
+    private static void registerDirInPrompts(WorkflowDefinition workflow, List<AnalyzerFinding> out) {
+        List<BlockDefinition> blocks = workflow.blocks();
+        for (int i = 0; i < blocks.size(); i++) {
+            BlockDefinition block = blocks.get(i);
+            if (block == null) {
+                continue;
+            }
+            List<String> prompts = new java.util.ArrayList<>(BlockText.instructions(block));
+            BlockText.nestedInstructions(block).values().forEach(prompts::addAll);
+            if ("agentic".equals(block.getType()) && block.getConfig() != null
+                    && block.getConfig().get("success_criteria") instanceof String criteria) {
+                prompts.add(criteria);
+            }
+            if (prompts.stream().anyMatch(text -> PlaceholderSyntax.keysIn(text).contains(RunVariables.REGISTER_DIR))) {
+                out.add(AnalyzerFinding.of("register-dir-in-ai-prompt", Severity.ERROR, i, block.getName(),
+                        "puts {{ register_dir }} into the prompt of an AI step: the container of an AI call does not"
+                                + " get the register folder, so the path names nothing there, and no model is handed"
+                                + " the path of a run folder. The run fails the step before the call. Let a shell"
+                                + " step read the files and put what the model needs into its output"));
             }
         }
     }

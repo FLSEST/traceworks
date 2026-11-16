@@ -152,6 +152,77 @@ class RegisterFolderTest {
                 .isInstanceOf(RunRefusedException.class).hasMessageContaining("register_dir is reserved");
     }
 
+    // ---- child workflows, and prompts ----
+
+    /**
+     * The folder is the run's: a workflow started by a run that is no audit has none, whatever its own metadata
+     * say, so a command that names it fails before anything runs instead of running with the placeholder as text.
+     */
+    @Test
+    void aChildWithItsOwnAuditBlock_underARunThatIsNoAudit_failsTheStepThatNamesTheFolder() {
+        Path parent = Path.of("/pkgs/plain-parent");
+        fx.packages.put(parent, "{\"id\": \"wf-plain\", \"name\": \"Plain\", \"blocks\": ["
+                + "{\"type\": \"sub-workflow\", \"name\": \"child\", \"config\": {\"workflow_id\": \"../audit\"}}]}");
+
+        RunResult result = fx.services().start(request(parent), null, null);
+
+        assertThat(result.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(fx.commands.commands()).as("nothing ran").isEmpty();
+        assertThat(allText(result.runId())).contains("{{ register_dir }} names the register folder of a run, and this"
+                + " run has none: only a run of an audit workflow (metadata.audit with enabled: true) has the folder,"
+                + " and a workflow started by a run that is no audit gets none. Nothing was run");
+    }
+
+    /** The other direction: a child of an audit run sees the folder of that run, whatever its own metadata say. */
+    @Test
+    void aChildThatIsNoAudit_underAnAuditRun_seesTheFolderOfThatRun() {
+        Path parent = Path.of("/pkgs/audit-parent");
+        Path child = Path.of("/pkgs/reader-child");
+        fx.packages.put(parent, "{\"id\": \"wf-audit\", \"name\": \"Audit\", \"metadata\": {\"audit\":"
+                + " {\"enabled\": true, \"key\": \"hello\", \"category\": \"example\", \"report_block\": \"report\"}},"
+                + " \"blocks\": [{\"type\": \"sub-workflow\", \"name\": \"child\", \"config\": {\"workflow_id\":"
+                + " \"../reader-child\"}}, {\"type\": \"shell\", \"name\": \"report\", \"config\": {\"command\":"
+                + " \"./report\"}}]}");
+        fx.packages.put(child, "{\"id\": \"wf-reader\", \"name\": \"Reader\", \"blocks\": [{\"type\": \"shell\","
+                + " \"name\": \"known\", \"config\": {\"command\": \"./known {{ register_dir }}\"}}]}");
+
+        RunResult result = fx.services().start(request(parent), null, null);
+
+        assertThat(result.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(commandOf("./known")).isEqualTo("./known /runs/" + result.runId() + "/register");
+    }
+
+    /** No model is handed the path: a prompt that names the folder fails its step, and no AI call is made. */
+    @Test
+    void aPromptThatNamesTheFolder_failsItsStep_andNoAiCallIsMade() {
+        fx.settings = OperatorSettings.defaults();
+        fx.withClaude();
+        fx.containers.on(AppFixture.SHELL_ID, new CommandResult(0, "# Report\n", "", 1, false));
+        Path prompting = Path.of("/pkgs/prompting");
+        fx.packages.put(prompting, "{\"id\": \"wf-audit\", \"name\": \"Audit\", \"metadata\": {\"audit\":"
+                + " {\"enabled\": true, \"key\": \"hello\", \"category\": \"example\", \"report_block\": \"report\"}},"
+                + " \"blocks\": [{\"type\": \"simple\", \"name\": \"judge\", \"config\": {\"command\":"
+                + " \"Read {{ register_dir }}/findings.jsonl\"}}, {\"type\": \"shell\", \"name\": \"report\","
+                + " \"config\": {\"command\": \"./report\"}}]}");
+
+        RunResult result = fx.services().start(request(prompting), null, null);
+
+        assertThat(result.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(fx.claude.calls()).isEmpty();
+        assertThat(fx.containers.runs()).isEmpty();
+        assertThat(allText(result.runId())).contains("{{ register_dir }} stands in the prompt of an AI step: the"
+                + " container of an AI call does not get the register folder, and no model is handed its path. Let a"
+                + " shell step read the files and put what the model needs into its output").doesNotContain("/runs/"
+                + result.runId() + "/register/findings.jsonl");
+    }
+
+    /** Every blob of the run's record as one text, to look for a message in. */
+    private String allText(String runId) {
+        StringBuilder all = new StringBuilder();
+        fx.run(runId).blobs().all().forEach(blob -> all.append(new String(blob, StandardCharsets.UTF_8)).append('\n'));
+        return all.toString();
+    }
+
     // ---- containers ----
 
     /** A container run: every shell step mounts the folder read-only at the fixed path; the AI step does not. */
