@@ -280,11 +280,27 @@ content, and no blob is written through one.
   - *The server's key.* The `secret` of a server is a secret like any other in `credentials.json`: the record
     redacts it, a model with tools can read it in its container (below), and a step of any package may declare
     the same name in `secrets` and get the value. Give a local server a key that is worth nothing elsewhere.
-  - *A server on this machine is a service of this machine.* It must listen on an address containers reach, so it
-    is reachable from your network as well unless a firewall says otherwise. The step's container still reaches
-    it only through the proxy, and only its one port.
+  - *A server on this machine is a service of this machine.* It must listen on an address the proxy's container
+    reaches. Bind it to one such address, or put a firewall rule in front of it: a server that listens on every
+    address (`0.0.0.0`) is reachable from your whole network. Whether a step's container reaches it only through
+    the proxy depends on the runtime: with Docker 28 or newer the machine has no address on the step's network,
+    so the proxy and the one `host:port` of the URL are the only way. With an older Docker and with Podman the
+    machine keeps an address there ("The host's own services, on an older runtime" below), and a server that
+    listens on it is reachable directly from the container of every AI step, a provider's steps included, past
+    the proxy and without an `egress` line. Traceworks does not warn about this when a run starts.
+  - *The refusal of `localhost` is a hint, not a barrier.* `localhost`, `127.0.0.1` and `0.0.0.0` are refused as a
+    `url` because they cannot work from a container; any other name or address is taken as the operator wrote it.
+  - *One server, several names.* The proxy allows a `host:port`. For a forwarded plain HTTP request it sets the
+    `Host` header to that `host:port`, so a server that serves several names there is asked for the listed one
+    only. Inside a tunnel (`https://`, or a client that tunnels plain HTTP) the proxy sees no header: a reverse
+    proxy that serves other names on the same `host:port` can be asked for them. List a server, not a gateway to
+    several.
+  - *A child workflow the start check did not see.* A child named through a placeholder is judged at its step,
+    not at the start. Its call to a declared server without a `secret` runs; what still holds there is the
+    server's closed list of models, `allowed_models`, and the server as the container's only host.
   - *Not verified* (Pi 1.5.2 was read, not run, to build this; no model was called): whether Pi sends the key as
-    `Authorization: Bearer` without further configuration; whether Pi asks the server for anything besides the
+    `Authorization: Bearer` with `authHeader: true`, as its reference says, which Traceworks writes for a server
+    with a `secret`; whether Pi asks the server for anything besides the
     chat completion (a list of models, for example); whether Pi sends a plain HTTP request through its proxy as a
     tunnel or as a forwarded request (the proxy takes both); and what Pi makes of a model name with a `:` in it.
     The container test `AiLocalModelIT` shows the first three in its record. Podman is not verified at all.

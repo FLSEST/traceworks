@@ -1572,7 +1572,11 @@ run. `traceworks describe` names the server and its URL next to the model.
 **What a run does with it.**
 
 - *The start check* refuses the run (exit 6) before its first step when a model names a backend nobody declared,
-  when the server does not list the model, and when the server's `secret` has no value. It asks for no credential of
+  when the server does not list the model, and when the server's `secret` has no value. It sees the workflow and
+  the children it names by a literal `workflow_id`. A child named through a placeholder is not seen: its step is
+  judged when it runs. There a model its server does not list and a model `allowed_models` does not allow are
+  still refused, and a server with a `secret` has no value and is refused too; a call to a declared server without
+  a `secret` runs, since it needs nothing the start check would have read. It asks for no credential of
   a provider: a run whose `PI` steps all name local models needs none and reads none. A step that goes to a provider
   next to them still needs that provider's credential. `allowed_models` applies as to every model:
   `[{"provider": "PI", "model": "llm/*"}]` allows this server's models and no provider's.
@@ -1583,14 +1587,15 @@ run. `traceworks describe` names the server and its URL next to the model.
   the call:
 
   ```json
-  {"providers":{"traceworks-local":{"baseUrl":"http://llm.internal:8080/v1","api":"openai-completions","apiKey":"$LLM_KEY","models":[{"id":"qwen2.5-coder:7b"}]}}}
+  {"providers":{"traceworks-local":{"baseUrl":"http://llm.internal:8080/v1","api":"openai-completions","apiKey":"$LLM_KEY","authHeader":true,"models":[{"id":"qwen2.5-coder:7b"}]}}}
   ```
 
   It reaches the container as the system prompt does: base64-encoded in the environment variable
   `TRACEWORKS_PI_MODELS`, which a fixed script decodes into `/tmp/traceworks-pi-agent/models.json` in the
   container's own `/tmp` and drops, before it starts Pi with `PI_CODING_AGENT_DIR=/tmp/traceworks-pi-agent`. The
   key is never in the file: `"$LLM_KEY"` is Pi's own way to read it from its environment, where the value travels
-  as every credential does. A server without a `secret` gets the word `none` as its key, since Pi offers a model
+  as every credential does. For a server with a `secret` the file also says `"authHeader": true`, Pi's setting for
+  sending the key as `Authorization: Bearer`, which is off by default. A server without a `secret` gets the word `none` as its key, since Pi offers a model
   only when its provider has one. Pi is called with `--provider traceworks-local --model <model>`.
 - *The network.* The container reaches that one server, through the egress proxy, and nothing else: not the hosts of
   any provider, not your `ai_hosts`, which are for calls to a provider. This holds with `ai_network: "open"` too: a
@@ -1611,14 +1616,23 @@ run. `traceworks describe` names the server and its URL next to the model.
   `FAIL` in the call's `egress`, and the call fails with Pi's error.
 - *On the machine that runs Traceworks*: supported through an address of the machine that containers reach, not
   through its loopback. `localhost`, `127.0.0.1` and `0.0.0.0` are refused when the file is read, since the loopback
-  of a container is its own, and the message says what to write instead. Let the server listen on an address
-  besides `127.0.0.1` (Ollama: `OLLAMA_HOST=0.0.0.0`; llama.cpp's server: `--host 0.0.0.0`), and write an address of
-  the machine in your network, or a name for it. The step's container still does not reach the machine: only the
-  proxy connects, and only to the one `host:port` of the URL. A server that listens on every address is then
-  reachable from your network too, which a firewall or the server's own key limits.
+  of a container is its own, and the message says what to write instead. The refusal is a hint against a common
+  mistake, not a barrier: any other name or address of the machine is taken as written. Bind the server to one
+  address of the machine that the proxy's container reaches, such as the machine's address in your network (Ollama:
+  `OLLAMA_HOST=192.168.1.20`; llama.cpp's server: `--host 192.168.1.20`), and write that address in `url`; a
+  firewall rule that lets only the container runtime's networks in narrows it further. Listening on every address
+  (`0.0.0.0`) works too, and opens more: the server is then reachable from your whole network, and, with a Docker
+  older than 28 or with Podman, directly from the container of every AI step, a provider's steps included, past the
+  proxy and without a line in `egress`. With Docker 28 or newer the machine has no address on the step's network, so
+  a step's container reaches the server only through the proxy, and only the one `host:port` of the URL. With an
+  older Docker or with Podman that is not so (docs/security.md, "The host's own services, on an older runtime"):
+  what the machine serves on an address of the step's network is reachable from the step, whatever the proxy
+  allows. Traceworks prints no warning for it at a run: `local_models` is checked before a container runtime is
+  looked for, and which address of the machine a network gets is the runtime's choice.
 - *Plain `http://`*: supported, since a local server usually speaks it. The proxy never forwarded plain HTTP
   before; it now does so to exactly the servers whose `url` starts with `http://`, and to nothing else. A tunnel to
-  that `host:port` already carries any bytes, so forwarding reaches nothing a tunnel does not. What it means for
+  that `host:port` already carries any bytes, so forwarding reaches nothing a tunnel does not; the proxy sets the
+  `Host` header of a forwarded request to that `host:port`, whatever the client wrote. What it means for
   you: the prompt and the key travel unencrypted between this machine and the server. Use it on a network you
   trust, or `https://`.
 - *`https://`*: supported for a server whose certificate a public authority signed, since the `pi` image holds
