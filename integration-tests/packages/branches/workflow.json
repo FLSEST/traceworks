@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "eafa24fa-bbc6-4f06-9a87-a8d05f8267e9",
   "name": "IT branches",
   "description": "conditional in shell mode and switch: the input mode picks the branch and the case.",
-  "defaultContext": {"mode": "fast"},
+  "default_context": {"mode": "fast"},
   "blocks": [
     {
       "type": "conditional",

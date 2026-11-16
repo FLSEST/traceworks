@@ -29,25 +29,25 @@ class RegistersTest {
     RegistersTest() {
         fixture.packages.put(AUDIT, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "measure", "config": {"command": "./measure"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.packages.put(OTHER, """
                 {"id": "wf-other", "name": "Other", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.packages.put(READER, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "use", "config": {"command": "./use {{ audit_findings }} {{ previous_report }}"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.commands.on("./measure", "## FACT SHEET hello\nFACT files: 3\n");
         fixture.packages.put(ITEM_READER, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "facts", "config": {"command": "./facts {{ audit_items }}"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
@@ -202,7 +202,7 @@ class RegistersTest {
     void aRunThatCompletedWithErrors_feedsTheRegister() {
         fixture.packages.put(CHECKED, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "check", "config": {"command": "./check", "checked_command": true,
                      "on_failure": "continue"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
@@ -267,7 +267,7 @@ class RegistersTest {
         Path racing = Path.of("/pkgs/racing");
         fixture.packages.put(racing, """
                 {"id": "wf-other", "name": "Other", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "meanwhile", "config": {"command": "./meanwhile"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");

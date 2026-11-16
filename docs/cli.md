@@ -73,9 +73,9 @@ refusal whole, every reason of it, where any other error is cut at 200 character
 fails when it is reached; a placeholder that names nothing reaches the step as text. `resume` does not check: it runs
 the definition recorded at the start, which the start checked or was told not to.
 
-An `--input` that no block reads and that is not in `defaultContext` changes nothing in the run, which is mostly a
+An `--input` that no block reads and that is not in `default_context` changes nothing in the run, which is mostly a
 typo of its name. `run` names it on standard error and starts all the same, with and without `--no-check`:
-`traceworks: warning: input "nme" is read by no block and is not in defaultContext, so it changes nothing in this run;
+`traceworks: warning: input "nme" is read by no block and is not in default_context, so it changes nothing in this run;
 did you mean "name"?`. A workflow that starts a child workflow is not judged: the child gets every variable of its
 parent.
 
@@ -543,11 +543,11 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `unquoted-ai-output` | `ERROR` | text a model wrote in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`) of a block without `shell_escape_variables: true`. A run quotes such text in every shell line ("The output of an AI step in a shell line", below), so the command would not run as written, and Traceworks refuses the workflow. What `check` takes for such text: the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen: a loop item, a variable, and the shell lines of a child workflow, which are judged when the child's package is checked and when it runs. Correct: `shell_escape_variables: true` on the block; `printf '%s\n' {{ block.<name>.output }} \| tool`, or `> file`, hands the text on as standard input or a file |
 | `quoted-placeholder` | `ERROR` or `WARNING` | a placeholder for free text inside quotes in shell code: an apostrophe in the value ends them, and where the run quotes the value itself the two pairs cancel out. An error for outside text (`previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) and for text a model wrote (as for `unquoted-ai-output`), with or without `shell_escape_variables`; a warning for the other step outputs, and in a block with `shell_escape_variables` for any placeholder in single quotes |
 | `heredoc-placeholder` | `ERROR` or `WARNING` | the same free text in the body of a heredoc. An error where an interpreter reads the body as its program (`python3 - <<'PY'`), where the delimiter is unquoted and the text is outside text or text a model wrote, and for text a model wrote in any body: the run quotes it there, so the quotes land in the text, and a line of it that equals the delimiter ends the body. A warning for the other step outputs under an unquoted delimiter, and for any placeholder in a body of a block with `shell_escape_variables` |
-| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`modelChoices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
+| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
 | `placeholder-in-model` | `ERROR` | a `model` with a placeholder, the workflow's or that of a block that makes an AI call, such as `"model": "{{ m }}"`: no run resolves it, so the CLI would be asked for a model of that text. Traceworks refuses the workflow. A model a run may pick is a declared choice ("Model choices") |
-| `invalid-model-choice` | `ERROR` | a `modelChoices` declaration that is not understood completely (a choice that is no object, a key other than `default` and `options`, an option without `provider` or `model`, a placeholder in either, the provider Codex, a name that is no plain name or one a run sets itself, a `defaultContext` entry of the choice's name), a `default` that is none of the options, a block whose `model_choice` names no declared choice, and a block that names `provider` or `model` next to `model_choice`. Traceworks refuses the workflow |
+| `invalid-model-choice` | `ERROR` | a `model_choices` declaration that is not understood completely (a choice that is no object, a key other than `default` and `options`, an option without `provider` or `model`, a placeholder in either, the provider Codex, a name that is no plain name or one a run sets itself, a `default_context` entry of the choice's name), a `default` that is none of the options, a block whose `model_choice` names no declared choice, and a block that names `provider` or `model` next to `model_choice`. Traceworks refuses the workflow |
 | `unused-model-choice` | `WARNING` | a declared model choice that no block refers to with `model_choice`: a pick of it changes nothing |
-| `unknown-variable` | `WARNING` | `{{ name }}` that nothing sets: it is not in `defaultContext`, no block sets it (the `variable_name` of an `approval`, a `human-input` or its `fields`, or a `foreach`, their defaults `approval_answer`, `user_input`, `item` and `item_index`, a `context` entry of a `foreach`, `agentic_goal_achieved` and `agentic_iterations`) and Traceworks does not provide it (`previous_output`, `package_dir`, the run variables such as `project_path` or `workflow_run_id`, and the three variables of each declared model choice). A warning, because a workflow cannot declare its inputs: the variable may come from `--input`, or from the parent run when the workflow runs as a child. A near name is suggested. Not judged: a key that is no plain name, such as `{{ item.id }}` or `{{ .State.Running }}` (the template of another tool in a shell command) |
+| `unknown-variable` | `WARNING` | `{{ name }}` that nothing sets: it is not in `default_context`, no block sets it (the `variable_name` of an `approval`, a `human-input` or its `fields`, or a `foreach`, their defaults `approval_answer`, `user_input`, `item` and `item_index`, a `context` entry of a `foreach`, `agentic_goal_achieved` and `agentic_iterations`) and Traceworks does not provide it (`previous_output`, `package_dir`, the run variables such as `project_path` or `workflow_run_id`, and the three variables of each declared model choice). A warning, because a workflow cannot declare its inputs: the variable may come from `--input`, or from the parent run when the workflow runs as a child. A near name is suggested. Not judged: a key that is no plain name, such as `{{ item.id }}` or `{{ .State.Running }}` (the template of another tool in a shell command) |
 
 `check` judges a package on its own, so `unknown-variable` names every variable that only an input sets; the check
 before a `run` knows the run's inputs and leaves those out. A child workflow checked on its own gets the warning for
@@ -588,9 +588,9 @@ Three things can happen to such a value, and only the first two are refusals:
   name. The step's recorded input shows the quoted line.
 
 An audit workflow (`metadata.audit`, docs/registers.md) is understood completely or refused: a block with
-`enabled: true` but a missing, blank or non-string `key`, `category` or `reportBlock`, a `schemaVersion` other than
+`enabled: true` but a missing, blank or non-string `key`, `category` or `report_block`, a `schema_version` other than
 the number 1, or an `enabled` that is no boolean is the error `invalid-audit-config`; a `key` that is no register key
-(`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `reportBlock` that names no top-level block is
+(`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `report_block` that names no top-level block is
 `report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; and `{{ previous_report }}`
 in a workflow without `metadata.audit` is `previous-report-outside-audit`. Each of them refuses a run at its start:
 a broken audit block is never ignored, and only an audit workflow has a previous report (docs/workflow-format.md).
@@ -664,7 +664,7 @@ Nothing was checked: 'traceworks check <package>' says what a run would refuse.
   package in a git checkout, the commit (with `(with uncommitted changes)` when it has any). The digest is the
   `digest` a run of the unchanged package records in `run.started` and the `package_digest` of its manifest, so the
   page of a description and the record of a run can be matched.
-- **The inputs.** `Inputs` lists the keys of `defaultContext` with their defaults: the variables a run starts with
+- **The inputs.** `Inputs` lists the keys of `default_context` with their defaults: the variables a run starts with
   unless `--input` sets them. A default that is no text is shown as JSON. `Requires` is the `requires` list. `AI` is
   the workflow's own `provider`, `model` and `effort`, and `Instructions` the first line of its instructions, each
   only when the workflow has it. `Audit` names the register an audit workflow feeds (`metadata.audit`: key, category,
@@ -1933,7 +1933,7 @@ name, a default and the options, each a provider and model pair, and a block ref
 ```json
 {
   "requires": ["ai.model_choice"],
-  "modelChoices": {
+  "model_choices": {
     "judge": {
       "default": "fable",
       "options": {
@@ -1964,17 +1964,17 @@ traceworks run <package> --input judge=astra    # the option astra: PI with open
   there.
 - **What the run knows.** Three variables per choice: the choice's name (the picked option, `{{ judge }}`),
   `{{ judge_provider }}` and `{{ judge_model }}`. They are set after the inputs, and nothing replaces them: an input
-  or a `defaultContext` entry named like the provider or the model variable refuses the run, and no block may set
+  or a `default_context` entry named like the provider or the model variable refuses the run, and no block may set
   one of the three. A block that would is refused by `check` and by the run admission (`invalid-model-choice`): the
   `variable_name` of a `foreach`, an `approval` or a `human-input`, the `variable_name` of a `human-input`'s
   `fields`, the `<variable_name>_index` a `foreach` sets, and the variable a block sets when it names none (`item`,
   `approval_answer`, `user_input`). So a report step can name who judged with them. A `context` of a `foreach`
   that names one is handed to the child run, which sets its own three after it.
-- **The declaration.** `modelChoices` maps the name of a choice to `default` and `options`; an option has exactly
+- **The declaration.** `model_choices` maps the name of a choice to `default` and `options`; an option has exactly
   `provider` and `model`, both a literal text. The name of a choice is a plain name (letters, digits and `_`) and
-  not one a run sets itself (`model`, `provider`, `previous_output`, ...); `defaultContext` may not set it, since the
+  not one a run sets itself (`model`, `provider`, `previous_output`, ...); `default_context` may not set it, since the
   default stands in the declaration. Two choices may not share a variable: next to a choice `x`, a choice named
-  `x_model` or `x_provider` is refused. A `modelChoices` that is no object fails the load of the package, with a
+  `x_model` or `x_provider` is refused. A `model_choices` that is no object fails the load of the package, with a
   message that names the key. A block has `model_choice` or its own `provider` and `model`, not both. The
   declaration needs `ai.model_choice` in `requires`. `traceworks check` reports a declaration or a reference that
   cannot be used (`invalid-model-choice`), an option with an unknown provider (`unknown-provider`) or, for Pi, an
@@ -1988,7 +1988,7 @@ traceworks run <package> --input judge=astra    # the option astra: PI with open
 - **A child workflow** (`sub-workflow`, `foreach` with `workflow_id`) with a choice of its own is picked by the inputs
   of the run that started first, by the choice's name: `--input judge=astra` picks `judge` in the run's workflow and
   in every child that declares a choice of that name; a child's choice the inputs do not name runs its default. The
-  `defaultContext` of the run's workflow counts as an input of the run here: a root workflow's `defaultContext` may
+  `default_context` of the run's workflow counts as an input of the run here: a root workflow's `default_context` may
   not name its own choice, but an entry named like a child's choice picks that child's option, since the workflow that
   starts the child decides for it. What a parent's steps set does not pick, nor does the `context` a `foreach` hands
   to its child: a child gets its parent's variables, and a step can set those. A child's pick stands in no
@@ -2041,7 +2041,7 @@ A workflow names the features beyond the common core it needs in `requires`, at 
 | `package.images` | a `container_image` `./images/<name>`, one of the package's own images, on such a step |
 | `ai.tools` | a `tools` value other than `none` on a `simple` or `agentic` block, or on a wrapper for its AI step |
 | `ai.web` | a `web` value other than `none` on one of the same blocks ("Web tools of an AI step"). It is separate from `ai.tools`: `tools: none` with `web: search` needs only `ai.web` |
-| `ai.model_choice` | a `modelChoices` declaration at the top of the workflow ("Model choices") |
+| `ai.model_choice` | a `model_choices` declaration at the top of the workflow ("Model choices") |
 
 A workflow that uses one of them without naming it is refused before its first block, and `traceworks check`
 reports `missing-requirement` at the first block that needs it. A requirement that no block uses is the warning

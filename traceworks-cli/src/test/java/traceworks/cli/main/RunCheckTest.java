@@ -46,7 +46,7 @@ class RunCheckTest {
     private Path pkg(String name, String defaultContext, String blocks) throws IOException {
         Path dir = Files.createDirectories(temp.resolve(name));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"" + name + "\",\"name\":\"" + name
-                + " flow\",\"defaultContext\":" + defaultContext + ",\"blocks\":[" + blocks + "]}");
+                + " flow\",\"default_context\":" + defaultContext + ",\"blocks\":[" + blocks + "]}");
         return dir;
     }
 
@@ -273,7 +273,7 @@ class RunCheckTest {
 
         assertThat(run.code()).as(run.all()).isZero();
         assertThat(run.err()).isEqualTo("traceworks: warning: input \"nme\" is read by no block and is not in"
-                + " defaultContext, so it changes nothing in this run; did you mean \"name\"?"
+                + " default_context, so it changes nothing in this run; did you mean \"name\"?"
                 + System.lineSeparator());
         assertThat(run.all().indexOf("traceworks: warning: input")).isLessThan(run.all().indexOf("run started: "));
         assertThat(run.out()).contains("output: Hello, Berta");

@@ -82,7 +82,7 @@ class WiringRulesTest {
     // --- audit-only-placeholder ---------------------------------------------------------------------------------
 
     private static final Map<String, Object> AUDIT_META = Map.of("audit", Map.of(
-            "enabled", true, "key", "project.security", "category", "security", "reportBlock", "report"));
+            "enabled", true, "key", "project.security", "category", "security", "report_block", "report"));
 
     @Test
     void auditFindingsWithoutAuditMetadata_areOneFindingPerBlock() {
@@ -107,11 +107,11 @@ class WiringRulesTest {
     @Test
     void auditFindingsWithADisabledOrIncompleteAuditBlock_areAFinding() {
         Map<String, Object> disabled = Map.of("audit", Map.of(
-                "enabled", false, "key", "project.security", "category", "security", "reportBlock", "report"));
+                "enabled", false, "key", "project.security", "category", "security", "report_block", "report"));
         Map<String, Object> withoutReportBlock = Map.of("audit", Map.of(
                 "enabled", true, "key", "project.security", "category", "security"));
         Map<String, Object> otherSchemaVersion = Map.of("audit", Map.of("enabled", true, "key", "project.security",
-                "category", "security", "reportBlock", "report", "schemaVersion", 2));
+                "category", "security", "report_block", "report", "schema_version", 2));
         BlockDefinition report = block("simple", "report", Map.of("command", "Known: {{ audit_findings }}"));
 
         assertThat(apply(disabled, report)).extracting(AnalyzerFinding::rule).contains("audit-only-placeholder");

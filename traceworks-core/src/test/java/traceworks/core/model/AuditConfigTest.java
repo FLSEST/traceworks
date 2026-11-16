@@ -20,7 +20,7 @@ class AuditConfigTest {
         block.put("enabled", true);
         block.put("key", "platform.health");
         block.put("category", "health");
-        block.put("reportBlock", "report");
+        block.put("report_block", "report");
         return block;
     }
 
@@ -34,7 +34,7 @@ class AuditConfigTest {
     @Test
     void of_acceptsExplicitSchemaVersionOne() {
         Map<String, Object> block = complete();
-        block.put("schemaVersion", 1L);
+        block.put("schema_version", 1L);
 
         assertThat(AuditConfig.of(audit(block))).map(AuditConfig::schemaVersion).contains(1);
     }
@@ -42,10 +42,10 @@ class AuditConfigTest {
     @Test
     void anUnknownSchemaVersion_isAProblem() {
         Map<String, Object> block = complete();
-        block.put("schemaVersion", 2);
+        block.put("schema_version", 2);
 
         assertThat(AuditConfig.of(audit(block))).isEmpty();
-        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("schemaVersion")
+        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("schema_version")
                 .contains("2").contains("1");
     }
 
@@ -53,10 +53,10 @@ class AuditConfigTest {
     @Test
     void aNonNumericSchemaVersion_isAProblem() {
         Map<String, Object> block = complete();
-        block.put("schemaVersion", "2");
+        block.put("schema_version", "2");
 
         assertThat(AuditConfig.of(audit(block))).isEmpty();
-        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("schemaVersion");
+        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("schema_version");
     }
 
     @Test
@@ -78,7 +78,7 @@ class AuditConfigTest {
 
     @Test
     void aMissingOrBlankRequiredField_isAProblem_namingIt() {
-        for (String field : new String[] {"key", "category", "reportBlock"}) {
+        for (String field : new String[] {"key", "category", "report_block"}) {
             Map<String, Object> missing = complete();
             missing.remove(field);
             assertThat(AuditConfig.of(audit(missing))).as(field).isEmpty();
@@ -95,10 +95,10 @@ class AuditConfigTest {
     @Test
     void aNonStringValue_isAProblem() {
         Map<String, Object> block = complete();
-        block.put("reportBlock", 3);
+        block.put("report_block", 3);
 
         assertThat(AuditConfig.of(audit(block))).isEmpty();
-        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("reportBlock")
+        assertThat(AuditConfig.problems(audit(block))).singleElement().asString().contains("report_block")
                 .contains("string");
     }
 

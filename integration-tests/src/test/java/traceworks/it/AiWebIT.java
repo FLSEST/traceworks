@@ -116,7 +116,7 @@ class AiWebIT extends AiIntegrationTest {
     /** A copy of {@code ai-web} in the sandbox with the first block's config replaced by {@code config}. */
     private Path variant(String name, String requires, String config) throws IOException {
         Path copy = Files.createDirectories(traceworks.workspace().resolve(name));
-        Files.writeString(copy.resolve("workflow.json"), "{\"format\": \"traceworks-workflow\", \"formatVersion\": 1,"
+        Files.writeString(copy.resolve("workflow.json"), "{\"format\": \"traceworks-workflow\", \"format_version\": 1,"
                 + " \"id\": \"9a1b2c3d-0000-4000-8000-00000000000" + (name.length() % 10) + "\", \"name\": \"IT " + name
                 + "\", \"requires\": " + requires + ", \"blocks\": [{\"type\": \"simple\", \"name\": \"look\","
                 + " \"config\": " + config + "}]}");

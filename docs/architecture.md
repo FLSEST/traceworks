@@ -108,7 +108,7 @@ the run calls the handles; how a process and everything it started end is the ad
 | `core.seal` | seals (docs/cli.md, "seal, unseal and seals"): reads and verifies an SSH signature in Java (Ed25519), reads an allowed signers file, reads and writes the seal file of a package, and chains, verifies and folds the seal log of a home; pure, no I/O |
 | `core.container` | the container policy of a run: which image a `container_image` names (a registry reference, a package image or the built-in `shell` image), what a command may do as a container (image, mounts, working directory), when the run lists its scratch directory, and `HostSecrets`, the one list of logins below the home that both the analyzer's `secret-mount` rule and the adapter's mount check refuse |
 
-**The model of an AI step.** No new package holds it: `core.engine.ModelChoices` reads a workflow's `modelChoices`
+**The model of an AI step.** No new package holds it: `core.engine.ModelChoices` reads a workflow's `model_choices`
 and returns the definition as a run runs it, with the picked provider and model in place of every `model_choice`
 (docs/cli.md, "Model choices"). It is the one place that takes a pick from the inputs of a run, and it is pure: the
 engine calls it before the admission of every run and child run, and the start check in `core.app`

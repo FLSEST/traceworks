@@ -58,7 +58,7 @@ class FindingsCommandTest {
                 + "'{\"snapshotComplete\":true,\"findings\":[" + findings + "]}' '-->'";
         Path dir = Files.createDirectories(temp.resolve("audit"));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
-                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;
@@ -136,8 +136,8 @@ class FindingsCommandTest {
                 + "\"evidence\":\"about a thousand lines\"}]}' '-->'";
         com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
         Path dir = Files.createDirectories(temp.resolve("audit-facts"));
-        Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit-facts\",\"name\":\"Audit\",\"metadata\":"
-                + "{\"audit\":{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+        Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit-facts\",\"name\":\"Audit\",\"metadata\":{"
+                + "\"audit\":{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"facts\",\"config\":{\"command\":"
                 + json.writeValueAsString(facts) + "}},{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + json.writeValueAsString(report) + "}}]}");
@@ -174,7 +174,7 @@ class FindingsCommandTest {
                 + "'{\"snapshotComplete\":true,\"findings\":[{\"ruleKey\":\"size\",\"subject\":\"A.java\",\"severity\":"
                 + "\"MEDIUM\",\"title\":\"Big A.java\",\"evidence\":\"src/A.java:12: mount(path);\"}]}' '-->'";
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
-                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"shell_escape_variables\":true,"
                 + "\"command\":" + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;
@@ -315,7 +315,7 @@ class FindingsCommandTest {
         Path dir = Files.createDirectories(temp.resolve("judged"));
         Files.writeString(dir.resolve("catalog.json"), "{\"format\":1,\"rules\":{\"size\":{\"judged\":true}}}");
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
-                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+                + "{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;
@@ -549,7 +549,7 @@ class FindingsCommandTest {
         String command = "printf '%s\\n' '# Report' '<!-- traceworks:audit-result:v1' '" + envelopeBody + "' '-->'";
         Path dir = Files.createDirectories(temp.resolve("audit-" + key));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit-" + key + "\",\"name\":\"Audit\",\"metadata\":"
-                + "{\"audit\":{\"enabled\":true,\"key\":\"" + key + "\",\"category\":\"example\",\"reportBlock\":"
+                + "{\"audit\":{\"enabled\":true,\"key\":\"" + key + "\",\"category\":\"example\",\"report_block\":"
                 + "\"report\"}},\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         return dir;
@@ -774,7 +774,7 @@ class FindingsCommandTest {
                 + "[{\"ruleKey\":\"size\",\"subject\":\"A.java\",\"severity\":\"LOW\",\"title\":\"t\"}]}' '-->'";
         Path dir = Files.createDirectories(temp.resolve("named-ledger"));
         Files.writeString(dir.resolve("workflow.json"), "{\"id\":\"audit-l\",\"name\":\"Audit\",\"metadata\":{\"audit\":"
-                + "{\"enabled\":true,\"key\":\"ledger\",\"category\":\"example\",\"reportBlock\":\"report\"}},"
+                + "{\"enabled\":true,\"key\":\"ledger\",\"category\":\"example\",\"report_block\":\"report\"}},"
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         assertThat(run(dir).code()).isZero();

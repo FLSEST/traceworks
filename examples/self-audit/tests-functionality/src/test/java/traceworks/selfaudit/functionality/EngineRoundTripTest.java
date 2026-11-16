@@ -48,10 +48,10 @@ class EngineRoundTripTest {
                 + answer + "\nANSWER\nelse printf '{\"section\":\"%s\",\"findings\":[]}' \"$1\"; fi\n");
         String scripts = "'" + Fixture.PACKAGE.resolve("scripts") + "'";
         String workflow = Fixture.JSON.writeValueAsString(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1,
+                "format", "traceworks-workflow", "format_version", 1,
                 "id", "5e2c7b1a-90d4-4f3b-8a6e-1d2c3b4a5f60", "name", "Round trip",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "functionality", "category", "functionality", "reportBlock", "report")),
+                        "key", "functionality", "category", "functionality", "report_block", "report")),
                 "blocks", List.of(
                         Map.of("type", "shell", "name", "known", "config", Map.of("shell_escape_variables", true,
                                 "command", "printf '%s\\n' {{ audit_findings }}")),
@@ -117,10 +117,10 @@ class EngineRoundTripTest {
         Path answers = pkg.resolve("answer.sh");
         String scripts = "'" + Fixture.PACKAGE.resolve("scripts") + "'";
         String workflow = Fixture.JSON.writeValueAsString(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1,
+                "format", "traceworks-workflow", "format_version", 1,
                 "id", "5e2c7b1a-90d4-4f3b-8a6e-1d2c3b4a5f61", "name", "Round trip through the register",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "functionality", "category", "functionality", "reportBlock", "report")),
+                        "key", "functionality", "category", "functionality", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to the fact step
                         Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,

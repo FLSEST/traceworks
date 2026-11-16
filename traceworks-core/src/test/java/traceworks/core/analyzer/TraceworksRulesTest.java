@@ -175,13 +175,13 @@ class TraceworksRulesTest {
                     .singleElement().satisfies(f -> {
                         assertThat(f.severity()).isEqualTo(Severity.ERROR);
                         assertThat(f.blockIndex()).isEqualTo(-1);
-                        assertThat(f.detail()).contains("metadata.audit").contains("reportBlock");
+                        assertThat(f.detail()).contains("metadata.audit").contains("report_block");
                     });
             assertThat(findings("invalid-audit-config", workflow(null,
-                    audit("enabled", "yes", "key", "k", "category", "c", "reportBlock", "report"), null, report)))
+                    audit("enabled", "yes", "key", "k", "category", "c", "report_block", "report"), null, report)))
                     .singleElement().satisfies(f -> assertThat(f.detail()).contains("enabled"));
             assertThat(findings("invalid-audit-config", workflow(null,
-                    audit("enabled", true, "key", "k", "category", "c", "reportBlock", "report"), null, report)))
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report)))
                     .isEmpty();
             assertThat(findings("invalid-audit-config", workflow(null,
                     audit("enabled", false), null, report))).as("disabled is fine").isEmpty();
@@ -190,7 +190,7 @@ class TraceworksRulesTest {
         @Test
         void aKeyThatIsNoPathSegment_isAnError() {
             assertThat(findings("invalid-audit-key", workflow(null,
-                    audit("enabled", true, "key", "My Audit", "category", "c", "reportBlock", "report"), null,
+                    audit("enabled", true, "key", "My Audit", "category", "c", "report_block", "report"), null,
                     report))).singleElement().satisfies(f -> assertThat(f.detail()).contains("My Audit")
                     .contains("[a-z0-9][a-z0-9._-]{0,127}"));
         }
@@ -198,11 +198,11 @@ class TraceworksRulesTest {
         @Test
         void aReportBlockThatNamesNoTopLevelBlock_isAnError() {
             assertThat(findings("report-block-missing", workflow(null,
-                    audit("enabled", true, "key", "k", "category", "c", "reportBlock", "summary"), null, report)))
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "summary"), null, report)))
                     .singleElement().satisfies(f -> assertThat(f.detail()).contains("summary")
                             .contains("names no top-level block"));
             assertThat(findings("report-block-missing", workflow(null,
-                    audit("enabled", true, "key", "k", "category", "c", "reportBlock", "report"), null, report)))
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report)))
                     .isEmpty();
         }
 
@@ -219,7 +219,7 @@ class TraceworksRulesTest {
                         assertThat(f.detail()).contains("previous_report").contains("metadata.audit");
                     });
             assertThat(findings("previous-report-outside-audit", workflow(null,
-                    audit("enabled", true, "key", "k", "category", "c", "reportBlock", "report"), null, report,
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report,
                     reader))).isEmpty();
             assertThat(findings("previous-report-outside-audit", workflow(null,
                     audit("enabled", true, "key", "k", "category", "c"), null, report, reader)))
@@ -229,7 +229,7 @@ class TraceworksRulesTest {
         @Test
         void anInvalidCatalog_isAnError() {
             WorkflowDefinition wf = workflow(null,
-                    audit("enabled", true, "key", "k", "category", "c", "reportBlock", "report"), null, report);
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report);
 
             assertThat(analyzer.analyze(wf, null, List.of(), List.of(), "{\"format\":2}".getBytes())
                     .stream().filter(f -> f.rule().equals("catalog-invalid")).toList())
@@ -252,11 +252,11 @@ class TraceworksRulesTest {
                     .singleElement().satisfies(f -> {
                         assertThat(f.severity()).isEqualTo(Severity.ERROR);
                         assertThat(f.blockIndex()).isEqualTo(1);
-                        assertThat(f.detail()).contains("metadata.audit.reportBlock")
+                        assertThat(f.detail()).contains("metadata.audit.report_block")
                                 .contains("the previous report is the output of that block");
                     });
             assertThat(findings("report-block-required", workflow(null,
-                    Map.of("audit", Map.of("enabled", true, "reportBlock", " ")), null, reader))).hasSize(1);
+                    Map.of("audit", Map.of("enabled", true, "report_block", " ")), null, reader))).hasSize(1);
             assertThat(findings("report-block-required", workflow(null,
                     Map.of("audit", "report"), null, reader))).hasSize(1);
         }
@@ -264,7 +264,7 @@ class TraceworksRulesTest {
         @Test
         void withAReportBlock_orWithoutPreviousReport_isFine() {
             assertThat(findings("report-block-required", workflow(null,
-                    Map.of("audit", Map.of("reportBlock", "compare")), null, reader))).isEmpty();
+                    Map.of("audit", Map.of("report_block", "compare")), null, reader))).isEmpty();
             assertThat(findings("report-block-required",
                     block("simple", "s", config("command", "Write {{ previous_output }}")))).isEmpty();
         }
@@ -602,7 +602,7 @@ class TraceworksRulesTest {
                     .containsExactly(
                             tuple(Severity.ERROR, -1, "format \"n8n-workflow\" is not traceworks-workflow — Traceworks"
                                     + " refuses the workflow"),
-                            tuple(Severity.ERROR, -1, "formatVersion 2 is newer than this version of Traceworks reads"
+                            tuple(Severity.ERROR, -1, "format_version 2 is newer than this version of Traceworks reads"
                                     + " (1) — it refuses the workflow"));
         }
     }

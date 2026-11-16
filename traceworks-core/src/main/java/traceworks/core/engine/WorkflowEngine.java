@@ -114,7 +114,7 @@ public final class WorkflowEngine {
      * Runs the workflow and returns once the run has ended.
      *
      * @param definition the workflow
-     * @param inputs     the run's inputs; they win over the workflow's {@code defaultContext}. May be {@code null}.
+     * @param inputs     the run's inputs; they win over the workflow's {@code default_context}. May be {@code null}.
      * @param options    the run's id, ports, control and working directory
      * @return how the run ended; the same facts as its last event, {@link RunFinished}, or {@link RunParked} for a run
      *         that parked: {@code PARKED}, no gate, no error

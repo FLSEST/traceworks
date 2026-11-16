@@ -74,7 +74,7 @@ class SecretEndToEndTest {
         Files.writeString(pkg.resolve("workflow.json"), """
                 {
                   "format": "traceworks-workflow",
-                  "formatVersion": 1,
+                  "format_version": 1,
                   "id": "5f0c2a8e-3d41-4b6f-9e27-8a1c0d4b7e63",
                   "name": "Leak",
                   "blocks": [

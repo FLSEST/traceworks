@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "fba1861b-2056-4cca-ad6b-86403b7d8d20",
   "name": "IT secret astral",
   "description": "A secret with a character outside the BMP is redacted in the JSON blobs too: the metadata of a failing foreach and the checkpoint state.",

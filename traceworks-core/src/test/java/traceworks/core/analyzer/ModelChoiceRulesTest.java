@@ -73,10 +73,10 @@ class ModelChoiceRulesTest {
         assertThat(found).extracting(AnalyzerFinding::rule, AnalyzerFinding::severity, AnalyzerFinding::detail)
                 .containsExactlyInAnyOrder(
                         org.assertj.core.groups.Tuple.tuple("unknown-provider", Severity.ERROR,
-                                "modelChoices.judge.options.b: provider \"GEMINI\" is not one of CLAUDE, PI —"
+                                "model_choices.judge.options.b: provider \"GEMINI\" is not one of CLAUDE, PI —"
                                         + " Traceworks refuses every AI step of a run that picks this option"),
                         org.assertj.core.groups.Tuple.tuple("unknown-model-backend", Severity.ERROR,
-                                "modelChoices.judge.options.c: " + REFUSAL));
+                                "model_choices.judge.options.c: " + REFUSAL));
     }
 
     @Test
@@ -87,11 +87,11 @@ class ModelChoiceRulesTest {
         assertThat(found).filteredOn(f -> f.severity() == Severity.ERROR)
                 .extracting(AnalyzerFinding::rule, AnalyzerFinding::blockIndex, AnalyzerFinding::detail)
                 .containsExactlyInAnyOrder(
-                        org.assertj.core.groups.Tuple.tuple("invalid-model-choice", -1, "modelChoices.judge.default"
+                        org.assertj.core.groups.Tuple.tuple("invalid-model-choice", -1, "model_choices.judge.default"
                                 + " \"gpt\" is none of the options (a); Traceworks refuses the workflow"),
                         org.assertj.core.groups.Tuple.tuple("invalid-model-choice", 0, "model_choice \"jugde\" is not"
-                                + " declared in modelChoices (declared: judge); Traceworks refuses the workflow"),
-                        org.assertj.core.groups.Tuple.tuple("missing-requirement", -1, "modelChoices needs"
+                                + " declared in model_choices (declared: judge); Traceworks refuses the workflow"),
+                        org.assertj.core.groups.Tuple.tuple("missing-requirement", -1, "model_choices needs"
                                 + " \"ai.model_choice\" in requires — add it to the workflow's requires; Traceworks"
                                 + " refuses the workflow"));
     }
@@ -105,7 +105,7 @@ class ModelChoiceRulesTest {
         assertThat(findings(workflow(null, List.of("ai.model_choice"), simple("verdict", Map.of("command", "Judge")))))
                 .extracting(AnalyzerFinding::rule, AnalyzerFinding::detail)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("unused-requirement", "requires names"
-                        + " \"ai.model_choice\", but no step uses it (the workflow declares no modelChoices) —"
+                        + " \"ai.model_choice\", but no step uses it (the workflow declares no model_choices) —"
                         + " remove it"));
     }
 
@@ -124,7 +124,7 @@ class ModelChoiceRulesTest {
         assertThat(found).filteredOn(f -> f.rule().equals("invalid-model-choice"))
                 .extracting(AnalyzerFinding::severity, AnalyzerFinding::blockIndex, AnalyzerFinding::detail)
                 .containsExactlyInAnyOrder(
-                        org.assertj.core.groups.Tuple.tuple(Severity.ERROR, -1, "modelChoices.judge_model: the run"
+                        org.assertj.core.groups.Tuple.tuple(Severity.ERROR, -1, "model_choices.judge_model: the run"
                                 + " sets the variable \"judge_model\" for the model choice \"judge\" too — give one"
                                 + " of the two choices another name; Traceworks refuses the workflow"),
                         org.assertj.core.groups.Tuple.tuple(Severity.ERROR, 2, "the block sets the variable"

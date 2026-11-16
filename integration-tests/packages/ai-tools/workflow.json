@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "b167e3e3-a18a-473a-8c6c-47c8a9283b4b",
   "name": "IT ai-tools",
   "description": "A simple AI step with each tools value for Claude and for Pi: the fake CLI reports the arguments it got.",

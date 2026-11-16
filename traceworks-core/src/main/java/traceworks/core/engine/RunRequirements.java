@@ -26,7 +26,7 @@ import java.util.Map;
  *       {@value #AI_TOOLS};</li>
  *   <li>a {@code web} value other than {@code none} on one of the same blocks needs {@value #AI_WEB}. It is a switch
  *       of its own: {@code tools: none} with {@code web: search} needs only this one;</li>
- *   <li>a declared model choice ({@code modelChoices}) needs {@value #AI_MODEL_CHOICE}.</li>
+ *   <li>a declared model choice ({@code model_choices}) needs {@value #AI_MODEL_CHOICE}.</li>
  * </ul>
  * A missing requirement refuses the run ({@code missing-requirement}, at the first block that needs it); a declared one
  * that no block uses is a warning ({@code unused-requirement}). Where a shell step reads a key: a {@code shell} block,
@@ -86,7 +86,7 @@ public final class RunRequirements {
             PACKAGE_IMAGES, "no shell step runs a ./images/ image",
             AI_TOOLS, "no AI step has tools other than none",
             AI_WEB, "no AI step has web other than none",
-            AI_MODEL_CHOICE, "the workflow declares no modelChoices");
+            AI_MODEL_CHOICE, "the workflow declares no model_choices");
 
     /** The blocks whose AI step reads {@code tools}: the two AI blocks, and the wrappers for their inner AI step. */
     private static final java.util.Set<String> TOOL_BLOCKS = java.util.Set.of("simple", "agentic", "foreach",
@@ -118,7 +118,7 @@ public final class RunRequirements {
         }
         problems.addAll(ModelChoices.problems(definition));
         if (!definition.modelChoices().isEmpty()) {
-            use(firstUse, AI_MODEL_CHOICE, -1, null, "modelChoices");
+            use(firstUse, AI_MODEL_CHOICE, -1, null, "model_choices");
         }
         List<BlockDefinition> blocks = definition.blocks();
         for (int i = 0; i < blocks.size(); i++) {
@@ -243,7 +243,7 @@ public final class RunRequirements {
     private static Problem placeholderInModel(int index, NestedBlocks.Nested at, String model) {
         return new Problem(PLACEHOLDER_IN_MODEL, true, index, at, "model \"" + model + "\" holds a placeholder, which"
                 + " no run resolves: the CLI would be asked for a model of that text — name the model, or declare the"
-                + " models a run may pick from in modelChoices and refer to the choice with " + ModelChoices.KEY);
+                + " models a run may pick from in model_choices and refer to the choice with " + ModelChoices.KEY);
     }
 
     /** Whether the provider id names Codex, compared ignoring case and edge spaces as the providers are matched. */

@@ -208,7 +208,7 @@ content, and no blob is written through one.
 
 - **Who chooses the model of an AI step.** The workflow does: a step names its provider and model, and nothing at
   the start of a run changes a named model. A workflow may open the choice to whoever starts the run, among options
-  it declares (`modelChoices`; docs/cli.md, "Model choices"): the caller picks one by its name, and a value outside
+  it declares (`model_choices`; docs/cli.md, "Model choices"): the caller picks one by its name, and a value outside
   the list refuses the run. So a caller can move a run to another declared model, with other strengths, costs and a
   provider that then sees the prompts, but never to a model the package does not list. The pick is read once, from
   the inputs the run starts with: no step output, workspace file or variable a step sets can change it, in the run or
@@ -425,8 +425,9 @@ What a seal protects:
 
 - **A changed package does not run.** A change in any file of a sealed package, or of a package it calls, refuses
   the run: a script, a prompt, a Dockerfile, `workflow.json`, a file's executable bit, a new file. The files are not
-  locked; the run refuses.
-- **The model choices are part of what is sealed.** A workflow's `modelChoices`, its default and its list of
+  locked; the run refuses. A seal is over the bytes of the files, not over their meaning: writing a key of
+  `workflow.json` in its other spelling (docs/workflow-format.md, "Key names") is a change too.
+- **The model choices are part of what is sealed.** A workflow's `model_choices`, its default and its list of
   options, stand in `workflow.json`, so the seal digest covers them. A run that picks an option of the list changes
   no file and breaks no seal; nothing a caller passes can add an option or a model to a sealed package. The seal
   does not say which option a run picked: `run.started` does.

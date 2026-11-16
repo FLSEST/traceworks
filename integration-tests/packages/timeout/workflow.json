@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "086aaf8b-0c2b-47d9-bb85-ab13e916b370",
   "name": "IT timeout",
   "description": "A step that sleeps far longer than its timeout_seconds is stopped at the timeout.",

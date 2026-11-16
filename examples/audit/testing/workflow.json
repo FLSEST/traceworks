@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "3a9d2c1e-7b54-4f0a-8c61-2e5d9f7a1b30",
   "name": "Testing audit",
   "description": "Asks whether the tests of the Maven project in the workspace notice when the code changes, by mutation testing with PIT (pitest.org) in a Maven container: a step with network fills a Maven repository in the tool's cache folder, a step without network runs PIT offline on a copy of the sources, and a step maps PIT's CSV to one finding per method with a change no test detected. A model then rates, per Java package, how much each finding matters, and learns what a person decided on a method before; it sets the severity of what was measured and can add no finding; a method it rates low is counted and is no finding. The gate counts the findings no person has decided on. The findings feed the register \"audit.testing\".",
@@ -17,10 +17,10 @@
       "enabled": true,
       "key": "audit.testing",
       "category": "testing",
-      "reportBlock": "report"
+      "report_block": "report"
     }
   },
-  "defaultContext": {
+  "default_context": {
     "modules": "traceworks-cli,traceworks-adapters,traceworks-core",
     "classes": "traceworks.*",
     "threads": "2"

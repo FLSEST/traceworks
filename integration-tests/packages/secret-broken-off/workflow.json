@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "40807a70-d3a5-4180-a3ec-2d45f22a0c6e",
   "name": "IT secret broken off",
   "description": "A step that prints the first part of its secret and is stopped at its timeout keeps no part of the value.",

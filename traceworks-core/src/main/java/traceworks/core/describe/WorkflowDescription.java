@@ -18,7 +18,7 @@ import java.util.Map;
  * @param digest             the package digest, as a run of the unchanged package records it
  * @param commit             the HEAD commit of the git checkout holding the package; {@code null} outside one
  * @param uncommittedChanges whether the package has uncommitted changes; {@code false} outside a checkout
- * @param inputs             the variables a run starts with unless its inputs set them ({@code defaultContext}), each
+ * @param inputs             the variables a run starts with unless its inputs set them ({@code default_context}), each
  *                           with its default as text, in definition order
  * @param requires           the features the workflow declares in {@code requires}
  * @param aiDefaults         the workflow's own AI settings, which a block may override, such as {@code provider pi};
@@ -27,7 +27,7 @@ import java.util.Map;
  * @param audit              the register the workflow feeds; {@code null} for a workflow that is no audit
  * @param blocks             the blocks, in definition order
  * @param counts             what the blocks add up to
- * @param modelChoices       the model choices the workflow opens ({@code modelChoices}), in declaration order; empty
+ * @param modelChoices       the model choices the workflow opens ({@code model_choices}), in declaration order; empty
  *                           for a workflow whose steps name their models
  */
 public record WorkflowDescription(String id, String name, String description, String packageDir, String digest,

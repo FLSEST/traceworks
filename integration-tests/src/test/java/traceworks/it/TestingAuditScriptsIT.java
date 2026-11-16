@@ -30,14 +30,14 @@ class TestingAuditScriptsIT extends IntegrationTest {
     private static final String WORKFLOW = """
             {
               "format": "traceworks-workflow",
-              "formatVersion": 1,
+              "format_version": 1,
               "id": "5f0c7b1e-2a4d-4c3b-9e8f-6d1a2b3c4d5e",
               "name": "IT testing audit scripts",
               "metadata": {
                 "gate": {"expected": true},
-                "audit": {"enabled": true, "key": "it.testing", "category": "testing", "reportBlock": "report"}
+                "audit": {"enabled": true, "key": "it.testing", "category": "testing", "report_block": "report"}
               },
-              "defaultContext": {"answers": "first"},
+              "default_context": {"answers": "first"},
               "blocks": [
                 {
                   "type": "shell",

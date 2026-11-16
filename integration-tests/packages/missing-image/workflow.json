@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "ec4c270b-a796-4712-aec1-f24d26d77be8",
   "name": "IT missing image",
   "description": "A step names a registry image that is not present; a run never pulls, so the start check refuses the run.",

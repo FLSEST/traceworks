@@ -171,12 +171,12 @@ class AnalyzerFindingLanguagesTest {
         // previous-report-outside-audit
         out.addAll(analyzer.analyze(new WorkflowDefinition("id", "audit", null, List.of(
                 block("shell", "report", Map.of("command", "set -euo pipefail\necho report"))), null, null, null, null,
-                Map.of("audit", Map.of("enabled", true, "key", "Bad Key", "category", "c", "schemaVersion", 3)),
+                Map.of("audit", Map.of("enabled", true, "key", "Bad Key", "category", "c", "schema_version", 3)),
                 null, null, null, null), null, List.of(), List.of(), "{\"format\":2}".getBytes()));
         out.addAll(analyzer.analyze(new WorkflowDefinition("id", "audit", null, List.of(
                 block("shell", "report", Map.of("command", "set -euo pipefail\necho report")),
                 block("simple", "prev", Map.of("command", "Compare with {{ previous_report }}"))), null, null, null,
-                null, Map.of("audit", Map.of("enabled", true, "key", "k", "category", "c", "reportBlock", "summary")),
+                null, Map.of("audit", Map.of("enabled", true, "key", "k", "category", "c", "report_block", "summary")),
                 null, null, null, null), null));
         // An image directory whose name is not valid: invalid-image-name
         out.addAll(analyzer.analyze(new WorkflowDefinition("id", "images", null, List.of(), null, null, null, null,

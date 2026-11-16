@@ -138,7 +138,7 @@ class ComparingTest {
     private void auditPackage() {
         fx.packages.put(AUDIT, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
-                   "category": "example", "reportBlock": "report"}}, "blocks": [
+                   "category": "example", "report_block": "report"}}, "blocks": [
                   {"type": "shell", "name": "measure", "config": {"command": "./measure"}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");

@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "02e3e025-bb6a-484a-8128-bd0be47d91b7",
   "name": "IT placeholders",
   "description": "Values between steps: an input, the output of a step by index and by name, shell_escape_variables and run_if.",
-  "defaultContext": {"name": "world", "payload": "plain"},
+  "default_context": {"name": "world", "payload": "plain"},
   "blocks": [
     {
       "type": "shell",

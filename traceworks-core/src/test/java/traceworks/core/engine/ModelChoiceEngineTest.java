@@ -266,7 +266,7 @@ class ModelChoiceEngineTest {
 
         assertThat(outcome.status()).isEqualTo(RunStatus.FAILED);
         assertThat(outcome.error()).startsWith("workflow refused: ").contains("Block 1 \"ask\": model \"{{ m }}\""
-                + " holds a placeholder, which no run resolves").contains("modelChoices");
+                + " holds a placeholder, which no run resolves").contains("model_choices");
         assertThat(outcome.steps()).extracting(StepResult::getOutput).isEmpty();
     }
 
@@ -278,7 +278,7 @@ class ModelChoiceEngineTest {
 
         RunOutcome outcome = engine.run(workflow, null, options().build());
 
-        assertThat(outcome.error()).isEqualTo("workflow refused: modelChoices needs \"ai.model_choice\" in requires"
+        assertThat(outcome.error()).isEqualTo("workflow refused: model_choices needs \"ai.model_choice\" in requires"
                 + " — add it to the workflow's requires");
     }
 }

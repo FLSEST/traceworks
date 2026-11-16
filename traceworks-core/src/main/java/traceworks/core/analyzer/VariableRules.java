@@ -30,7 +30,7 @@ import java.util.regex.Pattern;
  * input ({@code --input}, or the variables a parent run hands to its child). What sets a variable, as the resolver
  * and the block executors do it:
  * <ul>
- *   <li>the definition's {@code defaultContext} and the inputs of the run ({@link #apply} gets their names);</li>
+ *   <li>the definition's {@code default_context} and the inputs of the run ({@link #apply} gets their names);</li>
  *   <li>the engine: {@code previous_output}, the {@link RunVariables} and {@code package_dir};</li>
  *   <li>a block, at the top level or nested: the {@code variable_name} of an {@code approval} (default
  *       {@code approval_answer}), of a {@code human-input} (default {@code user_input}) and of each of its
@@ -88,7 +88,7 @@ final class VariableRules {
             String them = unknown.size() == 1 ? "it" : "them";
             out.add(AnalyzerFinding.of("unknown-variable", Severity.WARNING, i, block.getName(),
                     String.join(", ", unknown.stream().map(VariableRules::placeholder).toList())
-                            + " — nothing sets " + them + suggestions(unknown, set) + ": neither defaultContext nor a"
+                            + " — nothing sets " + them + suggestions(unknown, set) + ": neither default_context nor a"
                             + " block does, and Traceworks does not provide " + them + "; only a run input of the same"
                             + " name (--input, or the parent run of a sub-workflow) gives a value, otherwise the"
                             + " placeholder stays literal in the run"));
@@ -97,7 +97,7 @@ final class VariableRules {
 
     /**
      * What is wrong with the inputs of a run of {@code workflow}, one text per input: an input that no block reads
-     * and that is not in {@code defaultContext} changes nothing in the run, which is mostly a typo of its name. A
+     * and that is not in {@code default_context} changes nothing in the run, which is mostly a typo of its name. A
      * block reads an input by a placeholder, at the top level or nested. {@code previous_output} and the reserved
      * names ({@code __...}) are read by the engine. A workflow that starts a child ({@code sub-workflow}, or a block
      * with a {@code workflow_id}) is not judged: the child gets every variable of its parent.
@@ -116,7 +116,7 @@ final class VariableRules {
         for (String input : new LinkedHashSet<>(inputs)) {
             if (read.contains(input) || "previous_output".equals(input) || input.startsWith("__")) continue;
             String near = FindingText.suggestion(input, plainNames(read));
-            problems.add("input \"" + input + "\" is read by no block and is not in defaultContext, so it changes"
+            problems.add("input \"" + input + "\" is read by no block and is not in default_context, so it changes"
                     + " nothing in this run" + (near == null ? "" : "; did you mean \"" + near + "\"?"));
         }
         return problems;

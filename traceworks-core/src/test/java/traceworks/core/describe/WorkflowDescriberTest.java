@@ -47,7 +47,7 @@ class WorkflowDescriberTest {
     @Test
     void theInputs_areTheDefaultContextWithItsDefaults_inDefinitionOrder() {
         WorkflowDescription described = Described.of("""
-                {"id":"wf","defaultContext":{"name":"world","retries":3,"tags":["a","b"],"none":null},
+                {"id":"wf","default_context":{"name":"world","retries":3,"tags":["a","b"],"none":null},
                  "requires":["container.network","ai.tools"],"blocks":[]}""");
 
         assertThat(described.inputs()).containsExactly(Map.entry("name", "world"), Map.entry("retries", "3"),
@@ -59,7 +59,8 @@ class WorkflowDescriberTest {
     void anAuditWorkflow_namesItsRegister() {
         WorkflowDescription described = Described.of("""
                 {"id":"wf","metadata":{"audit":{"enabled":true,"key":"architecture","category":"design",
-                 "reportBlock":"report"}},"blocks":[{"type":"shell","name":"report","config":{"command":"cat r"}}]}""");
+                 "report_block":"report"}},
+                 "blocks":[{"type":"shell","name":"report","config":{"command":"cat r"}}]}""");
 
         assertThat(described.audit().key()).isEqualTo("architecture");
         assertThat(described.audit().category()).isEqualTo("design");

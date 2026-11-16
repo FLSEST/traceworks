@@ -21,7 +21,7 @@ public final class Described {
 
     public static WorkflowDefinition definition(String json) {
         try {
-            return JSON.readValue(json, WorkflowDefinition.class);
+            return traceworks.core.model.WorkflowJson.read(json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
