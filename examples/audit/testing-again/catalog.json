@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "rules": {
+    "undetected-mutants": {"severity": {"min": "LOW", "max": "HIGH"}}
+  }
+}

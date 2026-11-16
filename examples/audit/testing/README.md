@@ -41,6 +41,11 @@ traceworks findings audit.testing
   whole, so no number of findings makes a run forget. The reason of a rating is the first line of the finding's
   description (`Rating: ...`); the evidence is the measured fact alone. A method rated `low` is no finding, so the
   register keeps no reason for it: that is enough here, because a package that changed is rated from zero.
+- **A second audit rates again from the earlier verdict:** this audit rates a changed package from zero, and a
+  model does not rate the same gap the same way every time. [`examples/audit/testing-again`](../testing-again/README.md)
+  measures the same and keeps a rating until a ground that a script can check speaks against it: the method is its
+  unit, an unchanged method is not asked about, and a change of a rating needs a test or a line of the workspace.
+  It has a register of its own. Use this one for a fresh look, that one for ratings that hold still.
 - **Inputs:** `modules` (a comma list of Maven modules), `classes` (a PIT glob of the classes to change and of the
   tests to run) and `threads`. A run with other `modules` or `classes` states another snapshot, so the register
   resolves what the smaller run did not look at: keep them the same from run to run.
