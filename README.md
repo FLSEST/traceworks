@@ -17,6 +17,9 @@ repository, with or without a model, where "what ran, with which inputs, and who
 changes without a change of the tool. The frame is the same for every package: Traceworks checks the package, runs
 its steps in containers, records what happened, and keeps what an audit knows across its runs in a register.
 
+The format of `workflow.json` is Traceworks' own, and it has one rule: a workflow runs as it is written, or it is
+refused. It never silently runs as something else ([docs/workflow-format.md](docs/workflow-format.md)).
+
 Two pages explain it with drawings:
 
 - [docs/features.html](docs/features.html): the key features, each by the same four questions: what goes wrong
@@ -56,7 +59,7 @@ bin/traceworks resume <run> --no-input     # runs the last block, exits 0
 # The result.
 bin/traceworks show <run>                  # status, the workflow, every step, the gate
 bin/traceworks render <run>                # prints the path of run.html: open it in a browser
-bin/traceworks verify <run>                # the chain, the manifest, the ledger entry: exits 8 if one does not hold
+bin/traceworks verify <run>                # the chain, the blobs, the manifest, the ledger entry: exits 8 if one does not hold
 ```
 
 Leave out `--no-input` in a terminal and the run asks the question there instead of parking.
@@ -84,12 +87,12 @@ The names are those of [docs/features.html](docs/features.html), where each has 
 | Traceable | The record is an append-only event log in which each line holds the hash of the line before; outputs are blobs named by their SHA-256; a manifest and a git ledger name the last line | [docs/events.md](docs/events.md) |
 | Visible | `describe` shows a workflow before it runs; `run.html` shows the run afterwards, as one static file without scripts | [docs/cli.md](docs/cli.md#describe) |
 | Deterministic first, AI optional | A workflow works without any AI: shell steps, tool steps, loops, conditions and questions to a person; no default calls a model | [docs/cli.md](docs/cli.md#ai-steps) |
-| The model, chosen per step | A block names its provider and its model; the record names the model that was asked for and the one that answered | [docs/cli.md](docs/cli.md#ai-steps) |
+| The model, chosen per step | A block names its provider and its model, or a choice the workflow declares and an input of the run picks; the record names the model that was asked for and the one that answered | [docs/cli.md](docs/cli.md#model-choices) |
 | Contained | One container per step: read-only root file system, no capabilities, resource limits, no network and a read-only workspace unless the block says otherwise | [docs/security.md](docs/security.md#what-the-defaults-protect) |
 | Any tool, in a container | A step runs whatever tool an image holds; SARIF output becomes facts that later steps and the register can use | [docs/cli.md](docs/cli.md#tool-mode-of-the-shell-block) |
 | Secrets protected | A step gets only the secrets it names; every value is redacted in the record and in what the tool prints | [docs/cli.md](docs/cli.md#secrets), [docs/events.md](docs/events.md#redaction) |
 | Controllable | Pause, resume and cancel; approval and input blocks where a person must decide; gates as `GREEN`, `YELLOW` or `RED` | [docs/cli.md](docs/cli.md#interactive-and-parked-runs) |
-| The register | What an audit knows across its runs: findings with an identity, a person's decisions, reused verdicts, in a hash-chained log | [docs/registers.md](docs/registers.md) |
+| The register | What an audit knows across its runs: findings with an identity, a person's decisions, reused verdicts, in a hash-chained log; the next run gets it as files | [docs/registers.md](docs/registers.md) |
 | Lean | One runnable jar with one runtime library; plain files in one directory; no database, no service | [docs/architecture.md](docs/architecture.md#dependencies) |
 
 ## AI steps
@@ -99,7 +102,8 @@ that its blocks do not name.
 
 - **Two command line tools** do the calls, each in its own built-in image: Claude Code (provider `CLAUDE`) and Pi
   (provider `PI`), which reaches the backend its model names. Any other provider is refused, never replaced.
-- **Tools** are set per block: `none` (the default: the model only answers), `read`, `write` or `shell`.
+- **Tools** are set per block: `none` (the default: the model only answers), `read`, `write` or `shell`. Web
+  search and fetch are a switch of their own (`web`), off unless a block sets it.
 - **Credentials** come from `credentials.json` in the home, written by `traceworks credentials set <NAME>`, or from
   the environment. Claude takes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; the names Pi takes are in
   [docs/cli.md](docs/cli.md#ai-steps). Without a credential the run is refused before it starts. The credential
@@ -114,43 +118,82 @@ that its blocks do not name.
 needs a credential and costs money. What an AI step can still do is in
 [docs/security.md](docs/security.md#ai-steps).
 
+### A model's answer in a shell step
+
+Traceworks never writes text a model wrote into shell code. The same holds for untrusted input and for what a
+register hands a run. A shell line that names such a placeholder is refused: by `check`, or by the run before
+anything runs. The value reaches the command as a named shell variable instead. A block lists its `values`, a
+variable name and a template each, and its command reads the variable:
+
+```json
+{
+  "type": "shell",
+  "name": "save",
+  "config": {
+    "values": {"REVIEW": "{{ block.review.output }}"},
+    "command": "printf '%s\\n' \"$REVIEW\" > {{ scratch_dir }}/review.md"
+  }
+}
+```
+
+Bash does not parse what a variable holds. What the command does with the variable is its author's: an unquoted
+`$REVIEW` is split, and `eval` evaluates what it is given
+([docs/workflow-format.md](docs/workflow-format.md#rules), [docs/security.md](docs/security.md#ai-steps)).
+
 ## What a model's verdict is
 
-A deterministic step gives the same result for the same input. A model does not. Two full runs of the testing audit
-on the same code measured the same 637 methods with a gap in their tests, and rated 63 of them differently. So a
-model's verdict is a testimony, not a measurement, and Traceworks asks of it what one asks of a witness:
+A deterministic step gives the same result for the same input. A model does not. Three full runs of the testing
+audit on the same code gave 8, 14 and 11 findings rated `HIGH`. So a model's verdict is a testimony, not a
+measurement, and Traceworks asks of it what one asks of a witness:
 
-- **It is on record.** The prompt and the answer are in the run record and cannot be changed afterwards.
-- **It can be checked.** A finding names its evidence, and a deterministic step compares it with what the run
+- **It is on record.** The prompt and the answer are in the run record, and a change of either shows.
+- **It can be checked.** A finding names its evidence, and the register compares it with the facts the run
   measured.
 - **A person answers for the decision.** The model proposes; a person accepts or dismisses in the register.
 
-Letting a model go over the same thing again does not converge by itself: every run finds something. A loop over a
-model's verdicts ends when the workflow keeps to a few rules. They are decisions of the workflow's author, and the
-tool gives the means: a defined workflow for control, a register as the memory, a loop for the improvement.
+A loop over a model's verdicts does not end by itself. It ends when the workflow keeps to a few rules. They are
+decisions of the workflow's author, and the tool gives the means: a defined workflow, a register as the memory.
 
-1. **A measurement says what there is.** The model orders a finite list. Where a tool can measure the whole set,
-   the model adds nothing to it.
+1. **A measurement says what there is.** A tool measures the whole set, and the model rates what was measured. It
+   adds no finding.
 2. **A verdict is given once per state.** What did not change is not judged again.
-3. **A verdict changes for a reason:** the thing changed, a person decided, or the author asks for a new judgment,
-   for example by a stronger model.
-4. **From the severe to the less relevant, down to a floor a person sets.** Below it nothing is reported. The
-   lower the floor, the more a model judges at a border of discretion, and the more each run refills what the last
-   one emptied.
+3. **A verdict changes for a reason:** the thing changed, or a person decided.
+4. **Below a floor, nothing goes to the register.** What the model rates `low` is counted in the report of the
+   run and is no finding.
 
-[examples/audit/testing](examples/audit/testing/README.md) is built on these rules: PIT measures, a model rates each
-method once, and the gate counts what no person has decided on.
+Two example audits are built on these rules. Both measure the same: [PIT](https://pitest.org) changes the compiled
+code of a Maven project in one place at a time, and a change no test notices is a gap. A model rates each method
+with a gap, and the gate counts the findings no person has decided on. They differ in how a rating is given again:
 
-## The self-audits
+- [examples/audit/testing](examples/audit/testing/README.md) rates from zero. Its unit is the Java package: a
+  package whose gaps and decisions are what they were at its last rating is not rated, and a changed package is
+  rated anew.
+- [examples/audit/testing-again](examples/audit/testing-again/README.md) rates again from the earlier verdict. Its
+  unit is the method: an unchanged method is not asked about, and the rating of a changed method moves only when
+  the answer names a ground, a test or a line of code, that a script finds in the workspace. That shows that the
+  place exists, not that the rating is right.
 
-Traceworks checks itself with its own packages: `security`, `architecture`, `build`, `functionality` and `testing`
-under [examples/self-audit](examples/self-audit/README.md). They share one shape: a script measures and chooses, a
-model judges one item per call, and a script checks every quote, counts and sets the gate; `build` asks no model at
-all. The four that ask a model each feed a register, so the next run knows what was found and decided and asks only
-about what changed, was never judged or is still open.
+Each has a register of its own.
 
-[examples/audit-hello](examples/audit-hello/README.md) is the smallest audit with a register: three shell steps, no
-AI.
+## Audits and the register
+
+An audit is a workflow whose report feeds a register (`metadata.audit`). The register knows a finding of an
+earlier run by its rule and its subject, keeps what a person decided on it, and hands the next run what it knows:
+as capped placeholders (`{{ audit_findings }}`, `{{ audit_items }}`, `{{ previous_report }}`), and whole as files
+in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `resolved.jsonl`, `items.jsonl` and
+`previous-report.md`. The steps see the folder read-only; an AI step does not see it
+([docs/registers.md](docs/registers.md#the-register-folder-of-a-run)).
+
+- [examples/audit-hello](examples/audit-hello/README.md) is the smallest audit with a register: three shell
+  steps, no AI.
+- [examples/audit](examples/audit) holds the two testing audits above.
+- [examples/self-audit](examples/self-audit/README.md) holds the packages Traceworks checks itself with:
+  `security`, `architecture`, `build`, `functionality` and `testing`. They share one shape: a script measures and
+  chooses, a model judges one item per call, and a script checks every quote, counts and sets the gate; `build`
+  asks no model at all. The four that ask a model each feed a register, so the next run knows what was found and
+  decided and asks only about what changed, was never judged or is still open.
+- [examples/hooks](examples/hooks/README.md): an operator's hook gets the diff of a register that changed.
+  `todo-service.sh` creates one TODO per new or reopened finding in a TODO service over HTTP.
 
 ## Status
 
@@ -159,7 +202,8 @@ The version is `0.1.0-SNAPSHOT`. There is no release.
 **Built:** the engine and its block types, the check of a package (`check`, `describe`), container runs with
 Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), the run record with `verify`,
 `show`, `watch`, `run.html` and `diff`, pause and resume, secrets and their redaction, AI steps with Claude Code
-and Pi behind the allowlist proxy, seals, registers with `traceworks findings`, and the five self-audit packages.
+and Pi behind the allowlist proxy, model choices, named values for shell steps, seals, registers with
+`traceworks findings`, the five self-audit packages and the two testing audits.
 
 **Not built:**
 
@@ -167,8 +211,8 @@ and Pi behind the allowlist proxy, seals, registers with `traceworks findings`, 
   The record is tamper-evident, not signed; only a package can be signed, by its seal.
 - A server for MCP clients, and MCP servers for AI steps.
 - An export of a workflow to BPMN.
-- A scheduler, a web page to click in, a live view of a run. A run starts when a person, a cron entry or a CI job
-  starts it.
+- A scheduler, and a web page to click in. A run starts when a person, a cron entry or a CI job starts it, and
+  `traceworks watch` follows it in the terminal.
 
 **Verified with:**
 
@@ -190,11 +234,11 @@ package you did not write: a package is code you run.
 | [docs/audit-loop.html](docs/audit-loop.html) | the register and the audit loop, to step through (open in a browser) |
 | [docs/cli.md](docs/cli.md) | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals |
 | [docs/events.md](docs/events.md) | the run record: the run folder, the hash chain and how to check it by hand, every event type, the manifest, the ledger |
-| [docs/registers.md](docs/registers.md) | registers: audit workflows, findings across runs, items, decisions, hooks |
+| [docs/registers.md](docs/registers.md) | registers: audit workflows, findings across runs, items, the register folder of a run, decisions, hooks |
 | [docs/security.md](docs/security.md) | what the defaults protect and what they do not |
 | [docs/architecture.md](docs/architecture.md) | modules, ports and adapters, layers, the life of a run, the dependencies and their reasons, building and testing |
-| [docs/compatibility.md](docs/compatibility.md) | workflows follow the format of an earlier system; this page lists where Traceworks deliberately behaves differently and what it refuses |
-| [examples/](examples) | `hello`, `ai-hello`, `audit-hello`, `hooks` and the self-audits, each with a README |
+| [docs/workflow-format.md](docs/workflow-format.md) | the workflow format: the key names, and every rule of the format and of a run, each with its reason |
+| [examples/](examples) | `hello`, `ai-hello`, `audit-hello`, the two testing audits, `hooks` and the self-audits, each with a README |
 | [integration-tests/README.md](integration-tests/README.md) | the black-box suite and what a run of it costs the host |
 
 ## Building and testing
@@ -203,8 +247,8 @@ Containers start only on purpose. Three commands, from the root of the repositor
 
 | Command | What runs | What it starts |
 |---|---|---|
-| `mvn verify` | the unit and component tests of every module, and the jar | no container, no image build |
-| `mvn -Pcontainers verify` | the same, plus the container tests of `traceworks-adapters` and `traceworks-cli` | real containers through `docker` or `podman` |
+| `mvn verify` | the unit and component tests of every module, and the jar | no container, no image build, no network |
+| `mvn -Pcontainers verify` | the same, plus the container tests of `traceworks-adapters` and `traceworks-cli` | real containers through `docker` or `podman`, and two small test images that are removed again |
 | `mvn -Pit verify` | everything: the same as `-Pcontainers`, plus the suite of `integration-tests` | the same, plus the containers, images and networks of the suite |
 
 The two profiles need the built-in images, and no test builds them: run
@@ -216,4 +260,10 @@ contribute, and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 
 ## License
 
-GPL-3.0-only. See [LICENSE](LICENSE).
+`SPDX-License-Identifier: GPL-3.0-only`
+
+Copyright 2026 Florian Stampe
+
+Traceworks is free software under the GNU General Public License, version 3 only. The text is in
+[LICENSE](LICENSE). The jar includes Jackson, which is licensed under the Apache License 2.0. [NOTICE](NOTICE)
+holds the copyright notice, the additional term on the name "Traceworks", and Jackson's own notices.
