@@ -16,6 +16,10 @@ import java.util.stream.Collectors;
  */
 public final class DescriptionText {
 
+    /** What every step of an audit workflow may read besides what its block says: the run's register folder. */
+    static final String REGISTER_FOLDER_NOTE = "; its shell and tool steps read the register's files in"
+            + " {{ register_dir }}, its AI steps do not";
+
     private DescriptionText() {
     }
 
@@ -79,13 +83,16 @@ public final class DescriptionText {
         return out;
     }
 
-    /** The audit block on one line: the register it feeds, or what is wrong with it. */
+    /**
+     * The audit block on one line: the register it feeds and that its steps read the register's files, or what is
+     * wrong with it.
+     */
     public static String audit(Audit audit) {
         if (!audit.problems().isEmpty()) {
             return "invalid: " + facts(audit.problems());
         }
         return "register " + one(audit.key()) + ", category " + one(audit.category()) + ", report block "
-                + one(audit.reportBlock());
+                + one(audit.reportBlock()) + REGISTER_FOLDER_NOTE;
     }
 
     /** A section's heading: its label, and its note when it has one. */

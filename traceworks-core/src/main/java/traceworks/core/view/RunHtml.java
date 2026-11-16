@@ -142,6 +142,10 @@ public final class RunHtml {
         row(out, "digest", view.packageDigest());
         row(out, "seal", view.seal() == null ? "unsealed" : view.seal().summary());
         view.modelChoices().forEach(pick -> row(out, "model choice " + pick.choice(), pick.picked()));
+        if (view.register() != null) {
+            row(out, "register", view.register().summary()
+                    + (view.register().head() == null ? "" : "; head " + view.register().head()));
+        }
         if (view.definition() != null) {
             row(out, "definition", "blob " + view.definition().sha256());
         }
