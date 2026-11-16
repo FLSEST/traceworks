@@ -1,0 +1,16 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a51",
+  "name": "IT combo-approval child",
+  "description": "Adds its line to the file its parent's loop began in the scratch directory and says how many lines it found.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "add",
+      "config": {
+        "command": "echo \"child saw $(wc -l < \"{{ scratch_dir }}/trail.txt\") lines\"; echo child >> \"{{ scratch_dir }}/trail.txt\""
+      }
+    }
+  ]
+}

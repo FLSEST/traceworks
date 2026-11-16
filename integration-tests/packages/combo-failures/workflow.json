@@ -1,0 +1,103 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a60",
+  "name": "IT combo-failures",
+  "description": "A failure inside each block that holds a command or blocks, each with on_failure: continue: a switch case, a child after a good step, a foreach of children with one that fails, a while whose second pass fails, a retry of a step that times out, and a child whose checked command fails; then a step that shows the run got to its end.",
+  "default_context": {
+    "mode": "fast"
+  },
+  "blocks": [
+    {
+      "type": "switch",
+      "name": "sw",
+      "config": {
+        "expression": "{{ mode }}",
+        "on_failure": "continue",
+        "cases": [
+          {
+            "value": "fast",
+            "blocks": [
+              {
+                "type": "shell",
+                "name": "sw_fails",
+                "config": {
+                  "command": "echo before the fall; exit 3"
+                }
+              },
+              {
+                "type": "shell",
+                "name": "sw_never",
+                "config": {
+                  "command": "echo the case went past a failed block"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "child_fails",
+      "config": {
+        "workflow_id": "./fails-late",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "foreach",
+      "name": "each_child",
+      "config": {
+        "workflow_id": "./item",
+        "items": [
+          "ok-1",
+          "bad",
+          "ok-2"
+        ],
+        "variable_name": "thing",
+        "context": {
+          "what": "{{ thing }}"
+        },
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "while",
+      "name": "loop_fails",
+      "config": {
+        "execution_mode": "shell",
+        "max_iterations": 4,
+        "on_failure": "continue",
+        "command": "echo pass >> \"{{ scratch_dir }}/passes.txt\"; n=$(wc -l < \"{{ scratch_dir }}/passes.txt\"); echo pass $n; if [ $n -ge 2 ]; then exit 6; fi"
+      }
+    },
+    {
+      "type": "retry",
+      "name": "times_out",
+      "config": {
+        "execution_mode": "shell",
+        "max_retries": 1,
+        "delay": 0,
+        "timeout_seconds": 2,
+        "on_failure": "continue",
+        "command": "echo attempt >> \"{{ scratch_dir }}/attempts.txt\"; echo waiting; sleep 60"
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "red_child",
+      "config": {
+        "workflow_id": "./red",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "the_end",
+      "config": {
+        "command": "echo attempts: $(wc -l < \"{{ scratch_dir }}/attempts.txt\")"
+      }
+    }
+  ]
+}

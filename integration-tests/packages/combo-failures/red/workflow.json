@@ -1,0 +1,26 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a63",
+  "name": "IT combo-failures red",
+  "description": "A step that passes, then a checked command that fails and lets the run go on: the child ends completed with errors, and its last output holds a red gate marker.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "first",
+      "config": {
+        "command": "echo first step"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "build",
+      "config": {
+        "command": "echo compiling; exit 2",
+        "checked_command": true,
+        "check_category": "build",
+        "on_failure": "continue"
+      }
+    }
+  ]
+}
