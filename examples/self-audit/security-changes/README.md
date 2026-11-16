@@ -70,6 +70,12 @@ name of the workspace, and no text of a model is in that output. The register ha
 The base, its commit date and the workspace commit are in the output of the `base` step, in
 `areas-summary.json` and in the report.
 
+**A run on a workspace that differs from its commit does not move the base.** Such a run judges the files as
+they are, not the commit: the commit may hold a change the files do not have. So its report names this run's base
+again as the commit the next run starts from (`FACT changes_head`), and says so. The base moves with a run on a
+workspace that is its commit; a `.java` file git ignores makes a workspace differ, so use a clean checkout or
+`--source` for the runs that shall move it.
+
 **Changes that are in no commit count as changed.** A file is compared as it lies in the workspace, and a `.java`
 file the base does not have is new, whether git tracks it, ignores it or neither. The report says whether the
 workspace differs from its own commit. The next run measures from the commit, so it sees such changes again; an
@@ -95,11 +101,16 @@ What the workspace sets for git has no say in this: an attribute (`*.java -diff`
 
 | A file | Is |
 |---|---|
-| of the base or of the workspace commit, with another blob id in the workspace | changed |
+| of the base, with another blob id in the workspace, or another mode (made executable, replaced by a link) | changed |
 | of the base, and not in the workspace | removed |
 | of the workspace commit and not of the base, whatever its kind | new |
 | a `.java` file in neither tree, anywhere below the workspace except below a `.git` directory, tracked, ignored or neither | new |
-| of a tree, and no readable regular file any more (a link, a directory), or a path that leaves the workspace | not compared |
+| of a tree, and no file any more (a directory), or a path that leaves the workspace | not compared |
+| a file whose name is no UTF-8, in a tree or on disk | not compared: no text leads back to such a file, so it is a doubt by its name |
+
+Every path of either tree and every `.java` file on disk has one of these or is unchanged, and none is dropped: a
+test puts every status against every kind of file and holds that each ends in changed lines or in a list the report
+shows (`ChangesTest`, "noStatusOfNoKindOfFile_isDroppedSilently").
 
 **The lines are compared for exactly the files the finder read**, in `areas find`: for each of them the tool
 looks up what differs, and takes the finder's own lines of the file (`String.lines()`, which ends a line where the
@@ -114,14 +125,22 @@ a directory called `build`, `target` or `node_modules` or a hidden one inside a 
 | Kind | In the report | The gate |
 |---|---|---|
 | a Java file the finder read | its changed lines pick areas | follows the items |
-| a changed place of such a file in no member (an import, the head of a class) | counted and named | no effect |
-| a test (`.java` below `src/test/java`) | counted | no effect: tests are not what this audit judges |
-| documentation (`*.md`, everything below a `docs` directory) | counted | no effect |
+| a changed place of such a file in no member (an import, the package, the head of a class, an annotation of a type) | counted and named; **every area of that file is judged** (reason `changed: the head of its file`), since such a line can change what any name in the file means | follows the items |
+| a test (`.java` below a `src/test/java`) | counted | no effect. This assumes that test sources are not shipped and not run by the tool; a project that ships them needs another rule |
+| documentation | counted | no effect |
+| a removed Java file, other than a test | named | **not GREEN**: its areas are gone with it, and what called it was looked at only where it changed |
 | another `.java` file the finder did not read (a class moved out of the source roots, the source of a tool) | named | **not GREEN**: code changed that nothing looked at |
 | every other file, changed, new or removed (a script, a workflow, a Dockerfile, a `pom.xml`, a resource) | named | **not GREEN**: it can change what the project does, and this check has no word on it |
 | a file that could not be compared | named | **not GREEN** |
 
-A GREEN over a changed script would say more than was checked; that is the reason for the two rows above the last.
+**Documentation** is a `*.md` file, or a file below the `docs` directory at the top of the workspace, that nothing
+reads when the project runs. So not: a file below a `src` or a hidden directory; a file of a workflow package (a
+directory with a `workflow.json`, at or above the file: its steps and prompts can read what lies there, its README
+included); `AGENTS.md` and `CLAUDE.md`, which an AI tool reads as instructions. Those are files the check cannot
+judge.
+
+A GREEN over a changed script would say more than was checked; that is the reason for the rows that say **not
+GREEN**.
 The price: in the last twenty commits of this repository's main line, 8 changed a file of the "every other" kind and
 2 a Java file outside the source roots and the tests, so such runs are YELLOW with that reason until the files are
 looked at by a person; 19 changed tests, which is why tests do not count. The base moves on all the same, and the
@@ -129,7 +148,7 @@ next run speaks about what changed after it.
 
 **A finding is not named as gone while Java code changed where the finder does not read.** When a member with an
 open finding is no area any more, the tool otherwise names the finding as gone. In a run with a changed or new
-Java file outside the compiled roots it does not: the member may have moved there. The finding stays open, the
+Java file outside the compiled roots, a test included, it does not: the member may have moved there. The finding stays open, the
 report lists it under "Open findings that no item carries", and a person decides.
 
 ## What is looked at
@@ -254,8 +273,9 @@ path or an option is refused. Not tried: other versions of git, and the steps in
 ## What it does not see
 
 - **A change two calls away.** When `a` calls `b` and `b` calls the changed `c`, the area of `a` is not looked at.
-- **What is no call.** A changed constant or field that another member reads, a changed annotation, a changed
-  supertype without a changed method. And a call the compiler could not resolve: on a library type, or through
+- **What is no call.** A changed constant or field that another member reads, in another file: the areas of the
+  file that changed are judged, the readers elsewhere are not. (A changed import, package line, class head or
+  annotation of a type marks every area of its own file.) And a call the compiler could not resolve: on a library type, or through
   reflection.
 - **A base that was never audited.** The check judges the changes; it takes the base as it is. Run the long audit
   once, or accept that the code before the base is unjudged. A `since` later than the last run's commit is
@@ -296,5 +316,6 @@ In [`examples/self-audit/tests`](../tests), without a container and without an A
 (`ChangesMainTest`), the script and the tool against real git repositories, hostile ones among them
 (`ChangesScriptTest`; it needs bash and git and fails without them), the package as it ships (`ChangesPackageTest`), and the
 package through the engine into its register across runs with different bases, with a shell loop in the model's
-place (`ChangesRoundTripTest`). `SecurityChangesScriptIT` in `integration-tests` runs the script in the shell image
+place (`ChangesRoundTripTest`). `SecurityChangesToolIT` in `integration-tests` runs the script and the area tool
+in their images on a small repository; it is written and was not run here. `SecurityChangesScriptIT` in `integration-tests` runs the script in the shell image
 (`mvn -Pit`); it is written and was not run.
