@@ -3,8 +3,12 @@ package traceworks.adapters.host;
 import traceworks.core.util.ProcessTracking;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -22,8 +26,17 @@ import java.util.concurrent.TimeUnit;
  * gets SIGTERM, so cleanup traps run and a {@code docker run} client forwards the signal to its
  * container; whatever is still alive after {@link #GRACE} gets SIGKILL.
  *
- * <p>Not airtight: a child whose parent had already exited (e.g. after {@code nohup … &} or a daemon's
- * double fork) is out of reach of the parent chain. Closing that gap needs a process group or cgroup
+ * <p>SIGTERM goes to every process <em>before</em> its children: the process first, then its children, then
+ * theirs. A shell whose command ended before its own signal arrived would take that for the command's end and go
+ * on to the next command of its script, which a stop must not let start. With its signal already there, the shell
+ * ends instead, or runs its own trap once the command has returned. A process group would be signalled as one,
+ * but not every process of a step stays in the group it started in ({@code timeout}, {@code setsid} and job
+ * control make their own), the JDK cannot signal a group, and where there is no {@code setsid}
+ * ({@link OwnSession}) a step has no group of its own.
+ *
+ * <p>Not airtight: a process started after the tree was collected gets no SIGTERM, and is killed after the grace
+ * only while its parent is still there; a child whose parent had already exited (e.g. after {@code nohup … &} or
+ * a daemon's double fork) is out of reach of the parent chain. Closing that gap needs a process group or cgroup
  * and is not done here.
  */
 public final class ProcessTree {
@@ -43,11 +56,11 @@ public final class ProcessTree {
      */
     public static CompletableFuture<Void> terminate(Process process) {
         if (process == null || !process.isAlive()) return CompletableFuture.completedFuture(null);
-        List<ProcessHandle> descendants = process.descendants().toList();
-        descendants.forEach(ProcessHandle::destroy);
+        List<ProcessHandle> descendants = parentsFirst(process.toHandle(), process.descendants().toList());
         // Through the handle: Process.destroy() also closes the pipes, so a process writing while it
         // cleans up would die of SIGPIPE before its trap finishes
         process.toHandle().destroy();
+        descendants.forEach(ProcessHandle::destroy);
 
         CompletableFuture<Void> done = new CompletableFuture<>();
         Thread.ofVirtual().name("process-tree-kill").start(() -> {
@@ -68,6 +81,41 @@ public final class ProcessTree {
      */
     public static ProcessTracking.StopHandle stopHandle(Process process) {
         return () -> terminate(process);
+    }
+
+    /**
+     * {@code descendants} of {@code root} in the order they are signalled: every process after its parent, so the
+     * children of {@code root} first, then theirs. A process whose parent is not in the tree any more (it ended
+     * since the tree was collected) comes last.
+     */
+    static List<ProcessHandle> parentsFirst(ProcessHandle root, List<ProcessHandle> descendants) {
+        Map<Long, Long> parentOf = new HashMap<>();
+        for (ProcessHandle handle : descendants) {
+            handle.parent().ifPresent(parent -> parentOf.put(handle.pid(), parent.pid()));
+        }
+        Map<ProcessHandle, Integer> depths = new HashMap<>();
+        for (ProcessHandle handle : descendants) {
+            depths.put(handle, depth(handle.pid(), root.pid(), parentOf, descendants.size()));
+        }
+        List<ProcessHandle> ordered = new ArrayList<>(descendants);
+        ordered.sort(Comparator.comparingInt(depths::get));   // stable: the order within a depth stays
+        return ordered;
+    }
+
+    /** How many steps {@code pid} is below {@code root}; {@link Integer#MAX_VALUE} when its chain does not lead there. */
+    private static int depth(long pid, long root, Map<Long, Long> parentOf, int limit) {
+        long current = pid;
+        for (int steps = 1; steps <= limit; steps++) {
+            Long parent = parentOf.get(current);
+            if (parent == null) {
+                return Integer.MAX_VALUE;
+            }
+            if (parent == root) {
+                return steps;
+            }
+            current = parent;
+        }
+        return Integer.MAX_VALUE;
     }
 
     private static void killSurvivors(Process process, List<ProcessHandle> descendants) {
