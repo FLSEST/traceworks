@@ -212,7 +212,12 @@ class RecordIT extends IntegrationTest {
         assertThat(gone.code()).as(gone.describe()).isEqualTo(8);
         assertThat(gone.out())
                 .containsPattern("(?m)^  " + id + "  \\S+  4f0836fd-9da5-4024-acd4-9f8e823bb3e8  folder GONE$")
-                .contains("verification FAILED: 1 run started, never ended, and the folder is gone");
+                .contains("  " + id + "  started, never ended, and the folder is gone",
+                        "verification FAILED: 1 problem");
+
+        Result acknowledged = traceworks.exec("verify", "--acknowledge", id, "--note", "removed by this test");
+        assertThat(acknowledged.code()).as(acknowledged.describe()).isZero();
+        assertThat(acknowledged.out()).contains("acknowledged (1)", ": removed by this test", "problems (0)");
     }
 
     private static String sha256(String line) throws Exception {
