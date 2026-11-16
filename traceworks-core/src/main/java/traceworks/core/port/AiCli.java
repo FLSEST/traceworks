@@ -86,6 +86,16 @@ public interface AiCli {
         return null;
     }
 
+    /**
+     * The model server of the operator's that {@code call} goes to ({@link LocalModels}): the call's model names one
+     * of the declared backends. Empty for a call to a provider, and for every call of a CLI that knows no local
+     * server. Such a call needs no credential of the provider, gets the server's secret when it has one
+     * ({@link #credentialNames}), and reaches that server only ({@link #hosts}).
+     */
+    default java.util.Optional<LocalModels.Use> local(AiCall call) {
+        return java.util.Optional.empty();
+    }
+
     /** What the provider supports. */
     AiProviderCapabilities capabilities();
 

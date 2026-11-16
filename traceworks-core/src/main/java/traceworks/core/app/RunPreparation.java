@@ -228,8 +228,8 @@ final class RunPreparation {
     }
 
     /**
-     * The names whose values a run of {@code pkg} redacts: the secrets it declares and the credentials of the AI
-     * providers it uses.
+     * The names whose values a run of {@code pkg} redacts: the secrets it declares, the credentials of the AI
+     * providers it uses, and the secrets of the model servers of the operator's that its models name.
      */
     List<String> redactedNames(LoadedPackage pkg) {
         return redactedNames(pkg.definition(), resolver(pkg));
@@ -250,6 +250,21 @@ final class RunPreparation {
                 }
             }
         }
+        // The secret of each model server of the operator's that a model of the definition names, whichever option
+        // a run picks: the run redacts it as it redacts a provider's credential
+        WorkflowUses.literalModels(definition, children, WorkflowUses.Picks.EVERY).forEach((provider, models) -> {
+            for (AiCli cli : aiClis) {
+                if (!cli.id().toLowerCase(Locale.ROOT).equals(provider)) {
+                    continue;
+                }
+                for (String model : models) {
+                    cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null, null, null, 1))
+                            .map(use -> use.backend().secret())
+                            .filter(secret -> secret != null && !names.contains(secret))
+                            .ifPresent(names::add);
+                }
+            }
+        });
         return names;
     }
 

@@ -16,10 +16,17 @@ import java.util.regex.Pattern;
  * @param mode  which of the three
  * @param hosts the targets of {@link Mode#HOSTS}, each {@code host:port} in lower case, sorted and distinct, at least
  *              one, and maybe {@value #ANY} among them (first); empty for the other modes
- * @throws IllegalArgumentException for hosts with another mode than {@link Mode#HOSTS}, for none with it, and for a
- *                                  host that is none ({@link #hostProblem})
+ * @param plain those of the hosts the proxy also forwards a plain HTTP request to: a model server of the operator's
+ *              that speaks {@code http} ({@link LocalModels}). To every other target the proxy only opens a tunnel
+ * @throws IllegalArgumentException for hosts with another mode than {@link Mode#HOSTS}, for none with it, for a
+ *                                  host that is none ({@link #hostProblem}), and for a plain target that is no host
  */
-public record Egress(Mode mode, List<String> hosts) {
+public record Egress(Mode mode, List<String> hosts, List<String> plain) {
+
+    /** An egress without a plain HTTP target. */
+    public Egress(Mode mode, List<String> hosts) {
+        this(mode, hosts, List.of());
+    }
 
     /** The three kinds of egress. */
     public enum Mode { NONE, OPEN, HOSTS }
@@ -66,6 +73,24 @@ public record Egress(Mode mode, List<String> hosts) {
             throw new IllegalArgumentException("Only an egress to listed hosts has hosts");
         }
         hosts = List.copyOf(sorted);
+        TreeSet<String> plainSorted = new TreeSet<>();
+        for (String host : plain == null ? List.<String>of() : plain) {
+            String lower = host == null ? null : host.toLowerCase(Locale.ROOT);
+            if (lower == null || ANY.equals(lower) || !sorted.contains(lower)) {
+                throw new IllegalArgumentException("The plain HTTP target \"" + host + "\" is not one of the egress"
+                        + " hosts");
+            }
+            plainSorted.add(lower);
+        }
+        plain = List.copyOf(plainSorted);
+    }
+
+    /**
+     * Only this one target, which the proxy also forwards a plain HTTP request to when {@code plainHttp}: the
+     * egress of a call to a model server of the operator's.
+     */
+    public static Egress server(String host, boolean plainHttp) {
+        return new Egress(Mode.HOSTS, List.of(host), plainHttp ? List.of(host) : List.of());
     }
 
     /** Only these targets, each {@code host:port}; they are compared in lower case. */

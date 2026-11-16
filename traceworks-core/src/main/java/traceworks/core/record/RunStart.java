@@ -5,6 +5,7 @@ import traceworks.core.context.OutputBudget;
 import traceworks.core.model.ModelPick;
 import traceworks.core.model.TriggerSource;
 import traceworks.core.port.AiNetwork;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.CommandRunner;
 
 import java.util.List;
@@ -43,6 +44,8 @@ import java.util.Map;
  * @param register           what the register of an audit workflow handed the run: the head of its log and the files
  *                           of the run's register folder; {@code null} for a workflow that is no audit, whose
  *                           {@code run.started} then has no such field
+ * @param localModels        the model servers of the operator's own ({@code local_models}); empty for a home
+ *                           without one, whose {@code run.started} then has no such field
  */
 public record RunStart(String workflowId, String workflowName, String packageDir, String packageDigest,
                        String gitCommit, Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs,
@@ -50,7 +53,20 @@ public record RunStart(String workflowId, String workflowName, String packageDir
                        Runtime containerRuntime, int outputLimitMib, Map<String, String> aiImages, String workspace,
                        String workspaceSource, String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom,
                        List<ImageFacts> images, AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices,
-                       RegisterHandover register) {
+                       RegisterHandover register, LocalModels localModels) {
+
+    /** The start of a run in a home without a model server of the operator's. */
+    public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
+                    Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs, TriggerSource trigger,
+                    String actor, String version, String execution, Runtime containerRuntime, int outputLimitMib,
+                    Map<String, String> aiImages, String workspace, String workspaceSource,
+                    String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom, List<ImageFacts> images,
+                    AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices, RegisterHandover register) {
+        this(workflowId, workflowName, packageDir, packageDigest, gitCommit, gitDirty, workflowJson, inputs, trigger,
+                actor, version, execution, containerRuntime, outputLimitMib, aiImages, workspace, workspaceSource,
+                workspaceSourceSha, runOutputBudgetMib, inputsFrom, images, aiNetwork, seal, modelChoices, register,
+                LocalModels.NONE);
+    }
 
     /** The start of a run of a workflow that is no audit. */
     public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
@@ -93,6 +109,7 @@ public record RunStart(String workflowId, String workflowName, String packageDir
         aiImages = aiImages == null ? Map.of() : Map.copyOf(aiImages);
         images = images == null ? List.of() : List.copyOf(images);
         modelChoices = modelChoices == null ? List.of() : List.copyOf(modelChoices);
+        localModels = localModels == null ? LocalModels.NONE : localModels;
     }
 
     /** The start of a run with the restricted AI network, the default. */

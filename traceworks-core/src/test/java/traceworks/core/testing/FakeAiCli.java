@@ -57,9 +57,25 @@ public final class FakeAiCli implements AiCli {
         return new FakeAiCli("PI", "pi");
     }
 
-    /** The host of the fake provider's API: {@code api.<id in lower case>.example:443}. */
+    private volatile traceworks.core.port.LocalModels localModels = traceworks.core.port.LocalModels.NONE;
+
+    /** From now on the CLI knows these model servers of the operator's, as Pi does ({@code local_models}). */
+    public FakeAiCli localModels(traceworks.core.port.LocalModels local) {
+        this.localModels = local;
+        return this;
+    }
+
+    @Override
+    public java.util.Optional<traceworks.core.port.LocalModels.Use> local(AiCall call) {
+        return localModels.of(call.model());
+    }
+
+    /** The host of the fake provider's API: {@code api.<id in lower case>.example:443}; of a local call, its server. */
     @Override
     public List<String> hosts(AiCall call) {
+        if (local(call).isPresent()) {
+            return List.of(local(call).get().backend().host());
+        }
         return hosts != null ? hosts : List.of("api." + id.toLowerCase(java.util.Locale.ROOT) + ".example:443");
     }
 
@@ -109,6 +125,13 @@ public final class FakeAiCli implements AiCli {
 
     @Override
     public List<String> credentialNames(AiCall call) {
+        if (local(call).isPresent()) {
+            traceworks.core.port.LocalModels.Use use = local(call).get();
+            if (use.problem() != null) {
+                throw new IllegalArgumentException(use.problem());
+            }
+            return use.backend().secret() == null ? List.of() : List.of(use.backend().secret());
+        }
         if (noCredentialNames != null) {
             throw new IllegalArgumentException(noCredentialNames);
         }

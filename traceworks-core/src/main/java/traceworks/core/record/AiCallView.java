@@ -20,10 +20,41 @@ import java.util.List;
  * @param toolCalls    the tool calls in order
  * @param response     {@code null} when the record has no {@code ai.response} for the call (its process ended
  *                     during the call)
+ * @param local        the model server of the operator's the call went to ({@code local} of {@code ai.request});
+ *                     {@code null} for a call to the provider
  */
 public record AiCallView(int seq, Integer item, String provider, String model, String effort, String tools,
                          String web, List<String> webHosts,
-                         BlobRef prompt, BlobRef systemPrompt, List<ToolCallView> toolCalls, Response response) {
+                         BlobRef prompt, BlobRef systemPrompt, List<ToolCallView> toolCalls, Response response,
+                         Local local) {
+
+    /** A call to the provider. */
+    public AiCallView(int seq, Integer item, String provider, String model, String effort, String tools,
+                      String web, List<String> webHosts,
+                      BlobRef prompt, BlobRef systemPrompt, List<ToolCallView> toolCalls, Response response) {
+        this(seq, item, provider, model, effort, tools, web, webHosts, prompt, systemPrompt, toolCalls, response,
+                null);
+    }
+
+    /**
+     * The model server of the operator's a call went to, as the record names it.
+     *
+     * @param backend the backend id of {@code local_models}
+     * @param url     the base URL of the server
+     * @param api     the API the server was asked in
+     */
+    public record Local(String backend, String url, String api) {
+
+        /** {@code local backend <id> at <url>}: the words every view names the server with. */
+        public String summary() {
+            return "local backend " + backend + " at " + url;
+        }
+    }
+
+    /** {@link Local#summary} of the call's server; {@code null} for a call to the provider. */
+    public String localSummary() {
+        return local == null ? null : local.summary();
+    }
 
     /** The web mode of a call that may fetch pages itself, from its container. */
     public static final String FETCH = "fetch";
@@ -89,11 +120,11 @@ public record AiCallView(int seq, Integer item, String provider, String model, S
         List<ToolCallView> calls = new ArrayList<>(toolCalls);
         calls.add(call);
         return new AiCallView(seq, item, provider, model, effort, tools, web, webHosts, prompt, systemPrompt, calls,
-                response);
+                response, local);
     }
 
     AiCallView withResponse(Response response) {
         return new AiCallView(seq, item, provider, model, effort, tools, web, webHosts, prompt, systemPrompt,
-                toolCalls, response);
+                toolCalls, response, local);
     }
 }
