@@ -426,4 +426,124 @@ class EgressTest {
             assertThat(new String(in.readNBytes(9), StandardCharsets.US_ASCII)).isEqualTo("pong:ping");
         }
     }
+
+    /**
+     * An HTTP server that keeps the head and the first {@code bodyBytes} bytes of the body of each request it gets,
+     * answers {@code hello} and closes, as a server does that was told {@code Connection: close}.
+     */
+    private int httpServer(List<String> received, int bodyBytes) throws IOException {
+        ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        open.add(server);
+        Thread.ofVirtual().start(() -> {
+            while (!server.isClosed()) {
+                try (Socket client = server.accept()) {
+                    InputStream in = client.getInputStream();
+                    StringBuilder request = new StringBuilder();
+                    while (!request.toString().endsWith("\r\n\r\n")) {
+                        int b = in.read();
+                        if (b < 0) {
+                            break;
+                        }
+                        request.append((char) b);
+                    }
+                    request.append(new String(in.readNBytes(bodyBytes), StandardCharsets.US_ASCII));
+                    received.add(request.toString());
+                    client.getOutputStream().write("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello"
+                            .getBytes(StandardCharsets.US_ASCII));
+                    client.getOutputStream().flush();
+                } catch (IOException e) {
+                    return;
+                }
+            }
+        });
+        return server.getLocalPort();
+    }
+
+    /**
+     * A plain target is a server of the operator's that speaks HTTP without TLS: a plain request to it is sent on
+     * in origin form, without the headers meant for the proxy and with {@code Connection: close}, its body and the
+     * answer travel as they are, and the line names the target only.
+     */
+    @Test
+    void aPlainHttpRequest_toAPlainTarget_isForwardedInOriginForm_andPrintedAsAllow() throws Exception {
+        List<String> received = new java.util.concurrent.CopyOnWriteArrayList<>();
+        int upstream = httpServer(received, 4);
+        int proxy = proxy("HTTP://127.0.0.1:" + upstream);
+
+        String answer = exchange(proxy, "POST http://127.0.0.1:" + upstream + "/v1/chat/completions?x=1 HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:" + upstream + "\r\nProxy-Connection: keep-alive\r\n"
+                + "Proxy-Authorization: Basic abc\r\nConnection: keep-alive\r\nContent-Length: 4\r\n"
+                + "Authorization: Bearer hidden\r\n\r\nbody");
+
+        assertThat(answer).isEqualTo("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello");
+        assertThat(received).containsExactly("POST /v1/chat/completions?x=1 HTTP/1.1\r\n"
+                + "Host: 127.0.0.1:" + upstream + "\r\nContent-Length: 4\r\nAuthorization: Bearer hidden\r\n"
+                + "Connection: close\r\n\r\nbody");
+        assertThat(lines(2)).containsExactly("READY", "ALLOW 127.0.0.1:" + upstream);
+        assertThat(printed.toString(StandardCharsets.UTF_8)).doesNotContain("chat", "hidden", "body");
+    }
+
+    /** A plain target is a listed target too: a tunnel to it opens as to any other. */
+    @Test
+    void aPlainTarget_isTunnelledToo() throws Exception {
+        int upstream = upstream();
+        int proxy = proxy("http://127.0.0.1:" + upstream);
+
+        try (Socket socket = new Socket(InetAddress.getLoopbackAddress(), proxy)) {
+            socket.setSoTimeout(10_000);
+            socket.getOutputStream().write(("CONNECT 127.0.0.1:" + upstream + " HTTP/1.1\r\n\r\nping")
+                    .getBytes(StandardCharsets.US_ASCII));
+            InputStream in = socket.getInputStream();
+            String established = "HTTP/1.1 200 Connection established\r\n\r\n";
+            assertThat(new String(in.readNBytes(established.length()), StandardCharsets.US_ASCII))
+                    .isEqualTo(established);
+            assertThat(new String(in.readNBytes(9), StandardCharsets.US_ASCII)).isEqualTo("pong:ping");
+        }
+        assertThat(lines(2)).containsExactly("READY", "ALLOW 127.0.0.1:" + upstream);
+    }
+
+    /** Next to a plain target every other target is as before: a plain request to it is denied, listed or not. */
+    @Test
+    void aPlainHttpRequest_toAnyOtherTarget_staysDenied_nextToAPlainTarget() throws Exception {
+        List<String> received = new java.util.concurrent.CopyOnWriteArrayList<>();
+        int plain = httpServer(received, 0);
+        int listed = httpServer(received, 0);
+        int proxy = proxy("http://127.0.0.1:" + plain, "127.0.0.1:" + listed, "*");
+
+        String toListed = exchange(proxy, "GET http://127.0.0.1:" + listed + "/x HTTP/1.1\r\n\r\n");
+        String toOther = exchange(proxy, "GET http://example.org/x HTTP/1.1\r\n\r\n");
+        String otherPort = exchange(proxy, "GET http://127.0.0.1:1/x HTTP/1.1\r\n\r\n");
+
+        assertThat(toListed).startsWith("HTTP/1.1 403 ");
+        assertThat(toOther).startsWith("HTTP/1.1 403 ");
+        assertThat(otherPort).startsWith("HTTP/1.1 403 ");
+        assertThat(received).isEmpty();
+        assertThat(lines(4)).containsExactly("READY", "DENY 127.0.0.1:" + listed, "DENY example.org:80",
+                "DENY 127.0.0.1:1");
+    }
+
+    /** A plain target that cannot be reached is a failed connection, as for a tunnel. */
+    @Test
+    void aPlainTargetThatCannotBeReached_is502_andPrintedAsFail() throws Exception {
+        connector = address -> {
+            throw new IOException("refused");
+        };
+        int proxy = proxy("http://127.0.0.1:9");
+
+        String answer = exchange(proxy, "GET http://127.0.0.1:9/x HTTP/1.1\r\n\r\n");
+
+        assertThat(answer).startsWith("HTTP/1.1 502 ");
+        assertThat(lines(2)).containsExactly("READY", "FAIL 127.0.0.1:9");
+    }
+
+    /** The head a server gets: the path of the URL, {@code /} without one, and never the fragment. */
+    @Test
+    void theForwardedHead_namesThePathOfTheUrl() {
+        assertThat(Egress.forwarded("GET http://Host.example:80 HTTP/1.1\r\nHost: host.example\r\n\r\n",
+                new String[] {"GET", "http://Host.example:80", "HTTP/1.1"}))
+                .isEqualTo("GET / HTTP/1.1\r\nHost: host.example\r\nConnection: close\r\n\r\n");
+        assertThat(Egress.forwarded("GET http://h:1?q=A#f HTTP/1.0\r\nKeep-Alive: 5\r\nX-Y: z\r\n\r\n",
+                new String[] {"GET", "http://h:1?q=A#f", "HTTP/1.0"}))
+                .isEqualTo("GET /?q=A HTTP/1.0\r\nX-Y: z\r\nConnection: close\r\n\r\n");
+    }
 }

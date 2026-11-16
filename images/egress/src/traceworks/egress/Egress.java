@@ -20,12 +20,18 @@ import java.util.regex.Pattern;
 
 /**
  * The only door of an AI step's container: an HTTP proxy that tunnels {@code CONNECT host:port} to the targets it was
- * started with, and refuses everything else. Traceworks starts it next to the step's container, which has no other
+ * started with, forwards a plain HTTP request to those of them that are marked for it, and refuses everything else. Traceworks starts it next to the step's container, which has no other
  * way out, and reads what it printed into the run's record.
  *
  * <ul>
  *   <li><b>Arguments:</b> the allowed targets, each {@code host:port}; {@code *} also allows any public host on
- *       port 443.</li>
+ *       port 443. A target written {@code http://host:port} is allowed too, and is a plain target.</li>
+ *   <li><b>A plain target</b> is a server of the operator's own that speaks HTTP without TLS (a local model
+ *       server). A plain HTTP request whose URL names it ({@code POST http://host:port/path}) is sent on to it: the
+ *       request line in origin form, the headers without the ones meant for a proxy, {@code Connection: close}, and
+ *       then every byte both ways until the server closes. One connection carries one request. A tunnel to that
+ *       target already carries any bytes, so forwarding reaches nothing a tunnel does not. To every other target a
+ *       plain request stays refused.</li>
  *   <li><b>A star is no door to the machine or its network.</b> A target that only the star allows is refused when
  *       its port is not 443, when it is an IP literal, and when its name resolves to any address that is not public
  *       ({@link #isPublic}). The name is resolved once, and the connection goes to the address that was checked, so
@@ -36,8 +42,9 @@ import java.util.regex.Pattern;
  *       request is ever printed: no path, no header, no body. What is no target is printed as {@code ?}.</li>
  *   <li><b>Comparison:</b> a target is compared as the request writes it, in lower case. The address a listed name
  *       resolves to is not listed, so an IP literal passes only when it is listed itself.</li>
- *   <li><b>Refusals:</b> a request that is not {@code CONNECT} (plain HTTP), a target that is not listed and a
- *       request head over {@value #HEAD_LIMIT} bytes get {@code 403} and the connection is closed.</li>
+ *   <li><b>Refusals:</b> a request that is not {@code CONNECT} (plain HTTP) to anything but a plain target, a
+ *       target that is not listed and a request head over {@value #HEAD_LIMIT} bytes get {@code 403} and the
+ *       connection is closed.</li>
  *   <li><b>A bounded log:</b> after {@value #MAX_LINES} lines it prints {@code LIMIT} once and refuses every further
  *       request without a line, so a container cannot fill the log it is recorded from.</li>
  * </ul>
@@ -64,6 +71,13 @@ public final class Egress {
 
     private static final String ANY = "*";
 
+    /** What marks an argument as a plain target. */
+    private static final String PLAIN = "http://";
+
+    /** The headers of a plain request that are meant for the proxy or name the connection, in lower case. */
+    private static final Set<String> HOP_HEADERS = Set.of("proxy-connection", "proxy-authorization", "connection",
+            "keep-alive");
+
     /** A host name or an IPv4 literal, or an IPv6 literal in brackets, with a port. */
     private static final Pattern TARGET = Pattern.compile(
             "([a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\\[[0-9a-f:.]{2,45}]):([1-9][0-9]{0,4})");
@@ -89,6 +103,8 @@ public final class Egress {
     private static final Pattern NUMERIC = Pattern.compile("[0-9.]+");
 
     private final Set<String> allowed = new HashSet<>();
+    /** Those of the allowed targets a plain HTTP request is forwarded to. */
+    private final Set<String> plain = new HashSet<>();
     private final boolean any;
     private final PrintStream log;
     private final int maxLines;
@@ -111,7 +127,14 @@ public final class Egress {
      */
     Egress(Collection<String> targets, PrintStream log, int maxLines, Resolver resolver, Connector connector) {
         this.connector = connector;
-        targets.forEach(target -> allowed.add(target.toLowerCase(Locale.ROOT)));
+        for (String target : targets) {
+            String lower = target.toLowerCase(Locale.ROOT);
+            if (lower.startsWith(PLAIN)) {
+                lower = lower.substring(PLAIN.length());
+                plain.add(lower);
+            }
+            allowed.add(lower);
+        }
         this.any = allowed.remove(ANY);
         this.log = log;
         this.maxLines = maxLines;
@@ -231,7 +254,8 @@ public final class Egress {
             Request request = request(in);
             boolean counted = counted();
             String target = request.target();
-            if (!counted || !request.connect() || !any && !listed(target)) {
+            boolean forward = !request.connect() && request.head() != null && plain.contains(target);
+            if (!counted || !request.connect() && !forward || !any && !listed(target)) {
                 if (counted) {
                     print("DENY", target);
                 }
@@ -272,6 +296,16 @@ public final class Egress {
             try (Socket upstream = connected) {
                 print("ALLOW", target);
                 client.setSoTimeout(0);
+                if (forward) {
+                    OutputStream server = upstream.getOutputStream();
+                    server.write(request.head().getBytes(StandardCharsets.ISO_8859_1));
+                    server.flush();
+                    Thread body = Thread.ofVirtual().start(() -> pump(in, upstream));
+                    pump(upstream.getInputStream(), client);
+                    // The server closed after its answer: the client reads it to its end and closes too
+                    body.join(java.time.Duration.ofMillis(WAIT_MILLIS));
+                    return;
+                }
                 out.write("HTTP/1.1 200 Connection established\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
                 out.flush();
                 Thread up = Thread.ofVirtual().start(() -> pump(in, upstream));
@@ -311,16 +345,18 @@ public final class Egress {
      * What a request asks for.
      *
      * @param target  {@code host:port} in lower case; {@code ?} for whatever is no target
-     * @param connect whether it is a {@code CONNECT} with a target, the only request that can be allowed
+     * @param connect whether it is a {@code CONNECT} with a target
+     * @param head    of a plain HTTP request, the head as its server gets it ({@link #forwarded}); {@code null} for
+     *                a {@code CONNECT} and for what names no target
      */
-    private record Request(String target, boolean connect) {
-        static final Request NONE = new Request("?", false);
+    private record Request(String target, boolean connect, String head) {
+        static final Request NONE = new Request("?", false, null);
     }
 
     /**
      * The request whose head {@code in} holds: the target of a {@code CONNECT}, or the host and port of the URL of a
-     * plain HTTP request, which is never allowed; {@link Request#NONE} for a head over the limit and for whatever
-     * names no target.
+     * plain HTTP request, which is allowed only to a plain target; {@link Request#NONE} for a head over the limit
+     * and for whatever names no target.
      */
     private static Request request(InputStream in) throws IOException {
         String head = head(in);
@@ -333,7 +369,7 @@ public final class Egress {
         }
         String written = line[1].toLowerCase(Locale.ROOT);
         if (line[0].equals("CONNECT")) {
-            return valid(written) ? new Request(written, true) : Request.NONE;
+            return valid(written) ? new Request(written, true, null) : Request.NONE;
         }
         Matcher url = HTTP_URL.matcher(written);
         if (!url.matches()) {
@@ -343,7 +379,46 @@ public final class Egress {
         if (!authority.matches(".*:[0-9]+")) {
             authority += ":80";
         }
-        return valid(authority) ? new Request(authority, false) : Request.NONE;
+        return valid(authority) ? new Request(authority, false, forwarded(head, line)) : Request.NONE;
+    }
+
+    /**
+     * The head of a plain HTTP request as its server gets it: the request line with the path of the URL instead of
+     * the URL (origin form, {@code /} for a URL without a path), every header but the ones meant for a proxy or
+     * naming the connection, and {@code Connection: close}, so the server ends the connection after its answer and
+     * no second request travels on it.
+     *
+     * @param head the head as the client sent it, with its empty line
+     * @param line the three parts of its request line; the second is an {@code http://} URL
+     */
+    static String forwarded(String head, String[] line) {
+        String rest = line[1].substring(PLAIN.length());
+        int end = 0;
+        while (end < rest.length() && "/?#".indexOf(rest.charAt(end)) < 0) {
+            end++;
+        }
+        String path = rest.substring(end);
+        int fragment = path.indexOf('#');
+        if (fragment >= 0) {
+            path = path.substring(0, fragment);
+        }
+        if (!path.startsWith("/")) {
+            path = "/" + path;
+        }
+        StringBuilder out = new StringBuilder(line[0]).append(' ').append(path).append(' ').append(line[2])
+                .append("\r\n");
+        String[] lines = head.split("\r\n");
+        for (int i = 1; i < lines.length; i++) {
+            if (lines[i].isEmpty()) {
+                continue;
+            }
+            int colon = lines[i].indexOf(':');
+            String name = (colon < 0 ? lines[i] : lines[i].substring(0, colon)).strip().toLowerCase(Locale.ROOT);
+            if (!HOP_HEADERS.contains(name)) {
+                out.append(lines[i]).append("\r\n");
+            }
+        }
+        return out.append("Connection: close\r\n\r\n").toString();
     }
 
     private static boolean valid(String target) {
@@ -364,7 +439,7 @@ public final class Egress {
             boolean expected = (state % 2 == 0) ? b == '\r' : b == '\n';
             state = expected ? state + 1 : b == '\r' ? 1 : 0;
         }
-        return head.toString(StandardCharsets.US_ASCII);
+        return head.toString(StandardCharsets.ISO_8859_1);
     }
 
     /**
