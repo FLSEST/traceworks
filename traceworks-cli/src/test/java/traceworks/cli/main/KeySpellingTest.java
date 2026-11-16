@@ -276,11 +276,19 @@ class KeySpellingTest {
         assertThat(camelCase.code()).as(camelCase.all()).isZero();
         assertThat(newer.code()).as("the camel-case key of the child is read, not ignored: " + newer.all())
                 .isNotZero();
-        assertThat(newer.all()).contains("format_version 2 is newer");
-        // A child that cannot be loaded fails the step that calls it, as any unreadable child does
+        assertThat(newer.all()).as("the child's own admission, at the step that calls it")
+                .contains("run started", "format_version 2 is newer");
+        // A child that cannot be loaded fails the step that calls it, here as for any child that cannot be read:
+        // one with a key Traceworks does not know passes the parent's check and fails its step with the same exit code
+        Path unreadable = parentOf("parent-unknown-key", child("\"format_version\": 1, \"nope\": 1"));
+        assertThat(exec("check", unreadable.toString()).code()).isZero();
+        assertThat(exec("check", withBoth.toString()).code()).isZero();
+        Result unknownKey = run(unreadable);
+        assertThat(unknownKey.out()).contains("child FAILED");
+        assertThat(exec("show", runId(unknownKey), "--full").all()).contains("Unrecognized field \"nope\"");
         for (Result refused : List.of(both, bothUnchecked)) {
-            assertThat(refused.code()).as(refused.all()).isNotZero();
-            assertThat(refused.out()).contains("FAILED").doesNotContain("child ran");
+            assertThat(refused.code()).as(refused.all()).isEqualTo(unknownKey.code()).isNotZero();
+            assertThat(refused.out()).contains("child FAILED").doesNotContain("child ran");
             assertThat(exec("show", runId(refused), "--full").all())
                     .contains("duplicate-key-spelling", "both format_version and formatVersion");
         }
