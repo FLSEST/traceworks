@@ -1,6 +1,10 @@
+<p><img src="docs/logo/traceworks-logo.svg" alt="" height="52"></p>
+
 # Traceworks
 
 Repeatable, traceable workflows – deterministic steps, optional AI with any model, tools in containers.
+
+<p><img src="docs/logo/traceworks-scheme.svg" alt="How a run is built: a line of deterministic steps, each in a container; AI joins one step where a workflow asks for it; below, the record of every event, hash-chained; at the end, the result and its gate." width="560"></p>
 
 Traceworks is a command line tool that runs workflows. A workflow is a package: a directory of plain files with a
 `workflow.json`, its scripts, its rule files and its images. Its steps are deterministic, and a model is asked only

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="3 14 60 40" role="img" aria-label="Traceworks">
+  <style>
+    .line { stroke: #14232b } .end { fill: #0b7a75 }
+    @media (prefers-color-scheme: dark) { .line { stroke: #e9f0f1 } .end { fill: #45c9bd } }
+  </style>
+  <path class="line" d="M9 46H23V22H39V36H48" fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle class="end" cx="53" cy="36" r="6.5"/>
+</svg>
