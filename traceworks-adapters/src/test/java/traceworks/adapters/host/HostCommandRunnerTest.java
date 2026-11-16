@@ -705,6 +705,77 @@ class HostCommandRunnerTest {
         assertThat(result.durationMs()).isLessThan(4_000);
     }
 
+    /**
+     * A command gets SIGTERM first, so that it can clean up, and the runner waits for its end within the grace
+     * before it returns: what the command leaves behind is there when the step's result is.
+     */
+    @Test
+    void run_timeout_waitsForACommandThatCleansUpOnSigterm_beforeItReturns(@TempDir Path dir) {
+        Path started = dir.resolve("started");
+        Path cleanedUp = dir.resolve("cleaned-up");
+
+        CommandResult result = run("exec >/dev/null 2>&1; trap 'trap \"\" TERM; sleep 1; touch \"" + cleanedUp
+                + "\"; exit 0' TERM; sleep 60 & touch '" + started + "'; wait", 1);
+
+        assertThat(started).as("the command ran").exists();
+        assertThat(result.timedOut()).isTrue();
+        assertThat(cleanedUp).as("the command had ended when the runner returned").exists();
+    }
+
+    /**
+     * After a timeout the result holds the output to its end, also what a process of the command writes while it
+     * ends on SIGTERM: here a child that prints a line a moment after the command itself is gone.
+     */
+    @Test
+    void run_timeout_keepsWhatTheCommandsChildrenPrintWhileTheyEnd() {
+        CommandResult result = run("( trap 'sleep 0.4; echo cleaned-up; exit 0' TERM; sleep 60 & wait ) & "
+                + "echo started; exec sleep 60", 1);
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.stdout()).isEqualTo("started\ncleaned-up\n");
+    }
+
+    /**
+     * The result of a command that ended by itself holds its output to the end, not what the reader happened to have
+     * at that moment: here the last line is written a moment after the command's end, by a child it left behind.
+     */
+    @Test
+    void run_readsTheOutputToItsEnd_beforeItReturnsTheResult() {
+        CommandResult result = run("(sleep 0.4; echo late) & echo early", 30);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).isEqualTo("early\nlate\n");
+    }
+
+    /**
+     * An interrupt of the step's thread ends the wait and the command: exit code 130 with {@code Command
+     * interrupted}, and the interrupt flag stays set for the caller.
+     */
+    @Test
+    void run_interrupted_endsTheCommand_withExitCode130_andKeepsTheInterruptFlag(@TempDir Path dir) throws Exception {
+        Path started = dir.resolve("started");
+        Path pid = dir.resolve("pid");
+        AtomicReference<CommandResult> result = new AtomicReference<>();
+        AtomicReference<Boolean> interruptedAfterReturn = new AtomicReference<>();
+
+        Thread worker = Thread.ofPlatform().start(() -> {
+            result.set(run("echo $$ > '" + pid + "'; touch '" + started + "'; exec sleep 30", 60));
+            interruptedAfterReturn.set(Thread.currentThread().isInterrupted());
+        });
+        awaitFile(started);
+        worker.interrupt();
+        worker.join(15_000);
+
+        assertThat(worker.isAlive()).as("still waiting after the interrupt").isFalse();
+        assertThat(result.get()).as("the result of the interrupted run").isNotNull();
+        assertThat(result.get().exitCode()).isEqualTo(130);
+        assertThat(result.get().stdout()).isEqualTo("Command interrupted");
+        assertThat(result.get().timedOut()).isFalse();
+        assertThat(interruptedAfterReturn.get()).as("interrupt flag still set for the caller").isTrue();
+        assertThat(BackgroundChild.endsWithin(Long.parseLong(Files.readString(pid).trim()), Duration.ofSeconds(5)))
+                .as("the command was ended").isTrue();
+    }
+
     // --- cancel ---
 
     /**
