@@ -52,32 +52,59 @@ class AiLocalModelIT extends IntegrationTest {
     private static final List<String> PROVIDER_HOSTS = List.of("api.anthropic.com:443", "api.openai.com:443",
             "generativelanguage.googleapis.com:443", "openrouter.ai:443");
 
+    /** An address reserved for documentation (TEST-NET-1): nothing answers there, and no name has to be looked up. */
+    private static final String NO_SUCH_ADDRESS = "192.0.2.1";
+
     /**
-     * What the stand-in model has Pi's {@code bash} tool run: it asks the step's proxy for a tunnel to a provider's
-     * host, as a client would, and tries that host directly; it prints what came of each.
+     * What the stand-in model has Pi's {@code bash} tool run, in the step's container. Through the step's proxy it
+     * asks for a tunnel to a provider's host, and sends a plain HTTP request to another host and to another port of
+     * the stand-in server: each must be answered with 403. Without the proxy it tries a provider's host by name
+     * (which fails at the lookup already), an IP address (which fails only when there is no route: the documentation
+     * address, so nothing leaves the machine when the network is closed as it should be) and the stand-in server
+     * itself, which the container must reach through the proxy only. It prints one line for each.
+     *
+     * @param address the address of the stand-in server
+     * @param port    its port
      */
-    private static final String PROBE = "node -e 'const net = require(\"net\");"
-            + " const p = process.env.HTTPS_PROXY || process.env.https_proxy;"
-            + " if (!p) { console.log(\"via proxy: no proxy variable\"); process.exit(0); }"
-            + " const u = new URL(p);"
-            + " const s = net.connect(Number(u.port), u.hostname, () =>"
-            + " s.write(\"CONNECT api.anthropic.com:443 HTTP/1.1\\r\\nHost: api.anthropic.com:443\\r\\n\\r\\n\"));"
-            + " s.setTimeout(8000, () => { console.log(\"via proxy: timeout\"); s.destroy(); });"
-            + " s.on(\"data\", d => { console.log(\"via proxy: \" + String(d).split(\"\\r\\n\")[0]); s.destroy(); });"
-            + " s.on(\"error\", e => console.log(\"via proxy: error \" + e.code));"
-            + " const d = net.connect(443, \"api.anthropic.com\", () => { console.log(\"direct: connected\");"
-            + " d.destroy(); });"
-            + " d.setTimeout(4000, () => { console.log(\"direct: timeout\"); d.destroy(); });"
-            + " d.on(\"error\", e => console.log(\"direct: error \" + e.code));'";
+    private static String probe(String address, int port) {
+        return "node -e 'const net = require(\"net\");"
+                + " const p = process.env.HTTPS_PROXY || process.env.https_proxy;"
+                + " const ask = (label, request) => new Promise(done => {"
+                + " if (!p) { console.log(label + \": no proxy variable\"); return done(); }"
+                + " const u = new URL(p);"
+                + " const s = net.connect(Number(u.port), u.hostname, () => s.write(request));"
+                + " s.setTimeout(8000, () => { console.log(label + \": timeout\"); s.destroy(); done(); });"
+                + " s.on(\"data\", d => { console.log(label + \": \" + String(d).split(\"\\r\\n\")[0]); s.destroy();"
+                + " done(); });"
+                + " s.on(\"error\", e => { console.log(label + \": error \" + e.code); done(); }); });"
+                + " const direct = (label, port, host) => new Promise(done => {"
+                + " const d = net.connect(port, host, () => { console.log(label + \": connected\"); d.destroy();"
+                + " done(); });"
+                + " d.setTimeout(4000, () => { console.log(label + \": timeout\"); d.destroy(); done(); });"
+                + " d.on(\"error\", e => { console.log(label + \": error \" + e.code); done(); }); });"
+                + " (async () => {"
+                + " await ask(\"tunnel\", \"CONNECT api.anthropic.com:443 HTTP/1.1\\r\\nHost: api.anthropic.com:443"
+                + "\\r\\n\\r\\n\");"
+                + " await ask(\"plain other host\", \"GET http://example.org/ HTTP/1.1\\r\\nHost: example.org"
+                + "\\r\\n\\r\\n\");"
+                + " await ask(\"plain other port\", \"GET http://" + address + ":9/ HTTP/1.1\\r\\nHost: " + address
+                + ":9\\r\\n\\r\\n\");"
+                + " await direct(\"direct name\", 443, \"api.anthropic.com\");"
+                + " await direct(\"direct address\", 443, \"" + NO_SUCH_ADDRESS + "\");"
+                + " await direct(\"direct server\", " + port + ", \"" + address + "\");"
+                + " })();'";
+    }
 
     private StandIn server;
+    private String address;
     private String target;
     private String url;
 
     @BeforeEach
     void startTheStandInServer_andTheEgressImage() throws IOException {
         server = new StandIn();
-        target = ownAddress() + ":" + server.port();
+        address = ownAddress();
+        target = address + ":" + server.port();
         url = "http://" + target + "/v1";
         traceworks.environment().egressImage();
     }
@@ -89,15 +116,30 @@ class AiLocalModelIT extends IntegrationTest {
         }
     }
 
-    /** An IPv4 address of this machine that is not the loopback: the proxy's container reaches the machine by it. */
+    /**
+     * The address of this machine that its default route leaves from: the one the proxy's container reaches the
+     * machine by, through its outside network. A datagram socket "connected" to an address beyond the machine tells
+     * it without sending anything. It is the same on every call, unlike the first address of the first interface,
+     * which may be the bridge of a container network of another run that is gone a moment later. A machine without
+     * a default route has only its interfaces to offer: then the first address that is not the loopback's.
+     */
     private static String ownAddress() throws IOException {
+        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
+            socket.connect(InetAddress.getByName(NO_SUCH_ADDRESS), 9);
+            InetAddress local = socket.getLocalAddress();
+            if (local instanceof Inet4Address && !local.isLoopbackAddress() && !local.isAnyLocalAddress()) {
+                return local.getHostAddress();
+            }
+        } catch (IOException | RuntimeException e) {
+            // no default route: an interface's own address is all there is
+        }
         for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
             if (!network.isUp() || network.isLoopback()) {
                 continue;
             }
-            for (InetAddress address : Collections.list(network.getInetAddresses())) {
-                if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
-                    return address.getHostAddress();
+            for (InetAddress candidate : Collections.list(network.getInetAddresses())) {
+                if (candidate instanceof Inet4Address && !candidate.isLoopbackAddress()) {
+                    return candidate.getHostAddress();
                 }
             }
         }
@@ -277,15 +319,17 @@ class AiLocalModelIT extends IntegrationTest {
     }
 
     /**
-     * The step tries a provider's host and is denied. The stand-in model answers with a call of Pi's {@code bash}
-     * tool ({@code tools: shell}); the command asks the step's proxy for {@code api.anthropic.com:443} and tries it
-     * directly. The proxy refuses, the record has the {@code DENY}, and the only connection made is the one to the
-     * server.
+     * The step tries to get out and is denied. The stand-in model answers with a call of Pi's {@code bash} tool
+     * ({@code tools: shell}); the command ({@link #probe}) asks the step's proxy for a provider's host, for another
+     * host and for another port of the server, and tries a name, an IP address and the server itself without the
+     * proxy. The proxy refuses all three, each {@code DENY} is in the record, nothing connects directly, and the only
+     * connection made is the one to the server. That the server is not reachable past the proxy needs Docker 28 or
+     * newer, which leaves the host without an address on the step's network (docs/security.md).
      */
     @Test
     void aLocalStepThatTriesAProvidersHost_isDenied_andTheRecordShowsTheAttempt() {
         declare(null);
-        server.callBashFirst(PROBE);
+        server.callBashFirst(probe(address, server.port()));
 
         Result run = traceworks.run("ai-local-model-tools");
 
@@ -294,15 +338,21 @@ class AiLocalModelIT extends IntegrationTest {
         RunFolder folder = traceworks.folder(run);
         assertThat(folder.output("probe").strip()).as(why).isEqualTo(AFTER_TOOL);
         assertThat(server.toolResults).as("Pi ran the command and handed its output back to the model: the proxy"
-                + " answered 403, and the host is not reachable without the proxy\n" + why)
-                .anySatisfy(result -> assertThat(result).contains("via proxy: HTTP/1.1 403")
-                        .containsPattern("direct: (error|timeout)").doesNotContain("direct: connected"));
+                + " answered 403 to the tunnel and to both plain requests\n" + why)
+                .anySatisfy(result -> assertThat(result).contains("tunnel: HTTP/1.1 403",
+                        "plain other host: HTTP/1.1 403", "plain other port: HTTP/1.1 403"));
+        assertThat(server.toolResults).as("without the proxy nothing connects: not a name, which does not even"
+                + " resolve, not an IP address, for which there is no route, and not the server itself (Docker 28"
+                + " or newer: the host has no address on the step's network)\n" + why)
+                .anySatisfy(result -> assertThat(result).containsPattern("direct name: (error|timeout)")
+                        .containsPattern("direct address: (error|timeout)")
+                        .containsPattern("direct server: (error|timeout)").doesNotContain(": connected"));
 
         List<JsonNode> egress = egressOf(folder, "probe");
-        assertThat(egress).as("the attempt is in the record\n" + why).anySatisfy(entry -> {
-            assertThat(entry.path("target").asText()).isEqualTo("api.anthropic.com:443");
-            assertThat(entry.path("verdict").asText()).isEqualTo("DENY");
-        });
+        assertThat(egress).extracting(entry -> entry.path("target").asText() + " " + entry.path("verdict").asText())
+                .as("each attempt is in the record as denied: the tunnel, the plain request to another host, and"
+                        + " the plain request to another port of the server\n" + why)
+                .contains("api.anthropic.com:443 DENY", "example.org:80 DENY", address + ":9 DENY");
         assertThat(egress).as("nothing but the server was reached\n" + why)
                 .filteredOn(entry -> entry.path("verdict").asText().equals("ALLOW"))
                 .isNotEmpty().allSatisfy(entry -> assertThat(entry.path("target").asText()).isEqualTo(target));
