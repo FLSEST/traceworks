@@ -278,6 +278,47 @@ class LedgerStartCommandTest {
         assertThat(exec("runs").out().lines().count()).as("no second run").isEqualTo(1);
     }
 
+    /** A file that is no entry refuses the run before run.started is written: no FAILED run folder is left. */
+    @Test
+    void aStrayFileInTheLedger_refusesTheRunBeforeItStarts_withTheRemedy() throws Exception {
+        exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+        Files.writeString(home.resolve("ledger/README"), "notes");
+        git("add", "README");
+        git("commit", "-q", "-m", "notes");
+
+        Result run = exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+
+        assertThat(run.code()).as(run.out() + run.err()).isEqualTo(6);
+        assertThat(run.err()).contains("README", "rm README", "the run is not started");
+        assertThat(exec("runs").out().lines().count()).as("no second run folder").isEqualTo(1);
+    }
+
+    /**
+     * An entry of a version that named no hash is not judged, and verify says so instead of a plain verified; the
+     * next run pins it, and verify names the pin.
+     */
+    @Test
+    void anEntryWithoutAHash_isNamedAsNotJudged_untilTheNextRunPinsIt() throws Exception {
+        // The ledger of a version that named no hash: one end entry, by hand
+        Files.createDirectories(home.resolve("ledger/runs"));
+        git("init", "-q", "-b", "main");
+        Files.writeString(home.resolve("ledger/runs/old.json"), "{\"run_id\":\"old\",\"status\":\"COMPLETED\"}");
+        git("add", "runs/old.json");
+        git("commit", "-q", "-m", "run old COMPLETED");
+
+        Result before = exec("verify", "--quick");
+        assertThat(before.code()).as(before.out() + before.err()).isZero();
+        assertThat(before.out()).contains("not judged (1): entries no hash covers", "  runs/old.json",
+                "records   not verified (--quick)",
+                "verified, except 1 entry that no hash covers yet and that were not judged");
+
+        exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+
+        Result after = exec("verify");
+        assertThat(after.out()).contains("pins (1)", " covers 1 entry").doesNotContain("not judged")
+                .doesNotContain("--quick");
+    }
+
     private void git(String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of("git", "-C", home.resolve("ledger").toString(),
                 "-c", "user.name=x", "-c", "user.email=x@x.invalid", "-c", "commit.gpgsign=false"));

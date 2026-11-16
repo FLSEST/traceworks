@@ -30,6 +30,9 @@ public final class VerifyCommand implements Command {
             .option("acknowledge", "RUN", "without a run: record that one problem the check reports of RUN has an"
                     + " honest cause; needs --note, is kept in the ledger and listed for good")
             .option("note", "TEXT", "with --acknowledge: why (required)")
+            .flag("quick", "without a run: do not verify the record of every ended run against its end entry"
+                    + " (its chain, its blobs, the manifest it gives), which reads every record of the home;"
+                    + " only the first line and the manifest of each are read then")
             .note("Without a run: checks the ledger against the runs folder of the home, both ways. Lists the runs"
                     + " the ledger saw start and never end, with what the folder of each says (RUNNING, PARKED,"
                     + " INTERRUPTED, GONE, UNREADABLE, OTHER RECORD), the runs it names whose folder is gone, the"
@@ -57,7 +60,7 @@ public final class VerifyCommand implements Command {
             throw new UsageException("--note goes with --acknowledge <run>");
         }
         if (args.positional() == null) {
-            return ledger(context, context.services().ledgerReport());
+            return ledger(context, context.services().ledgerReport(!args.has("quick")));
         }
         VerifyReport report = context.services().verify(args.positional());
         ChainReport chain = report.chain();
@@ -77,7 +80,9 @@ public final class VerifyCommand implements Command {
             // Only the run of an audit workflow has a register folder
             out.println("register  " + TerminalFormat.safe(report.register()));
         }
-        out.println(report.ok() ? "verified" : "verification FAILED");
+        boolean unjudged = report.ledgerReason() != null && report.ledgerReason().startsWith("not judged");
+        out.println(!report.ok() ? "verification FAILED" : unjudged ? "verified, except the ledger entry, which no"
+                + " hash covers yet" : "verified");
         return report.ok() ? ExitCodes.OK : ExitCodes.VERIFY_FAILED;
     }
 
@@ -120,8 +125,25 @@ public final class VerifyCommand implements Command {
         out.println("problems (" + report.problems().size() + ")");
         report.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem.runId()) + "  "
                 + TerminalFormat.safe(problem.text())));
+        if (!report.pins().isEmpty()) {
+            out.println("pins (" + report.pins().size() + ")");
+            report.pins().forEach(pin -> out.println("  " + TerminalFormat.safe(pin)));
+        }
+        if (!report.unjudged().isEmpty()) {
+            out.println("not judged (" + report.unjudged().size() + "): entries no hash covers, written by a version"
+                    + " that named none; nothing is said of them here, and the next run pins them");
+            report.unjudged().stream().limit(10).forEach(path -> out.println("  " + TerminalFormat.safe(path)));
+            if (report.unjudged().size() > 10) {
+                out.println("  ... and " + (report.unjudged().size() - 10) + " more");
+            }
+        }
+        if (!report.records()) {
+            out.println("records   not verified (--quick): only traceworks verify <run> checks the record of a run");
+        }
         if (report.ok()) {
-            out.println("verified");
+            out.println(report.unjudged().isEmpty() ? "verified" : "verified, except "
+                    + count(report.unjudged().size(), "entry").replace("entrys", "entries")
+                    + " that no hash covers yet and that were not judged");
             return ExitCodes.OK;
         }
         out.println("verification FAILED: " + count(report.problems().size(), "problem")
