@@ -76,23 +76,50 @@ class RunSnapshotJsonTest {
                 c.sourceSteps(), c.nextStepIndex(), c.runMetadata(), c.rememberedApprovals()), List.of(), Map.of());
     }
 
-    /** What may hold text a model wrote comes back; a run that asked no model writes nothing about it. */
+    /** What may hold text a model wrote comes back, for a run that asked a model and for one that did not. */
     @Test
-    void read_givesBackTheModelText_andARunWithoutAModelWritesNone() throws Exception {
+    void read_givesBackTheModelText() throws Exception {
         ContextState.Taint asked = new ContextState.Taint(Set.of(), Set.of(), Set.of(), false, false, false,
                 new ContextState.ModelText(true, Set.of("step_1_output", "item"), Set.of("ask"), true));
         byte[] written = RunSnapshotJson.write(withTaint(asked), texts);
 
         assertThat(RunSnapshotJson.read(written, texts).context().taint()).isEqualTo(asked);
         assertThat(JSON.readTree(written).at("/context/taint/model_text").toString())
-                .isEqualTo("{\"variables\":[\"item\",\"step_1_output\"],\"outputs\":[\"ask\"],"
+                .isEqualTo("{\"asked\":true,\"variables\":[\"item\",\"step_1_output\"],\"outputs\":[\"ask\"],"
                         + "\"previous_output\":true}");
 
         ContextState.Taint none = new ContextState.Taint(Set.of(), Set.of(), Set.of(), false, false, false);
         byte[] without = RunSnapshotJson.write(withTaint(none), texts);
-        assertThat(JSON.readTree(without).at("/context/taint").has("model_text")).isFalse();
+        assertThat(JSON.readTree(without).at("/context/taint/model_text").toString())
+                .isEqualTo("{\"asked\":false,\"variables\":[],\"outputs\":[],\"previous_output\":false}");
         assertThat(RunSnapshotJson.read(without, texts).context().taint().modelText())
                 .isEqualTo(ContextState.ModelText.NONE);
+    }
+
+    /**
+     * The format number rose with the model text. A snapshot of the format before it, which has none, still reads,
+     * as a run that asked no model; and a snapshot of this format carries a number the version before does not
+     * know, which that version refuses ({@code read_ofAnotherFormat_isRefused} is that refusal, for any number a
+     * version does not know) instead of resuming the run without its model text.
+     */
+    @Test
+    void read_ofTheFormatBeforeTheModelText_readsAsARunThatAskedNoModel() throws Exception {
+        ContextState.Taint asked = new ContextState.Taint(Set.of("ticket"), Set.of(), Set.of("build"), true, false,
+                false, new ContextState.ModelText(true, Set.of("item"), Set.of("ask"), true));
+        ObjectNode root = (ObjectNode) JSON.readTree(RunSnapshotJson.write(withTaint(asked), texts));
+        assertThat(root.get("format").intValue()).isEqualTo(4);
+        root.put("format", 3);
+        ((ObjectNode) root.at("/context/taint")).remove("model_text");
+
+        ContextState.Taint read = RunSnapshotJson.read(JSON.writeValueAsBytes(root), texts).context().taint();
+
+        assertThat(read).isEqualTo(new ContextState.Taint(Set.of("ticket"), Set.of(), Set.of("build"), true, false,
+                false));
+
+        ObjectNode current = (ObjectNode) JSON.readTree(RunSnapshotJson.write(withTaint(asked), texts));
+        ((ObjectNode) current.at("/context/taint")).remove("model_text");
+        assertThatThrownBy(() -> RunSnapshotJson.read(JSON.writeValueAsBytes(current), texts))
+                .as("this format always has the field").isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -133,7 +160,7 @@ class RunSnapshotJsonTest {
     void write_refersToEachTextOfTheSteps_andToEachTextVariable_byItsBlob() throws Exception {
         JsonNode root = JSON.readTree(RunSnapshotJson.write(withStepOutputVariables(), texts));
 
-        assertThat(root.get("format").asInt()).isEqualTo(RunSnapshotJson.FORMAT).isEqualTo(3);
+        assertThat(root.get("format").asInt()).isEqualTo(RunSnapshotJson.FORMAT).isEqualTo(4);
         JsonNode output = root.at("/steps/0/output");
         assertThat(text(output)).isEqualTo("built\nok");
         assertThat(text(root.at("/steps/0/input"))).isEqualTo("make build");
@@ -327,7 +354,7 @@ class RunSnapshotJsonTest {
     @Test
     void read_ofAnotherFormat_isRefused() throws Exception {
         for (JsonNode format : List.of(JSON.getNodeFactory().numberNode(0), JSON.getNodeFactory().numberNode(1),
-                JSON.getNodeFactory().numberNode(4), JSON.getNodeFactory().textNode("3"),
+                JSON.getNodeFactory().numberNode(5), JSON.getNodeFactory().textNode("4"),
                 JSON.getNodeFactory().numberNode((double) RunSnapshotJson.FORMAT))) {
             ObjectNode root = (ObjectNode) JSON.readTree(RunSnapshotJson.write(everyFieldPopulated(), texts));
             root.set("format", format);

@@ -50,7 +50,10 @@ import java.util.regex.Pattern;
  * ({@value #SECOND_FORMAT}) referred to them as this one does, except for the variables: only those named
  * {@code step_<n>_output} that held a text were references ({@code step_output_variables}), every other variable
  * stood inline, and each step carried a {@code context_delta} with the variables at its end. Nothing read the delta,
- * and it is not read now either: the state of the run is its {@code context}.
+ * and it is not read now either: the state of the run is its {@code context}. The third ({@value #THIRD_FORMAT}) is
+ * this one without {@code context.taint.model_text}, what of the run may hold text a model wrote: a snapshot of it
+ * reads as a run that asked no model. The number was raised for that field, so that a version that does not know it
+ * refuses the snapshot instead of resuming the run without it.
  *
  * <p>Equal snapshots give equal bytes: the snapshot's own maps and sets are written sorted by key, whatever their order
  * in memory, and a sink that names content by its hash gives equal texts equal references. A value keeps its order,
@@ -60,7 +63,13 @@ import java.util.regex.Pattern;
 public final class RunSnapshotJson {
 
     /** The format {@link #write} writes; a snapshot without {@code format} is of the first, with embedded texts. */
-    public static final int FORMAT = 3;
+    public static final int FORMAT = 4;
+
+    /**
+     * The format before {@code context.taint.model_text}: read as a run that asked no model. A version that knows
+     * only this format refuses a snapshot of the current one, so it never resumes a run without its model text.
+     */
+    private static final int THIRD_FORMAT = 3;
 
     /** The format before, whose variables {@code step_<n>_output} alone were references. */
     private static final int SECOND_FORMAT = 2;
@@ -192,7 +201,8 @@ public final class RunSnapshotJson {
             return 1;
         }
         if (format.isIntegralNumber() && format.canConvertToInt()
-                && (format.intValue() == FORMAT || format.intValue() == SECOND_FORMAT)) {
+                && (format.intValue() == FORMAT || format.intValue() == THIRD_FORMAT
+                || format.intValue() == SECOND_FORMAT)) {
             return format.intValue();
         }
         throw new IllegalArgumentException("Not a run snapshot this version reads: format " + format
@@ -286,13 +296,11 @@ public final class RunSnapshotJson {
         taintNode.put("platform_used_in_shell", taint.platformUsedInShell());
         taintNode.put("platform_in_prompt", taint.platformInPrompt());
         ContextState.ModelText model = taint.modelText();
-        if (model.asked()) {
-            // Only for a run that asked a model, so the checkpoint of a run without AI is what it always was
-            ObjectNode modelNode = taintNode.putObject("model_text");
-            modelNode.set("variables", names(model.variables()));
-            modelNode.set("outputs", names(model.outputs()));
-            modelNode.put("previous_output", model.previousOutput());
-        }
+        ObjectNode modelNode = taintNode.putObject("model_text");
+        modelNode.put("asked", model.asked());
+        modelNode.set("variables", names(model.variables()));
+        modelNode.set("outputs", names(model.outputs()));
+        modelNode.put("previous_output", model.previousOutput());
         node.set("block_outputs", references(context.blockOutputs(), texts));
         node.set("previous_output", reference(context.previousOutput(), texts));
         ObjectNode sourceSteps = node.putObject("source_steps");
@@ -306,13 +314,10 @@ public final class RunSnapshotJson {
         return node;
     }
 
-    /** {@code taint.model_text}: absent for a run that asked no model, and in a checkpoint written before it existed. */
+    /** {@code taint.model_text} of the current format; the formats before it have none. */
     private static ContextState.ModelText modelText(JsonNode node) {
-        if (node == null || node.isNull()) {
-            return ContextState.ModelText.NONE;
-        }
         object(node);
-        return new ContextState.ModelText(true, names(required(node, "variables")),
+        return new ContextState.ModelText(bool(required(node, "asked")), names(required(node, "variables")),
                 names(required(node, "outputs")), bool(required(node, "previous_output")));
     }
 
@@ -336,7 +341,7 @@ public final class RunSnapshotJson {
                         bool(required(taint, "previous_output_tainted")),
                         bool(required(taint, "platform_used_in_shell")),
                         bool(required(taint, "platform_in_prompt")),
-                        modelText(taint.get("model_text"))),
+                        format == FORMAT ? modelText(required(taint, "model_text")) : ContextState.ModelText.NONE),
                 map(required(node, "block_outputs"), text),
                 text.apply(required(node, "previous_output")),
                 new ContextState.SourceSteps(byName, names(required(sourceSteps, "ambiguous")),
