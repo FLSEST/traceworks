@@ -975,9 +975,15 @@ old tree is read). Content is read by the object id the listing gives, never by 
 
 ### A ledger this version does not accept
 
-No command reads or writes such a ledger: `run` and `resume` are refused (exit 6), `verify` and
-`findings <key> verify` fail (exit 8), and a register's write is kept and says that it is not anchored. Each message
-says what was found and what to do:
+No command that needs the ledger reads or writes such a ledger. Each message says what was found and what to do.
+
+| Command | With such a ledger |
+|---|---|
+| `run`, `resume` | refused before anything is recorded, exit 6 |
+| `verify`, `verify <run>`, `findings <key> verify`, `diff` | fail, exit 8 (`verify <run>` and `diff` say `ledger    NOT checked: ...`) |
+| `findings <key> accept`, `dismiss`, `reopen`, `render`, and the register's part of a run's end | the write to the register is kept, the command exits 0 and says that the write is `not anchored in the ledger (<why>)` |
+| `cancel` of a parked or interrupted run, and the end of a run that is already running | the run ends in its record; the end entry is not written, the command fails, and `resume` writes it once the ledger is one this version accepts |
+| `runs`, `show`, `watch`, `findings <key> list`, `show`, `items`, `describe`, `check` | never read the ledger: as ever |
 
 | What the ledger holds | What to do |
 |---|---|
@@ -996,8 +1002,11 @@ writes.
 A ledger starts when a run finds none: in a new home, or after the folder was moved aside. It knows nothing of what
 was before it:
 
-- **Runs.** A run folder of a version that noted no start (`run.started` without `ledger_start`), of which the
-  ledger holds nothing, is from before the ledger. `traceworks verify` counts such folders (`N run folders from
+- **Runs.** A run folder of a version that noted no start (`run.started` without `ledger_start`), whose
+  `run.started` is older than the ledger's first commit and of which the ledger holds nothing, is from before the
+  ledger. Such a record is **unproven**: no entry vouches for it, the check of the home does not check its chain,
+  and a record that is made up, dated back and left without the field reads the same. One that is dated after the
+  ledger began is a problem (`the ledger does not know this run`). `traceworks verify` counts such folders (`N run folders from
   before the ledger`) and lists those that have not ended; that is no failure. `traceworks verify <run>` checks the
   record and the manifest of such a run and says `ledger    not checked (the ledger does not know this run ...)`. A
   run folder whose record says the ledger noted its start, and of which the new ledger holds nothing, is a problem
@@ -1076,8 +1085,14 @@ the ledger folder.
   folder swapped for the time of the run, or with a jar of a version that noted no start. What an operator can do:
   start audits only from a place that owns the home, such as a CI job with its own account that pushes the ledger
   after every run, and take as an audit result only a run whose start entry is in the pushed ledger.
-- **What was before a new ledger.** A ledger that was moved aside is not read; the new one says nothing of the runs
-  and the register lines from before it.
+- **What was before a new ledger, and that there was one.** A ledger that was moved aside is not read; the new one
+  says nothing of the runs and the register lines from before it, and nothing in the home records that it once had
+  another ledger. This can be forced: one commit with a message of its own makes this version refuse the ledger,
+  and once that commit is pushed it cannot be taken back, so the only remedy is to move the ledger aside. After
+  that everything earlier is unproven, and `traceworks resume <run>` of an old unfinished run writes fresh entries
+  for it from its record as it is. **The move is the alarm:** treat a ledger that had to be moved aside as an
+  incident, keep the old folder, and compare; a remote that refuses the new history is what shows a restart to
+  others, since the new ledger cannot be pushed over the old one.
 - **A run folder without a line whose lock a process holds.** It is listed as in flight for as long as the lock is
   held: it has no record, so it claims nothing.
 

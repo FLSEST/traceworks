@@ -269,8 +269,10 @@ three groups:
   The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
   of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
   verifies the record of every ended run against its end entry, unless `--quick` is given.
-- **What nothing in this version finds:** what was before a new ledger (a ledger of an earlier version is moved
-  aside and not read; docs/events.md, "A new ledger"); a well-formed entry or line added with write access to the
+- **What nothing in this version finds:** what was before a new ledger, and that there was one. A ledger this
+  version does not accept is moved aside and not read, and one hand-made commit forces that; the new ledger says
+  nothing of earlier runs and register lines, and the home does not record the restart. The move itself is the
+  alarm, and a remote that refuses the new history is what shows it (docs/events.md, "A new ledger"); a well-formed entry or line added with write access to the
   ledger (the ledger is not
   signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
   or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as

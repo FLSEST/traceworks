@@ -559,7 +559,8 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
   `INTERRUPTED` like a crash and cannot be told from one, but it never leaves the list.
 - **ended, folder gone** lists the finished runs whose folder is not there, with the status. The ledger still holds
   the manifest of each (`runs/<run-id>.json`), so this is no failure.
-- **from before the ledger** counts the run folders of a version that noted no start of which the ledger holds
+- **from before the ledger** counts the run folders of a version that noted no start, older than the ledger's first
+  commit, of which the ledger holds
   nothing (docs/events.md, "A new ledger"), and lists those that have not ended. No failure: the ledger never knew
   them.
 - **The records.** For every ended run whose folder is there, the check verifies the record against the end entry:
@@ -584,7 +585,8 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 | `the record in the folder is not the one the ledger saw start` | another first line than the start entry names |
 | `the record says the ledger noted the start (<status>), and the ledger holds no start entry of the run` | the ledger was deleted or replaced, another `ledger_dir` was in force, the entry was removed, or the process was killed between `run.started` and the commit |
 | `the record ended <STATUS>, and the ledger holds no end entry of the run` | as `ledger    missing` of `traceworks verify <run>`; `resume` writes it |
-| `starts/<run-id>.json is not what commit <id> ("<message>") left: that names the SHA-256 ..., and the ledger holds ...` | an ordinary later commit changed an entry, which Traceworks never does; also `commit <id> names <path>, and the ledger does not hold it`, `2 commits name <path>`, `no commit names <path>`, and `commit <id> names <path> without a SHA-256, after a commit that named one` |
+| `starts/<run-id>.json is not what commit <id> ("<message>") left: that names the SHA-256 ..., and the ledger holds ...` | a later commit changed an entry, which Traceworks never does; also `commit <id> names <path>, and the ledger does not hold it`, `2 commits name <path>`, and for the acknowledgements and the anchors `commit <id> left <path> with a SHA-256 that is no beginning of the file the ledger holds`, `... no longer than the commit before it` and `the ledger holds more of <path> than commit <id> left` |
+| `the ledger does not know this run, and its record ... is dated ..., after the ledger began (...)` | a record without `ledger_start` and without entries that is not older than the ledger: not a run from before it |
 | `the manifest in the run folder (SHA-256 ...) is not the end entry of the ledger (SHA-256 ...)` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
@@ -593,12 +595,17 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
   and `before_ledger`, and the arrays `open`, `ended_folder_gone`, `before_ledger_not_ended`, `in_flight`,
   `acknowledged` and `problems` (each problem with `run`, `code` and `text`; the codes are `lost`, `unreadable`,
   `other-record`, `no-start-entry`, `no-end-entry`, `entry-invalid`, `entry-changed`, `manifest-differs`,
-  `record-broken`). `traceworks verify <run> --json` prints `verified`, `chain`, `manifest`, `ledger`,
+  `record-broken`, `unknown-run`). `traceworks verify <run> --json` prints `verified`, `chain`, `manifest`, `ledger`,
   `ledger_reason`, `start`, `seal` and `register`. The exit codes are the same as without it.
-- **Exit codes of `verify`:** 0 when everything that was checked holds; 8 when anything does not, when the ledger
-  cannot be read, or when it is one this version does not accept (the reason is on standard error then, and
-  nothing on standard output); 2 for a wrong call or an unknown run. There is no state that is not verified and
-  exits 0.
+- **Exit codes of `verify`:** 0 when nothing that was checked fails; 8 when anything does, when the ledger cannot
+  be read, or when it is one this version does not accept (the reason is on standard error then, and nothing on
+  standard output); 2 for a wrong call or an unknown run. **Exit 0 does not say that everything was checked.** Not
+  checked, and said in the output each time: the records of the ended runs with `--quick`; a run in flight (its
+  entry is on its way); a run folder from before the ledger (the ledger never knew it, its record is unproven and
+  its chain is not checked here; `traceworks verify <run>` checks the chain and the manifest); an ended run whose
+  folder is gone (the ledger holds its manifest, and nothing can be compared with it).
+- **Registers.** `traceworks verify` without a run does not compare the log of a register with its anchors;
+  `traceworks findings <key> verify` does. What it does judge is the anchor file itself (`registers.<key>`).
 - The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
   another history than its commits: `traceworks: The ledger cannot be relied on ...: it has the replace ref ...`.
 - It exits 8 when there is a problem nobody acknowledged; else 0.
