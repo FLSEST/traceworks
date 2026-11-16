@@ -142,7 +142,9 @@ the operator replaces it (`ai_images`, see "What they do not protect"), with onl
 credential of the backend its model names: `ANTHROPIC_API_KEY` and `ANTHROPIC_OAUTH_TOKEN` for `anthropic/...`, for a
 model without a backend and for a step without a model, `OPENAI_API_KEY` for `openai/...`, `GEMINI_API_KEY` for
 `google/...` and `OPENROUTER_API_KEY` for `openrouter/...`. The other keys you stored for Pi never reach that
-container. A model that names another backend is refused, and the message says how to name the backend: Traceworks
+container. A model whose backend is a model server the operator declared (`local_models`) gets no credential of
+any provider: it gets that server's secret, when it has one ("A local model" below). A model that names any other
+backend is refused, and the message names the backends Traceworks knows: Traceworks
 cannot tell which credential it would take, so it hands over none. A model written as a literal is refused before
 the run starts (by `traceworks check`, and by the start check when its backend has no credential); a model built
 from a placeholder is refused when its step runs, before its CLI starts.
@@ -150,7 +152,8 @@ from a placeholder is refused when its step runs, before its CLI starts.
 switches, and the second is not the workflow's: the container joins one network that has no way out, and next to it
 Traceworks starts a proxy (the built-in image `egress`) that tunnels `CONNECT` to the listed hosts and refuses
 everything else. The hosts are the provider's API (`api.anthropic.com:443` for Claude; for Pi the API of the model's
-backend) and what the operator adds in `ai_hosts`; no workflow can name one. The proxy reports every request, allowed
+backend) and what the operator adds in `ai_hosts`; no workflow can name one. A call to a model server of the
+operator's has that server as its only host, and none of these. The proxy reports every request, allowed
 or not, and the record keeps them with the call (`egress` in `step.command.finished`: the target and the verdict, never
 a path, a header or content); `show` and `run.html` mark a denied one. The proxy and both networks exist only while
 the call runs. With `ai_network: "open"` the operator gives the AI containers the runtime's default network instead,
@@ -251,6 +254,40 @@ content, and no blob is written through one.
   `allowed_models`, any package may name any model of a provider you hold a credential for; and a step that names no
   model runs its provider's default, which Traceworks does not know. `run.started` names the pick, and every
   `ai.request` the provider and model of its call.
+- **A local model** (docs/cli.md, "Local models"). The operator declares a model server of their own in
+  `local_models`, and a `PI` step whose model names it runs against that server. What that changes, and what it
+  does not:
+  - *Nothing of the step goes to a provider.* The call gets no credential of a provider, and its container's only
+    host is the server: the hosts of Anthropic, OpenAI, Google and OpenRouter are not on its list, and neither are
+    the operator's `ai_hosts`. An attempt to reach one is refused by the proxy and is in the record as a `DENY`.
+    This holds with `ai_network: "open"` too: a local step always runs behind the proxy. With a server on your own
+    machine or network, the prompt, the files a model's tools read and the answer stay there.
+  - *Only the operator names a server.* `local_models` is read from `traceworks.json` only. A workflow asks for a
+    server by its id and for one of the models the operator listed; it cannot name a URL, add a model or change
+    the key. Pi's provider configuration is written by Traceworks from the setting alone, reaches the container
+    in an environment variable and never comes from the workspace; no extension is loaded for it, and Pi starts
+    with the same options as for a provider.
+  - *What Traceworks cannot know: what the server does with what it gets.* A server that is a gateway, a hosted
+    service or a proxy in front of a provider forwards the prompts, and Traceworks sees only the `host:port` you
+    named. "Local" is what you declared, not what Traceworks verified. The record says which server a call went
+    to (`local` in `ai.request`), not where that server sent it.
+  - *A small local model is a weaker model.* Its answers are less reliable than a large provider model's, and it
+    follows instructions hidden in what it reads more easily. Keep `tools` low and the workspace read-only on such
+    a step, check its work in a deterministic step, and do not let its verdict alone set a gate.
+  - *Plain HTTP is not encrypted.* A server whose `url` starts with `http://` gets the prompt and its key in clear
+    over the network between this machine and the server. The proxy forwards plain HTTP to exactly these servers
+    and to no other target. Use it on a network you trust, or give the server TLS.
+  - *The server's key.* The `secret` of a server is a secret like any other in `credentials.json`: the record
+    redacts it, a model with tools can read it in its container (below), and a step of any package may declare
+    the same name in `secrets` and get the value. Give a local server a key that is worth nothing elsewhere.
+  - *A server on this machine is a service of this machine.* It must listen on an address containers reach, so it
+    is reachable from your network as well unless a firewall says otherwise. The step's container still reaches
+    it only through the proxy, and only its one port.
+  - *Not verified* (Pi 1.5.2 was read, not run, to build this; no model was called): whether Pi sends the key as
+    `Authorization: Bearer` without further configuration; whether Pi asks the server for anything besides the
+    chat completion (a list of models, for example); whether Pi sends a plain HTTP request through its proxy as a
+    tunnel or as a forwarded request (the proxy takes both); and what Pi makes of a model name with a `:` in it.
+    The container test `AiLocalModelIT` shows the first three in its record. Podman is not verified at all.
 - **`ai_images` replaces the built-in image.** The guarantee that AI runs only in the built-in images holds only while
   the operator replaces none (docs/cli.md, "AI images"). A replacement image gets the provider's credentials, the
   workspace (read-only unless the step writes it), the prompt and the network exactly as the built-in image would, and
