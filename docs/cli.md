@@ -515,6 +515,7 @@ the record. It is checked for a run in any state, also one that is running, park
 | `start     none: the run was recorded by a version that noted no start in the ledger (Traceworks 0.1.0)` | `run.started` has no `ledger_start`: a run of an earlier version, which has no entry | 0 |
 | `start     missing: run.started says the ledger noted the start of this run, and the ledger holds no start entry of it` | the entry was taken out of the ledger; the ledger was deleted or replaced, or another `ledger_dir` was in force when the run started; the process was killed between `run.started` and the commit of the entry (a power cut at that moment: the honest cause); or the run ended because its start could not be noted. A `resume` writes the entry before it goes on, or completes a run that ended | 8 |
 | `start     mismatch: the ledger noted the start of run ... with the run.started line ..., and the first line of this record is ...` | the record is not the one that started under this id, or its first line was changed | 8 |
+| `ledger    changed: commit 4f1d2c3b4a59 ("tidy") changed runs/<run-id>.json, which commit ... added: ...` | a commit other than the one that added an entry of this run changed or removed it, or the entry came in under another message: it is not the entry of this run any more, whatever it holds now (printed on the `ledger` line, for the start entry too) | 8 |
 | `start     NOT checked: ...` | the ledger exists and cannot be read, or holds something that makes git show another history than its commits (a replace ref, a shallow or grafts file, a second branch; docs/events.md, "What the ledger shows, and what it does not") | 8 |
 | `start     not checked` | a copied run folder: this home's ledger does not speak for it | 0 |
 
@@ -559,9 +560,12 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
   the manifest of each (`runs/<run-id>.json`), so this is no failure.
 - **earlier version, not ended, not in the ledger** lists the run folders of a version that noted no start whose
   run has not ended: the ledger never knew them. The first line counts all folders of an earlier version.
-- **acknowledged** lists every run someone acknowledged, for good, with what the check said, who, when and the
-  note. `[no longer what the check finds]` marks one whose problem is gone or has become another.
-- **problems** is what fails the check, one line per run:
+- **in flight** appears for a run whose process is alive and has not written an entry yet: `its start entry is not
+  written yet` (it may wait for the ledger's lock), `its end entry is not written yet`, `its record has no line
+  yet`. No failure. The same record without a live process is a problem.
+- **acknowledged** lists every problem someone acknowledged, for good, with what the check said, who, when and the
+  note. `[no longer what the check finds]` marks one the check no longer says in those words.
+- **problems** is what fails the check, one line per problem, every problem of a run:
 
 | Problem | What it means |
 |---|---|
@@ -570,7 +574,9 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 | `the record in the folder is not the one the ledger saw start` | another first line than the start entry names |
 | `the record says the ledger noted the start (<status>), and the ledger holds no start entry of the run` | the ledger was deleted or replaced, another `ledger_dir` was in force, the entry was removed, or the process was killed between `run.started` and the commit |
 | `the record ended <STATUS>, and the ledger holds no end entry of the run` | as `ledger    missing` of `traceworks verify <run>`; `resume` writes it |
-| `a commit says the run started (or ended), and the ledger holds no ... entry of it` | a later commit removed the entry, or a commit made by hand named the run and added nothing |
+| `commit <id> ("<message>") changed (removed, added again) starts/<run-id>.json, which commit <id> added` | an ordinary later commit touched an entry, which Traceworks never does; also `... added <path> under another message`, and `... took lines out of acks/<run-id>.jsonl` |
+| `the manifest in the run folder is not the end entry of the ledger` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
+| `a commit says the run started (or ended), and the ledger holds no ... entry of it` | a later commit removed the entry, or a commit made by hand named the run and added nothing. An end entry that is not valid does not end the run: a run without a folder is then `started, never ended, and the folder is gone` as well |
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
 - The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
@@ -580,9 +586,11 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 **Acknowledging a run.** `traceworks verify --acknowledge <run> --note "why"` records that one problem of one run
 has an honest cause: a folder deleted by hand, a `runs_dir` that changed, the run of another home that shares the
 ledger. `<run>` is the run id or a prefix of at least four characters that one reported run has; the note is
-required; a run the check does not report cannot be acknowledged, and there is no way to acknowledge several at
-once. The ledger gets one commit for it (docs/events.md, "Acknowledging a run"), the command prints the check
-again, and from then on the run is listed under `acknowledged` and does not fail the check for that problem.
+required; a run the check does not report cannot be acknowledged, and there is no way to acknowledge several runs
+at once. The ledger gets one commit for it (docs/events.md, "Acknowledging a run") that names every problem the
+check reports of the run at that moment, the command prints the check again, and from then on those problems are
+listed under `acknowledged` and do not fail the check. The acknowledgement covers them as the check worded them: a
+problem that comes later, also one of the same kind with another content, fails the check again.
 
 What the check cannot find is said in docs/events.md, "What the ledger shows, and what it does not".
 
@@ -1275,7 +1283,7 @@ seal protects and what it does not.
 | 3 | the run failed |
 | 4 | the run was cancelled |
 | 5 | the run is parked: it waits for an answer, or it was paused (`traceworks pause`, Ctrl-C) and waits for its `resume` |
-| 6 | refused: the start check failed (no container runtime for a container run, a missing image, a workspace or package that cannot be mounted, a secret without a value or with a value shorter than 8 characters, a `credentials.json` others can read), `credentials` cannot trust or write `credentials.json`, was given a value no run would take or none at all, or shall remove a name that is not stored, a host run's resume lacks the consent, the workflow was not admitted, the package is invalid, the ledger cannot take an entry (no git, or `ledger/` cannot be created) or could not note the start of the run (the run then ended `FAILED` without a step), the ledger's lock is held for more than 60 seconds, a resume whose run has no start entry and cannot get one, a `verify --acknowledge` of a run the check does not report, the `--source` is not allowed or cannot be checked out, a package or a local source lies in `<home>/workspaces/`, a resume's missing checkout cannot be cloned again, a resume's checkpoint state or a text it refers to is deleted, a resume's checkpoint holds more output text than the output budget in force, a `resume` of a run that has finished (unless it only writes a missing manifest or ledger entry), of a run parked at a question that has no answer yet, of a run that another process writes, or of a run whose package changed without `--allow-changed-package`, a `cancel` of a run that has finished, a `pause` of a run that no process runs or that is already asked to pause, `traceworks.json` holds an unknown key or an invalid value, `check`, or the check before a `run`, found errors, or a seal refused: a `run` or a `resume` of a sealed package whose seal does not hold, of an unsealed package where `require_seal` asks for a seal, a `seal` that cannot sign or whose key the home does not allow, or an `unseal` under `seal_immutable` (see "seal, unseal and seals") |
+| 6 | refused: the start check failed (no container runtime for a container run, a missing image, a workspace or package that cannot be mounted, a secret without a value or with a value shorter than 8 characters, a `credentials.json` others can read), `credentials` cannot trust or write `credentials.json`, was given a value no run would take or none at all, or shall remove a name that is not stored, a host run's resume lacks the consent, the workflow was not admitted, the package is invalid, the ledger cannot take an entry (no git, or `ledger/` cannot be created) or could not note the start of the run (the run then ended `FAILED` without a step), the ledger's lock is held for more than 60 seconds, the ledger's own git configuration holds a key that is not allowed there or its `.git` is not a plain directory (docs/events.md, "The ledger's own git settings"), a resume whose run has no start entry and cannot get one, a `verify --acknowledge` of a run the check does not report, the `--source` is not allowed or cannot be checked out, a package or a local source lies in `<home>/workspaces/`, a resume's missing checkout cannot be cloned again, a resume's checkpoint state or a text it refers to is deleted, a resume's checkpoint holds more output text than the output budget in force, a `resume` of a run that has finished (unless it only writes a missing manifest or ledger entry), of a run parked at a question that has no answer yet, of a run that another process writes, or of a run whose package changed without `--allow-changed-package`, a `cancel` of a run that has finished, a `pause` of a run that no process runs or that is already asked to pause, `traceworks.json` holds an unknown key or an invalid value, `check`, or the check before a `run`, found errors, or a seal refused: a `run` or a `resume` of a sealed package whose seal does not hold, of an unsealed package where `require_seal` asks for a seal, a `seal` that cannot sign or whose key the home does not allow, or an `unseal` under `seal_immutable` (see "seal, unseal and seals") |
 | 7 | the run completed, but its gate reached the `--fail-on-gate` level |
 | 8 | verification failed, or the record of the run does not hold, so the command refused to act on it; the message points to `traceworks verify`, or `findings <key> verify` found a register that does not hold, or `seals` found a seal log that does not hold, or `seals verify` a seal that does not |
 | 9 | the run was interrupted (`show` and `watch`): its process ended without the run's end, and `resume` continues it |

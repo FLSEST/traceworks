@@ -237,25 +237,31 @@ and no step runs without it, at a start and at a resume (docs/events.md, "The st
 three groups:
 
 - **What the check finds on this machine** (`traceworks verify` without a run, exit 8): a run that started, never
-  ended, and whose folder is gone, empty or holds another record; an entry removed by an added commit, and a commit
-  that names a run without its entry; an end entry added by hand that is no manifest of the run or does not agree
-  with its commit and its start entry; a run folder whose record says its start was noted and that has no start
-  entry (a ledger deleted and made again, another `ledger_dir`, a kill between `run.started` and the commit); and a
-  ledger with replace refs, a shallow or grafts file, alternates, a second branch, a detached HEAD, a commit HEAD
-  does not reach, or a setting of its own that changes what git shows. An honest cause is acknowledged with a note,
-  which the ledger keeps and the check lists for good.
-- **What only a ledger that others hold finds:** a rewritten history that no reference names any more. The ledger
-  is a plain git repository, so the operator can push it to a remote they do not control alone and that refuses a
-  rewritten history (a protected branch without force push, or an append-only mirror); an entry that was pushed can
-  then not be removed without the remote showing it. Traceworks does not push by itself, has no setting for a
-  remote and writes the ledger without git hooks, so the push is the operator's: a cron entry, a timer or CI that
-  runs `git push` in the ledger folder. Entries that are not pushed yet are only as safe as the machine, so the
-  time between two pushes is the time in which a run can still be hidden.
+  ended, and whose folder is gone, empty or holds another record; an entry that is not what its own commit added,
+  because a later, ordinary commit changed it, removed it or added it again, named with the commit and the path
+  (so a rewritten record with a new manifest committed over the end entry is found, also by `verify <run>`); a
+  commit that names a run without its entry; an end entry added by hand that is no manifest of the run or does not
+  agree with its commit and its start entry, and a manifest in the run folder that is not the end entry; a run
+  folder whose record says its start was noted and that has no start entry (a ledger deleted and made again,
+  another `ledger_dir`, a kill between `run.started` and the commit), unless its process is alive; and a ledger
+  with replace refs, a shallow or grafts file, alternates, a `.git` that is not a plain directory, a second
+  branch, a merge, a detached HEAD, a commit HEAD does not reach, or a setting of its own that is not allowed
+  there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). An honest
+  cause is acknowledged with a note, which the ledger keeps and the check lists for good; it covers what the check
+  said then and nothing that comes later.
+- **What a ledger that others hold adds:** a rewritten history that no reference names any more is not found on
+  this machine. The ledger is a plain git repository, so the operator can push it to a remote they do not control
+  alone and that refuses a rewritten history (a protected branch without force push, or an append-only mirror).
+  What was pushed can then be changed only by an ordinary commit on top, which the remote takes and the check
+  finds; the remote itself finds nothing, it keeps the commit from being taken out again. Traceworks does not push
+  by itself, has no setting for a remote and writes the ledger without git hooks, so the push is the operator's: a
+  cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are not pushed yet are only as
+  safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
 - **What nothing in this version finds:** a forged entry made with write access to the ledger (the ledger is not
   signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
   or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
   started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
-  `ledger_dir`, a jar of a version that noted no start). Against the last, start audits only from a place that owns
+  `ledger_dir`, the ledger folder swapped for the time of the run, a jar of a version that noted no start). Against the last, start audits only from a place that owns
   the home, such as a CI job with its own account that pushes the ledger after every run, and accept as a result
   only a run whose start entry is in the pushed ledger.
 
