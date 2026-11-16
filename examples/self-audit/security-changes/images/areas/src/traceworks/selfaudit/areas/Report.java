@@ -338,7 +338,7 @@ final class Report {
             finding.put("title", (group.size() == 1 ? first.rule() + " finding" : group.size() + " " + first.rule()
                     + " findings") + " in " + first.file() + ", " + first.member());
             finding.put("description", "Area " + first.area() + " of the security report; the issue and the fix are"
-                    + " in security-report.md");
+                    + (changes(summary) == null ? " in security-report.md" : " in security-changes-report.md"));
             finding.put("evidence", evidence(group));
             if (itemOfArea.containsKey(first.area())) finding.put("item", itemOfArea.get(first.area()));
             findings.add(finding);

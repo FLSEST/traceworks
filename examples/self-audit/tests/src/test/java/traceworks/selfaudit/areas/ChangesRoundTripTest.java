@@ -241,7 +241,7 @@ class ChangesRoundTripTest {
                                 + " names it |",
                         "| Workspace commit | `" + third + "`, with nothing uncommitted |",
                         "| Areas with a changed line | 1 |", "| Areas an earlier run left open or without a verdict | 1 |",
-                        "3 of 3 items settled".replace("3 of 3", "2 of 3"));
+                        "2 of 3 items settled");
         assertThat(items()).matches("open        [0-9a-f]{16}  " + Pattern.quote(RUNNER) + "\n"
                 + "clean       [0-9a-f]{16}  " + Pattern.quote(CALLER) + "\n"
                 + "clean       [0-9a-f]{16}  " + Pattern.quote(LONE) + "\n");
