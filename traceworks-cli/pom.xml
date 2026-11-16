@@ -34,6 +34,25 @@
 
     <build>
         <finalName>traceworks</finalName>
+        <resources>
+            <!-- The license and the notice of the repository, carried by the jar: LICENSE (the GPL text) at its
+                 root, NOTICE as META-INF/NOTICE. -->
+            <resource>
+                <directory>${project.basedir}/..</directory>
+                <includes>
+                    <include>LICENSE</include>
+                </includes>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/..</directory>
+                <includes>
+                    <include>NOTICE</include>
+                </includes>
+                <targetPath>META-INF</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
         <plugins>
             <!-- One runnable jar with Jackson and the two modules inside. Shading adds no dependency: the enforcer rule
                  in the parent still sees the same ones. The reduced pom, signature files and module descriptors are
@@ -54,14 +73,18 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>traceworks.cli.main.Main</mainClass>
                                 </transformer>
-                                <!-- The NOTICE files of the three Jackson jars, one after the other, as they are.
-                                     Without this the jar keeps only the first, and jackson-core's names the code it
-                                     bundles. Their LICENSE files are the same text, so the first one is all of them. -->
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
-                                    <resource>META-INF/NOTICE</resource>
-                                </transformer>
                             </transformers>
                             <filters>
+                                <!-- META-INF/NOTICE of the jar is the NOTICE of the repository, which begins with
+                                     Traceworks' own notice and quotes the NOTICE files of the Jackson jars. Their own
+                                     copies are left out, so the jar holds one. Jackson's META-INF/LICENSE (the Apache
+                                     License, the same text in all three) stays; the GPL text is LICENSE at the root. -->
+                                <filter>
+                                    <artifact>com.fasterxml.jackson.core:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/NOTICE</exclude>
+                                    </excludes>
+                                </filter>
                                 <filter>
                                     <artifact>*:*</artifact>
                                     <excludes>

@@ -34,7 +34,9 @@ This distribution includes Jackson:
 
 Copyright FasterXML, LLC. Licensed under the Apache License 2.0. The text of
 that license is in the jar as META-INF/LICENSE, and at
-<https://www.apache.org/licenses/LICENSE-2.0>.
+<https://www.apache.org/licenses/LICENSE-2.0>. META-INF/LICENSE is the license
+of Jackson alone. The license of Traceworks is the file LICENSE, at the root
+of the repository and at the root of the jar.
 
 jackson-core bundles code of two other projects under the MIT license. Its
 notice below names them, and the license files it refers to
