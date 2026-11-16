@@ -110,8 +110,8 @@ class LedgerStartCommandTest {
 
         Result home = exec("verify");
         assertThat(home.code()).as(home.out() + home.err()).isZero();
-        assertThat(home.out()).contains("ledger    1 run started, 1 ended", "started, not ended (0)",
-                "ended, folder gone (0)", "verified");
+        assertThat(home.out()).contains("ledger    1 run started, 1 ended; 0 run folders of an earlier version",
+                "started, not ended (0)", "ended, folder gone (0)", "acknowledged (0)", "problems (0)", "verified");
     }
 
     /** The case the start entry is for: a run that never ended, and whose folder someone removed. */
@@ -124,7 +124,7 @@ class LedgerStartCommandTest {
 
         Result there = exec("verify");
         assertThat(there.code()).as(there.out()).isZero();
-        assertThat(there.out()).contains("ledger    2 runs started, 1 ended", "started, not ended (1)")
+        assertThat(there.out()).contains("ledger    2 runs started, 1 ended;", "started, not ended (1)")
                 .containsPattern("(?m)^  " + id + "  \\S+Z  asking  folder PARKED$");
 
         delete(folderOf(id));
@@ -133,8 +133,9 @@ class LedgerStartCommandTest {
         Result gone = exec("verify");
         assertThat(gone.code()).as(gone.out()).isEqualTo(8);
         assertThat(gone.out()).containsPattern("(?m)^  " + id + "  \\S+Z  asking  folder GONE$")
-                .contains("ended, folder gone (1)", "  " + finished,
-                        "verification FAILED: 1 run started, never ended, and the folder is gone");
+                .contains("ended, folder gone (1)", "  " + finished + "  COMPLETED", "problems (1)",
+                        "  " + id + "  started, never ended, and the folder is gone",
+                        "verification FAILED: 1 problem");
         assertThat(exec("runs").out()).as("the runs folder no longer knows either").doesNotContain(id.substring(0, 8));
     }
 
@@ -151,8 +152,8 @@ class LedgerStartCommandTest {
         assertThat(verify.out()).contains("start     missing: run.started says the ledger noted the start");
         Result all = exec("verify");
         assertThat(all.code()).isEqualTo(8);
-        assertThat(all.out()).contains("removed from the ledger by a later commit (1)", "  starts/" + id + ".json",
-                "1 entry removed from the ledger");
+        assertThat(all.out()).contains("problems (1)", "  " + id + "  a commit says the run started, and the ledger"
+                + " holds no start entry of it");
     }
 
     /** Fail closed: a ledger that takes no start entry lets no step run. The run ends FAILED and the start is refused. */
@@ -175,6 +176,70 @@ class LedgerStartCommandTest {
         assertThat(resumed.code()).as(resumed.out() + resumed.err()).isEqualTo(3);
         assertThat(temp.resolve("ran.txt")).as("the run stays ended: no step runs later either").doesNotExist();
         assertThat(exec("verify", id).code()).isZero();
+    }
+
+    /** rm -rf the folder and mkdir it again: no better than no folder. */
+    @Test
+    void aRunFolderMadeAgainEmpty_failsTheCheck() throws Exception {
+        String id = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        Path folder = folderOf(id);
+        delete(folder);
+        Files.createDirectories(folder);
+
+        Result verify = exec("verify");
+
+        assertThat(verify.code()).as(verify.out() + verify.err()).isEqualTo(8);
+        assertThat(verify.out()).containsPattern("(?m)^  " + id + "  \\S+Z  asking  folder UNREADABLE$")
+                .contains("holds no record that can be read");
+    }
+
+    /** The ledger is deleted and the tool makes a new one: the run folders say what it should hold. */
+    @Test
+    void aLedgerThatWasDeleted_isFoundFromTheRunFolders() throws Exception {
+        String parked = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        String finished = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        delete(home.resolve("ledger"));
+
+        Result verify = exec("verify");
+
+        assertThat(verify.code()).as(verify.out() + verify.err()).isEqualTo(8);
+        assertThat(verify.out()).contains("ledger    0 runs started, 0 ended", "problems (2)",
+                "  " + parked + "  the record says the ledger noted the start (PARKED), and the ledger holds no"
+                        + " start entry of the run",
+                "  " + finished + "  the record says the ledger noted the start (COMPLETED), and the ledger holds no"
+                        + " start entry of the run");
+        Result one = exec("verify", parked);
+        assertThat(one.code()).isEqualTo(8);
+        assertThat(one.out()).contains("start     missing:");
+    }
+
+    /** An honest cause is settled on the record: who, when and a note, kept in the ledger and listed for good. */
+    @Test
+    void aLostRun_isAcknowledgedWithANote_andStaysListed() throws Exception {
+        String id = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        delete(folderOf(id));
+        assertThat(exec("verify").code()).isEqualTo(8);
+
+        Result silent = exec("verify", "--acknowledge", id);
+        assertThat(silent.code()).as(silent.err()).isEqualTo(2);
+        assertThat(silent.err()).contains("--note");
+        Result unknown = exec("verify", "--acknowledge", "ffffffff", "--note", "why not");
+        assertThat(unknown.code()).as(unknown.err()).isEqualTo(6);
+        assertThat(exec("verify").code()).isEqualTo(8);
+
+        Result ack = exec("verify", "--acknowledge", id.substring(0, 8), "--note", "deleted by hand, the disk was full");
+
+        assertThat(ack.code()).as(ack.out() + ack.err()).isZero();
+        assertThat(ack.out()).contains("acknowledged (1)",
+                "  " + id + "  started, never ended, and the folder is gone",
+                "    by tester at ", ": deleted by hand, the disk was full", "problems (0)", "verified")
+                .containsPattern("(?m)^  " + id + "  \\S+Z  asking  folder GONE$");
+        assertThat(Files.readString(home.resolve("ledger/acks/" + id + ".jsonl")))
+                .contains("\"actor\":\"tester\"", "\"problem\":\"lost\"",
+                        "\"note\":\"deleted by hand, the disk was full\"");
+        Result again = exec("verify");
+        assertThat(again.code()).isZero();
+        assertThat(again.out()).contains("acknowledged (1)");
     }
 
     private void git(String... args) throws Exception {

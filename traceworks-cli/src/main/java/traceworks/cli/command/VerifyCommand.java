@@ -6,13 +6,12 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.TerminalFormat;
+import traceworks.cli.UsageException;
 import traceworks.core.app.LedgerReport;
 import traceworks.core.app.VerifyReport;
 import traceworks.core.record.ChainReport;
 
 import java.io.PrintStream;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * {@code traceworks verify <run>}: checks the hash chain, the blobs, the manifest, the ledger entry, the start entry
@@ -28,10 +27,14 @@ public final class VerifyCommand implements Command {
     private static final Spec SPEC = Spec.of("verify", "Verifies the record of a run. Exits 8 when it does not hold.",
                     "[<run>]")
             .positionals(0, 1)
-            .note("Without a run: checks the ledger against the runs folder of the home. Lists the runs the ledger"
-                    + " saw start and never end, with what the folder of each says (RUNNING, PARKED, INTERRUPTED,"
-                    + " GONE), and the runs it names whose folder is gone. Exits 8 when a run started, never ended"
-                    + " and its folder is gone, or an entry was removed from the ledger.");
+            .option("acknowledge", "RUN", "without a run: record that one problem the check reports of RUN has an"
+                    + " honest cause; needs --note, is kept in the ledger and listed for good")
+            .option("note", "TEXT", "with --acknowledge: why (required)")
+            .note("Without a run: checks the ledger against the runs folder of the home, both ways. Lists the runs"
+                    + " the ledger saw start and never end, with what the folder of each says (RUNNING, PARKED,"
+                    + " INTERRUPTED, GONE, UNREADABLE, OTHER RECORD), the runs it names whose folder is gone, the"
+                    + " run folders the ledger should know and does not, and what was acknowledged. Exits 8 when"
+                    + " something does not hold that nobody acknowledged.");
 
     @Override
     public Spec spec() {
@@ -40,8 +43,21 @@ public final class VerifyCommand implements Command {
 
     @Override
     public int run(Context context, Parsed args) {
+        String acknowledge = args.option("acknowledge");
+        if (acknowledge != null) {
+            if (args.positional() != null) {
+                throw new UsageException("--acknowledge names its run itself; give no other run");
+            }
+            if (args.option("note") == null || args.option("note").isBlank()) {
+                throw new UsageException("--acknowledge needs --note \"...\": why this run is no lost run");
+            }
+            return ledger(context, context.services().acknowledge(acknowledge, args.option("note")));
+        }
+        if (args.option("note") != null) {
+            throw new UsageException("--note goes with --acknowledge <run>");
+        }
         if (args.positional() == null) {
-            return ledger(context);
+            return ledger(context, context.services().ledgerReport());
         }
         VerifyReport report = context.services().verify(args.positional());
         ChainReport chain = report.chain();
@@ -65,11 +81,14 @@ public final class VerifyCommand implements Command {
         return report.ok() ? ExitCodes.OK : ExitCodes.VERIFY_FAILED;
     }
 
-    /** The ledger against the runs folder: what started and never ended, and what the ledger names without a folder. */
-    private static int ledger(Context context) {
-        LedgerReport report = context.services().ledgerReport();
+    /**
+     * The ledger against the runs folder, both ways: what the ledger saw start and never end, what it names without
+     * a folder, what the run folders say the ledger should hold, and what a person acknowledged.
+     */
+    private static int ledger(Context context, LedgerReport report) {
         PrintStream out = context.out();
-        out.println("ledger    " + count(report.started(), "run") + " started, " + report.ended() + " ended");
+        out.println("ledger    " + count(report.started(), "run") + " started, " + report.ended() + " ended; "
+                + count(report.earlier(), "run folder") + " of an earlier version");
         out.println("started, not ended (" + report.open().size() + ")");
         for (LedgerReport.Open run : report.open()) {
             out.println("  " + TerminalFormat.safe(run.runId()) + "  "
@@ -78,31 +97,35 @@ public final class VerifyCommand implements Command {
                     + TerminalFormat.safe(run.folder()));
         }
         out.println("ended, folder gone (" + report.endedGone().size() + ")");
-        report.endedGone().forEach(id -> out.println("  " + TerminalFormat.safe(id)));
-        if (!report.removed().isEmpty()) {
-            out.println("removed from the ledger by a later commit (" + report.removed().size() + ")");
-            report.removed().forEach(path -> out.println("  " + TerminalFormat.safe(path)));
+        report.endedGone().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  "
+                + TerminalFormat.safe(run.detail())));
+        if (!report.earlierOpen().isEmpty()) {
+            out.println("earlier version, not ended, not in the ledger (" + report.earlierOpen().size() + ")");
+            report.earlierOpen().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  folder "
+                    + TerminalFormat.safe(run.detail())));
         }
+        out.println("acknowledged (" + report.acknowledged().size() + ")");
+        for (LedgerReport.Acknowledged run : report.acknowledged()) {
+            out.println("  " + TerminalFormat.safe(run.runId()) + "  " + TerminalFormat.safe(String.valueOf(run.said()))
+                    + (run.covers() ? "" : " [no longer what the check finds]"));
+            out.println("    by " + TerminalFormat.safe(String.valueOf(run.actor())) + " at "
+                    + TerminalFormat.safe(String.valueOf(run.at())) + ": "
+                    + TerminalFormat.oneLine(String.valueOf(run.note())));
+        }
+        out.println("problems (" + report.problems().size() + ")");
+        report.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem.runId()) + "  "
+                + TerminalFormat.safe(problem.text())));
         if (report.ok()) {
             out.println("verified");
             return ExitCodes.OK;
         }
-        List<String> why = new ArrayList<>();
-        if (!report.lost().isEmpty()) {
-            why.add(count(report.lost().size(), "run") + " started, never ended, and the folder is gone");
-        }
-        if (!report.removed().isEmpty()) {
-            why.add(count(report.removed().size(), "entry", "entries") + " removed from the ledger");
-        }
-        out.println("verification FAILED: " + String.join("; ", why));
+        out.println("verification FAILED: " + count(report.problems().size(), "problem")
+                + "; acknowledge one that has an honest cause with traceworks verify --acknowledge <run> --note"
+                + " \"...\"");
         return ExitCodes.VERIFY_FAILED;
     }
 
     private static String count(int n, String one) {
-        return count(n, one, one + "s");
-    }
-
-    private static String count(int n, String one, String many) {
-        return n + " " + (n == 1 ? one : many);
+        return n + " " + (n == 1 ? one : one + "s");
     }
 }
