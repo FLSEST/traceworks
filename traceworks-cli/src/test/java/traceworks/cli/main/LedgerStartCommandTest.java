@@ -152,8 +152,8 @@ class LedgerStartCommandTest {
         assertThat(verify.out()).contains("start     missing: run.started says the ledger noted the start");
         Result all = exec("verify");
         assertThat(all.code()).isEqualTo(8);
-        assertThat(all.out()).contains("problems (1)", "  " + id + "  a commit says the run started, and the ledger"
-                + " holds no start entry of it");
+        assertThat(all.out()).contains("problems (1)").containsPattern("(?m)^  " + id
+                + "  commit [0-9a-f]{12} \\(\"tidy\"\\) removed starts/" + id + "\\.json, which commit ");
     }
 
     /** Fail closed: a ledger that takes no start entry lets no step run. The run ends FAILED and the start is refused. */
@@ -203,7 +203,7 @@ class LedgerStartCommandTest {
         Result verify = exec("verify");
 
         assertThat(verify.code()).as(verify.out() + verify.err()).isEqualTo(8);
-        assertThat(verify.out()).contains("ledger    0 runs started, 0 ended", "problems (2)",
+        assertThat(verify.out()).contains("ledger    0 runs started, 0 ended", "problems (3)",
                 "  " + parked + "  the record says the ledger noted the start (PARKED), and the ledger holds no"
                         + " start entry of the run",
                 "  " + finished + "  the record says the ledger noted the start (COMPLETED), and the ledger holds no"
@@ -240,6 +240,40 @@ class LedgerStartCommandTest {
         Result again = exec("verify");
         assertThat(again.code()).isZero();
         assertThat(again.out()).contains("acknowledged (1)");
+    }
+
+    /**
+     * No history is rewritten: a later, ordinary commit writes the start entry again, with the same fields. The
+     * entry is no longer what the commit that names it added, and both checks name the commit and the path.
+     */
+    @Test
+    void anEntryChangedByALaterOrdinaryCommit_failsBothChecks() throws Exception {
+        String id = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        assertThat(exec("verify", id).code()).isZero();
+        Path entry = home.resolve("ledger/starts/" + id + ".json");
+        Files.writeString(entry, Files.readString(entry).replace(" : ", ": "));
+        git("commit", "-q", "-m", "run " + id + " STARTED", "--", "starts/" + id + ".json");
+
+        Result one = exec("verify", id);
+        assertThat(one.code()).as(one.out()).isEqualTo(8);
+        assertThat(one.out()).containsPattern("(?m)^ledger +changed: commit [0-9a-f]{12} \\(\"run " + id
+                + " STARTED\"\\) changed starts/" + id + "\\.json");
+        Result all = exec("verify");
+        assertThat(all.code()).as(all.out()).isEqualTo(8);
+        assertThat(all.out()).contains("problems (1)", " changed starts/" + id + ".json, which commit ");
+    }
+
+    /** The rule for the ledger's own git settings holds at the start too: no run starts that could not be checked. */
+    @Test
+    void aForeignSettingInTheLedger_refusesTheRunBeforeItStarts() throws Exception {
+        exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+        git("config", "core.autocrlf", "true");
+
+        Result run = exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+
+        assertThat(run.code()).as(run.out() + run.err()).isEqualTo(6);
+        assertThat(run.err()).contains("core.autocrlf", "config --unset", "the run is not started");
+        assertThat(exec("runs").out().lines().count()).as("no second run").isEqualTo(1);
     }
 
     private void git(String... args) throws Exception {

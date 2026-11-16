@@ -104,6 +104,11 @@ public final class VerifyCommand implements Command {
             report.earlierOpen().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  folder "
                     + TerminalFormat.safe(run.detail())));
         }
+        if (!report.inFlight().isEmpty()) {
+            out.println("in flight (" + report.inFlight().size() + ")");
+            report.inFlight().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  "
+                    + TerminalFormat.safe(run.detail()) + "; its process is alive"));
+        }
         out.println("acknowledged (" + report.acknowledged().size() + ")");
         for (LedgerReport.Acknowledged run : report.acknowledged()) {
             out.println("  " + TerminalFormat.safe(run.runId()) + "  " + TerminalFormat.safe(String.valueOf(run.said()))
