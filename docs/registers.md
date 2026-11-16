@@ -262,7 +262,7 @@ testing  testing  OPEN 14  DISMISSED 6  RESOLVED 71
 
 ## What the next run gets
 
-The next run of the audit gets three placeholders as untrusted platform data, quoted in shell lines like every
+The next run of the audit gets three placeholders as untrusted platform data, handed to a shell line by reference like every
 untrusted text and data, never instructions, in a prompt:
 
 - `{{ audit_findings }}`: the open, awaiting, accepted and dismissed findings (never the resolved ones), one row

@@ -165,7 +165,7 @@ or remove them, or none answers for a run that ran with one), it is refused (exi
 
 A run that was interrupted (its process was killed, or told to end: see "run") runs again the step that was in
 flight, and the record says which. Untrusted values stay untrusted across a resume, and what a model wrote stays
-quoted in a shell line. A run started with `--source` resumes in its checkout; see
+protected in a shell line. A run started with `--source` resumes in its checkout; see
 "Isolated workspace".
 
 **A loop goes on where it stopped.** When the step that runs again is a `foreach`, it does not run every item again.
@@ -540,9 +540,10 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `step-output-out-of-range` | `ERROR` | `{{ step_N_output }}` with an N no step gets. Steps are numbered from 0, one per top-level block: in a workflow of two blocks the last one is `{{ step_1_output }}`. Judged only where the numbers are known before the run: a `foreach`, `while`, `retry`, `conditional` or `switch` block takes one further number for each inner step, so when one of them stands before the last block, no `step_N_output` is judged |
 | `duplicate-block-name` | `ERROR` | two blocks of one name that can both run in one run: `{{ block.<name>.output }}` would hold the output of whichever ran last, and a `compress` block refuses the name as its source. The blocks of `switch` cases share the names of the top-level blocks. The same name in two cases of one `switch` (or in a case and its `default`) is fine, because only one of them runs |
 | `empty-workflow` | `ERROR` | a workflow without blocks: a run of it does nothing and ends `COMPLETED` |
-| `unquoted-ai-output` | `ERROR` | text a model wrote in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`) of a block without `shell_escape_variables: true`. A run quotes such text in every shell line ("The output of an AI step in a shell line", below), so the command would not run as written, and Traceworks refuses the workflow. What `check` takes for such text: the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen: a loop item, a variable, and the shell lines of a child workflow, which are judged when the child's package is checked and when it runs. Correct: `shell_escape_variables: true` on the block; `printf '%s\n' {{ block.<name>.output }} \| tool`, or `> file`, hands the text on as standard input or a file |
-| `quoted-placeholder` | `ERROR` or `WARNING` | a placeholder for free text inside quotes in shell code: an apostrophe in the value ends them, and where the run quotes the value itself the two pairs cancel out. An error for outside text (`previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) and for text a model wrote (as for `unquoted-ai-output`), with or without `shell_escape_variables`; a warning for the other step outputs, and in a block with `shell_escape_variables` for any placeholder in single quotes |
-| `heredoc-placeholder` | `ERROR` or `WARNING` | the same free text in the body of a heredoc. An error where an interpreter reads the body as its program (`python3 - <<'PY'`), where the delimiter is unquoted and the text is outside text or text a model wrote, and for text a model wrote in any body: the run quotes it there, so the quotes land in the text, and a line of it that equals the delimiter ends the body. A warning for the other step outputs under an unquoted delimiter, and for any placeholder in a body of a block with `shell_escape_variables` |
+| `unquoted-ai-output` | `ERROR` | text a model wrote as a bare word in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`) of a block without `shell_escape_variables: true`. A run hands such text to the shell as one value ("The output of an AI step in a shell line", below), so the command would not run as written, a value inserted as it is, and Traceworks refuses the workflow. Inside double quotes it is one piece of text, as written: no finding. What `check` takes for such text: the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen: a loop item, a variable, and the shell lines of a child workflow, which are judged when the child's package is checked and when it runs. Correct: `shell_escape_variables: true` on the block, or the placeholder inside double quotes |
+| `placeholder-refused-place` | `ERROR` | a value the run protects (text a model wrote, as for `unquoted-ai-output`, and the outside text `previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) stands where the run refuses the shell line, because no reference to it can stand there: after a backslash, inside backticks, in arithmetic (`$(( ))`, `(( ))`, `$[ ]`, `let`, an array subscript, the offset of `${name:offset}`, `[[ … -eq … ]]`), where a name is evaluated (`declare`, `typeset`, `local`, `export`, `readonly`, `read`, `unset`, `mapfile`, `printf -v`, `test -v`), where a command runs its argument (`eval`, `source`, `.`, `trap`, the code argument of `bash -c` and of the other interpreters) and where the command's name stands. `check` asks what the run asks, so it reports what the run would refuse and nothing else of such a value |
+| `quoted-placeholder` | `ERROR` or `WARNING` | an error: a value the run protects inside single quotes (`'…'`, `$'…'`), where no reference expands; the run refuses the line. Inside double quotes such a value is fine. A warning: a step output the run inserts as it is, inside quotes (an apostrophe or a quote in the value ends them), and in a block with `shell_escape_variables` any inserted placeholder in single quotes, where the two pairs of quotes cancel out |
+| `heredoc-placeholder` | `ERROR` or `WARNING` | an error: a value the run protects in the body of a heredoc with a quoted delimiter (`<<'EOF'`), where no reference expands, or of one an interpreter reads as its program (`python3 - <<PY`, `… \| sh`); the run refuses the line. In a heredoc with an unquoted delimiter such a value is fine. An error too: a step output the run inserts as it is in a body an interpreter reads as its program. A warning: an inserted step output under an unquoted delimiter (the shell runs `$(…)` in it), and any inserted placeholder in a body of a block with `shell_escape_variables` |
 | `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
 | `placeholder-in-model` | `ERROR` | a `model` with a placeholder, the workflow's or that of a block that makes an AI call, such as `"model": "{{ m }}"`: no run resolves it, so the CLI would be asked for a model of that text. Traceworks refuses the workflow. A model a run may pick is a declared choice ("Model choices") |
 | `invalid-model-choice` | `ERROR` | a `model_choices` declaration that is not understood completely (a choice that is no object, a key other than `default` and `options`, an option without `provider` or `model`, a placeholder in either, the provider Codex, a name that is no plain name or one a run sets itself, a `default_context` entry of the choice's name), a `default` that is none of the options, a block whose `model_choice` names no declared choice, and a block that names `provider` or `model` next to `model_choice`. Traceworks refuses the workflow |
@@ -553,39 +554,60 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 before a `run` knows the run's inputs and leaves those out. A child workflow checked on its own gets the warning for
 every variable its parent hands to it.
 
-**The output of an AI step in a shell line.** A shell line inserts the value of a placeholder as it is, or
-single-quoted, so that the shell takes it as one literal argument whatever it holds. It quotes every value in a block
-with `shell_escape_variables: true`; an untrusted input, platform data and every output of a run that carries
-untrusted input; and, from the first call of a model on, every step output recorded since and every variable made
-from one (a `step_N_output`, a `foreach` item from an `items_command`, an AI actor's answer to a `human-input`, an
-approval's `auto_answer` filled in from a placeholder). The last holds for the rest of the run, for the shell steps
-after the call too (one of them can print what the model wrote), in a child workflow the values are handed to, for
-the output of a child workflow that asked a model, and after a resume. What a step recorded before the first call is
-inserted as before, a run that asks no model quotes nothing it did not quote before, and a trusted write (the static
-`items` of a `foreach`, a person's answer) takes the mark off a variable.
+**The output of an AI step in a shell line.** A shell line inserts the value of a placeholder as it is, or with
+`shell_escape_variables: true` in single quotes. A value the run has to protect is not inserted at all: an untrusted
+input, platform data, every output of a run that carries untrusted input, and, from the first call of a model on,
+every step output recorded since and every variable made from one (a `step_N_output`, a `foreach` item from an
+`items_command`, an AI actor's answer to a `human-input`, an approval's `auto_answer` filled in from a placeholder).
+The last holds for the rest of the run, for the shell steps after the call too (one of them can print what the model
+wrote), in a child workflow the values are handed to, for the output of a child workflow that asked a model, and
+after a resume. What a step recorded before the first call is inserted as before, a run without such values runs as
+it always did, and a trusted write (the static `items` of a `foreach`, a person's answer) takes the mark off a
+variable.
+
+The run sets a shell variable to each protected value and writes a reference in the placeholder's place. The step
+`printf '%s\n' {{ block.review.output }} > "notes/{{ block.review.output }}.txt"` runs, and is recorded, as:
+
+```
+IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :
+it's $(not run)
+TRACEWORKS_VALUE_1_END
+TRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\n'}
+printf '%s\n' "${TRACEWORKS_VALUE_1}" > "notes/${TRACEWORKS_VALUE_1}.txt"
+```
+
+The first four lines set the variable: the value is the body of a heredoc with a quoted delimiter, where bash
+expands nothing, under a delimiter no line of the value is; the fourth line takes off the newline the heredoc ends
+with. Bash does not read what a reference expands to as code, so the value is never a command. A bare word gets the
+reference in double quotes (one argument); inside the author's double quotes, in a heredoc with an unquoted
+delimiter and in a comment it stands as it is. The variables are not exported, and their names
+(`TRACEWORKS_VALUE_<n>`) are Traceworks' own. With `shell_escape_variables: true` the other values are quoted in
+place as before.
 
 Three things can happen to such a value, and only the first two are refusals:
 
-- `check` refuses the workflow before a run, where the workflow shows the value in shell code that does not escape
-  it, or inside quotes or a heredoc body (`unquoted-ai-output`, `quoted-placeholder`, `heredoc-placeholder` above).
-- The run refuses the shell line where the value's placeholder stands inside double or single quotes, inside
-  backticks or an arithmetic expression, in the body of a heredoc, in a comment or after a backslash: single quotes
-  make one argument of a bare word only. The step fails before any command runs (a `run_if` test and an
-  `items_command` included) and the run ends with the error, with `shell_escape_variables` too:
+- `check` refuses the workflow before a run where the workflow shows that the run would refuse a line
+  (`quoted-placeholder`, `heredoc-placeholder`, `placeholder-refused-place` above), and for bare model text in a
+  block that does not escape (`unquoted-ai-output`).
+- The run refuses the shell line where no reference can stand: single quotes, a heredoc with a quoted delimiter,
+  after a backslash, backticks, arithmetic, a name bash evaluates, a command that runs its argument, the place of the
+  command's name (docs/security.md, "A model's answer in a shell command", has the list, and says that it is not
+  complete). The step fails before any command runs (a `run_if` test and an `items_command` included) and the run
+  ends with the error, with `shell_escape_variables` too:
 
   ```
-  ShellLineRefusedException: shell line refused, nothing ran: {{ item }} stands inside double quotes, and such a
-  value is text a model wrote or comes from outside the run. The run quotes it itself, which only holds for a bare
-  word: there a $(…), a quote or a line break in the value would run as a command. Write the placeholder bare
-  (X={{ item }}, then "$X"), or pass the value through a file or standard input (printf '%s\n' {{ item }} > file)
+  ShellLineRefusedException: shell line refused, nothing ran: {{ item }} stands inside single quotes, where the
+  shell expands no reference. Its value is text a model wrote or comes from outside the run; the run hands such a
+  value to the shell as a variable and writes a reference in the placeholder's place, so it never is shell code,
+  and that needs a place where the shell takes a value. Write the placeholder as a bare word or inside double
+  quotes (X={{ item }}, then use "$X"), or pass the value through a file or standard input (printf '%s\n'
+  {{ item }} > file)
   ```
 
-  This holds for untrusted input, platform data and the outputs of a tainted run as well. A bare placeholder inside
-  `$( … )` is a bare word and runs: `"$(printf '%s' {{ item }})"`.
-- The run quotes a bare placeholder that `check` did not see (a loop item, a variable, a shell line of a child
-  workflow, a child named by a placeholder, a run started with `--no-check`), without a refusal. The value is one
-  argument then, also where its author meant several: `wc -l {{ files }}` over `a.txt b.txt` counts one file of that
-  name. The step's recorded input shows the quoted line.
+- The run hands over, as one argument and without a refusal, a bare placeholder that `check` did not see to be
+  protected (a loop item, a variable, a shell line of a child workflow, a child named by a placeholder, a run started
+  with `--no-check`). The value is one argument then, also where its author meant several: `wc -l {{ files }}` over
+  `a.txt b.txt` counts one file of that name. The recorded command shows the reference and the value.
 
 An audit workflow (`metadata.audit`, docs/registers.md) is understood completely or refused: a block with
 `enabled: true` but a missing, blank or non-string `key`, `category` or `report_block`, a `schema_version` other than
@@ -929,7 +951,7 @@ the decision was made on another severity than the row shows), at most 250 rows 
 counted; `{{ previous_report }}` is the text of the last valid report, its envelope cut and every marker defused, at
 most 3000 characters; `{{ audit_items }}` is the items of the register, one row each with state, verdict digest and
 name, for the step that chooses what to judge. Before the first report they read `(no known findings)`,
-`(no previous report)` and `(no known items)`. A shell step quotes them as it quotes every untrusted text.
+`(no previous report)` and `(no known items)`. A shell step hands them to the shell by reference, as every untrusted text ("check", "The output of an AI step in a shell line").
 
 **Hooks.** With `hooks.register_changed` in `traceworks.json`, the program runs on the host after every audit run
 whose report changed the register (something new, resolved, reopened or due for review) or was rejected, with the
@@ -1554,12 +1576,14 @@ counts against the output limit (see "Output limit"). Like every step with a `co
 runtime; there is no tool step on the host.
 
 **Placeholders.** `container_args` can name run variables and earlier outputs (`{{ target }}`,
-`{{ block.build.output }}`), which are resolved before the tool starts. A value from outside cannot be quoted for an
-argument as it can for a shell line, and a value such as `--config=/etc/x` would change what the tool does, so such a
-value is **refused**: an untrusted input, platform data such as `previous_chain_output`, and the output of a block
-that ran after untrusted data reached a shell line. The step fails before the tool starts, with `container_args must
-not contain untrusted values (untrusted input, tainted block output, platform data): <the argument>`. A `mounts` entry
-with such a value is refused too. A `shell` step with `command` quotes such a value instead.
+`{{ block.build.output }}`), which are resolved before the tool starts. A value the run protects cannot reach an
+argument by reference as it can in a shell line, and a value such as `--config=/etc/x` would change what the tool
+does, so such a value is **refused**: an untrusted input, platform data such as `previous_chain_output`, the output
+of a block that ran after untrusted data reached a shell line, and, after the run's first call of a model, every
+step output and every variable made from one. The step fails before the tool starts, with `container_args must
+not contain untrusted values (untrusted input, tainted block output, platform data, text a model wrote): <the
+argument>`. A `mounts` entry with such a value is refused too. A `shell` step with `command` hands such a value to
+the shell by reference instead ("check", "The output of an AI step in a shell line").
 
 **Output.** Without `output_format`, the step output is what the tool printed, standard output and standard error
 together. The step is `COMPLETED` when the tool exits with 0 and `FAILED` otherwise, which ends the run `FAILED`
