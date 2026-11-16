@@ -79,6 +79,12 @@ final class ContainerArguments {
     /** The port the egress proxy listens on, as its image has it. */
     static final int PROXY_PORT = 3128;
 
+    /**
+     * What marks a target of the egress proxy as one it also forwards a plain HTTP request to
+     * ({@link Egress#plain()}), as the proxy's image reads its arguments.
+     */
+    static final String PLAIN_TARGET = "http://";
+
     /** The variables that point a container's clients at the egress proxy, in the order they are set. */
     static final List<String> PROXY_VARIABLES = List.of("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy");
 
@@ -264,7 +270,8 @@ final class ContainerArguments {
     /**
      * The command line that starts the egress proxy of {@code run}, detached: the secure defaults of every container
      * (read-only, no capabilities, no new privileges, the user, the limits, the run's label), both networks, no mount
-     * and no variable of the step, and the listed hosts as its arguments. Unlike a step's container it keeps the
+     * and no variable of the step, and the listed hosts as its arguments, a host that also takes plain HTTP as
+     * {@code http://host:port}. Unlike a step's container it keeps the
      * runtime's log, which holds only the proxy's lines and is read with {@code logs}, and it has no {@code --rm}:
      * Traceworks reads the log and then removes it. Podman takes several networks as one list.
      *
@@ -296,7 +303,10 @@ final class ContainerArguments {
         arguments.addAll(List.of("-e", "HOME=/tmp", "-e", "TMPDIR=/tmp", "-e", "LANG=C.UTF-8",
                 "-e", "TINI_KILL_PROCESS_GROUP=1"));
         arguments.add(image);
-        arguments.addAll(run.network().hosts());
+        for (String host : run.network().hosts()) {
+            // A model server of the operator's that speaks http: the proxy also forwards a plain request to it
+            arguments.add(run.network().plain().contains(host) ? PLAIN_TARGET + host : host);
+        }
         return arguments;
     }
 
