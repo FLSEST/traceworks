@@ -315,6 +315,19 @@ public final class RunSnapshotJson {
     }
 
     /** {@code taint.model_text} of the current format; the formats before it have none. */
+    /**
+     * The model text of a state written before the marks existed: nothing says which outputs a model wrote, so the
+     * run counts as one that asked a model, and every output and every variable that is not protected already may
+     * hold model text. The resume sets the run's own variables anew, which makes those trusted again.
+     */
+    private static ContextState.ModelText unknownModelText(Set<String> variables, Set<String> untrusted,
+                                                           Set<String> platform, Set<String> blockOutputs) {
+        Set<String> names = new java.util.HashSet<>(variables);
+        names.removeAll(untrusted);
+        names.removeAll(platform);
+        return new ContextState.ModelText(true, names, blockOutputs, true);
+    }
+
     private static ContextState.ModelText modelText(JsonNode node) {
         object(node);
         return new ContextState.ModelText(bool(required(node, "asked")), names(required(node, "variables")),
@@ -332,17 +345,22 @@ public final class RunSnapshotJson {
         Map<String, SourceStep> byName = new LinkedHashMap<>();
         object(required(sourceSteps, "by_name")).properties()
                 .forEach(entry -> byName.put(entry.getKey(), sourceStep(entry.getValue())));
+        Map<String, Object> variables = variables(node, format, text);
+        Map<String, String> blockOutputs = map(required(node, "block_outputs"), text);
+        Set<String> untrusted = names(required(taint, "untrusted_variables"));
+        Set<String> platform = names(required(taint, "platform_variables"));
         return new ContextState(
-                variables(node, format, text),
+                variables,
                 new ContextState.Taint(
-                        names(required(taint, "untrusted_variables")),
-                        names(required(taint, "platform_variables")),
+                        untrusted,
+                        platform,
                         names(required(taint, "tainted_outputs")),
                         bool(required(taint, "previous_output_tainted")),
                         bool(required(taint, "platform_used_in_shell")),
                         bool(required(taint, "platform_in_prompt")),
-                        format == FORMAT ? modelText(required(taint, "model_text")) : ContextState.ModelText.NONE),
-                map(required(node, "block_outputs"), text),
+                        format == FORMAT ? modelText(required(taint, "model_text"))
+                                : unknownModelText(variables.keySet(), untrusted, platform, blockOutputs.keySet())),
+                blockOutputs,
                 text.apply(required(node, "previous_output")),
                 new ContextState.SourceSteps(byName, names(required(sourceSteps, "ambiguous")),
                         sourceStep(required(sourceSteps, "last"))),

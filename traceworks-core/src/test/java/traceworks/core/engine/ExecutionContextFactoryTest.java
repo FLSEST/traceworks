@@ -437,6 +437,37 @@ class ExecutionContextFactoryTest {
      * variables, which the resume sets from its seed exactly as {@code create} does, so they agree with the
      * context's own settings.
      */
+    /**
+     * A state of a version that did not mark model text is read as "everything may be model text"
+     * ({@code RunSnapshotJson}). Restored, a shell line refuses every output and every variable of the run, and
+     * the run's own variables, which the resume sets anew, are trusted.
+     */
+    @Test
+    void restore_ofAStateThatMarksEverythingAsModelText_refusesItsOutputsAndVariables_notTheRunsOwn() {
+        ExecutionContext before = factory.create(seed(Map.of("topic", "the release")));
+        before.recordOutput("ask", "$(touch pwned)");
+        before.setDerivedVariable("step_0_output", "$(touch pwned)");
+        ContextState taken = before.state();
+        Set<String> all = new java.util.HashSet<>(taken.variables().keySet());
+        ContextState closed = new ContextState(taken.variables(), new ContextState.Taint(Set.of(), Set.of(), Set.of(),
+                false, false, false, new ContextState.ModelText(true, all, taken.blockOutputs().keySet(), true)),
+                taken.blockOutputs(), taken.previousOutput(), taken.sourceSteps(), taken.nextStepIndex(),
+                taken.runMetadata(), taken.rememberedApprovals());
+
+        ExecutionContext after = factory.restore(seed(Map.of("topic", "the release")), closed);
+
+        for (String placeholder : List.of("{{ block.ask.output }}", "{{ previous_output }}", "{{ step_0_output }}",
+                "{{ topic }}")) {
+            assertThatThrownBy(() -> after.resolveShellTemplate("echo " + placeholder, false)).as(placeholder)
+                    .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        }
+        assertThat(after.resolveShellTemplate("cd {{ project_path }} && echo {{ workflow_run_id }}", false))
+                .as("the run's own variables").doesNotContain("{{");
+        after.recordOutput("next", "more");
+        assertThatThrownBy(() -> after.resolveShellTemplate("echo {{ block.next.output }}", false))
+                .as("what the resumed run records").isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
     @Test
     void restore_bringsBackTheStateAsItWas() {
         ExecutionContext before = factory.create(seed(Map.of("ticket", "a; reboot", "previous_chain_output", "chain",

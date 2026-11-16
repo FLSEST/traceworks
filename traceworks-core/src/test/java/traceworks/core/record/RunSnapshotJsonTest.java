@@ -97,13 +97,14 @@ class RunSnapshotJsonTest {
     }
 
     /**
-     * The format number rose with the model text. A snapshot of the format before it, which has none, still reads,
-     * as a run that asked no model; and a snapshot of this format carries a number the version before does not
+     * The format number rose with the model text. A snapshot of the format before it says nothing about what a
+     * model wrote, so it reads closed: as a run that asked a model, with every output and every variable that is
+     * not protected already as model text. A snapshot of this format carries a number the version before does not
      * know, which that version refuses ({@code read_ofAnotherFormat_isRefused} is that refusal, for any number a
      * version does not know) instead of resuming the run without its model text.
      */
     @Test
-    void read_ofTheFormatBeforeTheModelText_readsAsARunThatAskedNoModel() throws Exception {
+    void read_ofTheFormatBeforeTheModelText_readsEveryOutputAndVariableAsModelText() throws Exception {
         ContextState.Taint asked = new ContextState.Taint(Set.of("ticket"), Set.of(), Set.of("build"), true, false,
                 false, new ContextState.ModelText(true, Set.of("item"), Set.of("ask"), true));
         ObjectNode root = (ObjectNode) JSON.readTree(RunSnapshotJson.write(withTaint(asked), texts));
@@ -114,7 +115,22 @@ class RunSnapshotJsonTest {
         ContextState.Taint read = RunSnapshotJson.read(JSON.writeValueAsBytes(root), texts).context().taint();
 
         assertThat(read).isEqualTo(new ContextState.Taint(Set.of("ticket"), Set.of(), Set.of("build"), true, false,
-                false));
+                false, new ContextState.ModelText(true, Set.of("x"), Set.of(), true)));
+
+        ContextState state = everyFieldPopulated().context();
+        ObjectNode full = (ObjectNode) JSON.readTree(RunSnapshotJson.write(everyFieldPopulated(), texts));
+        full.put("format", 3);
+        ((ObjectNode) full.at("/context/taint")).remove("model_text");
+        ContextState.Taint closed = RunSnapshotJson.read(JSON.writeValueAsBytes(full), texts).context().taint();
+        assertThat(closed.modelText().asked()).isTrue();
+        assertThat(closed.modelText().previousOutput()).isTrue();
+        assertThat(closed.modelText().outputs()).as("every recorded output")
+                .isEqualTo(state.blockOutputs().keySet()).isNotEmpty();
+        Set<String> unmarked = new java.util.HashSet<>(state.variables().keySet());
+        unmarked.removeAll(state.taint().untrustedVariables());
+        unmarked.removeAll(state.taint().platformVariables());
+        assertThat(closed.modelText().variables()).as("every variable that was not protected already")
+                .isEqualTo(unmarked).isNotEmpty();
 
         ObjectNode current = (ObjectNode) JSON.readTree(RunSnapshotJson.write(withTaint(asked), texts));
         ((ObjectNode) current.at("/context/taint")).remove("model_text");
@@ -283,13 +299,13 @@ class RunSnapshotJsonTest {
 
         RunSnapshot read = RunSnapshotJson.read(first, none);
 
-        assertThat(read.context()).isEqualTo(expected.context());
+        assertThat(read.context()).isEqualTo(readClosed(expected.context()));
         assertThat(read.inputContext()).isEqualTo(expected.inputContext());
         assertThat(read.steps()).usingRecursiveFieldByFieldElementComparator().isEqualTo(expected.steps());
         assertThat(RunSnapshotJson.references(first)).isEmpty();
         byte[] again = RunSnapshotJson.write(read, texts);
         assertThat(JSON.readTree(again).get("format").asInt()).isEqualTo(RunSnapshotJson.FORMAT);
-        assertThat(RunSnapshotJson.read(again, texts).context()).isEqualTo(expected.context());
+        assertThat(RunSnapshotJson.read(again, texts).context()).isEqualTo(readClosed(expected.context()));
         assertThat(RunSnapshotJson.write(RunSnapshotJson.read(again, texts), texts)).isEqualTo(again);
     }
 
@@ -307,7 +323,7 @@ class RunSnapshotJsonTest {
 
         RunSnapshot read = RunSnapshotJson.read(second, texts);
 
-        assertThat(read.context()).isEqualTo(expected.context());
+        assertThat(read.context()).isEqualTo(readClosed(expected.context()));
         assertThat(read.inputContext()).isEqualTo(expected.inputContext());
         assertThat(read.steps()).usingRecursiveFieldByFieldElementComparator().isEqualTo(expected.steps());
         assertThat(RunSnapshotJson.references(second)).extracting(RunSnapshotJson.Reference::field).containsExactly(
@@ -316,7 +332,7 @@ class RunSnapshotJsonTest {
                 "context.step_output_variables.step_1_output");
         byte[] again = RunSnapshotJson.write(read, texts);
         assertThat(JSON.readTree(again).get("format").asInt()).isEqualTo(RunSnapshotJson.FORMAT);
-        assertThat(RunSnapshotJson.read(again, texts).context()).isEqualTo(expected.context());
+        assertThat(RunSnapshotJson.read(again, texts).context()).isEqualTo(readClosed(expected.context()));
         assertThat(RunSnapshotJson.write(RunSnapshotJson.read(again, texts), texts)).isEqualTo(again);
     }
 
@@ -512,6 +528,20 @@ class RunSnapshotJsonTest {
         return new RunSnapshot(new ContextState(variables, c.taint(), c.blockOutputs(), c.previousOutput(),
                 c.sourceSteps(), c.nextStepIndex(), c.runMetadata(), c.rememberedApprovals()), snapshot.steps(),
                 snapshot.inputContext());
+    }
+
+    /** {@code state} as a format before the model text reads: every output and unmarked variable is model text. */
+    private static ContextState readClosed(ContextState state) {
+        ContextState.Taint taint = state.taint();
+        Set<String> unmarked = new java.util.HashSet<>(state.variables().keySet());
+        unmarked.removeAll(taint.untrustedVariables());
+        unmarked.removeAll(taint.platformVariables());
+        return new ContextState(state.variables(), new ContextState.Taint(taint.untrustedVariables(),
+                taint.platformVariables(), taint.taintedOutputs(), taint.previousOutputTainted(),
+                taint.platformUsedInShell(), taint.platformInPrompt(),
+                new ContextState.ModelText(true, unmarked, state.blockOutputs().keySet(), true)),
+                state.blockOutputs(), state.previousOutput(), state.sourceSteps(), state.nextStepIndex(),
+                state.runMetadata(), state.rememberedApprovals());
     }
 
     private static ContextState context(Map<String, Object> variables) {
