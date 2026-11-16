@@ -403,6 +403,7 @@ On the host:
 | `duration_ms` | how long it ran |
 | `timed_out` | whether it was stopped by its time limit |
 | `truncated` | the streams that went beyond the output limit, `stdout` before `stderr`; `[]` when the output was whole. The limit is the `output_limit_mib` of `run.started`, or of the last `run.resumed` before the command (16 MiB by default). Of such a stream only its first part up to the limit was kept, and what ran the command failed (docs/cli.md, "Output limit"). On the host, `stdout` is the merged output. A record of an earlier version has no such field |
+| `output_cut` | only when the reading of the output ended at its bound and not at the end of the stream: `{streams, after_ms}`. After the command ended, something it left behind still held the output (a background job, a process substitution), and what that wrote after the bound is not in the record, so the output may be incomplete. `streams` names the streams it happened to, `stdout` before `stderr` (on the host, `stdout` is the merged output); `after_ms` is the bound, how long the output was read after the command's end: 5000 on the host after a command that ended by itself, 2000 after one that Traceworks stopped (a timeout, an output beyond the limit), 2000 for a container's client. A mark: it fails no step and changes no gate; `show` and `run.html` mark it and count it, and `diff` takes a cut in one run only as a difference. It is another matter than `truncated`: there the stream was longer than the limit, here it had not ended in time. The mark is set at the bound, also when what holds the output never writes; the reader of such a stream stays until that process ends and keeps nothing more. A record without the field says that every stream was read to its end; a record of an earlier version never has it, and does not say (docs/cli.md, "Host execution") |
 | `egress` | only for a command with `network: "hosts"`: what its container asked the egress proxy for, as a list of `{target, verdict, count}`, counted by target and verdict, in the order of their first appearance; `[]` when it asked for nothing. `target` is `host:port` as the container wrote it, in lower case, or `?` for a request that named none; it comes from inside the container. `verdict` is `ALLOW` (connected), `DENY` (not in `network_hosts`, or a plain HTTP request, which the proxy forwards only to a model server of the operator's whose URL starts with `http://`, or, for a target only `*` allows, another port than 443, an IP address or a name that resolves to an address that is not public), `FAIL` (listed, but the connection failed) or `LIMIT`. Nothing else of a connection is recorded: no path, no header, no content. A `DENY` fails no step and changes no gate; `show` and `run.html` mark it and count it. The list names at most 100 targets; the requests to further ones are counted together under the target `(other targets)`. After 10,000 requests the proxy refuses every further one, and the list ends with `{"target": "*", "verdict": "LIMIT", "count": 1}`. A command that could not start its proxy did not run (exit code 125) and has `[]` |
 
 ```json
@@ -413,6 +414,13 @@ An AI call whose model, with shell tools, also tried another host:
 
 ```json
 {"step":1,"item":null,"exit_code":0,"duration_ms":18244,"timed_out":false,"truncated":[],"egress":[{"target":"api.anthropic.com:443","verdict":"ALLOW","count":3},{"target":"paste.example.org:443","verdict":"DENY","count":1}]}
+```
+
+A host command that left a writer behind (`server & echo started`): its output was read for 5 seconds after its end
+and then closed:
+
+```json
+{"step":0,"item":null,"exit_code":0,"duration_ms":5012,"timed_out":false,"truncated":[],"output_cut":{"streams":["stdout"],"after_ms":5000}}
 ```
 
 A command whose output went beyond the limit:
