@@ -516,7 +516,8 @@ reason the engine's run admission would refuse the run for is an error, such as 
 requirement, an AI step's tools or a package image in a child of another package (`child-package-image`; see
 "Requirements" and "AI steps"). The rules judge the package's own workflow; of the child workflows it reaches by a
 literal `workflow_id`, `check` reports only their package images, their questions (`nested-wait-point`) and, for
-`unquoted-ai-output`, whether one of them asks a model. A child
+`unquoted-ai-output`, whether one of them asks a model; the shell lines of a child that take values its parent hands
+over are judged when the child runs ("The output of an AI step in a shell line"). A child
 that names Codex, which refuses the run at its start ("AI steps"), is reported when you check the child's package. A
 Dockerfile under the package's `images/` whose `FROM` names no `@sha256:` digest gets the warning
 `unpinned-base-image`, one without the label `org.opencontainers.image.description` the warning
@@ -539,7 +540,7 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `step-output-out-of-range` | `ERROR` | `{{ step_N_output }}` with an N no step gets. Steps are numbered from 0, one per top-level block: in a workflow of two blocks the last one is `{{ step_1_output }}`. Judged only where the numbers are known before the run: a `foreach`, `while`, `retry`, `conditional` or `switch` block takes one further number for each inner step, so when one of them stands before the last block, no `step_N_output` is judged |
 | `duplicate-block-name` | `ERROR` | two blocks of one name that can both run in one run: `{{ block.<name>.output }}` would hold the output of whichever ran last, and a `compress` block refuses the name as its source. The blocks of `switch` cases share the names of the top-level blocks. The same name in two cases of one `switch` (or in a case and its `default`) is fine, because only one of them runs |
 | `empty-workflow` | `ERROR` | a workflow without blocks: a run of it does nothing and ends `COMPLETED` |
-| `unquoted-ai-output` | `ERROR` | text a model wrote in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`) of a block without `shell_escape_variables: true`. A run quotes such text in every shell line ("The output of an AI step in a shell line", below), so the command would not run as written, and Traceworks refuses the workflow. It is the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one), and the output of every block after the first of them. The block is found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known before the run. Correct: `shell_escape_variables: true` on the block; `printf '%s\n' {{ block.<name>.output }} \| tool`, or `> file`, hands the text on as standard input or a file |
+| `unquoted-ai-output` | `ERROR` | text a model wrote in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`) of a block without `shell_escape_variables: true`. A run quotes such text in every shell line ("The output of an AI step in a shell line", below), so the command would not run as written, and Traceworks refuses the workflow. What `check` takes for such text: the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen: a loop item, a variable, and the shell lines of a child workflow, which are judged when the child's package is checked and when it runs. Correct: `shell_escape_variables: true` on the block; `printf '%s\n' {{ block.<name>.output }} \| tool`, or `> file`, hands the text on as standard input or a file |
 | `quoted-placeholder` | `ERROR` or `WARNING` | a placeholder for free text inside quotes in shell code: an apostrophe in the value ends them, and where the run quotes the value itself the two pairs cancel out. An error for outside text (`previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) and for text a model wrote (as for `unquoted-ai-output`), with or without `shell_escape_variables`; a warning for the other step outputs, and in a block with `shell_escape_variables` for any placeholder in single quotes |
 | `heredoc-placeholder` | `ERROR` or `WARNING` | the same free text in the body of a heredoc. An error where an interpreter reads the body as its program (`python3 - <<'PY'`), where the delimiter is unquoted and the text is outside text or text a model wrote, and for text a model wrote in any body: the run quotes it there, so the quotes land in the text, and a line of it that equals the delimiter ends the body. A warning for the other step outputs under an unquoted delimiter, and for any placeholder in a body of a block with `shell_escape_variables` |
 | `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`modelChoices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
@@ -556,12 +557,35 @@ every variable its parent hands to it.
 single-quoted, so that the shell takes it as one literal argument whatever it holds. It quotes every value in a block
 with `shell_escape_variables: true`; an untrusted input, platform data and every output of a run that carries
 untrusted input; and, from the first call of a model on, every step output recorded since and every variable made
-from one (a `step_N_output`, a `foreach` item from an `items_command`, an AI actor's answer to a `human-input`). The
-last holds for the rest of the run, for the shell steps after the call too (one of them can print what the model
-wrote), in a child workflow the values are handed to, for the output of a child workflow that asked a model, and
-after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
-quotes nothing it did not quote before. The rule above refuses, before a run, what the workflow shows; the run quotes
-what it does not show (a variable, a loop item, a child named by a placeholder, a run started with `--no-check`).
+from one (a `step_N_output`, a `foreach` item from an `items_command`, an AI actor's answer to a `human-input`, an
+approval's `auto_answer` filled in from a placeholder). The last holds for the rest of the run, for the shell steps
+after the call too (one of them can print what the model wrote), in a child workflow the values are handed to, for
+the output of a child workflow that asked a model, and after a resume. What a step recorded before the first call is
+inserted as before, a run that asks no model quotes nothing it did not quote before, and a trusted write (the static
+`items` of a `foreach`, a person's answer) takes the mark off a variable.
+
+Three things can happen to such a value, and only the first two are refusals:
+
+- `check` refuses the workflow before a run, where the workflow shows the value in shell code that does not escape
+  it, or inside quotes or a heredoc body (`unquoted-ai-output`, `quoted-placeholder`, `heredoc-placeholder` above).
+- The run refuses the shell line where the value's placeholder stands inside double or single quotes, inside
+  backticks or an arithmetic expression, in the body of a heredoc, in a comment or after a backslash: single quotes
+  make one argument of a bare word only. The step fails before any command runs (a `run_if` test and an
+  `items_command` included) and the run ends with the error, with `shell_escape_variables` too:
+
+  ```
+  ShellLineRefusedException: shell line refused, nothing ran: {{ item }} stands inside double quotes, and such a
+  value is text a model wrote or comes from outside the run. The run quotes it itself, which only holds for a bare
+  word: there a $(…), a quote or a line break in the value would run as a command. Write the placeholder bare
+  (X={{ item }}, then "$X"), or pass the value through a file or standard input (printf '%s\n' {{ item }} > file)
+  ```
+
+  This holds for untrusted input, platform data and the outputs of a tainted run as well. A bare placeholder inside
+  `$( … )` is a bare word and runs: `"$(printf '%s' {{ item }})"`.
+- The run quotes a bare placeholder that `check` did not see (a loop item, a variable, a shell line of a child
+  workflow, a child named by a placeholder, a run started with `--no-check`), without a refusal. The value is one
+  argument then, also where its author meant several: `wc -l {{ files }}` over `a.txt b.txt` counts one file of that
+  name. The step's recorded input shows the quoted line.
 
 An audit workflow (`metadata.audit`, docs/registers.md) is understood completely or refused: a block with
 `enabled: true` but a missing, blank or non-string `key`, `category` or `reportBlock`, a `schemaVersion` other than

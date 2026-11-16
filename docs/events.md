@@ -229,7 +229,7 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `workflow` | `{id, name}` of the workflow |
 | `package` | `{dir, digest, git_commit, git_dirty}`: the package directory, its digest, and the git commit and dirty state of its directory (`null` when it is not in a repository) |
 | `definition` | blob: the bytes of `workflow.json` as the run read them |
-| `inputs` | blob: the inputs of the run, the `--input` values. The engine sets `package_dir`, which is no input; a record of an earlier version also has it here |
+| `inputs` | blob: the inputs of the run, the `--input` values. The engine sets `package_dir`, which is no input; a record of an earlier version also has it here | The inputs of a child run are what its parent hands over, the parent's variables, and with them the reserved keys that carry which of them a shell line quotes: `__untrusted_keys` (the names of the variables from an untrusted source), `__untrusted_outputs` (the names of the block outputs of a tainted run, and `previous_output` for the last output), `__platform_in_shell` (`true` once platform data reached a shell line), and, once the parent asked a model, `__model_asked` (`true`), `__model_keys` (the names of the variables that may hold text a model wrote) and `__model_outputs` (the names of such block outputs, and `previous_output`). A key is there only when it has something to say
 | `trigger` | `MANUAL` for a run started on the command line |
 | `inputs_from` | only with `--inputs-from`: the id of the run whose recorded inputs this run took; the `inputs` blob holds the result, with the explicit `--input` values applied |
 | `actor` | who started the run |
@@ -271,12 +271,12 @@ grows with the number of steps and variables, not with the size of their texts:
 
 | Field of the state | Meaning |
 |---|---|
-| `format` | `3` |
+| `format` | `4`. `3` is the format before `context.taint.model_text`, read as a run that asked no model; a version that knows only `3` refuses a state of format `4` |
 | `context.variables` | the run's variables that hold no text: numbers, booleans, lists, maps and `null` |
 | `context.text_variables` | the run's variables that hold a text, each as a blob reference: the inputs and run variables that are texts, the texts steps set (an answer, a `foreach` item) and `step_<n>_output` (the output of step n) |
 | `context.block_outputs` | the output of each named block, each as a blob reference |
 | `context.previous_output` | the output of the last block as a blob reference, or `null` |
-| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context. `context.taint.model_text` is there once the run asked a model: the `variables` and `outputs` that may hold what a model wrote, and whether `previous_output` does; a shell line quotes them |
+| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context. `context.taint.model_text` is what may hold text a model wrote: `asked` (whether the run asked a model), the `variables` and `outputs` recorded since, and whether `previous_output` is one; a shell line quotes them |
 | `steps` | the top-level steps so far; each one's `input` and `output` is a blob reference or `null`, its status, times and `metadata` are written inline |
 | `input_context` | the variables the run started with, inline |
 
@@ -287,7 +287,7 @@ in `context.variables` or in `context.text_variables`, never in both. Each text 
 adds no copy of it:
 
 ```json
-{"format":3,"context":{"variables":{"retries":2},"text_variables":{"name":{"sha256":"bf4f...","size":4},"step_0_output":{"sha256":"4ae7...","size":12},"workflow_run_id":{...},...},"taint":{...},"block_outputs":{"greet":{"sha256":"4ae7...","size":12}},"previous_output":{"sha256":"4ae7...","size":12},"source_steps":{...},"next_step_index":1,"run_metadata":{},"remembered_approvals":{}},"steps":[{"id":"...","step_index":0,"block_name":"greet","block_type":"shell","status":"COMPLETED","input":{"sha256":"9e03...","size":19},"output":{"sha256":"4ae7...","size":12},"started_at":"...","completed_at":"...","duration_ms":8,"metadata":{...}}],"input_context":{"name":"Anna","retries":2}}
+{"format":4,"context":{"variables":{"retries":2},"text_variables":{"name":{"sha256":"bf4f...","size":4},"step_0_output":{"sha256":"4ae7...","size":12},"workflow_run_id":{...},...},"taint":{...},"block_outputs":{"greet":{"sha256":"4ae7...","size":12}},"previous_output":{"sha256":"4ae7...","size":12},"source_steps":{...},"next_step_index":1,"run_metadata":{},"remembered_approvals":{}},"steps":[{"id":"...","step_index":0,"block_name":"greet","block_type":"shell","status":"COMPLETED","input":{"sha256":"9e03...","size":19},"output":{"sha256":"4ae7...","size":12},"started_at":"...","completed_at":"...","duration_ms":8,"metadata":{...}}],"input_context":{"name":"Anna","retries":2}}
 ```
 
 `resume` reads every text the state refers to and checks it like the state itself; `cancel` checks them too, but a

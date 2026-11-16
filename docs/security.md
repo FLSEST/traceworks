@@ -288,32 +288,55 @@ content, and no blob is written through one.
   still send it there, under another account. Give AI steps a key you can limit and revoke, and keep `tools: none`
   for steps whose prompt carries content you do not trust.
 - **A model's answer in a shell command.** A model reads the workspace, and what it reads (a file, a page) can
-  steer its answer, so the output of an AI step never reaches a shell line as code: it is always quoted there, as
-  one literal argument, whatever `$(…)`, `;`, quote or line break it holds.
-  - **The run quotes.** From the first call of a model on (a `simple` or `agentic` step, a wrapper in AI mode,
-    `compress-ai`, a step an AI actor decides, a child workflow that asks one), a shell line single-quotes every
-    step output recorded since and every variable made from one: `{{ block.<name>.output }}`,
+  steer its answer, so the output of an AI step never reaches a shell line as code. Three things work together, and
+  each does something different:
+  - **The run quotes a bare placeholder.** From the first call of a model on (a `simple` or `agentic` step, a
+    wrapper in AI mode, `compress-ai`, a step an AI actor decides, a child workflow that asks one), every step output
+    recorded since and every variable made from one is model text: `{{ block.<name>.output }}`,
     `{{ previous_output }}`, `{{ step_N_output }}`, a `foreach` item from an `items_command`, an AI actor's answer
-    to a `human-input`. That holds in a `command`, an `items_command`, a `run_if` test and a shell `condition`, in
-    a child workflow the values are handed to, and after a resume. It covers the outputs of the shell steps after
-    the call too, because such a step can print what the model wrote, or a file the model wrote, without naming a
+    to a `human-input`, an approval's `auto_answer` filled in from a placeholder. Where its placeholder stands as a
+    bare word in a `command`, an `items_command`, a `run_if` test, a shell `condition`, a `then_command` or an
+    `else_command`, the run single-quotes the value: one literal argument, whatever `$(…)`, `;`, quote or line
+    break it holds. That holds in a child workflow the values are handed to, for the output of a child (or a child
+    of a child) that asked a model, and after a resume. It covers the outputs of the shell steps after the call
+    too, because such a step can print what the model wrote, or a file the model wrote, without naming a
     placeholder. What a step recorded before the first call is inserted as before, and a run that asks no model
-    runs as it always did.
-  - **`check` refuses what would not run as written.** Where the workflow shows that such an output stands in
-    shell code of a block without `shell_escape_variables: true`, `traceworks check` reports the error
-    `unquoted-ai-output`, and `traceworks run` starts no run. Inside the author's own quotes
-    (`quoted-placeholder`) and in the body of a heredoc (`heredoc-placeholder`) it is an error with or without the
-    setting: the quotes of the run cancel out against the author's, and a line of the answer that equals the
-    heredoc's delimiter ends the body. Write the placeholder bare in a block with `shell_escape_variables: true`
-    (the boolean: the text `"true"` is refused, the block fails and `check` reports `invalid-config-value`), and
-    hand the text on as standard input or as a file with `printf '%s\n' {{ block.<name>.output }} | tool` or
-    `> file`.
+    runs as it always did. A trusted write takes the mark off a variable again: the static `items` of a `foreach`,
+    a person's answer.
+  - **The run refuses a placeholder where its quotes do not hold.** Single quotes make one argument of a bare word
+    only. Inside the author's double quotes a `$(…)` in the value would still run; inside single quotes the two
+    pairs cancel out; backticks and an arithmetic expression expand the text again; in the body of a heredoc a
+    line of the value can end the body; in a comment a line break of the value ends the comment. In each of these
+    places, and after a backslash, the shell line is not filled in: the step fails before any command runs, with
+    `shell line refused, nothing ran: {{ item }} stands inside double quotes, and such a value is text a model
+    wrote or comes from outside the run. …`, and the run ends with that error. `shell_escape_variables: true` does
+    not change this. The same holds for the values that were quoted before: an untrusted input, platform data
+    (`previous_report`, `audit_findings`, `audit_items`, `previous_chain_output`) and the outputs of a run that
+    carries untrusted input. Inside `$( … )` a bare placeholder is a bare word: `"$(printf '%s' {{ x }})"` runs.
+  - **`check` refuses, before the run, what the workflow shows.** `unquoted-ai-output` is the error for model text
+    in shell code of a block without `shell_escape_variables: true`; `quoted-placeholder` and
+    `heredoc-placeholder` are errors for model text inside quotes and in a heredoc body, with or without the
+    setting (the boolean: the text `"true"` is refused, and `check` reports `invalid-config-value`); `traceworks run`
+    then starts no run. `check` knows the output of a block that asks a model, the
+    outputs of the blocks after the first such block, a `step_N_output` whose step the block list does not tell and
+    a `previous_output` in a nested block, both when a model is asked before them, and a child workflow named
+    literally, of which it asks only whether it asks a model.
+  - **What `check` does not see, the run decides without a refusal up front.** A loop item, a variable, a child
+    workflow's own shell lines that take values its parent hands over, a child named by a placeholder, a run
+    started with `--no-check`: there a bare placeholder is quoted at run time although its author did not ask for
+    it. `wc -l {{ files }}` over `a.txt b.txt` then counts one file named `a.txt b.txt`, and fails. The value never
+    runs as code; the command may do something other than its author meant, and the step's recorded input shows
+    the quoted line.
   - **What stays.** Quoting keeps the text from running as shell code; it does not make the text true or safe to
     act on. A command that takes the text as an argument or reads it from a file still decides what it does with
-    it (`sh -c`, `eval`, a path to delete). A tool step's `container_args` and a `mounts` entry take a model's
-    answer as it is, as one argument, since no shell reads them. A run recorded by a version before this rule and
-    resumed now knows nothing of the calls before its checkpoint: what they wrote is inserted as before, until the
-    resumed run asks a model itself.
+    it (`sh -c`, `eval`, a path to delete), and bash itself evaluates a quoted value as arithmetic in
+    `[[ … -eq … ]]` and in an array index. A tool step's `container_args` and a `mounts` entry take a model's
+    answer as it is, as one argument, since no shell reads them. The reader that tells where a placeholder stands
+    is a small state machine, not a shell: it knows quotes, `$'…'`, `$(…)`, backticks, arithmetic, heredocs,
+    comments and `case` patterns, and treats shell code it leaves with an open quote or bracket as not understood
+    (every placeholder in it is refused). A checkpoint written before model text was kept says nothing of the
+    calls before it: a run resumed from one inserts what those calls wrote as before, until the resumed run asks a
+    model itself. A checkpoint written now has a format number such a version refuses.
 - **A gate from an AI step.** A `simple` or `agentic` step can set the run's gate with a `gate_status:` line, since a
   report step delivers its verdict that way; a model steered by what it reads can therefore set a gate too. Keep the
   verdict in a step that checks the model's work, as `examples/self-audit/security` does. The output of a wrapper in
