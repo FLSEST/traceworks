@@ -64,7 +64,9 @@ of an envelope: a title over 2000 or a description over 20 000 characters reject
 `examples/audit-hello` is the smallest audit: two shell steps and no AI. `examples/self-audit/architecture` feeds
 the register `architecture` with its measured findings and its verified verdicts. `examples/self-audit/security`,
 `functionality` and `testing` feed registers of their own; `examples/self-audit/README.md` shows how the audits, the
-registers and the triage of their findings make a loop.
+registers and the triage of their findings make a loop. `examples/self-audit/security-changes` is an audit whose
+runs each judge a part of the project (what changed since a commit): it lists every item its register knows in
+every report, and takes every item that is open or was not judged into its next run.
 
 ### catalog.json
 
