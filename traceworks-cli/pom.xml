@@ -54,6 +54,12 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>traceworks.cli.main.Main</mainClass>
                                 </transformer>
+                                <!-- The NOTICE files of the three Jackson jars, one after the other, as they are.
+                                     Without this the jar keeps only the first, and jackson-core's names the code it
+                                     bundles. Their LICENSE files are the same text, so the first one is all of them. -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>META-INF/NOTICE</resource>
+                                </transformer>
                             </transformers>
                             <filters>
                                 <filter>
