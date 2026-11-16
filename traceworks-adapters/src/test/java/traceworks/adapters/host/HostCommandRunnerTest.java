@@ -737,16 +737,52 @@ class HostCommandRunnerTest {
 
     /**
      * The result of a command that ended by itself holds its output to the end, not what the reader happened to have
-     * at that moment: here the last line is written a moment after the command's end, by a child it left behind.
-     * The command ends a moment after its own last line, so that the reader waits in a read when it does: the JDK
-     * closes a stream nobody reads at that instant, with what is still to come.
+     * at that moment: here the last two lines are written after the command's end, by a child it left behind. The
+     * command ends right after its own last line, when the reader may be between two reads, and the child's lines come
+     * apart: the JDK would close the stream at the command's end, or after the next read (BoundedOutput#drain).
      */
     @Test
     void run_readsTheOutputToItsEnd_beforeItReturnsTheResult() {
-        CommandResult result = run("(sleep 0.8; echo late) & echo early; sleep 0.3", 30);
+        CommandResult result = run("(sleep 0.4; echo late; sleep 0.2; echo later) & echo early", 30);
 
         assertThat(result.exitCode()).isZero();
-        assertThat(result.stdout()).isEqualTo("early\nlate\n");
+        assertThat(result.stdout()).isEqualTo("early\nlate\nlater\n");
+    }
+
+    /**
+     * A process the command left behind that never stops writing is read for the bound after the command's end, not
+     * for its life: the result comes then, with what was written until then, and the process finds its output closed.
+     */
+    @Test
+    void run_ofACommandThatLeavesAWriterBehind_returnsAfterTheBound_andTheWriterFindsItsOutputClosed(
+            @TempDir Path dir) throws Exception {
+        Path closed = dir.resolve("found-its-output-closed");
+        long start = System.nanoTime();
+
+        CommandResult result = run("(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null; touch '" + closed
+                + "') & echo early", 30);
+
+        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).startsWith("early\ntick\n");
+        assertThat(millis).isBetween(HostCommandRunner.AFTER_END_MILLIS, HostCommandRunner.AFTER_END_MILLIS + 3000);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(closed) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(closed).as("the writer found its output closed").exists();
+    }
+
+    /**
+     * The same for output that goes through a process substitution, which bash does not wait for: the line arrives
+     * after bash has ended.
+     */
+    @Test
+    void run_readsWhatAProcessSubstitutionWritesAfterTheCommandEnded() {
+        CommandResult result = run("exec > >(sleep 0.2; cat); echo through", 30);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).isEqualTo("through\n");
     }
 
     /**
