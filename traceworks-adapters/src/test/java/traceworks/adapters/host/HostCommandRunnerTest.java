@@ -750,6 +750,30 @@ class HostCommandRunnerTest {
     }
 
     /**
+     * A process the command left behind that never stops writing is read for the bound after the command's end, not
+     * for its life: the result comes then, with what was written until then, and the process finds its output closed.
+     */
+    @Test
+    void run_ofACommandThatLeavesAWriterBehind_returnsAfterTheBound_andTheWriterFindsItsOutputClosed(
+            @TempDir Path dir) throws Exception {
+        Path closed = dir.resolve("found-its-output-closed");
+        long start = System.nanoTime();
+
+        CommandResult result = run("(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null; touch '" + closed
+                + "') & echo early", 30);
+
+        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).startsWith("early\ntick\n");
+        assertThat(millis).isBetween(HostCommandRunner.AFTER_END_MILLIS, HostCommandRunner.AFTER_END_MILLIS + 3000);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(closed) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(closed).as("the writer found its output closed").exists();
+    }
+
+    /**
      * The same for output that goes through a process substitution, which bash does not wait for: the line arrives
      * after bash has ended.
      */

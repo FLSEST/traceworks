@@ -11,8 +11,9 @@ import java.util.concurrent.CountDownLatch;
 /**
  * What a runner keeps of one stream of a process: everything up to a limit (the operator's {@code output_limit_mib},
  * {@link CommandRunner#OUTPUT_LIMIT_BYTES} by default, the same for every runner of a run), and of a stream that goes
- * beyond it only the first bytes. The host command runner and the
- * container client read stdout and stderr with it, each on a thread of its own, so a full pipe never blocks the process.
+ * beyond it only the first bytes. The host command runner, the
+ * container client and a git call read stdout and stderr with it, each on a thread of its own, so a full pipe never
+ * blocks the process.
  *
  * <ul>
  *   <li><b>Up to the limit</b> the text is the stream's bytes decoded as UTF-8, as it always was: a byte that is no
@@ -33,6 +34,11 @@ public final class BoundedOutput {
     private byte[] bytes = new byte[CHUNK];
     private int count;
     private volatile boolean exceeded;
+    /** Set by {@link #end} when the stream outlasted its bound: nothing more is kept. */
+    private boolean ended;
+    /** What {@link #drain} reads, and its reader; {@code null} before. */
+    private volatile InputStream stream;
+    private volatile Thread reader;
 
     /** @param limit how many bytes of the stream are kept at most */
     public BoundedOutput(int limit) {
@@ -55,7 +61,12 @@ public final class BoundedOutput {
      *
      * <p>The reader holds the stream when this method returns. A process that ended before that (within the instant
      * of its start) is still read up to its own end only; a caller that needs more starts the reading before the
-     * process gets its work, as the host command runner does with the script on stdin.
+     * process gets its work, as the host command runner does with the script on stdin. The container client and a
+     * git call do not: both keep that window.
+     *
+     * <p>A caller waits for the end with {@link #end}, which bounds the reading. The hook runner and the SSH signer
+     * read with loops of their own and still have the loss: of a hook only the end of its stderr is kept, for a
+     * message, and of {@code ssh-keygen} only what it says when it fails.
      */
     public Thread drain(InputStream stream, String name) {
         CountDownLatch held = new CountDownLatch(1);
@@ -73,7 +84,38 @@ public final class BoundedOutput {
             }
         });
         awaitUninterrupted(held);
+        this.stream = stream;
+        this.reader = reader;
         return reader;
+    }
+
+    /**
+     * Waits up to {@code millis} for the end of the stream that {@link #drain} reads, and ends the reading when it has
+     * not come: a process that still holds the pipe then (a child the command left behind, such as a server that
+     * logs) must not be read for the rest of the run. Nothing that arrives afterwards is kept, the stream is closed,
+     * and the next write of that process fails (EPIPE, or it dies of SIGPIPE). The reader ends with that write: a
+     * read that waits is not woken by the close, so the reader of a process that holds the pipe and never writes
+     * stays until that process ends, and keeps nothing.
+     *
+     * @throws InterruptedException if the calling thread is interrupted while it waits; the reading goes on
+     */
+    public void end(long millis) throws InterruptedException {
+        Thread reading = reader;
+        if (reading == null) {
+            return;
+        }
+        reading.join(millis);
+        if (!reading.isAlive()) {
+            return;
+        }
+        synchronized (this) {
+            ended = true;
+        }
+        try {
+            stream.close();
+        } catch (IOException ignored) {
+            // closed already
+        }
     }
 
     /** Waits for the reader to hold its stream, which takes no longer than its start; an interrupt stays set. */
@@ -117,7 +159,7 @@ public final class BoundedOutput {
     }
 
     private synchronized void keep(byte[] chunk, int n) {
-        if (exceeded) {
+        if (exceeded || ended) {
             return;
         }
         int room = limit - count;

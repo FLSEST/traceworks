@@ -163,7 +163,57 @@ class BoundedOutputTest {
         }
         reader.join(10_000);
 
+        // Protects the platforms where the stream of a process is the JDK's ProcessPipeInputStream, whose
+        // processExited() is synchronized on the stream: Linux and macOS with a JDK 21. Elsewhere this fails too,
+        // which is the point: the reading then has the old loss.
         assertThat(reader.isAlive()).isFalse();
-        assertThat(output.text()).isEqualTo("first\nlate\n");
+        assertThat(output.text())
+                .as("what a child wrote after its process ended. Without it, the JDK closed the stream at the end of "
+                        + "the process although the reader held it: the JDK's locking of a process stream may have "
+                        + "changed, and the reader relies on it (the javadoc of BoundedOutput#drain says how)")
+                .isEqualTo("first\nlate\n");
+    }
+
+    /**
+     * A child the process left behind keeps writing. The reading has a bound: after it the stream is closed, the
+     * reader ends with the child's next write, nothing more is kept, and the child finds its output closed.
+     */
+    @Test
+    void end_afterItsBound_closesTheStream_soTheReaderEndsAndNothingMoreIsKept(@TempDir Path dir) throws Exception {
+        Path closed = dir.resolve("found-its-output-closed");
+        Process process = new ProcessBuilder("/bin/sh", "-c",
+                "read go; (trap '' PIPE; while echo tick; do sleep 0.05; done; touch \"$0\") 2>/dev/null & echo first",
+                closed.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024 * 1024);
+        Thread reader = output.drain(process.getInputStream(), "test-output");
+        process.getOutputStream().close();
+        assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+
+        long before = System.nanoTime();
+        output.end(300);
+        long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before);
+        String kept = output.text();
+
+        assertThat(waited).as("the bound, not the child's life").isBetween(300L, 3000L);
+        assertThat(kept).startsWith("first\ntick\n");
+        reader.join(10_000);
+        assertThat(reader.isAlive()).as("the reader still runs").isFalse();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(closed) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(closed).as("the child found its output closed").exists();
+        assertThat(output.text()).as("nothing was kept after the bound").isEqualTo(kept);
+    }
+
+    /** A stream that ends within the bound is read whole, and the wait ends with it. */
+    @Test
+    void end_ofAStreamThatEndsInTime_keepsAllOfIt() throws InterruptedException {
+        BoundedOutput output = new BoundedOutput(8);
+        output.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+
+        output.end(5000);
+
+        assertThat(output.text()).isEqualTo("abc");
     }
 }
