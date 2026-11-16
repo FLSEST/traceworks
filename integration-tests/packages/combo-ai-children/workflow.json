@@ -1,0 +1,41 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a20",
+  "name": "IT combo-ai-children",
+  "description": "A simple step of the run itself, a child workflow that asks a model, and a foreach of two such children: each call asks its proxy for an address of its own that nobody listed, so the record shows which call asked for what, and names its proxy.",
+  "default_context": {
+    "last": "20"
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "parent_ask",
+      "config": {
+        "command": "[fake:connect=192.0.2.10:443] asked by the parent"
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "once",
+      "config": {
+        "workflow_id": "./child"
+      }
+    },
+    {
+      "type": "foreach",
+      "name": "each",
+      "config": {
+        "workflow_id": "./child",
+        "items": [
+          "31",
+          "32"
+        ],
+        "variable_name": "number",
+        "context": {
+          "last": "{{ number }}"
+        }
+      }
+    }
+  ]
+}
