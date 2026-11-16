@@ -8,12 +8,14 @@ it loads nothing from the network. The register, round by round: [audit-loop.htm
 
 ## The terms and how they nest
 
-![How the terms lie inside one another: on the left the package an author writes, with its workflow, blocks, steps and containers; on the right the home the tool keeps, with runs, registers and the ledger; the workspace between them, mounted read-only.](concepts.svg)
+![How the terms lie inside one another: on the left the package that is defined before a run, with its workflow, blocks, steps and containers; on the right the home the tool keeps, with runs, registers and the ledger; the workspace between them, mounted read-only.](concepts.svg)
 
 What lies inside belongs to what lies outside.
 
-- **A package** is a directory an author writes: a `workflow.json`, its scripts and rule files, and its container
-  images. It does not change while a run runs.
+- **A package** is a directory: a `workflow.json`, its scripts and rule files, and its container images. Someone
+  wrote it by hand, a model generated it, or it was taken over from somebody else; whichever it was, `describe` and
+  `check` say what it will do before anything runs, a digest names this version of it, and a seal says who signed
+  it. It does not change while a run runs.
 - **A workflow** holds blocks. A block becomes one or more steps, and each step is one command or one model call
   in a container.
 - **The workspace** is the project the steps look at. It belongs neither to the package nor to the tool and is
