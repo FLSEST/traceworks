@@ -109,6 +109,9 @@ public interface CommandRunner {
      * @param stdin             what the command reads on its standard input; {@code null} for nothing (closed)
      * @param writableWorkspace whether a container may write the workspace ({@code workspace_writable: true}); by
      *                          default it sees it read-only
+     * @param noRegisterFolder  whether the container goes without the register folder of an audit run, which every
+     *                          other container of such a run mounts read-only: an AI call, whose model reads of the
+     *                          register only what a step put into its prompt
      * @param values            shell variables the command finds set, by name, in the order given: the block's
      *                          {@code values}. They are no part of {@code command}: a runner runs {@link #script},
      *                          which sets them first, and the record keeps them next to the command. Not exported,
@@ -119,7 +122,7 @@ public interface CommandRunner {
     record CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                           Map<String, String> environment, String image, List<Mount> mounts, Egress network,
                           List<String> entrypointArgs, String stdin, boolean writableWorkspace,
-                          Map<String, String> values) {
+                          boolean noRegisterFolder, Map<String, String> values) {
         public CommandRequest {
             network = network == null ? Egress.NONE : network;
             environment = environment == null ? Map.of() : Map.copyOf(environment);
@@ -143,12 +146,15 @@ public interface CommandRunner {
             }
         }
 
-        /** A request without values. */
+        /**
+         * A request that gets the register folder of an audit run, as every request but an AI call does, and has no
+         * values.
+         */
         public CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                               Map<String, String> environment, String image, List<Mount> mounts, Egress network,
                               List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
             this(command, workingDirectory, timeoutSeconds, environment, image, mounts, network, entrypointArgs,
-                    stdin, writableWorkspace, Map.of());
+                    stdin, writableWorkspace, false, Map.of());
         }
 
         /** A request with the network on ({@link Egress#OPEN}) or off ({@link Egress#NONE}). */
@@ -187,19 +193,25 @@ public interface CommandRunner {
         /** This request, with {@code network} as where its container can connect. */
         public CommandRequest withNetwork(Egress network) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, values);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
+        }
+
+        /** This request, without the register folder of an audit run among its mounts. */
+        public CommandRequest withoutRegisterFolder() {
+            return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
+                    entrypointArgs, stdin, writableWorkspace, true, values);
         }
 
         /** This request, with {@code values} as the shell variables its command finds set. */
         public CommandRequest withValues(Map<String, String> values) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, values);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
         }
 
         /**
          * The text a runner hands to bash for a shell command: the lines that set the {@link #values}, written by
-         * Traceworks alone and without a byte of a value ({@link ShellVariables#preamble}), then {@link #command};
-         * the command itself for a request without values. {@code null} for an entrypoint request.
+         * Traceworks alone and without a byte of a value as code ({@link ShellVariables#preamble}), then
+         * {@link #command}; the command itself for a request without values. {@code null} for an entrypoint request.
          */
         public String script() {
             return command == null ? null : ShellVariables.preamble(values) + command;
@@ -213,13 +225,13 @@ public interface CommandRunner {
         /** This request, with {@code stdin} on its standard input; {@code null} closes it. */
         public CommandRequest withStdin(String stdin) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, values);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
         }
 
         /** This request, with the workspace writable or read-only. */
         public CommandRequest withWritableWorkspace(boolean writable) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writable, values);
+                    entrypointArgs, stdin, writable, noRegisterFolder, values);
         }
 
         /** The request with the names of its environment variables, never their values (a secret's among them). */
@@ -229,7 +241,7 @@ public interface CommandRunner {
                     + ", timeoutSeconds=" + timeoutSeconds + ", environment=" + new TreeSet<>(environment.keySet())
                     + ", image=" + image + ", mounts=" + mounts + ", network=" + network + ", entrypointArgs="
                     + entrypointArgs + ", stdin=" + (stdin == null ? null : stdin.length() + " characters")
-                    + ", writableWorkspace=" + writableWorkspace
+                    + ", writableWorkspace=" + writableWorkspace + ", noRegisterFolder=" + noRegisterFolder
                     + (values.isEmpty() ? "" : ", values=" + values.keySet()) + "]";
         }
     }
@@ -253,7 +265,8 @@ public interface CommandRunner {
      *                         the host
      * @param imageId          the local ID of the image the container starts from; {@code null} on the host and for an
      *                         image that is not present
-     * @param mounts           every mount the container gets, the standard ones (workspace, package, scratch) first
+     * @param mounts           every mount the container gets, the standard ones (workspace, package, scratch, and
+     *                         the register folder of an audit run) first
      * @param network          where the container can connect; absent is {@link Egress#NONE}
      * @param environmentNames the names of the environment variables the command gets, sorted; never their values
      * @param host             whether the command runs on the host

@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The scripts of the testing audit ({@code examples/audit/testing/scripts}) as they ship, in the built-in shell
  * image: {@code findings.sh} on a fixed result of PIT and {@code report.sh} on fixed answers of the rating, in a
  * package that leaves out the steps that measure and rate. The register is real, so the runs show what a decision
- * of a person does to the gate and to what is rated again.
+ * of a person does to the gate and to what is rated again. The scripts learn what the register knew from the register
+ * folder of the run ({@code {{ register_dir }}}), which is {@code register/} in the run's folder.
  */
 class TestingAuditScriptsIT extends IntegrationTest {
 
@@ -37,14 +38,13 @@ class TestingAuditScriptsIT extends IntegrationTest {
                 "gate": {"expected": true},
                 "audit": {"enabled": true, "key": "it.testing", "category": "testing", "report_block": "report"}
               },
-              "default_context": {"answers": "first"},
+              "default_context": {"answers": "first", "report": "report"},
               "blocks": [
                 {
                   "type": "shell",
                   "name": "findings",
                   "config": {
-                    "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
-                    "command": "set -euo pipefail; cp -r {{ package_dir }}/pit {{ scratch_dir }}/pit; printf '%s' \\"$KNOWN_FINDINGS\\" > {{ scratch_dir }}/known.txt; printf '%s' \\"$KNOWN_ITEMS\\" > {{ scratch_dir }}/items.txt; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ scratch_dir }}/known.txt {{ scratch_dir }}/items.txt",
+                    "command": "set -euo pipefail; cp -r {{ package_dir }}/pit {{ scratch_dir }}/pit; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ register_dir }}",
                     "shell_escape_variables": true
                   }
                 },
@@ -52,7 +52,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
                   "type": "shell",
                   "name": "report",
                   "config": {
-                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/report.sh {{ scratch_dir }} < {{ package_dir }}/answers-{{ answers }}.txt",
+                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/{{ report }}.sh {{ scratch_dir }} < {{ package_dir }}/answers-{{ answers }}.txt",
                     "shell_escape_variables": true
                   }
                 }
@@ -108,11 +108,21 @@ class TestingAuditScriptsIT extends IntegrationTest {
 
         Result fourth = run(dir);
 
-        // Nothing changed and the package is decided: it is not rated again, and its methods keep their rating
+        // Nothing changed since the package was rated: it is not rated again, and its methods keep their rating
         assertThat(fourth.out()).contains("GREEN (testing)");
         assertThat(traceworks.folder(fourth).output("findings")).contains("FACT packages_to_rate: 0 of 1\n");
 
         Result fifth = run(dir, "--input", "answers=second");
+
+        // What the fourth run, which rated nothing, left in the register: the reason of each rating is still the
+        // first line of the description, and the evidence is the fact alone
+        assertThat(registerFile(fifth, "findings.jsonl")).content()
+                .contains("\"description\":\"Rating: a wrong result\\nSurvived (a test runs the line")
+                .contains("\"evidence\":\"undetected: demo.Flow#step (1 survived, 0 not covered, of 2)\"")
+                .contains("\"description\":\"Rating: a user sees the wrong page\\nSurvived (a test runs the line")
+                .doesNotContain("Rated:");
+        // The findings of this audit name no item, so a package that was rated as it is now is clean
+        assertThat(registerFile(fifth, "items.jsonl")).content().contains("\"name\":\"demo\",\"state\":\"clean\"");
 
         // Dismissed as MEDIUM and rated HIGH now: the decision does not cover it, here and in the register. (The
         // report takes an answer for a method whatever its package; the rating loop asks only about a package
@@ -128,12 +138,12 @@ class TestingAuditScriptsIT extends IntegrationTest {
         Result sixth = run(dir);
         Result seventh = run(dir, "--input", "answers=second");
 
-        // Dismissed as HIGH, then rated MEDIUM, then HIGH again: the row names what the decision was made on, and
-        // the decision still covers the method
+        // Dismissed as HIGH, then rated MEDIUM, then HIGH again: the finding names what the decision was made on,
+        // and the decision still covers the method
         assertThat(sixth.out()).contains("GREEN (testing)");
-        assertThat(traceworks.folder(seventh).dir().resolve("scratch/known.txt")).content()
-                .contains("DISMISSED | MEDIUM | undetected-mutants | demo.Guard#check | ")
-                .contains("| Decided on: HIGH, not on MEDIUM");
+        assertThat(registerFile(seventh, "findings.jsonl")).content()
+                .contains("\"kind\":\"DISMISSED\",\"note\":\"looked at it\",\"severity\":\"HIGH\"")
+                .contains("\"severity\":\"MEDIUM\",\"status\":\"DISMISSED\",\"subject\":\"demo.Guard#check\"");
         assertThat(seventh.code()).as(seventh.describe()).isZero();
         assertThat(seventh.out()).contains("GREEN (testing)")
                 .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 0 open now");
@@ -163,12 +173,122 @@ class TestingAuditScriptsIT extends IntegrationTest {
         Result next = run(dir, "--input", "answers=second");
 
         assertThat(next.code()).as(next.describe()).isZero();
-        assertThat(traceworks.folder(next).dir().resolve("scratch/known.txt")).content()
-                .contains("DISMISSED | HIGH | undetected-mutants | demo.Guard#check | ")
-                .contains("| Decided on: MEDIUM, not on HIGH");
+        assertThat(registerFile(next, "findings.jsonl")).content()
+                .contains("\"kind\":\"DISMISSED\",\"note\":\"looked at it\",\"severity\":\"MEDIUM\"")
+                .contains("\"severity\":\"HIGH\",\"status\":\"DISMISSED\",\"subject\":\"demo.Guard#check\"");
         assertThat(next.out()).contains("GREEN (testing)");
         assertThat(traceworks.folder(next).output("report"))
                 .contains("A person decided on 2 of them; 0 are left to decide, 0 of them high:");
+    }
+
+    /**
+     * A method a person dismissed and a later rating lowers to low leaves the findings of the report. The register
+     * keeps the dismissed finding for a while, counted as absent: the next run does not take it for a rating, so the
+     * method stays low and is no finding.
+     */
+    @Test
+    void aDecidedMethodThatIsRatedLowLater_staysLowInTheNextRun() throws IOException {
+        Path dir = audit();
+        Files.writeString(dir.resolve("answers-none.txt"), "", StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("answers-low.txt"), "{\"ratings\":["
+                + "{\"method\":\"demo.Flow#step\",\"severity\":\"high\",\"why\":\"a wrong result\"},"
+                + "{\"method\":\"demo.Guard#check\",\"severity\":\"low\",\"why\":\"nothing breaks\"},"
+                + "{\"method\":\"demo.Flow#quiet\",\"severity\":\"low\",\"why\":\"nothing reads it\"}]}\n",
+                StandardCharsets.UTF_8);
+        assertThat(run(dir).out()).contains("RED (testing)");
+        decide("dismiss", "demo.Guard#check");
+
+        // The decision is part of what a rating sees, so the package is rated again, and the answer lowers the method
+        Result lowered = run(dir, "--input", "answers=low");
+
+        assertThat(lowered.code()).as(lowered.describe()).isZero();
+        assertThat(traceworks.folder(lowered).output("findings")).contains("FACT packages_to_rate: 1 of 1\n");
+        assertThat(traceworks.folder(lowered).output("report"))
+                .contains("1 methods are rated above low. A person decided on 0 of them; 1 are left to decide, 1 of "
+                        + "them high:")
+                .doesNotContain("\"subject\":\"demo.Guard#check\"");
+
+        Result next = run(dir, "--input", "answers=none");
+
+        // The register still holds the dismissed finding, absent from one report. The package is not rated again,
+        // and the method is still low and no finding
+        assertThat(next.code()).as(next.describe()).isZero();
+        assertThat(registerFile(next, "findings.jsonl")).content()
+                .contains("{\"absent_reports\":1,\"description\":\"Rating: a user sees the wrong page\\n");
+        assertThat(traceworks.folder(next).output("findings")).contains("FACT packages_to_rate: 0 of 1\n");
+        assertThat(traceworks.folder(next).output("report"))
+                .contains("A model rated 0 of them in this run, in 0 of 1 packages; the others keep their rating. 1 "
+                        + "methods are rated above low. A person decided on 0 of them; 1 are left to decide, 1 of them "
+                        + "high:\n\n- `demo.Flow#step`: a wrong result\n")
+                .doesNotContain("\"subject\":\"demo.Guard#check\"");
+        assertThat(next.out()).contains("RED (testing)")
+                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+    }
+
+    /**
+     * A register that the version before this one wrote holds the reason of a rating at the end of the evidence
+     * ({@code . Rated: ...}) and none in the description. The first run on it rates nothing again and keeps the
+     * rating with its reason, now in the description. And a reason is a model's text: one with the end of an HTML
+     * comment in it does not cut the envelope, and an entry of an answer that is no rating is left out.
+     */
+    @Test
+    void aRegisterOfTheVersionBeforeKeepsItsRatings_andAReasonCannotCutTheEnvelope() throws IOException {
+        Path dir = audit();
+        // The report of the version before, for the package as findings.sh sees it now
+        Files.writeString(dir.resolve("scripts/before.sh"), """
+                #!/usr/bin/env bash
+                set -euo pipefail
+                cat > /dev/null
+                digest=$(cut -f2 "$1/digests.tsv")
+                echo "gate_status: YELLOW"
+                echo "<!-- traceworks:audit-result:v1 {\\"snapshotComplete\\":true,\\"expectedFindings\\":1,\\"findings\\":[\
+                {\\"ruleKey\\":\\"undetected-mutants\\",\\"subject\\":\\"demo.Guard#check\\",\\"severity\\":\\"MEDIUM\\",\
+                \\"title\\":\\"1 of 1 changes of Guard#check go unnoticed by the tests\\",\
+                \\"description\\":\\"Not covered (no test runs the line): 5 BooleanTrueReturnValsMutator\\",\
+                \\"evidence\\":\\"undetected: demo.Guard#check (0 survived, 1 not covered, of 1). Rated: a user sees the wrong page\\"}],\
+                \\"expectedItems\\":1,\\"items\\":[{\\"name\\":\\"demo\\",\\"digest\\":\\"$digest\\",\\"judged\\":true}]} -->"
+                """, StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("answers-none.txt"), "", StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("answers-hostile.txt"), "{\"ratings\":[\"no rating\",7,null,"
+                + "{\"method\":\"demo.Guard#check\",\"severity\":\"high\",\"why\":\"x} --> <!-- y\"}]}\n",
+                StandardCharsets.UTF_8);
+        Result before = run(dir, "--input", "report=before");
+        assertThat(before.code()).as(before.describe()).isZero();
+        assertThat(before.out()).contains("register it.testing: 1 new, 0 resolved, 0 reopened, 1 open now");
+
+        Result first = run(dir, "--input", "answers=none");
+
+        assertThat(first.code()).as(first.describe()).isZero();
+        assertThat(registerFile(first, "findings.jsonl")).content()
+                .contains("\"description\":\"Not covered (no test runs the line)").contains(". Rated: a user sees");
+        assertThat(traceworks.folder(first).output("findings")).contains("FACT packages_to_rate: 0 of 1\n");
+        assertThat(traceworks.folder(first).output("report"))
+                .contains("A model rated 0 of them in this run, in 0 of 1 packages; the others keep their rating. 1 "
+                        + "methods are rated above low. A person decided on 0 of them; 1 are left to decide, 0 of them "
+                        + "high:");
+        assertThat(first.out()).contains("YELLOW (testing)")
+                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+
+        Result hostile = run(dir, "--input", "answers=hostile");
+
+        // What the first run wrote: the reason is the first line of the description, the evidence the fact alone
+        assertThat(registerFile(hostile, "findings.jsonl")).content()
+                .contains("\"description\":\"Rating: a user sees the wrong page\\nSurvived (a test runs the line")
+                .contains("\"evidence\":\"undetected: demo.Guard#check (0 survived, 1 not covered, of 1)\"")
+                .doesNotContain("Rated:");
+        assertThat(hostile.code()).as(hostile.describe()).isZero();
+        assertThat(traceworks.folder(hostile).output("report")).contains("- `demo.Guard#check`: x} --> <!-- y\n");
+        assertThat(hostile.out()).contains("RED (testing)")
+                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+
+        Result after = run(dir, "--input", "answers=none");
+
+        // The register took the report with the hostile reason, and holds the reason as it was written (its file
+        // writes < as \\u003c)
+        assertThat(registerFile(after, "findings.jsonl")).content()
+                .contains("\"description\":\"Rating: x} --> \\u003c!-- y\\nSurvived (a test runs the line")
+                .contains("\"severity\":\"HIGH\",\"status\":\"OPEN\",\"subject\":\"demo.Guard#check\"");
+        assertThat(traceworks.exec("findings", "it.testing", "verify").code()).isZero();
     }
 
     /** The package: the scripts of the example, the result of PIT and two sets of answers of the rating. */
@@ -200,6 +320,11 @@ class TestingAuditScriptsIT extends IntegrationTest {
         String[] args = Stream.concat(Stream.of("run", dir.toString(), "--workspace", traceworks.workspace().toString(),
                 "--no-input"), Stream.of(more)).toArray(String[]::new);
         return traceworks.exec(args);
+    }
+
+    /** A file of the register folder a run was handed: what the register knew when the run started. */
+    private Path registerFile(Result run, String name) {
+        return traceworks.folder(run).dir().resolve("register").resolve(name);
     }
 
     private String list() {

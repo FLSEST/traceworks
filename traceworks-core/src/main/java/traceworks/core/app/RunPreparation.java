@@ -105,10 +105,14 @@ final class RunPreparation {
      *                         it declares no secret and uses no AI provider, so none were read
      * @param modelPicks       the option the run picked of each model choice its workflow declares; empty for a
      *                         workflow without one
+     * @param register         the files the register of an audit workflow hands the run, read with the platform
+     *                         data; {@code null} for a workflow that is no audit. A start writes them into the run's
+     *                         register folder; a resume goes on with the folder the run has
      */
     record Prepared(RunTarget target, ContainerRuntime runtime, LoadedPackage pkg, Map<String, String> secrets,
                     Redactor redactor, ImageCatalog catalog, RunAi ai, String workspace, String packageDirectory,
-                    SecretValues values, Map<String, String> platformData, List<ModelPick> modelPicks) {
+                    SecretValues values, Map<String, String> platformData, List<ModelPick> modelPicks,
+                    AuditPlatformData.Handed register) {
 
         /**
          * What the run's use case returns: the outcome as the record has it, its error and every gate value
@@ -150,7 +154,8 @@ final class RunPreparation {
                 preflight.refuse(e.getMessage());
             }
         }
-        Map<String, String> platformData = auditData.platformData(pkg, preflight);
+        AuditPlatformData.Read register = auditData.platformData(pkg, preflight);
+        Map<String, String> platformData = register.placeholders();
         SecretSource values = new SecretSource(secrets);
         Map<String, String> runSecrets = Secrets.check(pkg.definition(), resolver(pkg), values, preflight);
         Map<String, Map<String, String>> credentials = AiCredentials.check(pkg.definition(), resolver(pkg), aiClis,
@@ -161,7 +166,8 @@ final class RunPreparation {
         RunAi ai = RunAi.of(aiClis, catalog, credentials, settings.aiImages(), settings.aiNetwork());
         // The paths the check judged, not a second resolution: what replaced a directory since is not mounted
         return new Prepared(target, runtime, pkg, runSecrets, redactor, catalog, ai,
-                mounted.workspace(), mounted.packageDirectory(), values.read(), platformData, modelPicks);
+                mounted.workspace(), mounted.packageDirectory(), values.read(), platformData, modelPicks,
+                register.register());
     }
 
     /**
@@ -339,14 +345,47 @@ final class RunPreparation {
     }
 
     /**
-     * The run's directories as its containers see them: the workspace, the package and its scratch directory.
+     * The run's directories as its containers see them: the workspace, the package, its scratch directory and, for
+     * the run of an audit workflow, its register folder.
      *
      * @param workspace the real path of the directory the steps work in; {@code null} for none
-     * @throws RunRefusedException if the run's scratch directory cannot be made or has no real path
+     * @param register  the run's register folder; {@code null} for a run without one
+     * @throws RunRefusedException if the run's scratch directory cannot be made or has no real path, or its
+     *                             register folder has none
      */
-    RunPaths paths(StoredRun run, String workspace, Prepared prepared) {
-        return new RunPaths(workspace, prepared.packageDirectory(), scratch(run),
+    RunPaths paths(StoredRun run, String workspace, Prepared prepared, String register) {
+        return new RunPaths(workspace, prepared.packageDirectory(), scratch(run), realPath(register),
                 prepared.target() == RunTarget.CONTAINER);
+    }
+
+    /**
+     * Writes the files the register handed the run into its register folder.
+     *
+     * @return the folder; {@code null} for a workflow that is no audit, which has none
+     * @throws RunRefusedException if the folder cannot be written
+     */
+    String writeRegisterFolder(StoredRun run, Prepared prepared) {
+        if (prepared.register() == null) {
+            return null;
+        }
+        try {
+            return run.writeRegisterFiles(prepared.register().files());
+        } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
+            throw new RunRefusedException("The register folder of the run cannot be written, so the run is not"
+                    + " started: " + e.getMessage());
+        }
+    }
+
+    /** The real path of a folder of the run; {@code null} for none. */
+    private String realPath(String folder) {
+        if (folder == null) {
+            return null;
+        }
+        try {
+            return containers.directories().realPath(Path.of(folder));
+        } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
+            throw new RunRefusedException(e.getMessage());
+        }
     }
 
     /**
@@ -354,11 +393,14 @@ final class RunPreparation {
      *
      * @param parkAtQuestions    whether a top-level question parks the run
      * @param workspaceSourceSha the commit of the run's checkout of a source; {@code null} for none
+     * @param folder             the run's register folder with what the run recorded of it, which a host run
+     *                           compares before each command that gets the folder; {@code null} for a run without one
      */
     RunOptions options(String runId, RunSession session, RunRecorder recorder, RunPaths paths, Prepared prepared,
-                       TriggerSource trigger, boolean parkAtQuestions, String workspaceSourceSha) {
+                       TriggerSource trigger, boolean parkAtQuestions, String workspaceSourceSha,
+                       RegisterFolder folder) {
         // run_if, step commands and the AI CLIs' commands alike are recorded, by one runner that counts the containers
-        CommandRunner recorded = recorder.recording(runner(prepared, paths, runId));
+        CommandRunner recorded = recorder.recording(runner(prepared, paths, runId, folder));
         return RunOptions.builder()
                 .runId(runId)
                 .events(recorder)
@@ -496,9 +538,10 @@ final class RunPreparation {
      * The run's command runner: every command through the container policy; the image-less commands of a host run
      * to the host runner.
      */
-    private CommandRunner runner(Prepared prepared, RunPaths paths, String runId) {
+    private CommandRunner runner(Prepared prepared, RunPaths paths, String runId, RegisterFolder folder) {
         return new ContainerCommandRunner(prepared.runtime(), prepared.target() == RunTarget.HOST ? hostRunner : null,
-                paths, prepared.catalog(), settings.containerLimits(), runId);
+                paths, prepared.catalog(), settings.containerLimits(), runId,
+                folder == null ? () -> null : folder::problem);
     }
 
     private WorkflowResolver resolver(LoadedPackage pkg) {

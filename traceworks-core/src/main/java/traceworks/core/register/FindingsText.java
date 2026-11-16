@@ -43,7 +43,8 @@ public final class FindingsText {
 
     private static final Comparator<Finding> WITHIN_STATUS = Comparator.comparing(Finding::severity)
             .thenComparing(Finding::ruleKey).thenComparing(Finding::subject).thenComparing(Finding::id);
-    private static final Comparator<Finding> ORDER = Comparator.comparingInt((Finding f) -> SHOWN.indexOf(f.status()))
+    /** The order of the rows: by status as {@link #SHOWN}, then by severity, rule, subject and id. */
+    static final Comparator<Finding> ORDER = Comparator.comparingInt((Finding f) -> SHOWN.indexOf(f.status()))
             .thenComparing(WITHIN_STATUS);
     private static final Comparator<Finding> KEEP = Comparator.comparingInt((Finding f) -> KEPT_FIRST.indexOf(f.status()))
             .thenComparing(WITHIN_STATUS);

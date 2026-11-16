@@ -77,6 +77,7 @@ public class ShellBlockExecutor implements BlockExecutor {
         ShellTarget target = ShellTarget.of(config, () -> resolveMounts(mounts, context),
                 context.isContainerRun(), context.getSecrets());
 
+        traceworks.core.engine.RegisterFolderUse.inCommand(rawCommand, context);
         // A protected value refuses the line; it reaches the command as one of the block's values
         String command = context.resolveShellTemplate(rawCommand, escapeVariables);
         Map<String, String> values = ShellValues.resolve(config, context);
@@ -156,6 +157,7 @@ public class ShellBlockExecutor implements BlockExecutor {
      * resolves as a whole, with the step's values.
      */
     static String resolveMount(String entry, ExecutionContext context) {
+        traceworks.core.engine.RegisterFolderUse.inCommand(entry, context);
         List<String> parts = colonParts(entry);
         if (parts.size() < 2 || parts.size() > 3) {
             return context.resolveTemplate(entry);

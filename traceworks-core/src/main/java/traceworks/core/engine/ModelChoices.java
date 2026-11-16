@@ -388,6 +388,7 @@ public final class ModelChoices {
     /** Whether a run sets a variable of this name itself, or reads the name as something else than an input. */
     private static boolean reserved(String name) {
         return RunVariables.NAMES.contains(name) || RunVariables.PACKAGE_DIR.equals(name)
+                || RunVariables.REGISTER_DIR.equals(name)
                 || PlatformVariables.contains(name) || StepOutputs.isStepOutput(name)
                 || "previous_output".equals(name) || name.startsWith("__");
     }

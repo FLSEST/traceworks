@@ -65,8 +65,7 @@
       "type": "shell",
       "name": "findings",
       "config": {
-        "values": {"KNOWN_FINDINGS": "{{ audit_findings }}", "KNOWN_ITEMS": "{{ audit_items }}"},
-        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known.txt; printf '%s' \"$KNOWN_ITEMS\" > {{ scratch_dir }}/items.txt; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ scratch_dir }}/known.txt {{ scratch_dir }}/items.txt",
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/findings.sh {{ scratch_dir }} {{ register_dir }}",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }
@@ -94,8 +93,7 @@
       "type": "shell",
       "name": "report",
       "config": {
-        "values": {"RATINGS": "{{ block.rate.output }}"},
-        "command": "set -euo pipefail; printf '%s' \"$RATINGS\" | bash {{ package_dir }}/scripts/report.sh {{ scratch_dir }}",
+        "command": "set -euo pipefail; printf '%s' {{ block.rate.output }} | bash {{ package_dir }}/scripts/report.sh {{ scratch_dir }}",
         "shell_escape_variables": true,
         "timeout_seconds": 300
       }

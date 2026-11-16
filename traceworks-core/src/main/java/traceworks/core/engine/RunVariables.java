@@ -17,6 +17,12 @@ public final class RunVariables {
     /** Where a step finds the package's files; set on a run that has run paths, which every run of a package has. */
     public static final String PACKAGE_DIR = "package_dir";
 
+    /**
+     * Where a step finds the files the run's register handed it (docs/registers.md, "The register folder of a
+     * run"); set on a run that has such a folder, which only the run of an audit workflow has.
+     */
+    public static final String REGISTER_DIR = "register_dir";
+
     private RunVariables() {
     }
 }

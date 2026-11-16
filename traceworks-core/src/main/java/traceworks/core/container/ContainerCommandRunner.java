@@ -15,11 +15,13 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * The container policy of a run: what a {@link CommandRequest} may do as a container, decided in the core so the
  * adapter only carries it out. Planning a request resolves its image to the local image ID, adds the standard mounts
- * (workspace, package, scratch, from {@link RunPaths}) in front of the request's own and maps the working directory
+ * (workspace, package, scratch, and for an audit run its register folder, from {@link RunPaths}) in front of the
+ * request's own and maps the working directory
  * into the container; the execution starts exactly that ({@link ContainerRun}) through the {@link ContainerRuntime}.
  *
  * <ul>
@@ -65,6 +67,7 @@ public final class ContainerCommandRunner implements CommandRunner {
     private final ImageCatalog images;
     private final ContainerLimits limits;
     private final String runId;
+    private final Supplier<String> registerProblem;
     private final AtomicInteger containers = new AtomicInteger();
 
     /**
@@ -76,6 +79,18 @@ public final class ContainerCommandRunner implements CommandRunner {
      */
     public ContainerCommandRunner(ContainerRuntime runtime, CommandRunner hostRunner, RunPaths paths,
                                   ImageCatalog images, ContainerLimits limits, String runId) {
+        this(runtime, hostRunner, paths, images, limits, runId, () -> null);
+    }
+
+    /**
+     * @param registerProblem what is wrong with the files of the run's register folder, compared with what the run
+     *                        recorded of them at its start; {@code null} when nothing is. Asked in a host run only,
+     *                        before every command that gets the folder: a command on the host can write it
+     */
+    public ContainerCommandRunner(ContainerRuntime runtime, CommandRunner hostRunner, RunPaths paths,
+                                  ImageCatalog images, ContainerLimits limits, String runId,
+                                  Supplier<String> registerProblem) {
+        this.registerProblem = Objects.requireNonNull(registerProblem, "registerProblem");
         this.runtime = runtime;
         this.hostRunner = hostRunner;
         this.paths = Objects.requireNonNull(paths, "paths");
@@ -97,14 +112,21 @@ public final class ContainerCommandRunner implements CommandRunner {
 
     @Override
     public CommandPlan plan(CommandRequest request) {
+        boolean withRegister = paths.register() != null && !request.noRegisterFolder();
+        // A host run: a command before this one may have run on the host, where no mount keeps the folder read-only
+        String changed = withRegister && !paths.fixedContainerPaths() && !cancelled() ? registerProblem.get() : null;
         if (request.image() == null && hostRunner != null) {
             CommandPlan onTheHost = hostRunner.plan(request);
-            return cancelled() ? cancelled(onTheHost.facts()) : onTheHost;
+            return cancelled() ? cancelled(onTheHost.facts())
+                    : changed != null ? refused(onTheHost.facts(), changed) : onTheHost;
         }
-        List<Mount> mounts = new ArrayList<>(paths.standardMounts(request.writableWorkspace()));
+        List<Mount> mounts = new ArrayList<>(paths.standardMounts(request.writableWorkspace(), withRegister));
         mounts.addAll(request.mounts());
         if (cancelled()) {
             return cancelled(facts(request, null, mounts));
+        }
+        if (changed != null) {
+            return refused(facts(request, null, mounts), changed);
         }
         String refusal = refusal(request);
         String reference = refusal == null ? images.reference(request.image()) : null;
@@ -145,7 +167,7 @@ public final class ContainerCommandRunner implements CommandRunner {
             }
             egressImageId = proxy.imageId();
         }
-        ContainerRun run = containerRun(request, facts, egressImageId);
+        ContainerRun run = containerRun(request, facts, egressImageId, withRegister);
         Optional<String> refusedByRuntime = runtime.refusal(run);
         if (refusedByRuntime.isPresent()) {
             // Nothing starts from the image, so the record names none
@@ -209,7 +231,9 @@ public final class ContainerCommandRunner implements CommandRunner {
             for (String point : mountPoints) {
                 if (RunPaths.within(target, point)) {
                     return "the mount " + mount.hostPath() + " -> " + mount.containerPath() + " lies on the run's"
-                            + " mount at " + point + "; mount it at another container path";
+                            + " mount at " + point + (point.equals(paths.registerInContainer()) ? ", where the run of"
+                            + " an audit workflow sees its register folder" : "")
+                            + "; mount it at another container path";
                 }
             }
             if (!plain(mount.containerPath())) {
@@ -235,12 +259,14 @@ public final class ContainerCommandRunner implements CommandRunner {
         return paths.containerPathOf(directory);
     }
 
-    private ContainerRun containerRun(CommandRequest request, CommandFacts facts, String egressImageId) {
+    private ContainerRun containerRun(CommandRequest request, CommandFacts facts, String egressImageId,
+                                      boolean withRegister) {
         String name = "traceworks-" + runId + "-" + containers.incrementAndGet();
         String entrypoint = request.runsEntrypoint() ? null : SHELL;
         List<String> args = request.runsEntrypoint() ? request.entrypointArgs() : List.of("-c", request.script());
         return new ContainerRun(name, runId, facts.imageId(), entrypoint, args, facts.workingDirectory(),
-                facts.mounts(), new RunDirectories(paths.workspace(), paths.packageDirectory(), paths.scratch()),
+                facts.mounts(), new RunDirectories(paths.workspace(), paths.packageDirectory(), paths.scratch(),
+                        withRegister ? paths.register() : null),
                 facts.network(), request.environment(), request.stdin(), request.timeoutSeconds(), limits,
                 egressImageId);
     }

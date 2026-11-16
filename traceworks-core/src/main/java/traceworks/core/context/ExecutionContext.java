@@ -477,7 +477,8 @@ public class ExecutionContext {
 
     /**
      * {@link #resolveTemplate} for text that names a host path, such as the host side of a mount: the path variables
-     * ({@code project_path}, {@code execution_path}, {@code package_dir}, {@code scratch_dir}) take the host paths
+     * ({@code project_path}, {@code execution_path}, {@code package_dir}, {@code scratch_dir}, {@code register_dir})
+     * take the host paths
      * of the run's directories, which in a container run differ from the paths the step sees. Without
      * {@link RunPaths} the variables are host paths already.
      */
@@ -491,6 +492,7 @@ public class ExecutionContext {
         hostVariables.put("execution_path", workspace);
         if (runPaths.packageDirectory() != null) hostVariables.put("package_dir", runPaths.packageDirectory());
         hostVariables.put("scratch_dir", runPaths.scratch() != null ? runPaths.scratch() : "");
+        if (runPaths.register() != null) hostVariables.put("register_dir", runPaths.register());
         return TemplateResolver.resolve(template, previousOutput, blockOutputs, hostVariables);
     }
 

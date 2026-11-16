@@ -96,6 +96,9 @@ public final class RunComparer {
         fields.add(new Field("ai_network", va.aiNetwork(), vb.aiNetwork()));
         byKey("ai_hosts ", joined(va.aiHosts()), joined(vb.aiHosts()), fields);
         List<String> picksThatDiffer = modelChoices(va, vb, fields);
+        // Whether two audit runs started from the same state of their register: a field, never a difference of its
+        // own, since the run before always moved the head
+        byKey("register ", registerHead(va), registerHead(vb), fields);
         fields.add(new Field("models", list(ma.models()), list(mb.models())));
         fields.add(new Field("status", va.status().name(), vb.status().name()));
         fields.add(new Field("gate", gate(va.gate()), gate(vb.gate())));
@@ -129,6 +132,12 @@ public final class RunComparer {
             }
         }
         return differences;
+    }
+
+    /** The head of the register's log a run started from, by the register's key; empty for a run of no audit. */
+    private static Map<String, String> registerHead(RunView view) {
+        return view.register() == null ? Map.of() : Map.of(view.register().key(), view.register().position()
+                + (view.register().head() == null ? "" : ", head " + view.register().head()));
     }
 
     private static String shown(String pick) {

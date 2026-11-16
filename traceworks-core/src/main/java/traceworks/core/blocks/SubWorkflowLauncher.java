@@ -42,7 +42,7 @@ class SubWorkflowLauncher {
      * {@code SubWorkflowReservedNamesTest}.
      */
     static final Set<String> RUN_VARIABLES = Set.of("previous_output", "workflow_run_id", "workflow_id",
-            "workflow_name", "project_id", "project_path", "execution_path", "package_dir", "scratch_dir",
+            "workflow_name", "project_id", "project_path", "execution_path", "package_dir", "scratch_dir", "register_dir",
             "workspace_source_sha", "model", "provider", "effort", "started_at", "run_timestamp", "workflow_version",
             "workflow_changed_since_last_run", "workflow_definition_hash", "trigger_source", "platform_scripts");
 

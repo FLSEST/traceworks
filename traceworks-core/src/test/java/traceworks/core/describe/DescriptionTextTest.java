@@ -48,7 +48,8 @@ class DescriptionTextTest {
                 "Inputs",
                 "  target = staging",
                 "Requires  container.network",
-                "Audit     register deploys, category ops, report block report",
+                "Audit     register deploys, category ops, report block report; its shell and tool steps read the"
+                        + " register's files in {{ register_dir }}, its AI steps do not",
                 "",
                 "Blocks",
                 "  0   build                    shell",

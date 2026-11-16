@@ -11,6 +11,7 @@ import traceworks.core.record.EventChain;
 import traceworks.core.record.Manifest;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
+import traceworks.core.record.RegisterHandover;
 import traceworks.core.record.RunView;
 import traceworks.core.record.SealView;
 import traceworks.core.seal.Seal;
@@ -27,7 +28,8 @@ import java.util.Optional;
  * Verifies a run: the hash chain and the blobs, then whether {@code manifest.json} names the head and the number of
  * events the log has (a cut-off tail leaves an intact chain and shows only there) and is byte for byte the manifest
  * the record gives (a rewritten status or gate shows there), and whether the ledger holds the
- * same manifest. A manifest or ledger entry is expected once the log says the run finished; when there is one, it is
+ * same manifest, and for the run of an audit workflow whether the files of its register folder are the ones
+ * {@code run.started} recorded. A manifest or ledger entry is expected once the log says the run finished; when there is one, it is
  * checked whatever the log says, so a log cut before its {@code run.finished} does not escape. Bytes after the last
  * line feed of a finished run's log are a problem of the chain.
  */
@@ -71,10 +73,27 @@ final class Verification {
             ledgerState = agrees(copy.get(), run.runId(), chain, view, run.blobs());
         }
         String sealState = view == null ? VerifyReport.NOT_CHECKED : seal(view.seal());
+        String registerState = view == null ? VerifyReport.NOT_CHECKED : registerFolder(run, view.register());
         boolean ok = chain.intact() && acceptable(manifestState) && acceptable(ledgerState)
                 && (sealState.startsWith(VerifyReport.OK) || sealState.equals(VerifyReport.UNSEALED)
-                || sealState.equals(VerifyReport.NOT_CHECKED));
-        return new VerifyReport(chain, manifestState, ledgerState, ledgerReason, ok, sealState);
+                || sealState.equals(VerifyReport.NOT_CHECKED))
+                && (registerState.startsWith(VerifyReport.OK) || registerState.equals(VerifyReport.NOT_CHECKED));
+        return new VerifyReport(chain, manifestState, ledgerState, ledgerReason, ok, sealState, registerState);
+    }
+
+    /**
+     * The register folder of the run against the digests {@code run.started} recorded: the folder is part of the
+     * run's record, so a file that is missing, changed or added is a problem. This says that the files are the ones
+     * the run's steps got, not that the register held the truth.
+     */
+    private static String registerFolder(StoredRun run, RegisterHandover recorded) {
+        if (recorded == null) {
+            return VerifyReport.NOT_CHECKED;
+        }
+        String problem = new RegisterFolder(run, recorded).problem();
+        return problem != null ? problem : VerifyReport.OK + " (" + recorded.files().size()
+                + (recorded.files().size() == 1 ? " file" : " files") + " of the register " + recorded.key()
+                + (recorded.seq() == null ? ", " : " ") + recorded.position() + ")";
     }
 
     /**

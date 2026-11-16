@@ -64,6 +64,8 @@ record AgenticBlockConfig(
         // Within its range (at most a day), so the auto-alignment below stays inside an int
         Integer callTimeoutSeconds = settings.number("timeout_seconds");
         boolean writableWorkspace = settings.flag("workspace_writable");
+        traceworks.core.engine.RegisterFolderUse.inPrompt(rawGoal);
+        traceworks.core.engine.RegisterFolderUse.inPrompt(rawSuccessCriteria);
         String goal = context.resolvePromptTemplate(rawGoal);
         String successCriteria = context.resolvePromptTemplate(rawSuccessCriteria);
 

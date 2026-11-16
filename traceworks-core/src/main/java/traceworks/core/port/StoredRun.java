@@ -1,5 +1,6 @@
 package traceworks.core.port;
 
+import java.util.Map;
 import java.util.Optional;
 
 /** A run kept in a store: its event log, blobs and inbox, the writer lock and the files derived from the log. */
@@ -27,6 +28,30 @@ public interface StoredRun extends AutoCloseable, ScratchDirectory {
      *                               hand the containers whatever it points to, writable
      */
     String prepareScratchDirectory();
+
+    /** Where the register folder of the run is, to mount it into containers; a folder path. */
+    String registerDirectory();
+
+    /**
+     * Makes the register folder of the run and writes its files, each for reading only: what the register of an
+     * audit workflow hands the run at its start (docs/registers.md, "The register folder of a run").
+     *
+     * @param files the content of each file, by its name (a plain file name)
+     * @return the folder's path
+     * @throws IllegalStateException if the folder is there already: a run gets its folder once
+     */
+    String writeRegisterFiles(Map<String, byte[]> files);
+
+    /**
+     * The SHA-256 of every entry of the register folder, by its name, sorted; an entry that is no regular file (a
+     * link, a directory) has the value {@value #NOT_A_FILE}. No link is followed.
+     *
+     * @return empty when the run has no such folder
+     */
+    Optional<Map<String, String>> registerFileDigests();
+
+    /** What {@link #registerFileDigests} names for an entry that is no regular file. */
+    String NOT_A_FILE = "not a regular file";
 
     /**
      * Removes the run from the store, folder and all, and releases this handle's writer lock: for a start that is

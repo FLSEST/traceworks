@@ -76,6 +76,10 @@ public final class ShowCommand implements Command {
         out.println("Seal      " + (view.seal() == null ? "unsealed" : TerminalFormat.safe(view.seal().summary())));
         // The option the run picked of each model choice its workflow opens: what its steps ran with
         view.modelChoices().forEach(pick -> out.println("Model     " + TerminalFormat.safe(pick.summary())));
+        if (view.register() != null) {
+            // What the run of an audit knew of earlier runs: the head of the register's log it started from
+            out.println("Register  " + TerminalFormat.safe(view.register().summary()));
+        }
         egress(out, view);
         if (view.error() != null) {
             out.println("Error     " + TerminalFormat.oneLine(text.apply(view.error().sha256())));

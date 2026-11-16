@@ -189,6 +189,20 @@ public final class RunRecorder implements RunEvents {
                 choice.put("model", pick.model());
             }
         }
+        if (start.register() != null) {
+            // Only for an audit workflow: every other run.started keeps its bytes
+            ObjectNode register = f.putObject("register");
+            register.put("key", start.register().key());
+            register.put("seq", start.register().seq());
+            register.put("head", start.register().head());
+            ArrayNode files = register.putArray("files");
+            for (RegisterHandover.File file : start.register().files()) {
+                ObjectNode node = files.addObject();
+                node.put("name", file.name());
+                node.put("sha256", file.sha256());
+                node.put("size", file.size());
+            }
+        }
         f.put("workspace", start.workspace());
         if (start.workspaceSource() != null) {
             f.put("workspace_source", start.workspaceSource());

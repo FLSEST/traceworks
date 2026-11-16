@@ -100,6 +100,7 @@ final class RunViewBuilder {
                 run.definition = e.blob("definition");
                 run.aiNetwork = text(e.fields(), "ai_network");
                 run.seal = seal(e.fields().path("seal"));
+                run.register = register(e.fields().path("register"));
                 for (Map.Entry<String, JsonNode> choice : e.fields().path("model_choices").properties()) {
                     JsonNode pick = choice.getValue();
                     run.modelChoices.add(new ModelPick(choice.getKey(), text(pick, "option"),
@@ -464,7 +465,19 @@ final class RunViewBuilder {
                 status == RunStatus.PARKED ? run.parkedAnswer : null, run.checkpoint, run.definition, run.inputs,
                 children, root ? eventCount : run.events, root ? head : null, root ? interventions : List.of(),
                 run.images, run.aiNetwork, run.aiHosts, status == RunStatus.PARKED ? run.parkedBy : null, run.seal,
-                run.modelChoices);
+                run.modelChoices, run.register);
+    }
+
+    /** What the register handed the run, as {@code run.started} records it; {@code null} when it records none. */
+    private static RegisterHandover register(JsonNode node) {
+        if (!node.isObject()) {
+            return null;
+        }
+        List<RegisterHandover.File> files = new ArrayList<>();
+        node.path("files").forEach(file -> files.add(new RegisterHandover.File(text(file, "name"),
+                text(file, "sha256"), file.path("size").asLong())));
+        return new RegisterHandover(text(node, "key"), node.path("seq").isInt() ? node.path("seq").asInt() : null,
+                text(node, "head"), files);
     }
 
     /** The seal {@code run.started} records; {@code null} when it records none. */
@@ -573,6 +586,7 @@ final class RunViewBuilder {
         String packageDir;
         String packageDigest;
         SealView seal;
+        RegisterHandover register;
         final List<ModelPick> modelChoices = new ArrayList<>();
         String packageCommit;
         final List<ImageFacts> images = new ArrayList<>();

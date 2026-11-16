@@ -48,6 +48,7 @@ final class RunIfGate {
         if (condition == null || condition.isBlank()) {
             return Optional.empty();
         }
+        RegisterFolderUse.inCommand(condition, context);
         String resolved = context.resolveShellTemplate(condition, settings.flag("shell_escape_variables"));
         Instant start = clock.now();
         CommandResult test = commands.run(new CommandRequest(resolved, context.getProjectPath(), TIMEOUT_SECONDS,

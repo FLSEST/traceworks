@@ -88,6 +88,29 @@ class ExecutionContextFactoryTest {
         assertThat(host.isContainerRun()).isFalse();
     }
 
+    /**
+     * The run of an audit workflow has a register folder, and {@code register_dir} is where a step sees it: the fixed
+     * path in a container run, the folder's path in a host run. No input takes its place. Every other run has no
+     * such variable, so the placeholder stays as written (and the analyzer refuses it).
+     */
+    @Test
+    void registerDir_isWhereAStepSeesTheRegisterFolder_andOnlyARunWithOneHasIt() {
+        Map<String, Object> input = Map.of("register_dir", "/etc");
+        ExecutionContext container = factory.create(seed(input, new RunPaths("/w", "/p", "/s", "/r", true)));
+        ExecutionContext host = factory.create(seed(input, new RunPaths("/w", "/p", "/s", "/r", false)));
+        ExecutionContext noAudit = factory.create(seed(Map.of(), new RunPaths("/w", "/p", "/s", true)));
+
+        assertThat(container.getVariables()).containsEntry("register_dir", "/register");
+        assertThat(host.getVariables()).containsEntry("register_dir", "/r");
+        assertThat(container.resolveHostTemplate("{{ register_dir }}")).isEqualTo("/r");
+        assertThat(container.resolveShellTemplate("cat {{ register_dir }}/findings.jsonl", false))
+                .as("a path the engine sets, trusted like scratch_dir").isEqualTo("cat /register/findings.jsonl");
+        assertThat(noAudit.getVariables()).doesNotContainKey("register_dir");
+        assertThat(noAudit.resolveTemplate("{{ register_dir }}")).isEqualTo("{{ register_dir }}");
+        assertThat(factory.restore(seed(Map.of(), new RunPaths("/w", "/p", "/s", "/r", true)), host.state())
+                .getVariables()).as("set again on a resume").containsEntry("register_dir", "/register");
+    }
+
     /** The host side of a mount names host directories, also in a container run. */
     @Test
     void hostTemplates_resolveThePathVariablesToTheHostPaths() {

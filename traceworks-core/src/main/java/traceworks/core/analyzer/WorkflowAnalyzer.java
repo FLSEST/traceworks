@@ -54,7 +54,9 @@ import java.util.Set;
  *       {@code unbalanced-placeholder}, {@code report-block-required}, {@code unprovided-variable},
  *       {@code blank-ai-prompt}, {@code unknown-provider}, {@code host-dependent-step},
  *       {@code invalid-audit-config}, {@code invalid-audit-key},
- *       {@code report-block-missing}, {@code catalog-invalid}, {@code previous-report-outside-audit};</li>
+ *       {@code report-block-missing}, {@code catalog-invalid}, {@code previous-report-outside-audit},
+ *       {@code register-dir-outside-audit},
+ *       {@code register-dir-in-ai-prompt};</li>
  *   <li>parking ({@link ParkingRules}): {@code nested-wait-point}, {@code question-changes-on-resume};</li>
  *   <li>package images ({@link PackageImageRules}): {@code child-package-image}, {@code invalid-image-name},
  *       {@code unpinned-base-image}, {@code image-without-description};</li>
