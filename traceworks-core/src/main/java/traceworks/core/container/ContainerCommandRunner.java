@@ -231,7 +231,9 @@ public final class ContainerCommandRunner implements CommandRunner {
             for (String point : mountPoints) {
                 if (RunPaths.within(target, point)) {
                     return "the mount " + mount.hostPath() + " -> " + mount.containerPath() + " lies on the run's"
-                            + " mount at " + point + "; mount it at another container path";
+                            + " mount at " + point + (point.equals(paths.registerInContainer()) ? ", where the run of"
+                            + " an audit workflow sees its register folder" : "")
+                            + "; mount it at another container path";
                 }
             }
             if (!plain(mount.containerPath())) {

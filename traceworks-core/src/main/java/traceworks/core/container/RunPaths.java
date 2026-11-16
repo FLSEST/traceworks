@@ -161,12 +161,14 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
 
     /**
      * Where the standard mounts lie in a container, on or below which a declared mount would cover one: the fixed paths
-     * in a container run, whether the run has the directory or not; the host paths of the directories it has in a
-     * host run.
+     * in a container run, whether the run has the directory or not, and {@value #REGISTER} only for a run that has
+     * a register folder; the host paths of the directories it has in a host run.
      */
     public List<String> standardMountPoints() {
         if (fixedContainerPaths) {
-            return List.of(WORKSPACE, PACKAGE, SCRATCH, REGISTER);
+            // The register folder only for a run that has one: no other run's steps lose a path they may mount at
+            return present(register) ? List.of(WORKSPACE, PACKAGE, SCRATCH, REGISTER)
+                    : List.of(WORKSPACE, PACKAGE, SCRATCH);
         }
         List<String> points = new ArrayList<>();
         for (String dir : new String[] {workspace, packageDirectory, scratch, register}) {

@@ -549,8 +549,21 @@ class ContainerCommandRunnerTest {
         CommandPlan plan = auditRun(AUDIT_PATHS, () -> null)
                 .plan(shell("x", ALPINE, List.of(new Mount("/mine", "/register/findings.jsonl", false))));
 
-        assertThat(plan.execution().get().stderr()).contains("lies on the run's mount at /register");
+        assertThat(plan.execution().get().stderr()).isEqualTo("the mount /mine -> /register/findings.jsonl lies on"
+                + " the run's mount at /register, where the run of an audit workflow sees its register folder; mount"
+                + " it at another container path");
         assertThat(runtime.runs()).isEmpty();
+    }
+
+    /** Only a run that has the folder reserves its place: any other run may mount what it likes at /register. */
+    @Test
+    void aRunWithoutARegisterFolder_mayMountAtRegister() {
+        Mount own = new Mount("/mine", "/register", true);
+
+        CommandPlan plan = containerRun().plan(shell("ls /register", ALPINE, List.of(own)));
+
+        assertThat(plan.execution().get().exitCode()).isZero();
+        assertThat(runtime.runs().getFirst().declaredMounts()).containsExactly(own);
     }
 
     /** In a host run a container step sees the folder at its host path, read-only, as it sees the package. */

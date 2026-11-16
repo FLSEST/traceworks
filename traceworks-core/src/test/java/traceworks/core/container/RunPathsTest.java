@@ -101,7 +101,11 @@ class RunPathsTest {
     /** In a host run a declared mount must not cover any of the run's directories, each at its own host path. */
     @Test
     void standardMountPoints_areTheFixedPathsInAContainerRun_andEachDirectorysHostPathInAHostRun() {
-        assertThat(fixed.standardMountPoints()).containsExactly("/workspace", "/package", "/scratch", "/register");
+        assertThat(fixed.standardMountPoints()).as("a run without a register folder reserves no /register")
+                .containsExactly("/workspace", "/package", "/scratch");
+        assertThat(new RunPaths("/w", "/p", "/s", "/r", true).standardMountPoints())
+                .as("the run of an audit reserves /register too")
+                .containsExactly("/workspace", "/package", "/scratch", "/register");
         assertThat(host.standardMountPoints())
                 .containsExactly("/home/a/project", "/home/a/project/pkg", "/th/runs/r/scratch");
         assertThat(new RunPaths("/w", "/p", "/s", "/th/runs/r/register/", false).standardMountPoints())
@@ -110,7 +114,7 @@ class RunPathsTest {
                 .as("without a trailing slash, and only the directories the run has").containsExactly("/w", "/s");
         assertThat(new RunPaths(null, null, null, true).standardMountPoints())
                 .as("a container run has the fixed paths whether it has the directory or not")
-                .containsExactly("/workspace", "/package", "/scratch", "/register");
+                .containsExactly("/workspace", "/package", "/scratch");
     }
 
     /**
