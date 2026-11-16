@@ -70,11 +70,22 @@ name of the workspace, and no text of a model is in that output. The register ha
 The base, its commit date and the workspace commit are in the output of the `base` step, in
 `areas-summary.json` and in the report.
 
-**A run on a workspace that differs from its commit does not move the base.** Such a run judges the files as
-they are, not the commit: the commit may hold a change the files do not have. So its report names this run's base
-again as the commit the next run starts from (`FACT changes_head`), and says so. The base moves with a run on a
-workspace that is its commit; a `.java` file git ignores makes a workspace differ, so use a clean checkout or
-`--source` for the runs that shall move it.
+**When the base moves.** The report of a run names the commit the next run without `since` starts from
+(`FACT changes_head`, and a row of the report that says why). It is the workspace commit only when the run judged
+everything of the range that a run can judge. It is **this run's base again** when the run left something that a
+later run can judge:
+
+| The run | Why the base stays |
+|---|---|
+| could not read a file of a source root (it does not parse, is no UTF-8, is a link) | once it reads, the next run sees the whole change in it |
+| could not compare a changed file | the same |
+| cut an area by the cap, or got no verdict for an area (a failed call, an answer that did not verify) | the area is judged by a later run with the changed code still in the diff |
+| ran on a workspace that differs from its commit (a `.java` file git ignores counts) | the files were judged, not the commit, which may hold a change they do not have |
+
+What this check can never judge does not hold the base, or it would hold it for ever: a changed script, workflow
+or build file, Java code outside the compiled roots, a removed Java file, and commits skipped with `skip=yes`. Such
+a run is not GREEN, the report names the files and says **passed unjudged**, and no later run of this check comes
+back to them. A run that holds the base judges again only what the register does not call judged as it is.
 
 **Changes that are in no commit count as changed.** A file is compared as it lies in the workspace, and a `.java`
 file the base does not have is new, whether git tracks it, ignores it or neither. The report says whether the
@@ -125,7 +136,7 @@ a directory called `build`, `target` or `node_modules` or a hidden one inside a 
 | Kind | In the report | The gate |
 |---|---|---|
 | a Java file the finder read | its changed lines pick areas | follows the items |
-| a changed place of such a file in no member (an import, the package, the head of a class, an annotation of a type) | counted and named; **every area of that file is judged** (reason `changed: the head of its file`), since such a line can change what any name in the file means | follows the items |
+| a changed place of such a file in no member (an import, the package, the head of a class, an annotation of a type) | counted and named. Every area of that file is picked (reason `changed: the head of its file`), and every area with a call into that file, or into a file that holds a supertype or a subtype of its classes, is a neighbour: such a line can change what a name in the file means and what a call through its classes reaches. A picked area is judged unless the register holds a verdict for exactly what it is and means now | follows the items |
 | a test (`.java` below a `src/test/java`) | counted | no effect. This assumes that test sources are not shipped and not run by the tool; a project that ships them needs another rule |
 | documentation | counted | no effect |
 | a removed Java file, other than a test | named | **not GREEN**: its areas are gone with it, and what called it was looked at only where it changed |
@@ -170,16 +181,21 @@ sources it calls, creates or refers to (`Type::method`). A call of a method coun
 overrides it, so a call through an interface reaches each implementation in the project, and a changed
 implementation makes the callers of the interface neighbours. A call inside a lambda or an anonymous class belongs
 to the member around it. The changed member need not be an area itself: a helper no rule points at makes the areas
-that call it neighbours.
+that call it neighbours. A call of something a class has without a line of its own (the constructor nobody wrote,
+the canonical constructor and the accessors of a record) goes to the head of the class, the lines before its first
+member, so a changed record header makes the areas that create the record neighbours.
 
 **The verdict sees the changed code next to its area.** The prompt holds the area's code as in the long audit and,
 in a frame of its own, the code of the changed members the area is connected with (at most 4 members, 60 lines
 each; the rest are named). A finding still has to quote a line of the area: the connected code is context, and the
 model may read the rest of the workspace (`tools: read`).
 
-**Judged as it is now.** The digest of an item holds the version of the question, the rules, the area's code and
-the whole code of every changed member it is connected with, also what the prompt had no room for (the prompt says
-where it cut). So a run with the same `since` as the last one asks again when any line of that code changed. A picked area that the register calls clean or decided with exactly that
+**Judged as it is now.** The digest of an item holds the version of the question, the rules, the area's code,
+**what that code means** (what each call, creation and method reference of its members resolved to, by declaring
+type and signature, and the lines of its file outside every member: package, imports, class heads), and the whole
+code of every changed member it is connected with, also what the prompt had no room for (the prompt says where it
+cut). So an import or a supertype that points a call of the area at other code changes the digest, though no line
+of the area changed, and the area does not pass for judged. So a run with the same `since` as the last one asks again when any line of that code changed. A picked area that the register calls clean or decided with exactly that
 digest is left out: the same question was answered. That is what keeps a second run over the same uncommitted
 change from asking again.
 
@@ -219,7 +235,9 @@ and a report of this check, which lists a few, would take the others out of its 
 - **An area without a verdict is judged by the next run.** A failed call or the cap leaves the item `not judged`
   in the register, and the next run takes it in, whatever its base.
 
-So the register has no state that no run comes back to: an item is settled, or the next run judges it.
+So the register has no item that no run comes back to: an item is settled, or the next run judges it. What is no
+item (a file that was not read, a changed file that was not compared) is not in the register; it holds the base
+instead ("When the base moves"), so the next run meets it again.
 
 Decisions do not travel between the two registers. A finding dismissed in `security` is a new finding here when
 this check reports it, and the other way round.
@@ -274,8 +292,7 @@ path or an option is refused. Not tried: other versions of git, and the steps in
 
 - **A change two calls away.** When `a` calls `b` and `b` calls the changed `c`, the area of `a` is not looked at.
 - **What is no call.** A changed constant or field that another member reads, in another file: the areas of the
-  file that changed are judged, the readers elsewhere are not. (A changed import, package line, class head or
-  annotation of a type marks every area of its own file.) And a call the compiler could not resolve: on a library type, or through
+  file that changed are picked, the readers elsewhere are not. And a call the compiler could not resolve: on a library type, or through
   reflection.
 - **A base that was never audited.** The check judges the changes; it takes the base as it is. Run the long audit
   once, or accept that the code before the base is unjudged. A `since` later than the last run's commit is

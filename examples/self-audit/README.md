@@ -261,7 +261,8 @@ traceworks run examples/self-audit/security-changes        # since the workspace
 Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
 changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
 keeps the gate from GREEN for that run; tests and documentation are counted. A changed import or class head
-marks every area of its file, and a run on a workspace that differs from its commit does not move the base. It
+picks every area of its file and makes the areas that call into it neighbours, the digest of an area holds what
+its calls resolve to, and the base moves only when the run judged everything a run can judge. It
 has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding
 there is asked about in every run until an answer says it is gone or a person decides, whatever the base of the
 run, and an area whose call failed is judged by the next run: the register holds nothing that no run comes back
