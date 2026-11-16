@@ -80,9 +80,9 @@ class ComparingTest {
         String c = run(BUILD, Map.of());
 
         assertThat(fx.services().compare(a, b).differences()).containsExactly(
-                "step test: the output was cut in run B (stdout after 5000 ms), not in run A");
+                "step test: the output was cut in run B (command 1: stdout after 5000 ms), not in run A");
         assertThat(fx.services().compare(b, a).differences()).containsExactly(
-                "step test: the output was cut in run A (stdout after 5000 ms), not in run B");
+                "step test: the output was cut in run A (command 1: stdout after 5000 ms), not in run B");
         assertThat(fx.services().compare(b, c).reproduced()).as("cut the same way in both").isTrue();
     }
 
