@@ -281,7 +281,7 @@ class RunServicesTest {
     }
 
     /** A ledger whose writes fail, as without git: {@code prepare} fails when {@code usable} is off. */
-    private static Ledger failingLedger(boolean usable) {
+    private Ledger failingLedger(boolean usable) {
         return new Ledger() {
             @Override
             public void prepare() {
@@ -298,6 +298,21 @@ class RunServicesTest {
             @Override
             public Optional<byte[]> find(String runId) {
                 return Optional.empty();
+            }
+
+            @Override
+            public String recordStart(String runId, byte[] startJson) {
+                return fx.ledger.recordStart(runId, startJson);   // the start is noted; the end is what fails
+            }
+
+            @Override
+            public Optional<byte[]> findStart(String runId) {
+                return fx.ledger.findStart(runId);
+            }
+
+            @Override
+            public traceworks.core.port.LedgerRuns runs() {
+                return fx.ledger.runs();
             }
         };
     }

@@ -4,6 +4,7 @@ import traceworks.adapters.pkg.GitProcess;
 import traceworks.core.port.Ids;
 import traceworks.core.model.AuditConfig;
 import traceworks.core.port.Ledger;
+import traceworks.core.port.LedgerRuns;
 import traceworks.core.port.RegisterAnchor;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -16,11 +17,14 @@ import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * The ledger as a git repository: one commit per finished run adds {@code runs/<run-id>.json}, a byte-identical copy
- * of the manifest, with the message {@code run <run-id> <STATUS>}; and one commit per write of a register adds a line
+ * The ledger as a git repository: one commit per started run adds {@code starts/<run-id>.json}, the start entry, with
+ * the message {@code run <run-id> STARTED}; one commit per finished run adds {@code runs/<run-id>.json}, a
+ * byte-identical copy of the manifest, with the message {@code run <run-id> <STATUS>}; and one commit per write of a register adds a line
  * to {@code registers/<key>.jsonl}, the anchor of the register's head, with the message
  * {@code register <key> seq <n>}.
  *
@@ -42,6 +46,13 @@ public final class GitLedger implements Ledger {
     private static final java.util.regex.Pattern HEAD = java.util.regex.Pattern.compile("[0-9a-f]{64}");
     private static final java.util.regex.Pattern ANCHOR =
             java.util.regex.Pattern.compile("\\{\"seq\":(\\d{1,9}),\"head\":\"([0-9a-f]{64})\"\\}");
+
+    /** The status a start entry has in its commit message; no run status has this name. */
+    static final String STARTED = "STARTED";
+    /** The message of the commit of a run's entry: {@code run <run-id> STARTED} or {@code run <run-id> <STATUS>}. */
+    private static final java.util.regex.Pattern SUBJECT = java.util.regex.Pattern.compile("run (\\S+) ([A-Z_]+)");
+    /** The path of a start entry or an end entry. */
+    private static final java.util.regex.Pattern ENTRY = java.util.regex.Pattern.compile("(starts|runs)/([^/]+)\\.json");
 
     private final Path directory;
     private final Path lockFile;
@@ -90,7 +101,68 @@ public final class GitLedger implements Ledger {
     @Override
     public String record(String runId, String status, byte[] manifestJson) {
         requireRunId(runId);
-        Path relative = Path.of("runs", runId + ".json");
+        return commitNew(Path.of("runs", runId + ".json"), manifestJson, "run " + runId + " " + status,
+                "Run is already recorded: " + runId);
+    }
+
+    /** One commit adds {@code starts/<run-id>.json} with the message {@code run <run-id> STARTED}. */
+    @Override
+    public String recordStart(String runId, byte[] startJson) {
+        requireRunId(runId);
+        return commitNew(Path.of("starts", runId + ".json"), startJson, "run " + runId + " " + STARTED,
+                "The start of the run is already noted: " + runId);
+    }
+
+    @Override
+    public Optional<byte[]> findStart(String runId) {
+        requireRunId(runId);
+        return strictInHead(Path.of("starts", runId + ".json"));
+    }
+
+    /**
+     * Every run the history names, and every entry HEAD holds no more. The commit messages say which runs started and
+     * ended ({@code run <run-id> STARTED}, {@code run <run-id> <STATUS>}): a later commit can remove a file, not an
+     * earlier message, and reading messages needs no diff, so it stays fast on a long history. The files of HEAD say
+     * what is still there. Nothing for a ledger that does not exist yet or has no commit.
+     */
+    @Override
+    public LedgerRuns runs() {
+        Set<String> started = new TreeSet<>();
+        Set<String> ended = new TreeSet<>();
+        List<String> removed = new java.util.ArrayList<>();
+        if (!hasCommit()) return new LedgerRuns(started, ended, removed);
+        GitProcess.Result log = run("--git-dir=.git", "--work-tree=.", "log", "--format=%s", "HEAD");
+        requireRead(log, "its history cannot be listed");
+        for (String subject : log.outputText().split("\n")) {
+            java.util.regex.Matcher entry = SUBJECT.matcher(subject);
+            if (entry.matches() && Ids.isRunId(entry.group(1))) {
+                (entry.group(2).equals(STARTED) ? started : ended).add(entry.group(1));
+            }
+        }
+        GitProcess.Result files = run("--git-dir=.git", "--work-tree=.", "-c", "core.quotePath=false", "ls-tree",
+                "-r", "--name-only", "HEAD", "--", "starts", "runs");
+        requireRead(files, "the files of its HEAD cannot be listed");
+        Set<String> held = new java.util.HashSet<>(List.of(files.outputText().split("\n")));
+        for (String path : held) {
+            // An entry that is there counts, whatever the message of its commit says
+            java.util.regex.Matcher entry = ENTRY.matcher(path);
+            if (entry.matches() && Ids.isRunId(entry.group(2))) {
+                (entry.group(1).equals("starts") ? started : ended).add(entry.group(2));
+            }
+        }
+        started.stream().map(id -> "starts/" + id + ".json").filter(path -> !held.contains(path)).forEach(removed::add);
+        ended.stream().map(id -> "runs/" + id + ".json").filter(path -> !held.contains(path)).forEach(removed::add);
+        java.util.Collections.sort(removed);
+        return new LedgerRuns(started, ended, removed);
+    }
+
+    /**
+     * Adds a file that HEAD does not hold yet, in one commit of its own.
+     *
+     * @param taken what to say when HEAD holds the file already
+     * @return the commit id
+     */
+    private String commitNew(Path relative, byte[] content, String message, String taken) {
         JVM_LOCK.lock();
         try {
             Files.createDirectories(lockFile.toAbsolutePath().getParent());
@@ -100,19 +172,19 @@ public final class GitLedger implements Ledger {
                 if (!Files.isDirectory(directory.resolve(".git"))) {
                     git("-c", "init.defaultBranch=main", "-c", "init.templateDir=", "init", "-q");
                 }
-                if (inHead(relative).isPresent()) throw new IllegalStateException("Run is already recorded: " + runId);
+                if (inHead(relative).isPresent()) throw new IllegalStateException(taken);
                 Path target = directory.resolve(relative);
                 Files.createDirectories(target.getParent());
                 Path temp = Files.createTempFile(directory, ".record-", ".tmp");
                 try {
-                    Files.write(temp, manifestJson);
+                    Files.write(temp, content);
                     Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
                     git("add", "--", relative.toString());
                     // --only: a file staged by an earlier, killed process must not ride along in this commit
-                    git("commit", "-q", "-m", "run " + runId + " " + status, "--only", "--", relative.toString());
+                    git("commit", "-q", "-m", message, "--only", "--", relative.toString());
                 } catch (RuntimeException | IOException e) {
                     Files.deleteIfExists(temp);
-                    // git may have committed before it failed or timed out: then the run is recorded
+                    // git may have committed before it failed or timed out: then the entry is in the ledger
                     if (inHead(relative).isPresent()) return git("rev-parse", "HEAD").strip();
                     Files.deleteIfExists(target);
                     try {
@@ -161,7 +233,7 @@ public final class GitLedger implements Ledger {
                 }
                 // Read strictly: a ledger that fails here must not get a commit that starts the file again with the
                 // one new line, which would take every earlier anchor out of HEAD
-                String before = new String(anchorsInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
+                String before = new String(strictInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
                 if (before.equals(line) || before.endsWith("\n" + line)) return;
                 byte[] after = (before + line).getBytes(StandardCharsets.UTF_8);
                 Path target = directory.resolve(relative);
@@ -201,7 +273,7 @@ public final class GitLedger implements Ledger {
     @Override
     public List<RegisterAnchor> registerAnchors(String key) {
         Path relative = anchorFile(key);
-        String text = new String(anchorsInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
+        String text = new String(strictInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
         List<RegisterAnchor> anchors = new java.util.ArrayList<>();
         int number = 0;
         for (String line : text.split("\n")) {
@@ -224,30 +296,42 @@ public final class GitLedger implements Ledger {
      * @throws IllegalStateException if the ledger exists and git cannot read it: its HEAD names no commit that can be
      *                               read, the tree cannot be listed, or the file is listed and cannot be shown
      */
-    private Optional<byte[]> anchorsInHead(Path relative) {
-        if (!Files.exists(directory, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
-        if (!Files.isDirectory(directory)) {
-            throw new IllegalStateException("The ledger " + directory + " cannot be read: it is no directory");
-        }
-        if (!Files.exists(directory.resolve(".git"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
-        // The repository is named: with a damaged .git, git would otherwise look for one in the folders above
-        GitProcess.Result head = run("--git-dir=.git", "--work-tree=.", "rev-parse", "--verify", "-q", "HEAD");
-        if (head.exitCode() == 1 && head.outputText().isBlank() && head.errorText().isBlank()) {
-            // HEAD names a branch without a commit. That is a new repository, and it is also what a branch file
-            // that is empty, zeroed or deleted looks like. A new repository has no history at all
-            requireNoHistory();
-            return Optional.empty();
-        }
-        requireRead(head, "its HEAD cannot be read");
-        // rev-parse only reads the name: whether the commit it names is there is asked of the object store
-        requireRead(run("--git-dir=.git", "--work-tree=.", "cat-file", "-e", head.outputText().strip() + "^{commit}"),
-                "the commit its HEAD names is not there");
+    private Optional<byte[]> strictInHead(Path relative) {
+        if (!hasCommit()) return Optional.empty();
         GitProcess.Result listed = run("--git-dir=.git", "--work-tree=.", "ls-tree", "HEAD", "--", relative.toString());
         requireRead(listed, "the files of its HEAD cannot be listed");
         if (listed.outputText().isBlank()) return Optional.empty();
         GitProcess.Result shown = run("--git-dir=.git", "--work-tree=.", "show", "HEAD:" + relative);
         requireRead(shown, relative + " of its HEAD cannot be shown");
         return Optional.of(shown.output());
+    }
+
+    /**
+     * Whether the ledger has a commit to read. Not for a ledger that does not exist yet (no folder, or a folder git
+     * has not been started in) and for a new repository.
+     *
+     * @throws IllegalStateException if the ledger exists and git cannot read it: it is no directory, or its HEAD names
+     *                               no commit that can be read
+     */
+    private boolean hasCommit() {
+        if (!Files.exists(directory, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return false;
+        if (!Files.isDirectory(directory)) {
+            throw new IllegalStateException("The ledger " + directory + " cannot be read: it is no directory");
+        }
+        if (!Files.exists(directory.resolve(".git"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) return false;
+        // The repository is named: with a damaged .git, git would otherwise look for one in the folders above
+        GitProcess.Result head = run("--git-dir=.git", "--work-tree=.", "rev-parse", "--verify", "-q", "HEAD");
+        if (head.exitCode() == 1 && head.outputText().isBlank() && head.errorText().isBlank()) {
+            // HEAD names a branch without a commit. That is a new repository, and it is also what a branch file
+            // that is empty, zeroed or deleted looks like. A new repository has no history at all
+            requireNoHistory();
+            return false;
+        }
+        requireRead(head, "its HEAD cannot be read");
+        // rev-parse only reads the name: whether the commit it names is there is asked of the object store
+        requireRead(run("--git-dir=.git", "--work-tree=.", "cat-file", "-e", head.outputText().strip() + "^{commit}"),
+                "the commit its HEAD names is not there");
+        return true;
     }
 
     /**

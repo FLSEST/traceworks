@@ -481,12 +481,125 @@ class GitLedgerTest {
         assertEquals(40, recorded.get(20, java.util.concurrent.TimeUnit.SECONDS).length());
     }
 
+    private static byte[] start(String id) {
+        return ("{\"run_id\":\"" + id + "\",\"run_started\":\"abc\"}\n").getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** The start of a run is one commit of its own: {@code starts/<run-id>.json}, {@code run <run-id> STARTED}. */
+    @Test
+    void aStart_isOneCommit_withTheEntry_andTheEndIsAnother() throws Exception {
+        GitLedger ledger = ledger();
+
+        String commit = ledger.recordStart("r1", start("r1"));
+
+        assertEquals(commit, git("rev-parse", "HEAD").strip());
+        assertEquals("run r1 STARTED", git("log", "-1", "--format=%s").strip());
+        assertEquals(new String(start("r1")), git("show", "HEAD:starts/r1.json"));
+        assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
+        assertTrue(ledger.find("r1").isEmpty(), "a start is no end entry");
+        assertTrue(ledger.findStart("r2").isEmpty());
+
+        ledger.record("r1", "COMPLETED", manifest("r1"));
+
+        assertEquals("2", git("rev-list", "--count", "HEAD").strip());
+        assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow(), "the end keeps the start");
+        assertArrayEquals(manifest("r1"), ledger.find("r1").orElseThrow());
+    }
+
+    @Test
+    void theSameStartTwice_isRefused() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.recordStart("r1", start("r1"));
+
+        assertThrows(IllegalStateException.class, () -> ledger.recordStart("r1", start("other")));
+
+        assertEquals("1", git("rev-list", "--count", "HEAD").strip());
+        assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
+    }
+
+    @Test
+    void aStartWhereNoRepositoryCanBeCreated_failsWithTheReason() throws Exception {
+        Files.writeString(home.resolve("ledger"), "a file, not a directory");
+
+        RuntimeException e = assertThrows(RuntimeException.class, () -> ledger().recordStart("r1", start("r1")));
+
+        assertTrue(String.valueOf(e.getMessage()).contains(home.resolve("ledger").toString()), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"),
+                "a ledger that cannot be read does not say 'no start entry'");
+    }
+
+    /** Runs that start at the same time, while others end: every entry lands. */
+    @Test
+    void concurrentStartsAndRecords_allLand() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        try {
+            List<Future<Void>> futures = new ArrayList<>();
+            for (int t = 0; t < 3; t++) {
+                int thread = t;
+                Callable<Void> work = () -> {
+                    GitLedger ledger = ledger();
+                    for (int i = 0; i < 4; i++) {
+                        String id = "t" + thread + "-" + i;
+                        ledger.recordStart(id, start(id));
+                        if (thread == 2) ledger.record(id, "COMPLETED", manifest(id));
+                    }
+                    return null;
+                };
+                futures.add(pool.submit(work));
+            }
+            for (Future<Void> future : futures) future.get();
+        } finally {
+            pool.shutdownNow();
+        }
+        assertEquals("16", git("rev-list", "--count", "HEAD").strip());
+        var runs = ledger().runs();
+        assertEquals(12, runs.started().size());
+        assertEquals(java.util.Set.of("t2-0", "t2-1", "t2-2", "t2-3"), runs.ended());
+        assertTrue(runs.removed().isEmpty());
+    }
+
+    /** The runs are read from the history: an entry that a later commit removed is still a run the ledger saw. */
+    @Test
+    void runs_namesEveryStartAndEnd_alsoOneALaterCommitRemoved() throws Exception {
+        GitLedger ledger = ledger();
+        assertTrue(ledger.runs().started().isEmpty(), "no ledger yet");
+        ledger.prepare();
+        assertTrue(ledger.runs().started().isEmpty(), "no commit yet");
+        ledger.recordStart("r1", start("r1"));
+        ledger.recordStart("r2", start("r2"));
+        ledger.record("r2", "FAILED", manifest("r2"));
+        ledger.record("old", "COMPLETED", manifest("old"));
+        ledger.anchorRegister("hello", 0, "a".repeat(64));
+        Map<String, String> me = Map.of("GIT_AUTHOR_NAME", "x", "GIT_AUTHOR_EMAIL", "x@x", "GIT_COMMITTER_NAME", "x",
+                "GIT_COMMITTER_EMAIL", "x@x");
+        git(me, "rm", "-q", "starts/r1.json");
+        git(me, "commit", "-q", "-m", "tidy up");
+
+        var runs = ledger.runs();
+
+        assertEquals(java.util.Set.of("r1", "r2"), runs.started());
+        assertEquals(java.util.Set.of("r2", "old"), runs.ended());
+        assertEquals(List.of("starts/r1.json"), runs.removed());
+        assertTrue(ledger.findStart("r1").isEmpty(), "HEAD holds it no more");
+    }
+
+    @Test
+    void runs_ofALedgerThatCannotBeRead_isAnError_notAnEmptyList() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        Files.writeString(home.resolve("ledger/.git/HEAD"), "garbage\n");
+
+        assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"));
+    }
+
     /** A run id is a name, never a path: one that would lead out of {@code runs/} is refused, and nothing is written. */
     @Test
     void aRunIdThatIsNoRunId_isRefused_andWritesNothing() {
         assertThrows(IllegalArgumentException.class, () -> ledger().record("../escape", "COMPLETED",
                 manifest("escape")));
         assertThrows(IllegalArgumentException.class, () -> ledger().find("../escape"));
+        assertThrows(IllegalArgumentException.class, () -> ledger().recordStart("../escape", start("escape")));
+        assertThrows(IllegalArgumentException.class, () -> ledger().findStart("../escape"));
         assertTrue(Files.notExists(home.resolve("ledger")));
     }
 }

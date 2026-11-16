@@ -198,6 +198,21 @@ class RegisterAnchorTest {
             }
 
             @Override
+            public String recordStart(String runId, byte[] startJson) {
+                return fixture.ledger.recordStart(runId, startJson);
+            }
+
+            @Override
+            public java.util.Optional<byte[]> findStart(String runId) {
+                return fixture.ledger.findStart(runId);
+            }
+
+            @Override
+            public traceworks.core.port.LedgerRuns runs() {
+                return fixture.ledger.runs();
+            }
+
+            @Override
             public List<RegisterAnchor> registerAnchors(String key) {
                 throw new IllegalStateException("git show failed: no git");
             }
@@ -224,6 +239,21 @@ class RegisterAnchorTest {
             @Override
             public java.util.Optional<byte[]> find(String runId) {
                 return fixture.ledger.find(runId);
+            }
+
+            @Override
+            public String recordStart(String runId, byte[] startJson) {
+                return fixture.ledger.recordStart(runId, startJson);
+            }
+
+            @Override
+            public java.util.Optional<byte[]> findStart(String runId) {
+                return fixture.ledger.findStart(runId);
+            }
+
+            @Override
+            public traceworks.core.port.LedgerRuns runs() {
+                return fixture.ledger.runs();
             }
 
             @Override

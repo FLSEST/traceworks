@@ -4,8 +4,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Port to the ledger: every finished run adds one entry with a byte-identical copy of its manifest, and the
- * history of the ledger chains all runs. It also anchors the head of every register (docs/registers.md, "The
+ * Port to the ledger: every run adds one entry when it starts, before its first step, and every finished run one
+ * with a byte-identical copy of its manifest; the history of the ledger chains all runs. A run that never ended, or
+ * whose folder is gone, is still named here. It also anchors the head of every register (docs/registers.md, "The
  * anchor"): a register's log is written by runs and by a person's decisions, and the ledger is the place outside
  * the register's folder that says where its log ended after each of them.
  */
@@ -32,6 +33,31 @@ public interface Ledger {
 
     /** The recorded manifest of a run, or empty when the run is not recorded. */
     Optional<byte[]> find(String runId);
+
+    /**
+     * Notes that a run started: its record holds {@code run.started}, and no step has run yet.
+     *
+     * @param runId     the run id
+     * @param startJson the start entry (docs/events.md, "The start entry"), stored unchanged
+     * @return the id of the ledger entry (the commit id)
+     * @throws IllegalStateException if the start of the run is already noted, or the ledger cannot be written
+     */
+    String recordStart(String runId, byte[] startJson);
+
+    /**
+     * The start entry of a run, or empty when the ledger noted no start of it.
+     *
+     * @throws IllegalStateException with the reason when the ledger exists and cannot be read: "no start entry"
+     *                               must not be what a damaged ledger says
+     */
+    Optional<byte[]> findStart(String runId);
+
+    /**
+     * Every run the ledger names, from its whole history, so an entry that a later commit removed still counts.
+     *
+     * @throws IllegalStateException with the reason when the ledger exists and cannot be read
+     */
+    LedgerRuns runs();
 
     /**
      * Anchors the head of a register after a write: the ledger keeps every anchor it was given, in order. The same
