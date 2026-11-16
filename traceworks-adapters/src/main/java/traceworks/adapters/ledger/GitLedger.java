@@ -223,7 +223,8 @@ public final class GitLedger implements Ledger {
             boolean file = type.equals("blob") && mode.equals("100644") && ENTRY_PATH.matcher(path).matches();
             if (!folder && !file) {
                 throw tampered("its HEAD holds " + path + " (" + type + ", mode " + mode + "), which is no entry of a"
-                        + " ledger: a regular file under starts/, runs/, acks/, registers/ or pins/");
+                        + " ledger: a regular file under starts/, runs/, acks/, registers/ or pins/. Take it out"
+                        + " with 'git -C " + directory + " rm " + path + "' and a commit");
             }
             if (file) files.put(path, entry.group(3));
         }
@@ -303,7 +304,7 @@ public final class GitLedger implements Ledger {
      */
     private List<Message> messages() {
         GitProcess.Result log = run("--git-dir=.git", "--work-tree=.", "log", "-z", "--encoding=UTF-8",
-                "--format=%H %s", "HEAD");
+                "--format=%H %s", "HEAD", "--");
         requireRead(log, "its history cannot be listed");
         List<Message> messages = new java.util.ArrayList<>();
         int position = 0;
@@ -340,43 +341,63 @@ public final class GitLedger implements Ledger {
      *
      * @param files     what HEAD holds ({@link #listing})
      * @param messages  the commits that name a path, newest first ({@link #messages})
-     * @param contents  the content of every file but the pins
+     * @param contents  the content of every file that was read, but the pins
      * @param problems  by path, what does not hold, one sentence each
-     * @param unpinned  by path, the SHA-256 of an entry no hash covers yet: one of a version whose messages named
-     *                  none, which the next pin takes as it is
+     * @param rewritten the paths whose file is not what its commits left: changed, cut or removed. A reader of such
+     *                  a file must not take it; a problem of another kind (a commit that names no hash) leaves the
+     *                  file readable
+     * @param unjudged  the paths no hash covers yet: of a version whose messages named none, which the next pin
+     *                  takes as they are. Told from the messages and the pins alone, for every path
+     * @param pins      the pins, oldest first, one sentence each
      */
     private record Judged(Map<String, String> files, List<Message> messages, Map<String, byte[]> contents,
-                          Map<String, List<String>> problems, Map<String, String> unpinned) {
+                          Map<String, List<String>> problems, Set<String> rewritten, Set<String> unjudged,
+                          List<String> pins) {
     }
 
     /**
-     * Judges every path by a hash: an entry must be what the commit that names it said the path held.
+     * Judges every path by hashes that are bound to what came before, so that no later commit chooses what counts.
      * <ul>
-     * <li>A start entry and an end entry are named by one commit, whose subject holds their SHA-256.</li>
-     * <li>The acknowledgements of a run and the anchors of a register are added to; each commit names the SHA-256 of
-     *     the whole file after it, and the file must be what the newest of them left.</li>
+     * <li>A start entry and an end entry are named by one commit, whose subject holds their SHA-256: the oldest
+     *     commit that names the path counts, and a second one is a problem.</li>
+     * <li>The acknowledgements of a run and the anchors of a register are added to. Each commit names the SHA-256 of
+     *     the whole file after it, and <em>every</em> one of them, in the order of the history, must be the SHA-256
+     *     of a beginning of the file as it is now that ends with a line, each longer than the one before. So a
+     *     commit can only have added lines: a file that was rewritten, also under a correct hash of the new file,
+     *     no longer begins with what the earlier commits left.</li>
      * <li>An entry of a version whose subjects named no hash is covered by a pin: a commit
      *     {@code ledger PINNED sha256:<hex>} that adds {@code pins/<hex>.txt}, a list of such paths with the SHA-256
-     *     each had then. The file is named by its own SHA-256, so it cannot be changed, and the oldest pin that
-     *     lists a path counts. Once a hash covers a path, a commit that names it without one is refused: there is no
-     *     way back to a path no hash covers.</li>
+     *     each had then. The file is named by its own SHA-256, so it cannot be changed; the oldest pin that lists
+     *     a path counts, and a pin covers no path a hash covered before it. Whether a path is covered is told from
+     *     its own commits and from what the pins list, never from the fact that a pin exists.</li>
+     * <li>Once the ledger has a hash, a commit that names a path without one is a problem of that path: a version
+     *     that names none wrote to the ledger.</li>
      * </ul>
+     *
+     * @param read      which paths to read and compare; the pins are always read, and what is covered is told for all
+     * @param fromFiles whether the files of the working tree will do for the content ({@link #blob}): for a reader
+     *                  of every entry
      */
-    private Judged judge() {
+    private Judged judge(java.util.function.Predicate<String> read, boolean fromFiles) {
         Map<String, String> files = listing();
         List<Message> messages = files.isEmpty() && !hasCommit() ? List.of() : messages();
         Map<String, byte[]> contents = new java.util.HashMap<>();
         Map<String, List<String>> problems = new java.util.TreeMap<>();
+        Set<String> rewritten = new java.util.TreeSet<>();
         Map<String, List<Message>> namers = new java.util.TreeMap<>();
-        // The pins, oldest first: what each covers, unless something older covers it
         Map<String, Message> pinOf = new java.util.HashMap<>();
         Map<String, String> pinned = new java.util.HashMap<>();
         Set<String> namedPins = new java.util.HashSet<>();
+        List<String> pins = new java.util.ArrayList<>();
+        // Where the hashes begin: the oldest commit that names one
+        Message first = null;
         for (Message message : messages) {
+            if (message.hash() != null) first = message;
             if (!message.path().startsWith("pins/")) {
                 namers.computeIfAbsent(message.path(), path -> new java.util.ArrayList<>()).add(message);
             }
         }
+        // The pins, oldest first: what each covers, unless something older covers it
         for (Message pin : messages.reversed()) {
             if (!pin.path().startsWith("pins/")) continue;
             namedPins.add(pin.path());
@@ -388,6 +409,7 @@ public final class GitLedger implements Ledger {
                         : "holds another file there (SHA-256 " + sha256(list) + ")"));
                 continue;
             }
+            int covers = 0;
             for (String line : new String(list, StandardCharsets.UTF_8).split("\n")) {
                 java.util.regex.Matcher entry = PINNED_LINE.matcher(line);
                 if (!entry.matches()) continue;
@@ -397,10 +419,12 @@ public final class GitLedger implements Ledger {
                 if (!coveredBefore) {
                     pinOf.put(path, pin);
                     pinned.put(path, entry.group(1));
+                    covers++;
                 }
             }
+            pins.add(pin.who() + " covers " + covers + (covers == 1 ? " entry" : " entries"));
         }
-        Map<String, String> unpinned = new java.util.TreeMap<>();
+        Set<String> unjudged = new java.util.TreeSet<>();
         Set<String> paths = new java.util.TreeSet<>(files.keySet());
         paths.addAll(namers.keySet());
         paths.addAll(pinOf.keySet());
@@ -412,57 +436,127 @@ public final class GitLedger implements Ledger {
             }
             List<Message> named = namers.getOrDefault(path, List.of());
             Message pin = pinOf.get(path);
-            byte[] content = files.containsKey(path) ? blob(files.get(path), path, true) : null;
-            if (content != null) contents.put(path, content);
-            String holds = content == null ? null : sha256(content);
             boolean once = path.startsWith("starts/") || path.startsWith("runs/");
-            if (named.isEmpty() && pin == null) {
-                found.add("no commit names " + path + ", which the ledger holds (SHA-256 " + holds + ")");
-                continue;
-            }
-            if (once && named.size() > 1) {
-                found.add(named.size() + " commits name " + path + " (" + String.join(", ", named.reversed().stream()
-                        .map(Message::who).toList()) + "): an entry is added once");
-            }
-            // What covers the path first: from then on every commit that names it must name a hash
-            int covered = pin != null ? pin.position() : -1;
             for (Message message : named) {
-                if (message.hash() != null) covered = Math.max(covered, message.position());
-            }
-            for (Message message : named) {
-                if (message.hash() == null && message.position() < covered) {
-                    found.add(message.who() + " names " + path + " without a SHA-256, after a commit that named one:"
-                            + " a version that names none must not write to this ledger");
+                if (message.hash() == null && first != null && message.position() < first.position()) {
+                    found.add(message.who() + " names " + path + " without a SHA-256, although the ledger has them"
+                            + " since commit " + first.commit().substring(0, 12) + ": a version that names none"
+                            + " wrote to this ledger. If that was an older Traceworks, acknowledge this and do not"
+                            + " use that version on this ledger again");
                 }
             }
-            // What the path must hold: what the commit that added it said, or for a file that is added to, the
-            // newest one; for an entry of the time before hashes, what the pin took
-            Message says = once ? named.isEmpty() ? null : named.getLast()
-                    : named.stream().filter(message -> message.hash() != null).findFirst().orElse(null);
-            String expected = says != null && says.hash() != null ? says.hash() : pin != null ? pinned.get(path) : null;
+            // What vouches for the path, oldest first: the pin, then every commit that names a hash
+            List<Message> hashed = named.reversed().stream().filter(message -> message.hash() != null).toList();
+            boolean covered = pin != null || (once ? !named.isEmpty() && named.getLast().hash() != null
+                    : !hashed.isEmpty());
+            if (!covered && files.containsKey(path) && !named.isEmpty()) {
+                unjudged.add(path);
+            }
+            if (!read.test(path)) continue;
+            byte[] content = files.containsKey(path) ? blob(files.get(path), path, fromFiles) : null;
+            if (content != null) contents.put(path, content);
+            String holds = content == null ? null : sha256(content);
+            if (named.isEmpty() && pin == null) {
+                found.add("no commit names " + path + ", which the ledger holds (SHA-256 " + holds + ")");
+                rewritten.add(path);
+                continue;
+            }
+            Message says = once ? named.isEmpty() ? null : named.getLast() : hashed.isEmpty() ? null : hashed.getLast();
             String by = says != null && says.hash() != null ? says.who() : pin != null ? "the pin of " + pin.who()
                     : named.getLast().who();
             if (content == null) {
                 found.add(by + " names " + path + ", and the ledger does not hold it: a later commit removed it, or"
                         + " the commit added none");
-            } else if (expected == null) {
-                unpinned.put(path, holds);
-            } else if (!expected.equals(holds)) {
-                found.add(path + " is not what " + by + " left: that names the SHA-256 " + expected
-                        + ", and the ledger holds " + holds + " ('git log -- " + path + "' in the ledger shows the"
-                        + " commits that touched it)");
+                rewritten.add(path);
+                continue;
             }
+            if (once) {
+                if (named.size() > 1) {
+                    found.add(named.size() + " commits name " + path + " (" + String.join(", ", named.reversed()
+                            .stream().map(Message::who).toList()) + "): an entry is added once");
+                }
+                String expected = says != null && says.hash() != null ? says.hash() : pinned.get(path);
+                if (expected != null && !expected.equals(holds)) {
+                    found.add(path + " is not what " + by + " left: that names the SHA-256 " + expected
+                            + ", and the ledger holds " + holds + " ('git log -- " + path + "' in the ledger shows"
+                            + " the commits that touched it)");
+                    rewritten.add(path);
+                }
+                continue;
+            }
+            // A file that is added to: every hash, in order, is one of a beginning of the file, each a longer one
+            Map<String, Integer> beginnings = beginnings(content);
+            int length = 0;
+            boolean holdsAll = true;
+            if (pin != null) {
+                Integer upTo = beginnings.get(pinned.get(path));
+                if (upTo == null) {
+                    found.add("the pin of " + pin.who() + " took " + path + " with the SHA-256 " + pinned.get(path)
+                            + ", which is no beginning of the file the ledger holds (SHA-256 " + holds + "): the file"
+                            + " was rewritten");
+                    holdsAll = false;
+                } else {
+                    length = upTo;
+                }
+            }
+            for (Message message : hashed) {
+                Integer upTo = beginnings.get(message.hash());
+                if (upTo == null) {
+                    found.add(message.who() + " left " + path + " with a SHA-256 that is no beginning of the file the"
+                            + " ledger holds (SHA-256 " + holds + "): the file was rewritten");
+                    holdsAll = false;
+                } else if (upTo <= length) {
+                    found.add(message.who() + " left " + path + " no longer than the commit before it: a commit of"
+                            + " this file only adds lines");
+                    holdsAll = false;
+                } else {
+                    length = upTo;
+                }
+            }
+            boolean unnamedTail = covered && length < content.length
+                    && (named.isEmpty() || named.getFirst().hash() != null);
+            if (unnamedTail) {
+                found.add("the ledger holds more of " + path + " (SHA-256 " + holds + ") than " + by + " left: lines"
+                        + " were added by a commit that does not name the file");
+            }
+            if (!holdsAll || unnamedTail) rewritten.add(path);
         }
         problems.values().removeIf(List::isEmpty);
-        return new Judged(files, messages, contents, problems, unpinned);
+        return new Judged(files, messages, contents, problems, rewritten, unjudged, pins);
+    }
+
+    /** The SHA-256 of every beginning of {@code content} that ends with a line, and of the whole, with its length. */
+    private static Map<String, Integer> beginnings(byte[] content) {
+        Map<String, Integer> beginnings = new java.util.HashMap<>();
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            for (int i = 0; i < content.length; i++) {
+                digest.update(content[i]);
+                if (content[i] == '\n' || i == content.length - 1) {
+                    java.security.MessageDigest upTo = (java.security.MessageDigest) digest.clone();
+                    beginnings.put(java.util.HexFormat.of().formatHex(upTo.digest()), i + 1);
+                }
+            }
+        } catch (java.security.NoSuchAlgorithmException | CloneNotSupportedException e) {
+            throw new IllegalStateException(e);
+        }
+        return beginnings;
+    }
+
+    /** The name a path's problems are listed under: the run, or {@code registers.<key>} for the anchors. */
+    private static String owner(String path) {
+        java.util.regex.Matcher run = RUN_PATH.matcher(path);
+        if (run.matches()) return run.group(2);
+        return path.startsWith("registers/") ? "registers." + path.substring("registers/".length(),
+                path.length() - ".jsonl".length()) : null;
     }
 
     /**
      * Every run the ledger names. The subjects of the commits say which runs started and ended: a later commit can
      * remove a file, not an earlier message. The files of HEAD are what the ledger holds now, and each must be what
-     * its commits say ({@link #judge}); what is not is a change of its run ({@link LedgerRuns.Run#changes}), and for
-     * the anchors of a register and the pins a failure of the whole ledger. Nothing for a ledger that does not exist
-     * yet or has no commit.
+     * its commits say ({@link #judge}); what is not is a change of its run ({@link LedgerRuns.Run#changes}), for the
+     * anchors of a register one of {@code registers.<key>}, and for a pin a failure of the whole ledger. Nothing for
+     * a ledger that does not exist yet or has no commit.
      *
      * @throws IllegalStateException if the ledger cannot be read, holds something that is no entry, or something
      *                               that lets git show another history than its commits ({@link #requireOneHistory})
@@ -470,23 +564,29 @@ public final class GitLedger implements Ledger {
     @Override
     public LedgerRuns runs() {
         requireOneHistory();
-        Judged judged = judge();
+        Judged judged = judge(path -> true, true);
         List<String> whole = new java.util.ArrayList<>();
         Map<String, List<String>> changed = new java.util.HashMap<>();
+        Map<String, List<String>> unjudged = new java.util.HashMap<>();
         Set<String> ids = new java.util.TreeSet<>();
         Map<String, String> endNamed = new java.util.HashMap<>();
         Set<String> startNamed = new java.util.HashSet<>();
         judged.problems().forEach((path, found) -> {
-            java.util.regex.Matcher entry = RUN_PATH.matcher(path);
-            if (entry.matches()) {
-                ids.add(entry.group(2));
-                changed.computeIfAbsent(entry.group(2), id -> new java.util.ArrayList<>()).addAll(found);
-            } else {
+            String owner = owner(path);
+            if (owner == null) {
                 whole.addAll(found);
+            } else {
+                ids.add(owner);
+                changed.computeIfAbsent(owner, id -> new java.util.ArrayList<>()).addAll(found);
             }
         });
         if (!whole.isEmpty()) {
             throw tampered(String.join("; ", whole));
+        }
+        for (String path : judged.unjudged()) {
+            String owner = owner(path);
+            if (RUN_PATH.matcher(path).matches()) ids.add(owner);
+            unjudged.computeIfAbsent(owner, id -> new java.util.ArrayList<>()).add(path);
         }
         // Newest first: the oldest message of an end is the one that counts, so it is put last
         for (Message message : judged.messages()) {
@@ -504,17 +604,34 @@ public final class GitLedger implements Ledger {
         for (String id : ids) {
             runs.add(new LedgerRuns.Run(id, startNamed.contains(id), judged.contents().get("starts/" + id + ".json"),
                     endNamed.get(id), judged.contents().get("runs/" + id + ".json"),
-                    judged.contents().get("acks/" + id + ".jsonl"), changed.getOrDefault(id, List.of())));
+                    judged.contents().get("acks/" + id + ".jsonl"), changed.getOrDefault(id, List.of()),
+                    unjudged.getOrDefault(id, List.of())));
         }
-        return new LedgerRuns(runs);
+        return new LedgerRuns(runs, List.copyOf(judged.unjudged()), judged.pins());
     }
 
-    /** What the history did to the entries of one run: {@link #runs()} for that run. */
+    /** The entries of one run, judged alone: only its files are read. */
+    private Judged judgeRun(String runId) {
+        requireRunId(runId);
+        requireOneHistory();
+        Set<String> its = Set.of("starts/" + runId + ".json", "runs/" + runId + ".json", "acks/" + runId + ".jsonl");
+        return judge(its::contains, false);
+    }
+
+    /** What the history did to the entries of one run. */
     @Override
     public List<String> changes(String runId) {
-        requireRunId(runId);
-        return runs().runs().stream().filter(run -> run.runId().equals(runId)).findFirst()
-                .map(LedgerRuns.Run::changes).orElse(List.of());
+        List<String> found = new java.util.ArrayList<>();
+        judgeRun(runId).problems().forEach((path, sentences) -> {
+            if (runId.equals(owner(path))) found.addAll(sentences);
+        });
+        return found;
+    }
+
+    /** The entries of one run that no hash covers. */
+    @Override
+    public List<String> unjudged(String runId) {
+        return judgeRun(runId).unjudged().stream().filter(path -> runId.equals(owner(path))).toList();
     }
 
     /**
@@ -522,20 +639,16 @@ public final class GitLedger implements Ledger {
      * {@code pins/<hex>.txt} with the SHA-256 and the path of each, as the ledger holds them now. They are the
      * entries of a version whose messages named no hash; from here on each is judged by the hash of the pin. Before
      * a run starts, so a ledger is pinned by the first run of this version, without a command of its own: a pin
-     * says nothing a person decides, only what the ledger holds. Nothing for a ledger without such an entry, and
-     * nothing while the ledger has a problem: what does not hold is not pinned.
+     * says nothing a person decides, only what the ledger holds. Which entries those are is asked of the listing and
+     * the hashes each time, so no pin that is there, and no problem somewhere else, keeps one from being pinned.
      */
     private void pinWhatNoHashCovers() throws IOException {
-        if (!hasCommit()) return;
-        // Cheap first: only a commit without a hash that is newer than the newest pin can have left such an entry
-        List<Message> messages = messages();
-        int newestPin = messages.stream().filter(message -> message.path().startsWith("pins/"))
-                .mapToInt(Message::position).min().orElse(Integer.MAX_VALUE);
-        if (messages.stream().noneMatch(message -> message.hash() == null && message.position() < newestPin)) return;
-        Judged judged = judge();
-        if (judged.unpinned().isEmpty() || !judged.problems().isEmpty()) return;
+        Judged judged = judge(path -> false, false);
+        if (judged.unjudged().isEmpty()) return;
         StringBuilder list = new StringBuilder();
-        judged.unpinned().forEach((path, hash) -> list.append(hash).append("  ").append(path).append('\n'));
+        for (String path : judged.unjudged()) {
+            list.append(sha256(blob(judged.files().get(path), path, false))).append("  ").append(path).append('\n');
+        }
         byte[] content = list.toString().getBytes(StandardCharsets.UTF_8);
         String hash = sha256(content);
         write("pins/" + hash + ".txt", content, "ledger PINNED sha256:" + hash);
@@ -575,7 +688,7 @@ public final class GitLedger implements Ledger {
             throw new IllegalStateException("The ledger " + directory + " stored other bytes at " + path + " than the"
                     + " entry it was given: something changes files on their way into the repository");
         }
-        return git("rev-parse", "HEAD").strip();
+        return git("rev-parse", "--verify", "HEAD").strip();
     }
 
     /** Whether HEAD holds exactly {@code content} at {@code path}, by the id of the object. */
@@ -694,13 +807,13 @@ public final class GitLedger implements Ledger {
         }
         // A merge can bring in a change to an entry that the walk over each commit's own changes does not show
         GitProcess.Result merges = run("--git-dir=.git", "--work-tree=.", "rev-list", "--merges", "--max-count=1",
-                "HEAD");
+                "HEAD", "--");
         requireRead(merges, "its commits cannot be listed");
         if (!merges.outputText().isBlank()) {
             throw tampered("its history holds the merge commit " + merges.outputText().strip());
         }
         GitProcess.Result beside = run("--git-dir=.git", "--work-tree=.", "rev-list", "--max-count=1", "--all",
-                "--not", "HEAD");
+                "--not", "HEAD", "--");
         requireRead(beside, "its commits cannot be listed");
         if (!beside.outputText().isBlank()) {
             throw tampered("a reference holds the commit " + beside.outputText().strip()
@@ -831,12 +944,23 @@ public final class GitLedger implements Ledger {
      * The anchors {@code registers/<key>.jsonl} holds in HEAD. None for a ledger that does not exist yet (no folder,
      * or a folder git has not been started in), for one without a commit, and for one whose HEAD does not hold the
      * file. A ledger that exists and cannot be read is an error, never an empty list: "no anchor" must not be what a
-     * damaged ledger says.
+     * damaged ledger says. The file is judged as every other reader judges it ({@link #judge}): one that was
+     * rewritten is an error too.
      */
     @Override
     public List<RegisterAnchor> registerAnchors(String key) {
         Path relative = anchorFile(key);
-        String text = new String(held(relative.toString()).orElse(new byte[0]), StandardCharsets.UTF_8);
+        requireOneHistory();
+        Judged judged = judge(relative.toString()::equals, false);
+        List<String> broken = new java.util.ArrayList<>();
+        judged.problems().forEach((path, found) -> {
+            if (path.startsWith("pins/") || judged.rewritten().contains(path)) broken.addAll(found);
+        });
+        if (!broken.isEmpty()) {
+            throw tampered(String.join("; ", broken));
+        }
+        String text = new String(judged.contents().getOrDefault(relative.toString(), new byte[0]),
+                StandardCharsets.UTF_8);
         List<RegisterAnchor> anchors = new java.util.ArrayList<>();
         int number = 0;
         for (String line : text.split("\n")) {
