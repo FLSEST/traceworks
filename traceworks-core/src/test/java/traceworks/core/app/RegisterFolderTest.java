@@ -291,9 +291,9 @@ class RegisterFolderTest {
 
     // ---- the register's own files ----
 
-    /** The files are made from the register's blobs: a report blob that is not what its name says refuses the run. */
+    /** The files are made from the register's blobs: a blob that is not what its name says refuses the run. */
     @Test
-    void aReportBlobThatDoesNotHashToItsName_refusesTheRun() {
+    void aBlobOfTheRegisterThatDoesNotHashToItsName_refusesTheRun() {
         fx.services().start(request(AUDIT), null, null);
         String reportBlob;
         try (RegisterStore.Opened opened = fx.registers.open("hello")) {
@@ -307,5 +307,25 @@ class RegisterFolderTest {
                 .hasMessageContaining("the register hello cannot be read")
                 .hasMessageContaining("does not hash to its name")
                 .hasMessageContaining("findings hello verify");
+    }
+
+    /** The findings a report stated are a blob too: one that was edited in place refuses the run as well. */
+    @Test
+    void aFindingsBlobThatWasEditedInPlace_refusesTheRun() {
+        fx.services().start(request(AUDIT), null, null);
+        String findingsBlob;
+        try (RegisterStore.Opened opened = fx.registers.open("hello")) {
+            findingsBlob = new RegisterLog(opened, fx.clock).read().stream()
+                    .filter(event -> event.text("findings_blob") != null).findFirst().orElseThrow()
+                    .text("findings_blob");
+        }
+        byte[] edited = new String(fx.registers.blobs("hello").get(findingsBlob).orElseThrow(),
+                StandardCharsets.UTF_8).replace("Big A.java", "Nothing to see").getBytes(StandardCharsets.UTF_8);
+        fx.registers.blobs("hello").putRaw(findingsBlob, edited);
+
+        assertThatThrownBy(() -> fx.services().start(request(AUDIT), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("the register hello cannot be read")
+                .hasMessageContaining("does not hash to its name");
     }
 }

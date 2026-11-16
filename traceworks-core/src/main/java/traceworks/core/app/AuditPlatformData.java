@@ -1,6 +1,7 @@
 package traceworks.core.app;
 
 import traceworks.core.model.AuditConfig;
+import traceworks.core.port.BlobStore;
 import traceworks.core.port.Clock;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.RegisterStore;
@@ -99,6 +100,28 @@ final class AuditPlatformData {
         }
     }
 
+    /**
+     * The blobs of a register, read with a check: a blob whose content does not hash to its name is not the one a
+     * line of the log points to, and refuses the run.
+     */
+    private static BlobStore hashed(BlobStore blobs) {
+        return new BlobStore() {
+            @Override
+            public traceworks.core.port.BlobRef put(byte[] content) {
+                throw new UnsupportedOperationException("the start check reads a register and writes nothing");
+            }
+
+            @Override
+            public java.util.Optional<byte[]> get(String sha256) {
+                java.util.Optional<byte[]> content = blobs.get(sha256);
+                if (content.isPresent() && !sha256.equals(EventChain.sha256Hex(content.get()))) {
+                    throw new IllegalStateException("the blob " + sha256 + " does not hash to its name");
+                }
+                return content;
+            }
+        };
+    }
+
     private Read platformData(LoadedPackage pkg, AuditConfig config) {
         Catalog catalog = null;
         if (pkg.catalogJson() != null) {
@@ -116,19 +139,16 @@ final class AuditPlatformData {
         try (RegisterStore.Opened opened = registers.open(config.key())) {
             RegisterLog log = new RegisterLog(opened, clock);
             List<traceworks.core.register.RegisterEvent> events = log.read();
-            RegisterState state = RegisterReplay.replay(config.key(), events, opened.blobs());
+            // What the run is handed, whole and as files, comes from these blobs: each must be what its name says
+            BlobStore blobs = hashed(opened.blobs());
+            RegisterState state = RegisterReplay.replay(config.key(), events, blobs);
             // The last valid report: the last applied one, whatever was rejected after it
             String report = null;
             for (int i = events.size() - 1; i >= 0; i--) {
                 String blob = events.get(i).text("report_blob");
                 if (traceworks.core.register.RegisterEvents.REPORT_APPLIED.equals(events.get(i).type())
                         && blob != null) {
-                    byte[] bytes = opened.blobs().get(blob).orElse(null);
-                    if (bytes != null && !blob.equals(EventChain.sha256Hex(bytes))) {
-                        // The text goes to the next run whole, as a file: it must be the report that was applied
-                        throw new IllegalStateException("seq " + events.get(i).seq() + ": the report blob " + blob
-                                + " does not hash to its name");
-                    }
+                    byte[] bytes = blobs.get(blob).orElse(null);
                     report = bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
                     break;
                 }
