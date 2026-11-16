@@ -510,13 +510,15 @@ class ContainerProcessTest {
     /**
      * The result holds each stream to its end, not what the reader happened to have when the client ended: here the
      * last line of a stream is written a moment after the client's end, by a child that still holds only that stream.
+     * The client ends a moment after its own last line, so that the reader waits in a read when it does: the JDK
+     * closes a stream nobody reads at that instant, with what is still to come.
      */
     @Test
     void execute_readsEachStreamToItsEnd_beforeItReturnsTheResult(@TempDir Path dir) throws IOException {
         Path lateStdout = Files.writeString(dir.resolve("late-stdout.sh"),
-                "(exec 2>&-; sleep 0.4; echo late) &\necho early\n");
+                "(exec 2>&-; sleep 0.8; echo late) &\necho early\nsleep 0.3\n");
         Path lateStderr = Files.writeString(dir.resolve("late-stderr.sh"),
-                "(exec >&-; sleep 0.4; echo late >&2) &\necho early >&2\n");
+                "(exec >&-; sleep 0.8; echo late >&2) &\necho early >&2\nsleep 0.3\n");
 
         CommandResult stdout = execute(lateStdout, null, 10, List.of("true"));
         CommandResult stderr = execute(lateStderr, null, 10, List.of("true"));

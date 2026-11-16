@@ -738,10 +738,12 @@ class HostCommandRunnerTest {
     /**
      * The result of a command that ended by itself holds its output to the end, not what the reader happened to have
      * at that moment: here the last line is written a moment after the command's end, by a child it left behind.
+     * The command ends a moment after its own last line, so that the reader waits in a read when it does: the JDK
+     * closes a stream nobody reads at that instant, with what is still to come.
      */
     @Test
     void run_readsTheOutputToItsEnd_beforeItReturnsTheResult() {
-        CommandResult result = run("(sleep 0.4; echo late) & echo early", 30);
+        CommandResult result = run("(sleep 0.8; echo late) & echo early; sleep 0.3", 30);
 
         assertThat(result.exitCode()).isZero();
         assertThat(result.stdout()).isEqualTo("early\nlate\n");
