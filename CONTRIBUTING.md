@@ -40,8 +40,8 @@ container code does not need the full run on your machine.
 ## Rules
 
 - **Everything in the repository is English:** code, comments, documentation, test names, messages. The one
-  exception is the class `core.compat.GermanWords`, which holds the German words that workflows of the earlier system
-  use, so that those workflows keep working.
+  exception is the class `core.compat.GermanWords`, which holds the German words Traceworks still reads in a
+  workflow, so that workflows written with them keep working.
 - **Commits** are small and follow [Conventional Commits](https://www.conventionalcommits.org/): `fix(register):
   ...`, `feat: ...`, `docs: ...`, `test: ...`.
 - **Tests first.** A fix starts with a test that fails without it. A feature comes with its tests, and a test that
@@ -55,12 +55,18 @@ container code does not need the full run on your machine.
   [docs/architecture.md](docs/architecture.md#dependencies).
 - **Documentation with the change.** What a command does, prints or exits with is in `docs/`; a change of
   behaviour changes the page in the same commit. A limit is written down next to the feature it belongs to.
-- **Compatibility:** a workflow behaves as [docs/compatibility.md](docs/compatibility.md) says, or it is refused.
-  It never silently behaves differently.
+- **The format:** a workflow runs as it is written, or it is refused. It never silently runs as something else.
+  A new key or rule comes with its row and its reason in [docs/workflow-format.md](docs/workflow-format.md).
 
-## Secret scan
+### Trailer lines in commit messages
 
-Turn the hook on once per clone:
+Many commits in the history end with two trailer lines. `Todo:` names the id and the title of an internal work
+item the commit belongs to; the tracker is not public, and a contribution needs no such line. `Co-Authored-By:`
+with the name of an AI model says that the commit was written with that model.
+
+## Hooks and the secret scan
+
+The hooks of the repository are in `scripts/hooks`. Turn them on once per clone:
 
 ```bash
 git config core.hooksPath scripts/hooks
