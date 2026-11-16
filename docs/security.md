@@ -262,6 +262,9 @@ three groups:
   by itself, has no setting for a remote and writes the ledger without git hooks, so the push is the operator's: a
   cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are not pushed yet are only as
   safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
+  The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
+  of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
+  verifies the record of every ended run against its end entry, unless `--quick` is given.
 - **What nothing in this version finds:** what was done to an entry of an earlier version before this version
   pinned it (docs/events.md, "Entries from before the hash"); a forged entry made with write access to the ledger (the ledger is not
   signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended

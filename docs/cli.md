@@ -560,6 +560,15 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
   the manifest of each (`runs/<run-id>.json`), so this is no failure.
 - **earlier version, not ended, not in the ledger** lists the run folders of a version that noted no start whose
   run has not ended: the ledger never knew them. The first line counts all folders of an earlier version.
+- **pins** lists the pins of the ledger, and **not judged** the entries no hash covers yet (docs/events.md,
+  "Entries from before the hash"): nothing is said of those, the last line then reads `verified, except N entries
+  that no hash covers yet and that were not judged`, and the exit code stays 0 because the next run pins them.
+- **The records.** For every ended run whose folder is there, the check verifies the record against the end entry:
+  the chain, the blobs, and that the manifest the record gives is the end entry byte for byte. So a record that
+  was rewritten while its manifest was left alone fails here too (`the end entry of the ledger is not the manifest
+  the record gives`). This reads every record and every blob of the home. `--quick` leaves it out and reads the
+  first line and the manifest of each run only; the output then says `records   not verified (--quick)`, and only
+  `traceworks verify <run>` checks a record.
 - **in flight** appears for a run whose process is alive and has not written an entry yet: `its start entry is not
   written yet (run.started 12 s ago)` (it may wait for the ledger's lock), `its end entry is not written yet
   (run.finished 3 s ago)`, `its record has no line yet`. No failure, for five minutes after that line: then the
@@ -580,6 +589,7 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 | `the manifest in the run folder (SHA-256 ...) is not the end entry of the ledger (SHA-256 ...)` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
+- A problem of the anchors of a register is listed under `registers.<key>` and acknowledged under that name.
 - The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
   another history than its commits: `traceworks: The ledger cannot be relied on ...: it has the replace ref ...`.
 - It exits 8 when there is a problem nobody acknowledged; else 0.

@@ -956,12 +956,17 @@ follows is what that gives, in three groups.
 - **an entry that is not what its own commit left.** A start entry and an end entry are added once, by the commit
   whose message names them and their SHA-256, and never touched again; the acknowledgements of a run and the
   anchors of a register are added to, and each commit names the SHA-256 of the whole file after it. The check
-  compares what the ledger holds now with that hash: of the one commit that names an entry, or of the newest that
-  names a file that is added to. A later commit that changes or removes a file, a second commit under the message
+  compares what the ledger holds now with these hashes. For an entry it is the hash of the one commit that names
+  it. For a file that is added to it is every hash, in the order of the history: each must be the SHA-256 of a
+  beginning of the file as it is now that ends with a line, each longer than the one before, and the newest must be
+  the whole file. So a commit can only have added lines; a file that was rewritten, also by a commit that names the
+  correct hash of the new file, no longer begins with what the earlier commits left. A later commit that changes or removes a file, a second commit under the message
   of an entry, a file no commit names, and a commit that names a file without a hash after one named it with a
   hash, is a problem of that run, with the commit, the path and both hashes
   (`runs/<run-id>.json is not what commit 4f1d2c3b4a59 ("run ... COMPLETED sha256:...") left: that names the SHA-256
-  ..., and the ledger holds ...`); for the anchors and the pins, the whole check fails. So a new manifest committed
+  ..., and the ledger holds ...`); a problem of the anchors of a register is listed under `registers.<key>` and
+  fails `traceworks findings <key> verify`, which reads the anchors through the same judgement; for a pin, the
+  whole check fails. So a new manifest committed
   over the end entry, after the record was rewritten to match it, is found although no history was rewritten;
   `traceworks verify <run>` says the same on its `ledger` line. Nothing here walks old trees or reads a message
   body: the subjects are read as records that end with a NUL, which no message can hold, and only a record that is,
@@ -997,7 +1002,9 @@ a new repository with the same entries but one) leaves nothing on this machine t
 is a plain git repository, so it can be pushed to a remote that the operator does not control alone and that refuses
 a rewritten history (a protected branch without force push, or an append-only mirror). Then a rewrite of what was
 pushed is refused by the next push, and all that is left to someone who wants to change a pushed entry is an
-ordinary commit on top, which such a remote takes, and which the check finds, here and on any clone of the remote.
+ordinary commit on top, which such a remote takes. The check finds that commit when it changes or removes an entry,
+or rewrites a file that is added to; it does not find one that adds a well-formed new entry or line (below). This
+holds here and on any clone of the remote.
 So the remote does not find a changed entry by itself: the check does, and the remote makes sure the commit that
 did it cannot be taken out again. What the remote does not add: anything for entries that are not pushed yet, which
 are only as safe as the machine, and anything against a well-formed entry that is new (below). Traceworks does not
@@ -1055,10 +1062,20 @@ are pinned once: before a run starts, when the ledger holds an entry no hash cov
 ledger holds it then. It needs no command of its own, because a pin decides nothing: it says what the ledger
 holds. From then on these entries are judged by the pinned hash, like every other. The pin file is named by its own
 SHA-256, so a changed pin fails the check; the oldest pin that lists a path counts, and a pin does not cover a path
-a hash already covers; and once a hash covers a path, a commit that names it without one is a problem, so a version
-that writes no hashes must not write to a ledger this version has pinned. Until the first run of this version such
-entries are not judged at all, and **what was done to them before the pin cannot be found: they are as trustworthy
-as the ledger was at the moment of the pin.**
+a hash already covers. Which entries no hash covers is asked of the entries and the hashes each time, never of the
+fact that a pin exists, and a problem elsewhere in the ledger does not keep them from being pinned.
+
+Until then such entries are **not judged**, and the checks say so instead of a plain "verified": `traceworks
+verify` lists them under `not judged` and ends with `verified, except N entries that no hash covers yet and that
+were not judged`, `traceworks verify <run>` says it on its `ledger` line, and both still exit 0, because the next
+run ends it. `traceworks verify` lists the pins. **What was done to an entry before its pin cannot be found: it is as
+trustworthy as the ledger was at the moment of the pin.**
+
+Once the ledger has a hash, a commit that names a path without one is a problem of that path, whether the path is
+new or not: a version that names none wrote to the ledger (one run with an older jar does that). The problem names
+the commit, is listed under the run or under `registers.<key>`, and can be acknowledged like any other; the entry
+itself is pinned by the next run, and lines such a commit added to the anchors are vouched for by the next anchor
+of this version. Do not use that version on the ledger again.
 
 ### Acknowledging a run
 
@@ -1072,7 +1089,8 @@ record: one commit `run <run-id> ACKNOWLEDGED` adds a line to `acks/<run-id>.jso
 
 `actor` and `at` are who acknowledged and when, as a decision in a register records them; `note` is required;
 `problems` holds every problem the check reported of the run at that moment, each with its kind and its sentence.
-Only a run the check reports can be acknowledged, one run per call. The acknowledgement covers exactly those
+Only a run the check reports can be acknowledged, one run per call; the anchors of a register are acknowledged
+under the name `registers.<key>`. The acknowledgement covers exactly those
 problems, by what was said: the check lists them under `acknowledged` with the note, for good, and does not fail
 for them. Every sentence holds what tells its case from another of its kind (the SHA-256 of the entry or of the
 manifest, the commit, the line of the record), so a problem of the run that comes later, also one of the same kind

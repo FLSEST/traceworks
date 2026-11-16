@@ -668,9 +668,10 @@ the last anchor it read, which it names as above, and never an anchor beyond the
 
 What the anchor does not do: it does not protect against someone who can write the ledger too (keep a copy of the
 ledger where your runs cannot write, docs/security.md), and it cannot tell a register whose anchors were never
-written from one whose ledger was replaced by an empty one; both read `none`. To start a register over, remove its
-folder and `registers/<key>.jsonl` in the ledger with a commit; an old anchor that stays would fail `verify` of the
-new register, which is what it is for. `report.html` shows the chain's own verification line, not the anchor's.
+written from one whose ledger was replaced by an empty one; both read `none`. To start a register over, use another
+key. The anchors of a key cannot be taken out of the ledger unnoticed: a commit that removes `registers/<key>.jsonl`
+is found, listed under `registers.<key>` by `traceworks verify`, and fails `verify` of a new register under the old
+key, which is what the anchors are for. `report.html` shows the chain's own verification line, not the anchor's.
 
 ## What a register does not do
 
