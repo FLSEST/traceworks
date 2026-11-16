@@ -2,10 +2,12 @@
 
 ## Reporting a vulnerability
 
-Report a vulnerability in private, through the private vulnerability reporting of the repository host. Do not open
-a public issue for it.
+Report a vulnerability in private, through GitHub's private vulnerability reporting. Do not open a public issue
+for it.
 
-Contact: TODO before publishing: contact
+1. Open the **Security** tab of the repository.
+2. Choose **Report a vulnerability**.
+3. Describe the issue and send the report. Only the maintainers see it.
 
 A useful report says:
 
@@ -31,15 +33,19 @@ In scope is anything that breaks a guarantee of "What the defaults protect", for
   connection of an AI step that is missing from the record;
 - a secret or a credential that reaches a step that did not name it, or that stands readable in the record
   although it passed through unchanged;
+- a protected value (text a model wrote, untrusted input, what a register hands a run) that ends up in the shell
+  code of a step instead of in a named variable (`values`), or a shell line that names one and still runs;
+- an AI step that sees the register folder of a run (`/register`), or a step that changes it or a register;
 - a record, a register or a seal log that was changed and still verifies, beyond the cases the documentation
   names;
 - a sealed package that changed and still runs;
 - a package or a workspace that makes the Traceworks process itself run something on the host.
 
 Not a vulnerability: what "What they do not protect" already names. Examples are a step with `network: true` that
-sends its own secret away, what an operator's setting such as `ai_network: "open"`, `ai_images` or
-`--allow-host-execution` allows, and whoever can write the home rewriting a run folder together with its ledger
-entry. If you think one of those limits is wrong, or worse than the page says, a report is welcome all the same.
+sends its own secret away, a command that evaluates a variable it was given (`eval "$NAME"`, an unquoted `$NAME`),
+what an operator's setting such as `ai_network: "open"`, `ai_images` or `--allow-host-execution` allows, and
+whoever can write the home rewriting a run folder together with its ledger entry. If you think one of those
+limits is wrong, or worse than the page says, a report is welcome all the same.
 
 ## Supported versions
 
