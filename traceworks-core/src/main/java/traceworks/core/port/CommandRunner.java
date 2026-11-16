@@ -1,6 +1,7 @@
 package traceworks.core.port;
 
 import traceworks.core.util.ProcessTracking;
+import traceworks.core.util.ShellVariables;
 
 import java.util.List;
 import java.util.Map;
@@ -111,18 +112,27 @@ public interface CommandRunner {
      * @param noRegisterFolder  whether the container goes without the register folder of an audit run, which every
      *                          other container of such a run mounts read-only: an AI call, whose model reads of the
      *                          register only what a step put into its prompt
-     * @throws IllegalArgumentException if the request has both a command and entrypoint arguments, neither, or
-     *                                  entrypoint arguments without an image
+     * @param values            shell variables the command finds set, by name, in the order given: the block's
+     *                          {@code values}. They are no part of {@code command}: a runner runs {@link #script},
+     *                          which sets them first, and the record keeps them next to the command. Not exported,
+     *                          and only for a shell command
+     * @throws IllegalArgumentException if the request has both a command and entrypoint arguments, neither,
+     *                                  entrypoint arguments without an image, or values without a shell command
      */
     record CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                           Map<String, String> environment, String image, List<Mount> mounts, Egress network,
                           List<String> entrypointArgs, String stdin, boolean writableWorkspace,
-                          boolean noRegisterFolder) {
+                          boolean noRegisterFolder, Map<String, String> values) {
         public CommandRequest {
             network = network == null ? Egress.NONE : network;
             environment = environment == null ? Map.of() : Map.copyOf(environment);
             mounts = mounts == null ? List.of() : List.copyOf(mounts);
             entrypointArgs = entrypointArgs == null ? null : List.copyOf(entrypointArgs);
+            values = values == null || values.isEmpty() ? Map.of()
+                    : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(values));
+            if (entrypointArgs != null && !values.isEmpty()) {
+                throw new IllegalArgumentException("An image's entrypoint runs without a shell: it takes no values");
+            }
             if (entrypointArgs != null) {
                 if (command != null) {
                     throw new IllegalArgumentException(
@@ -136,12 +146,15 @@ public interface CommandRunner {
             }
         }
 
-        /** A request that gets the register folder of an audit run, as every request but an AI call does. */
+        /**
+         * A request that gets the register folder of an audit run, as every request but an AI call does, and has no
+         * values.
+         */
         public CommandRequest(String command, String workingDirectory, int timeoutSeconds,
                               Map<String, String> environment, String image, List<Mount> mounts, Egress network,
                               List<String> entrypointArgs, String stdin, boolean writableWorkspace) {
             this(command, workingDirectory, timeoutSeconds, environment, image, mounts, network, entrypointArgs,
-                    stdin, writableWorkspace, false);
+                    stdin, writableWorkspace, false, Map.of());
         }
 
         /** A request with the network on ({@link Egress#OPEN}) or off ({@link Egress#NONE}). */
@@ -180,13 +193,45 @@ public interface CommandRunner {
         /** This request, with {@code network} as where its container can connect. */
         public CommandRequest withNetwork(Egress network) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
         }
 
         /** This request, without the register folder of an audit run among its mounts. */
         public CommandRequest withoutRegisterFolder() {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, true);
+                    entrypointArgs, stdin, writableWorkspace, true, values);
+        }
+
+        /** This request, with {@code values} as the shell variables its command finds set. */
+        public CommandRequest withValues(Map<String, String> values) {
+            return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
+        }
+
+        /**
+         * The text a runner hands to bash for a shell command: the lines that set the {@link #values}, written by
+         * Traceworks alone and without a byte of a value as code ({@link ShellVariables#preamble}), then
+         * {@link #command}; the command itself for a request without values. {@code null} for an entrypoint request.
+         */
+        public String script() {
+            return command == null ? null : ShellVariables.preamble(values) + command;
+        }
+
+        /**
+         * The result of a runner that ran {@link #script}, as the engine reads it: when a value was not delivered
+         * ({@link ShellVariables#notDelivered}) the command's own text did not run, and the result says so
+         * ({@link CommandResult#notRunReason}), so that no condition takes the exit code for an answer. Every
+         * runner passes its result through this.
+         */
+        public CommandResult delivered(CommandResult result) {
+            if (result == null || result.didNotRun() || values.isEmpty()) {
+                return result;
+            }
+            // A runner may hand both streams over as one
+            boolean failed = ShellVariables.notDelivered(values, result.exitCode(), result.stderr())
+                    || ShellVariables.notDelivered(values, result.exitCode(), result.stdout());
+            return failed ? result.asNotRun("a value of the block (values) was not delivered to the shell, so the"
+                    + " command did not run") : result;
         }
 
         /** Whether this request runs the image's entrypoint (tool mode) instead of a shell command. */
@@ -197,13 +242,13 @@ public interface CommandRunner {
         /** This request, with {@code stdin} on its standard input; {@code null} closes it. */
         public CommandRequest withStdin(String stdin) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder);
+                    entrypointArgs, stdin, writableWorkspace, noRegisterFolder, values);
         }
 
         /** This request, with the workspace writable or read-only. */
         public CommandRequest withWritableWorkspace(boolean writable) {
             return new CommandRequest(command, workingDirectory, timeoutSeconds, environment, image, mounts, network,
-                    entrypointArgs, stdin, writable, noRegisterFolder);
+                    entrypointArgs, stdin, writable, noRegisterFolder, values);
         }
 
         /** The request with the names of its environment variables, never their values (a secret's among them). */
@@ -213,7 +258,8 @@ public interface CommandRunner {
                     + ", timeoutSeconds=" + timeoutSeconds + ", environment=" + new TreeSet<>(environment.keySet())
                     + ", image=" + image + ", mounts=" + mounts + ", network=" + network + ", entrypointArgs="
                     + entrypointArgs + ", stdin=" + (stdin == null ? null : stdin.length() + " characters")
-                    + ", writableWorkspace=" + writableWorkspace + ", noRegisterFolder=" + noRegisterFolder + "]";
+                    + ", writableWorkspace=" + writableWorkspace + ", noRegisterFolder=" + noRegisterFolder
+                    + (values.isEmpty() ? "" : ", values=" + values.keySet()) + "]";
         }
     }
 

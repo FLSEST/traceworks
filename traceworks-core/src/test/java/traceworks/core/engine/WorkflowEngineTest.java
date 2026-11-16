@@ -1379,12 +1379,18 @@ class WorkflowEngineTest {
     // -- taint propagation end to end --------------------------------------------------------------------
 
     @Test
-    void run_untrustedInput_blockOutputsAreEscapedInLaterShellTemplates() {
+    void run_untrustedInput_blockOutputsAreProtectedInLaterShellTemplates() {
         AtomicInteger calls = new AtomicInteger();
         List<String> resolved = new ArrayList<>();
         when(simpleBlockExecutor.execute(any(BlockDefinition.class), any(ExecutionContext.class))).thenAnswer(inv -> {
             ExecutionContext ctx = inv.getArgument(1);
-            resolved.add(ctx.resolveShellTemplate("echo {{ previous_output }} {{ step_0_output }} {{ branch }}", false));
+            for (String line : List.of("echo {{ previous_output }}", "echo {{ step_0_output }}", "echo {{ branch }}")) {
+                try {
+                    resolved.add(ctx.resolveShellTemplate(line, false));
+                } catch (traceworks.core.context.ShellLineRefusedException e) {
+                    resolved.add("refused: " + line);
+                }
+            }
             return completed(calls.getAndIncrement(), "x; id");
         });
 
@@ -1392,8 +1398,10 @@ class WorkflowEngineTest {
                 "branch", "main; id",
                 ExecutionContext.UNTRUSTED_KEYS_VARIABLE, List.of("branch"))));
 
-        // block 1 sees only the untrusted variable escaped, block 2 also the tainted output
-        assertThat(resolved.get(0)).isEqualTo("echo  {{ step_0_output }} 'main; id'");
-        assertThat(resolved.get(1)).isEqualTo("echo 'x; id' 'x; id' 'main; id'");
+        // block 1 is refused only the untrusted variable, block 2 also the tainted output
+        assertThat(resolved.subList(0, 3)).containsExactly("echo ", "echo {{ step_0_output }}",
+                "refused: echo {{ branch }}");
+        assertThat(resolved.subList(3, 6)).containsExactly("refused: echo {{ previous_output }}",
+                "refused: echo {{ step_0_output }}", "refused: echo {{ branch }}");
     }
 }

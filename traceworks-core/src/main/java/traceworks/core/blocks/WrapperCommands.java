@@ -1,6 +1,7 @@
 package traceworks.core.blocks;
 
 import traceworks.core.context.ExecutionContext;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.GateSources;
 import traceworks.core.engine.WorkflowExecutionException;
 import traceworks.core.model.BlockDefinition;
@@ -59,8 +60,10 @@ class WrapperCommands {
         step.setStartedAt(context.getClock().now());
         step.setInput(command);
         step.setStatus(StepStatus.RUNNING);
+        // The values were filled in when the shell block was made, like the mounts
         ShellResult result = ShellResult.of(
-                context.getCommandRunner().run(target.request(command, context.getProjectPath(), timeoutSeconds)),
+                context.getCommandRunner().run(target.request(command, context.getProjectPath(), timeoutSeconds)
+                        .withValues(ShellValues.resolved(config))),
                 timeoutSeconds, context.secretValues());
         step.setOutput(result.output());
         step.setStatus(result.exitCode() == 0 ? StepStatus.COMPLETED : StepStatus.FAILED);
@@ -79,10 +82,13 @@ class WrapperCommands {
      * the run's {@code shell} image in a container run, on the host in a host run. A
      * {@linkplain ShellResult#truncated() truncated} result is no answer, nor is one that
      * {@linkplain ShellResult#didNotRun() did not run}: the block fails instead of reading it.
+     *
+     * @param values the shell variables the command finds set: the block's {@code values}, filled in
      */
-    ShellResult runCommand(String command, int timeoutSeconds, ExecutionContext context) {
+    ShellResult runCommand(String command, int timeoutSeconds, ExecutionContext context, Map<String, String> values) {
         return ShellResult.of(context.getCommandRunner().run(
-                new CommandRequest(command, context.getProjectPath(), timeoutSeconds, null, null, null, false)),
+                new CommandRequest(command, context.getProjectPath(), timeoutSeconds, null, null, null, false)
+                        .withValues(values)),
                 timeoutSeconds, context.secretValues());
     }
 

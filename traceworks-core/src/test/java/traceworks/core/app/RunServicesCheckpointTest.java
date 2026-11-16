@@ -291,12 +291,13 @@ class RunServicesCheckpointTest {
     /**
      * A run parked by the version before this format: its record ({@code items-parked-checkpoint-v2.json}) holds a
      * checkpoint state of the second format, whose variables are inline but for {@code step_0_output} and whose step
-     * carries a {@code context_delta}. It still verifies and resumes, and the step after the resume sees every
-     * variable as the run left it: the text a step set ({@code item}), a number ({@code item_index}), an input and
-     * a map of the workflow's defaults ({@code form}).
+     * carries a {@code context_delta}. It still verifies and resumes. Such a checkpoint does not say what a model
+     * wrote, so the resumed run holds every output and variable of it as text a model may have written: the step
+     * after the resume, whose shell line names them, is refused and nothing runs. The checkpoint the resume writes
+     * is of this format.
      */
     @Test
-    void aRunParkedWithASecondFormatCheckpoint_resumes() throws Exception {
+    void aRunParkedWithASecondFormatCheckpoint_resumes_withEveryOutputAndVariableProtected() throws Exception {
         String id = load("/records/items-parked-checkpoint-v2.json");
         fx.commands.on("./done ", "done");
         assertThat(JSON.readTree(state(id)).get("format").asInt()).isEqualTo(2);
@@ -307,9 +308,9 @@ class RunServicesCheckpointTest {
 
         RunResult resumed = services.resume(resumeOf(id), null, null);
 
-        assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(fx.commands.commands()).containsExactly(
-                "./done beta 1 1.2 {name=Flo, tags=[x]} [alpha]: shown\n[beta]: shown");
+        assertThat(resumed.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(resumed.error()).contains("shell line refused, nothing ran: {{ item }}");
+        assertThat(fx.commands.commands()).isEmpty();
         assertThat(services.verify(id).ok()).isTrue();
         assertThat(JSON.readTree(state(id)).get("format").asInt()).as("the checkpoints after the resume")
                 .isEqualTo(RunSnapshotJson.FORMAT);

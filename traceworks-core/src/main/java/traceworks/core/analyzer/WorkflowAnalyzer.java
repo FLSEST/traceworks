@@ -44,7 +44,8 @@ import java.util.Set;
  *       {@code unused-requirement}, {@code tools-required}, {@code unsupported-provider},
  *       {@code unsupported-mcp-servers}, and {@code invalid-config-value} for {@code tools};</li>
  *   <li>shell quoting ({@link QuotingRules}): {@code quoted-placeholder}, {@code placeholder-self-compare},
- *       {@code heredoc-placeholder}, {@code unquoted-ai-output};</li>
+ *       {@code heredoc-placeholder}, {@code protected-value-in-shell};</li>
+ *   <li>the shell variables of a block ({@link ValueRules}): {@code invalid-value-name}, {@code unused-value};</li>
  *   <li>the isolation setting {@code workspace} ({@link WorkspaceRules}): {@code legacy-install-npm},
  *       {@code unknown-workspace-mode}, {@code workspace-not-on-first-block}, {@code build-in-project-path};</li>
  *   <li>Traceworks ({@link TraceworksRules}): {@code unknown-format}, {@code unknown-requirement},
@@ -222,7 +223,8 @@ public final class WorkflowAnalyzer {
             BlockShapeRules.apply(blocks, findings);
             MountRules.apply(blocks, findings);
             SecretRules.apply(blocks, findings);
-            QuotingRules.apply(blocks, findings);
+            ValueRules.apply(blocks, findings);
+            QuotingRules.apply(blocks, children, findings);
             WorkspaceRules.apply(workflow, findings);
             TraceworksRules.apply(blocks, metadata, registry.knownTypes(), findings);
             ParkingRules.apply(blocks, children, findings);

@@ -104,14 +104,16 @@ class WorkflowEngineEndToEndTest {
         RunOutcome outcome = run(workflow("wf-review",
                 block("shell", "build", Map.of("command", "make build")),
                 block("simple", "review", Map.of("command", "Review: {{ previous_output }}")),
-                block("shell", "notify", Map.of("command", "notify {{ ticket }} {{ block.review.output }}"))),
+                block("shell", "notify", Map.of("values", Map.of("TICKET", "{{ ticket }}",
+                        "REVIEW", "{{ block.review.output }}"), "command", "notify \"$TICKET\" \"$REVIEW\""))),
                 untrustedTicket("fix it'; rm -rf / #"));
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(claude.prompts()).as("the shell output reaches the prompt").containsExactly("Review: build ok");
-        // the untrusted input and the output of a run that carries it are single-quoted in the later shell line
-        assertThat(commands.commands()).containsExactly("make build",
-                "notify 'fix it'\\''; rm -rf / #' 'looks fine'");
+        // the untrusted input and the output of a run that carries it reach the later shell line as variables
+        assertThat(commands.commands()).containsExactly("make build", "notify \"$TICKET\" \"$REVIEW\"");
+        assertThat(commands.requests().getLast().values()).containsOnly(
+                Map.entry("TICKET", "fix it'; rm -rf / #"), Map.entry("REVIEW", "looks fine"));
         assertThat(outcome.steps()).extracting(StepResult::getOutput).containsExactly("build ok", "looks fine", "sent");
         assertThat(commands.requests()).allSatisfy(request -> {
             assertThat(request.workingDirectory()).isEqualTo("/work/project");
@@ -309,7 +311,8 @@ class WorkflowEngineEndToEndTest {
     @Test
     void subWorkflowTaintSurvivesHandOver() {
         workflows.add(workflow("wf-child",
-                block("shell", "deploy", Map.of("command", "deploy {{ ticket }} {{ previous_output }}"))));
+                block("shell", "deploy", Map.of("values", Map.of("TICKET", "{{ ticket }}",
+                        "PAYLOAD", "{{ previous_output }}"), "command", "deploy \"$TICKET\" \"$PAYLOAD\""))));
         commands.on("cat payload", "payload text").on("deploy ", "deployed");
 
         RunOutcome outcome = run(workflow("wf-parent",
@@ -318,8 +321,10 @@ class WorkflowEngineEndToEndTest {
                 untrustedTicket("a; reboot"));
 
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
-        // in the child, the parent's untrusted input and its tainted output are still quoted
-        assertThat(commands.commands()).containsExactly("cat payload", "deploy 'a; reboot' 'payload text'");
+        // in the child, the parent's untrusted input and its tainted output are still protected
+        assertThat(commands.commands()).containsExactly("cat payload", "deploy \"$TICKET\" \"$PAYLOAD\"");
+        assertThat(commands.requests().getLast().values()).containsOnly(
+                Map.entry("TICKET", "a; reboot"), Map.entry("PAYLOAD", "payload text"));
         StepResult childStep = outcome.steps().get(1);
         assertThat(childStep.getOutput()).isEqualTo("deployed");
         String childRunId = (String) childStep.getMetadata().get("subRunId");

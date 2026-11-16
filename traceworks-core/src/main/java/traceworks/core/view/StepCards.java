@@ -260,6 +260,7 @@ final class StepCards {
                     .append("</code>");
         }
         content.pre(out, command.command());
+        content.values(out, command.values());
         out.append("</div>\n");
     }
 

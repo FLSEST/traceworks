@@ -80,6 +80,8 @@ public class AgenticBlockExecutor implements BlockExecutor {
         } catch (IllegalArgumentException e) {
             return refused(stepIndex, start, cfg.goal(), e.getMessage(), clock);
         }
+        // From here on the run holds what a model wrote: its answers, and what its actions leave in the workspace
+        context.markModelAsked();
         String model = context.modelFor(block);
         String effort = context.effortFor(block);
         AiProviderCapabilities capabilities = provider.getCapabilities() != null

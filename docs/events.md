@@ -231,7 +231,7 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `workflow` | `{id, name}` of the workflow |
 | `package` | `{dir, digest, git_commit, git_dirty}`: the package directory, its digest, and the git commit and dirty state of its directory (`null` when it is not in a repository) |
 | `definition` | blob: the bytes of `workflow.json` as the run read them |
-| `inputs` | blob: the inputs of the run, the `--input` values. The engine sets `package_dir`, which is no input; a record of an earlier version also has it here |
+| `inputs` | blob: the inputs of the run, the `--input` values. The engine sets `package_dir`, which is no input; a record of an earlier version also has it here | The inputs of a child run are what its parent hands over, the parent's variables, and with them the reserved keys that carry which of them are protected: `__untrusted_keys` (the names of the variables from an untrusted source), `__untrusted_outputs` (the names of the block outputs of a tainted run, and `previous_output` for the last output), `__platform_in_shell` (`true` once platform data reached a shell line), `__platform_keys` (the names of the variables the parent built from platform data, a `foreach`'s `context` entry that names `audit_findings`, say: platform data in the child too), `__model_keys` alone when the parent holds a variable of model text without having asked a model itself (a run that gets `__model_keys` or `__model_outputs` counts as one that asked a model, whatever `__model_asked` says), and, once the parent asked a model, `__model_asked` (`true`), `__model_keys` (the names of the variables that may hold text a model wrote) and `__model_outputs` (the names of such block outputs, and `previous_output`). A key is there only when it has something to say
 | `trigger` | `MANUAL` for a run started on the command line |
 | `inputs_from` | only with `--inputs-from`: the id of the run whose recorded inputs this run took; the `inputs` blob holds the result, with the explicit `--input` values applied |
 | `actor` | who started the run |
@@ -280,12 +280,12 @@ grows with the number of steps and variables, not with the size of their texts:
 
 | Field of the state | Meaning |
 |---|---|
-| `format` | `3` |
+| `format` | `4`. `3` is the format before `context.taint.model_text`. Such a state, and one of an earlier format, does not say what a model wrote, so it is read as a run that asked a model, with every output and every variable that is not protected already as model text (docs/security.md, "Earlier checkpoints"); a version that knows only `3` refuses a state of format `4` |
 | `context.variables` | the run's variables that hold no text: numbers, booleans, lists, maps and `null` |
 | `context.text_variables` | the run's variables that hold a text, each as a blob reference: the inputs and run variables that are texts, the texts steps set (an answer, a `foreach` item) and `step_<n>_output` (the output of step n) |
 | `context.block_outputs` | the output of each named block, each as a blob reference |
 | `context.previous_output` | the output of the last block as a blob reference, or `null` |
-| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context |
+| `context.taint`, `context.source_steps`, `context.next_step_index`, `context.run_metadata`, `context.remembered_approvals` | the rest of the run's context. `context.taint.model_text` is what may hold text a model wrote: `asked` (whether the run asked a model), the `variables` and `outputs` recorded since, and whether `previous_output` is one; a shell line that names one is refused |
 | `steps` | the top-level steps so far; each one's `input` and `output` is a blob reference or `null`, its status, times and `metadata` are written inline |
 | `input_context` | the variables the run started with, inline |
 
@@ -296,7 +296,7 @@ in `context.variables` or in `context.text_variables`, never in both. Each text 
 adds no copy of it:
 
 ```json
-{"format":3,"context":{"variables":{"retries":2},"text_variables":{"name":{"sha256":"bf4f...","size":4},"step_0_output":{"sha256":"4ae7...","size":12},"workflow_run_id":{...},...},"taint":{...},"block_outputs":{"greet":{"sha256":"4ae7...","size":12}},"previous_output":{"sha256":"4ae7...","size":12},"source_steps":{...},"next_step_index":1,"run_metadata":{},"remembered_approvals":{}},"steps":[{"id":"...","step_index":0,"block_name":"greet","block_type":"shell","status":"COMPLETED","input":{"sha256":"9e03...","size":19},"output":{"sha256":"4ae7...","size":12},"started_at":"...","completed_at":"...","duration_ms":8,"metadata":{...}}],"input_context":{"name":"Anna","retries":2}}
+{"format":4,"context":{"variables":{"retries":2},"text_variables":{"name":{"sha256":"bf4f...","size":4},"step_0_output":{"sha256":"4ae7...","size":12},"workflow_run_id":{...},...},"taint":{...},"block_outputs":{"greet":{"sha256":"4ae7...","size":12}},"previous_output":{"sha256":"4ae7...","size":12},"source_steps":{...},"next_step_index":1,"run_metadata":{},"remembered_approvals":{}},"steps":[{"id":"...","step_index":0,"block_name":"greet","block_type":"shell","status":"COMPLETED","input":{"sha256":"9e03...","size":19},"output":{"sha256":"4ae7...","size":12},"started_at":"...","completed_at":"...","duration_ms":8,"metadata":{...}}],"input_context":{"name":"Anna","retries":2}}
 ```
 
 `resume` reads every text the state refers to and checks it like the state itself; `cancel` checks them too, but a
@@ -365,7 +365,8 @@ command whose mount is refused only then, because its path changed in between, e
 |---|---|
 | `step` | the step index (`null` outside a step) |
 | `item` | the `foreach` item index, or `null` |
-| `command` | blob: the resolved command text; for a container's own entrypoint, a JSON array of its arguments |
+| `command` | blob: the resolved command text, as the workflow wrote it with its trusted placeholders filled in; for a container's own entrypoint, a JSON array of its arguments |
+| `values` | only for a command of a block with `values`: a blob that holds a JSON object from each variable name to the value the command found in it (docs/cli.md, "Values: how a protected value reaches a command"). The values are no part of `command`; what bash ran is the lines that set them, then `command`. A secret in a value is redacted like any text |
 | `working_dir` | the directory the command runs in, inside the container for a container command |
 | `image` | the container image as the step names it (`./images/<name>` for a package image, `shell` for the default image), or `null` on the host |
 | `image_id` | the local ID of the image the container starts from (`sha256:...`), or `null` on the host and for a command that starts no container (see above) |

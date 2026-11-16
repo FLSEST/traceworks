@@ -51,26 +51,43 @@ class QuotingRulesTest {
     }
 
     /**
-     * Chain output and the platform data Traceworks keeps ({@code previous_report}, {@code audit_findings}) are
-     * outside text. The TODO and goal variables are not: Traceworks does not provide them
+     * Chain output and the platform data Traceworks keeps ({@code previous_report}, {@code audit_findings},
+     * {@code audit_items}) are outside text, which never goes into shell code: an error wherever it stands, bare,
+     * inside either quotes, with or without escaping. The quotes around an inserted output are a warning of their
+     * own. The TODO and goal variables are no outside text: Traceworks does not provide them
      * ({@code unprovided-variable} reports them).
      */
     @Test
-    void should_reportChainOutputAndPlatformData_asErrorInOneFinding() {
-        assertThat(apply(shell("echo 'CHAIN={{ previous_chain_output }}'\nPREV='{{ previous_report }}'\n"
-                + "echo '{{ audit_findings }}' '{{ previous_output }}'")))
-                .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }}, {{ previous_report }}, "
-                            + "{{ audit_findings }}, {{ previous_output }} inside quotes in shell code");
-                });
+    void should_reportOutsideTextAnywhereInShellCode_asError() {
+        List<AnalyzerFinding> findings = apply(shell("echo 'CHAIN={{ previous_chain_output }}'\nPREV=\"{{ previous_report }}\"\n"
+                + "printf '%s' {{ audit_findings }} > known.txt; echo '{{ previous_output }}' # {{ audit_items }}"));
+
+        assertThat(rule("protected-value-in-shell", findings)).singleElement().satisfies(f -> {
+            assertThat(f.severity()).isEqualTo(Severity.ERROR);
+            assertThat(f.detail()).isEqualTo("puts {{ previous_chain_output }}, {{ previous_report }},"
+                    + " {{ audit_findings }}, {{ audit_items }} into shell code, text from outside the run — text a"
+                    + " model wrote and text from outside the run never go into shell code, quoted or not: a model"
+                    + " reads the workspace, and what it reads can steer its answer; a run refuses this shell line"
+                    + " before anything runs, so Traceworks refuses the workflow. Correct: hand the value to the"
+                    + " command as a variable: \"values\": {\"PREVIOUS_CHAIN_OUTPUT\": \"{{ previous_chain_output }}\"}"
+                    + " in this block's config, and \"$PREVIOUS_CHAIN_OUTPUT\" where the placeholder stands");
+        });
+        assertThat(rule("quoted-placeholder", findings)).singleElement().satisfies(f -> {
+            assertThat(f.severity()).isEqualTo(Severity.WARNING);
+            assertThat(f.detail()).startsWith("puts {{ previous_output }} inside quotes in shell code");
+        });
+        assertThat(rule("protected-value-in-shell", apply(escapedShell("printf '%s\\n' {{ previous_report }}"))))
+                .as("escaping every value does not make it shell-safe to put it there").hasSize(1);
+        assertThat(apply(block("shell", Map.of("values", Map.of("KNOWN", "{{ audit_findings }}",
+                "CHAIN", "{{ previous_chain_output }}"), "command", "printf '%s' \"$KNOWN\" \"$CHAIN\""))))
+                .as("under values, any placeholder").isEmpty();
         assertThat(apply(shell("echo 'TITLE={{ todo_title }}' '{{ open_todos }}' '{{ goal_status }}'"))).isEmpty();
     }
 
     @Test
     void should_acceptUnquotedPlaceholders_andTheGuidesSetForm() {
-        assertThat(apply(escapedShell("set -- {{ previous_chain_output }}; CHAIN=\"$*\"\nRESULT={{ previous_output }}\n"
-                + "printf '%s\\n' {{ previous_report }}"))).isEmpty();
+        assertThat(apply(escapedShell("set -- {{ branch }}; BRANCH=\"$*\"\nRESULT={{ previous_output }}\n"
+                + "printf '%s\\n' {{ block.build.output }}"))).isEmpty();
     }
 
     @Test
@@ -156,11 +173,11 @@ class QuotingRulesTest {
 
     @Test
     void should_reportFreeTextPipedIntoAShell_asError() {
-        assertThat(apply(shell("cat <<'EOF' | sh\necho {{ previous_chain_output }}\nEOF"))).singleElement()
+        assertThat(apply(shell("cat <<'EOF' | sh\necho {{ previous_output }}\nEOF"))).singleElement()
                 .satisfies(f -> {
                     assertThat(f.rule()).isEqualTo("heredoc-placeholder");
                     assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }} into the body of a heredoc"
+                    assertThat(f.detail()).startsWith("puts {{ previous_output }} into the body of a heredoc"
                             + " that sh reads");
                 });
     }
@@ -170,8 +187,8 @@ class QuotingRulesTest {
     void should_acceptQuotedHeredocs_whoseReaderTakesTheBodyAsInput() {
         assertThat(apply(shell("cat > \"$OUT/raw.txt\" <<'RAW'\n{{ previous_output }}\nRAW\n"
                 + "python3 -I bin/backlog.py candidates --max \"$MAX\" <<'JIRA'\n{{ block.jira_issues.output }}\nJIRA\n"
-                + "python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<'IN'\n{{ previous_report }}\nIN\n"
-                + "BODY=$(cat <<'B'\n{{ previous_chain_output }}\nB\n)\n"
+                + "python3 -c \"\nimport sys\nprint(sys.stdin.read())\n\" <<'IN'\n{{ step_0_output }}\nIN\n"
+                + "BODY=$(cat <<'B'\n{{ previous_output }}\nB\n)\n"
                 + "if cat <<\\STEP | grep -qiE \"error|failed\"\n{{ step_1_output }}\nSTEP\nthen echo red; fi"))).isEmpty();
     }
 
@@ -182,17 +199,17 @@ class QuotingRulesTest {
     }
 
     @Test
-    void should_reportFreeTextInAnUnquotedHeredoc_asWarningForOutputs_andErrorForOutsideText() {
+    void should_reportAnOutputInAnUnquotedHeredoc_asWarning() {
         assertThat(apply(shell("cat > report.md <<EOF\n{{ previous_output }}\nEOF"))).singleElement().satisfies(f -> {
             assertThat(f.rule()).isEqualTo("heredoc-placeholder");
             assertThat(f.severity()).isEqualTo(Severity.WARNING);
             assertThat(f.detail()).startsWith("puts {{ previous_output }} into the body of a heredoc with an unquoted"
                     + " delimiter (<<EOF)");
         });
-        assertThat(apply(shell("cat <<-END\n\t{{ previous_chain_output }} {{ step_2_output }}\n\tEND")))
+        assertThat(apply(shell("cat <<-END\n\t{{ block.plan.output }} {{ step_2_output }}\n\tEND")))
                 .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                    assertThat(f.detail()).startsWith("puts {{ previous_chain_output }}, {{ step_2_output }} into"
+                    assertThat(f.severity()).isEqualTo(Severity.WARNING);
+                    assertThat(f.detail()).startsWith("puts {{ block.plan.output }}, {{ step_2_output }} into"
                             + " the body");
                     assertThat(f.detail()).contains("quote the delimiter (<<'END')");
                 });
@@ -228,12 +245,7 @@ class QuotingRulesTest {
     /** A shift in arithmetic once opened a "heredoc" that swallowed the rest of the script. */
     @Test
     void should_notTakeAShiftInArithmeticForAHeredoc() {
-        assertThat(apply(shell("echo $(( 1 << n ))\necho '{{ previous_chain_output }}'"))).singleElement()
-                .satisfies(f -> {
-                    assertThat(f.rule()).isEqualTo("quoted-placeholder");
-                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
-                });
-        assertThat(apply(shell("(( x = 1 << SHIFT ))\necho \"{{ previous_output }}\""))).singleElement()
+        assertThat(apply(shell("echo $(( 1 << n ))\necho '{{ previous_output }}'"))).singleElement()
                 .satisfies(f -> {
                     assertThat(f.rule()).isEqualTo("quoted-placeholder");
                     assertThat(f.severity()).isEqualTo(Severity.WARNING);
@@ -263,7 +275,7 @@ class QuotingRulesTest {
         }
     }
 
-    // -- unquoted-ai-output ------------------------------------------------------------------------------
+    // -- protected-value-in-shell --------------------------------------------------------------------------
 
     private static BlockDefinition named(String type, String name, Map<String, Object> config) {
         BlockDefinition b = block(type, config);
@@ -273,85 +285,208 @@ class QuotingRulesTest {
 
     private static final BlockDefinition REVIEW = named("simple", "review", Map.of("command", "Review the diff"));
 
-    private static List<AnalyzerFinding> unquotedAi(BlockDefinition... blocks) {
-        return rule("unquoted-ai-output", apply(blocks));
+    private static List<AnalyzerFinding> protectedInShell(BlockDefinition... blocks) {
+        return rule("protected-value-in-shell", apply(blocks));
     }
 
     @Test
-    void should_reportTheBareOutputOfAnAiStepInShellCode_asWarning() {
-        assertThat(unquotedAi(REVIEW, shell("printf '%s' {{ block.review.output }} | ./report")))
+    void should_reportTheOutputOfAnAiStepInShellCode_asError() {
+        assertThat(protectedInShell(REVIEW, shell("printf '%s' {{ block.review.output }} | ./report")))
                 .singleElement().satisfies(f -> {
-                    assertThat(f.severity()).isEqualTo(Severity.WARNING);
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
                     assertThat(f.blockIndex()).isEqualTo(1);
-                    assertThat(f.detail()).startsWith("puts {{ block.review.output }} into shell code without quotes,"
-                            + " the output of the AI step review");
-                    assertThat(f.detail()).contains("shell_escape_variables: true");
+                    assertThat(f.detail()).isEqualTo("puts {{ block.review.output }} into shell code, the output of"
+                            + " the AI step review — text a model wrote and text from outside the run never go into"
+                            + " shell code, quoted or not: a model reads the workspace, and what it reads can steer"
+                            + " its answer; a run refuses this shell line before anything runs, so Traceworks refuses"
+                            + " the workflow. Correct: hand the value to the command as a variable: \"values\":"
+                            + " {\"REVIEW\": \"{{ block.review.output }}\"} in this block's config, and \"$REVIEW\""
+                            + " where the placeholder stands");
                 });
+    }
+
+    /**
+     * What a model wrote never goes into shell code, wherever its placeholder stands: bare, inside either quotes, in
+     * a comment, in a heredoc of any kind, with or without escaping. One finding per block, of this rule alone: the
+     * rules for the quotes around an inserted value say nothing of it. Under {@code values} it is fine.
+     */
+    @Test
+    void should_reportTheOutputOfAnAiStep_whereverItStandsInShellCode_withOrWithoutEscaping() {
+        for (String command : List.of("echo {{ block.review.output }}", "echo \"{{ block.review.output }}\"",
+                "X='{{ previous_output }}'", "true # {{ step_0_output }}",
+                "cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF", "cat <<EOF\n{{ block.review.output }}\nEOF",
+                "python3 - <<'PY'\nprint(\"{{ block.review.output }}\")\nPY",
+                "echo \"$(printf '%s' {{ block.review.output }})\"")) {
+            for (BlockDefinition use : List.of(shell(command), escapedShell(command))) {
+                assertThat(apply(REVIEW, use)).as(command).singleElement().satisfies(f -> {
+                    assertThat(f.rule()).isEqualTo("protected-value-in-shell");
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                });
+            }
+        }
+        assertThat(apply(REVIEW, block("shell", Map.of("values", Map.of("REVIEW", "{{ block.review.output }}"),
+                "command", "printf '%s' \"$REVIEW\" > out.md")))).isEmpty();
+        assertThat(rule("quoted-placeholder", apply(named("shell", "review", Map.of("command", "make")),
+                shell("echo '{{ block.review.output }}'")))).as("the output of a step of a workflow without AI")
+                .singleElement().satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.WARNING));
+    }
+
+    /**
+     * From its first AI step on a run protects every output: a later shell step can print what the model wrote without
+     * naming it. So the output of a step after the AI step is refused the same way, and one before it is not.
+     */
+    @Test
+    void should_reportTheOutputOfAStepAfterAnAiStep_andLeaveTheStepsBeforeIt() {
+        BlockDefinition list = named("shell", "list", Map.of("command", "ls"));
+        BlockDefinition build = named("shell", "build", Map.of("command", "make"));
+
+        assertThat(protectedInShell(list, REVIEW, build, shell("for f in {{ block.list.output }}; do echo; done")))
+                .isEmpty();
+        assertThat(protectedInShell(list, REVIEW, build, shell("echo {{ block.build.output }}"))).singleElement()
+                .satisfies(f -> {
+                    assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                    assertThat(f.detail()).startsWith("puts {{ block.build.output }} into shell code, the output"
+                            + " of the step build, which runs after the AI step review and may hold what the model"
+                            + " wrote — ");
+                });
+        assertThat(apply(list, REVIEW, build, shell("echo '{{ previous_output }}'"))).singleElement()
+                .satisfies(f -> assertThat(f.rule()).isEqualTo("protected-value-in-shell"));
+        assertThat(protectedInShell(list, REVIEW, build, escapedShell("echo {{ block.build.output }}")))
+                .as("escaping every value does not make it shell-safe to put it there").hasSize(1);
+    }
+
+    /** A child workflow that asks a model hands its answer on as the step's output; one that asks none does not. */
+    @Test
+    void should_followAChildWorkflow_toItsAiSteps_whenTheAnalyzerCanFindIt() {
+        traceworks.core.testing.MapWorkflowResolver children = new traceworks.core.testing.MapWorkflowResolver()
+                .add("judge", workflow("judge", REVIEW))
+                .add("outer", workflow("outer", named("sub-workflow", "inner", Map.of("workflow_id", "judge"))))
+                .add("plain", workflow("plain", named("shell", "build", Map.of("command", "make"))));
+        BlockDefinition use = shell("echo {{ block.child.output }}");
+
+        for (String asking : List.of("judge", "outer")) {
+            List<AnalyzerFinding> out = new ArrayList<>();
+            QuotingRules.apply(List.of(named("sub-workflow", "child", Map.of("workflow_id", asking)), use), children,
+                    out);
+            assertThat(rule("protected-value-in-shell", out)).as(asking).singleElement()
+                    .satisfies(f -> assertThat(f.detail()).contains("the output of the AI step child"));
+        }
+        List<AnalyzerFinding> out = new ArrayList<>();
+        QuotingRules.apply(List.of(named("sub-workflow", "child", Map.of("workflow_id", "plain")), use,
+                named("foreach", "each", Map.of("items", List.of("a"), "workflow_id", "judge")),
+                shell("echo {{ block.each.output }}")), children, out);
+        assertThat(rule("protected-value-in-shell", out)).singleElement()
+                .satisfies(f -> assertThat(f.blockIndex()).isEqualTo(3));
+        assertThat(protectedInShell(named("sub-workflow", "child", Map.of("workflow_id", "judge")), use))
+                .as("without a resolver the child is not looked into: the run quotes").isEmpty();
+        assertThat(rule("protected-value-in-shell", new WorkflowAnalyzer().analyze(workflow("parent",
+                named("sub-workflow", "child", Map.of("workflow_id", "judge")), use), children)))
+                .as("the analyzer hands its resolver on").hasSize(1);
+    }
+
+    private static traceworks.core.model.WorkflowDefinition workflow(String id, BlockDefinition... blocks) {
+        return new traceworks.core.model.WorkflowDefinition(id, id, null, List.of(blocks), null, null, null, null,
+                Map.of(), Map.of(), null, null, null);
     }
 
     /** previous_output and step_N_output name the AI step too, and every AI type counts. */
     @Test
     void should_followPreviousOutputAndStepIndex_toEveryAiType() {
-        assertThat(unquotedAi(named("agentic", "fix", Map.of("goal", "Fix it")), shell("echo {{ previous_output }}")))
+        assertThat(protectedInShell(named("agentic", "fix", Map.of("goal", "Fix it")), shell("echo {{ previous_output }}")))
                 .hasSize(1);
-        assertThat(unquotedAi(named("compress-ai", "short", Map.of("source", "x")), shell("echo {{ step_0_output }}")))
+        assertThat(protectedInShell(named("compress-ai", "short", Map.of("source", "x")), shell("echo {{ step_0_output }}")))
                 .hasSize(1);
         for (String type : List.of("foreach", "retry", "while", "conditional")) {
-            assertThat(unquotedAi(named(type, "loop", Map.of("execution_mode", "ai", "command", "Judge")),
+            assertThat(protectedInShell(named(type, "loop", Map.of("execution_mode", "ai", "command", "Judge")),
                     shell("echo {{ block.loop.output }}"))).as(type).hasSize(1);
         }
     }
 
     @Test
-    void should_notReport_whenTheBlockEscapesEveryValue() {
-        assertThat(unquotedAi(REVIEW, escapedShell("printf '%s' {{ block.review.output }} | ./report"))).isEmpty();
-    }
-
-    /** Quotes and heredoc bodies have their own rules (quoted-placeholder, heredoc-placeholder). */
-    @Test
-    void should_leaveQuotesAndHeredocBodies_toTheirOwnRules() {
-        assertThat(unquotedAi(REVIEW, shell("echo '{{ block.review.output }}'"))).isEmpty();
-        assertThat(unquotedAi(REVIEW, shell("cat > out.md <<'EOF'\n{{ block.review.output }}\nEOF"))).isEmpty();
-    }
-
-    @Test
     void should_notReport_theOutputOfADeterministicStep() {
-        assertThat(unquotedAi(named("shell", "build", Map.of("command", "make")), shell("echo {{ previous_output }}")))
+        assertThat(protectedInShell(named("shell", "build", Map.of("command", "make")), shell("echo {{ previous_output }}")))
                 .isEmpty();
-        assertThat(unquotedAi(named("foreach", "lint", Map.of("execution_mode", "shell", "command", "lint")),
+        assertThat(protectedInShell(named("foreach", "lint", Map.of("execution_mode", "shell", "command", "lint")),
                 shell("echo {{ block.lint.output }}"))).isEmpty();
-        assertThat(unquotedAi(named("simple", "probe", Map.of("execution_mode", "shell", "command", "ls")),
+        assertThat(protectedInShell(named("simple", "probe", Map.of("execution_mode", "shell", "command", "ls")),
                 shell("echo {{ block.probe.output }}"))).isEmpty();
     }
 
     /** The step index of a wrapper itself is known, as long as no block before it draws further indices. */
     @Test
     void should_followAStepIndex_toAWrapperInAiMode_atThatIndex() {
-        assertThat(unquotedAi(named("foreach", "each", Map.of("execution_mode", "ai", "items", List.of("a"),
+        assertThat(protectedInShell(named("foreach", "each", Map.of("execution_mode", "ai", "items", List.of("a"),
                 "command", "Judge {{ item }}")), shell("echo {{ step_0_output }}"))).hasSize(1);
     }
 
-    /** A wrapper draws further step indices, so after one step_N_output cannot be told from the block list. */
+    /**
+     * A wrapper draws further step indices, so after one the block list does not tell which step step_N_output is.
+     * In a workflow that asks a model before the block it may be what the model wrote: the same error. Before the
+     * first AI step, and in a workflow without one, it is not.
+     */
     @Test
-    void should_notGuessAStepIndex_afterAWrapper() {
-        assertThat(unquotedAi(named("foreach", "lint", Map.of("execution_mode", "shell", "items", List.of("a"),
-                "command", "lint")), REVIEW, shell("echo {{ step_1_output }}"))).isEmpty();
+    void should_reportAStepIndexAfterAWrapper_whenAModelIsAskedBeforeTheBlock() {
+        BlockDefinition lint = named("foreach", "lint", Map.of("execution_mode", "shell", "items", List.of("a"),
+                "command", "lint"));
+        assertThat(protectedInShell(lint, REVIEW, shell("echo {{ step_1_output }}"))).singleElement().satisfies(f -> {
+            assertThat(f.severity()).isEqualTo(Severity.ERROR);
+            assertThat(f.detail()).startsWith("puts {{ step_1_output }} into shell code, an output whose step"
+                    + " the workflow does not tell, in a run that asks a model before it (the AI step review), so it"
+                    + " may hold what the model wrote — ");
+        });
+        assertThat(apply(lint, REVIEW, shell("echo '{{ step_4_output }}'"))).singleElement()
+                .satisfies(f -> assertThat(f.rule()).isEqualTo("protected-value-in-shell"));
+        assertThat(protectedInShell(lint, shell("echo {{ step_1_output }}"), REVIEW)).as("before the AI step").isEmpty();
+        assertThat(protectedInShell(lint, shell("echo {{ step_1_output }}"))).as("no AI step").isEmpty();
     }
 
-    /** A shell text of a nested block counts too; its previous_output may be an inner block's, so only names do. */
+    /** A shell text of a nested block counts too; its previous_output may be an inner block's, an untold step. */
     @Test
-    void should_checkNestedShellTexts_byName() {
+    void should_checkNestedShellTexts_byName_andTheirPreviousOutput() {
         Map<String, Object> inner = Map.of("type", "shell", "name", "send", "config",
                 Map.of("command", "notify {{ block.review.output }} {{ previous_output }}"));
         BlockDefinition loop = named("foreach", "each", Map.of("execution_mode", "shell", "items", List.of("a"),
                 "blocks", List.of(inner)));
-        assertThat(unquotedAi(REVIEW, loop)).singleElement()
-                .satisfies(f -> assertThat(f.detail()).startsWith("puts {{ block.review.output }} into shell code"));
+        assertThat(protectedInShell(REVIEW, loop)).singleElement().satisfies(f -> assertThat(f.detail())
+                .startsWith("puts {{ block.review.output }}, {{ previous_output }} into shell code"));
+        assertThat(protectedInShell(loop, REVIEW)).as("before the AI step, previous_output is none of its answers")
+                .singleElement().satisfies(f -> assertThat(f.detail()).doesNotContain("previous_output"));
+    }
+
+    /**
+     * previous_output of a shell block nested after an AI block in the same switch case is that block's answer, and
+     * the output of a nested shell block that runs after a nested AI block may hold it: both are refused. A nested
+     * block written before the AI block of a switch is not; in a loop, where the blocks run again, it is.
+     */
+    @Test
+    void should_reportNestedBlocksAfterANestedAiBlock_inTheWrapperThatAsksFirst() {
+        Map<String, Object> probe = Map.of("type", "shell", "name", "probe", "config", Map.of("command", "ls"));
+        Map<String, Object> draft = Map.of("type", "simple", "name", "draft", "config", Map.of("command", "Draft"));
+        Map<String, Object> echo = Map.of("type", "shell", "name", "echo", "config",
+                Map.of("command", "echo '{{ previous_output }}'"));
+        Map<String, Object> store = Map.of("type", "shell", "name", "store", "config", Map.of("command", "cat"));
+        BlockDefinition route = named("switch", "route", Map.of("expression", "x",
+                "cases", List.of(Map.of("value", "a", "blocks", List.of(probe, draft, echo, store)))));
+
+        assertThat(apply(route)).singleElement().satisfies(f -> {
+            assertThat(f.rule()).isEqualTo("protected-value-in-shell");
+            assertThat(f.blockIndex()).isZero();
+        });
+        assertThat(protectedInShell(route, shell("echo {{ block.store.output }}"))).filteredOn(f -> f.blockIndex() == 1)
+                .singleElement()
+                .satisfies(f -> assertThat(f.detail()).contains("the output of the step store, which runs after the"
+                        + " AI step route"));
+        assertThat(protectedInShell(route, shell("echo {{ block.probe.output }}"))).filteredOn(f -> f.blockIndex() == 1)
+                .as("written before the AI block").isEmpty();
+
+        BlockDefinition loop = named("foreach", "each", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
+                "blocks", List.of(probe, draft)));
+        assertThat(protectedInShell(loop, shell("echo {{ block.probe.output }}"))).as("a loop runs probe again").hasSize(1);
     }
 
     @Test
     void should_checkTheShellFieldsOfAWrapper_suchAsItsItemsCommand() {
-        assertThat(unquotedAi(REVIEW, named("foreach", "each", Map.of("execution_mode", "ai",
+        assertThat(protectedInShell(REVIEW, named("foreach", "each", Map.of("execution_mode", "ai",
                 "items_source", "command", "items_command", "printf '%s\\n' {{ block.review.output }}",
                 "command", "Judge {{ item }}")))).hasSize(1);
     }
@@ -362,15 +497,15 @@ class QuotingRulesTest {
         Map<String, Object> caseBlock = Map.of("type", "simple", "name", "draft", "config", Map.of("command", "Draft"));
         BlockDefinition route = named("switch", "route", Map.of("expression", "x",
                 "cases", List.of(Map.of("value", "a", "blocks", List.of(caseBlock)))));
-        assertThat(unquotedAi(route, shell("echo {{ block.route.output }}"))).hasSize(1);
-        assertThat(unquotedAi(named("human-input", "ask", Map.of("question", "Why?", "actor", "ai")),
+        assertThat(protectedInShell(route, shell("echo {{ block.route.output }}"))).hasSize(1);
+        assertThat(protectedInShell(named("human-input", "ask", Map.of("question", "Why?", "actor", "ai")),
                 shell("echo {{ block.ask.output }}"))).hasSize(1);
     }
 
     /** The first block has no step before it, so its previous_output is no AI step's. */
     @Test
     void should_notReport_previousOutputInTheFirstBlock() {
-        assertThat(unquotedAi(shell("echo {{ previous_output }}"), REVIEW)).isEmpty();
+        assertThat(protectedInShell(shell("echo {{ previous_output }}"), REVIEW)).isEmpty();
     }
 
     /** block.<name>.output names a block nested in a switch too, the one of that name, not another case block. */
@@ -382,16 +517,16 @@ class QuotingRulesTest {
         BlockDefinition route = named("switch", "route", Map.of("expression", "x",
                 "cases", List.of(Map.of("value", "a", "blocks", List.of(probe, draft)))));
 
-        assertThat(unquotedAi(route, shell("echo {{ block.draft.output }}"))).singleElement()
+        assertThat(protectedInShell(route, shell("echo {{ block.draft.output }}"))).singleElement()
                 .satisfies(f -> assertThat(f.detail()).contains("the output of the AI step draft"));
-        assertThat(unquotedAi(route, shell("echo {{ block.probe.output }}"))).as("a nested step in shell mode")
+        assertThat(protectedInShell(route, shell("echo {{ block.probe.output }}"))).as("a nested step in shell mode")
                 .isEmpty();
     }
 
     /** step_N_output past deterministic blocks still names the block at position N. */
     @Test
     void should_followAStepIndex_pastTheDeterministicBlocksBeforeIt() {
-        assertThat(unquotedAi(named("shell", "build", Map.of("command", "make")), REVIEW,
+        assertThat(protectedInShell(named("shell", "build", Map.of("command", "make")), REVIEW,
                 shell("echo {{ step_1_output }}"))).singleElement()
                 .satisfies(f -> assertThat(f.detail()).contains("the output of the AI step review"));
     }
@@ -399,16 +534,8 @@ class QuotingRulesTest {
     /** A block's own step index is no earlier step: its output does not exist yet when its fields resolve. */
     @Test
     void should_notReport_theStepIndexOfTheBlockItself() {
-        assertThat(unquotedAi(named("foreach", "each", Map.of("execution_mode", "ai", "items_source", "command",
+        assertThat(protectedInShell(named("foreach", "each", Map.of("execution_mode", "ai", "items_source", "command",
                 "items_command", "printf '%s\\n' {{ step_0_output }}", "command", "Judge {{ item }}")))).isEmpty();
     }
 
-    /** The items of a register carry names a step wrote: outside text, as the findings are. */
-    @Test
-    void auditItems_insideQuotesInShellCode_areAnError() {
-        assertThat(apply(shell("echo '{{ audit_items }}'"))).singleElement().satisfies(f -> {
-            assertThat(f.severity()).isEqualTo(Severity.ERROR);
-            assertThat(f.detail()).startsWith("puts {{ audit_items }} inside quotes in shell code");
-        });
-    }
 }

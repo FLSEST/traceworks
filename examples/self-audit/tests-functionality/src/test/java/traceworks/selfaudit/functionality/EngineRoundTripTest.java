@@ -53,20 +53,23 @@ class EngineRoundTripTest {
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
                         "key", "functionality", "category", "functionality", "report_block", "report")),
                 "blocks", List.of(
-                        Map.of("type", "shell", "name", "known", "config", Map.of("shell_escape_variables", true,
-                                "command", "printf '%s\\n' {{ audit_findings }}")),
+                        Map.of("type", "shell", "name", "known", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}"),
+                                "shell_escape_variables", true,
+                                "command", "printf '%s\\n' \"$KNOWN_FINDINGS\"")),
                         Map.of("type", "shell", "name", "facts", "config", Map.of("command", "set -euo pipefail; "
                                 + "python3 -B " + scripts + "/facts.py --root . --rules '" + fixture.rules
                                 + "' --out {{ scratch_dir }}")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("SECTION_ID", "{{ section.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/sections.jsonl", "variable_name", "section",
                                 "shell_escape_variables", true, "continue_on_error", true,
                                 "max_consecutive_failures", 0, "on_failure", "continue",
-                                "command", "sh '" + answers + "' {{ section.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "sh '" + answers + "' \"$SECTION_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | python3 -B " + scripts + "/report.py --root ."
+                                        + "\"$VERDICTS\" | python3 -B " + scripts + "/report.py --root ."
                                         + " --facts {{ scratch_dir }}/facts.json --sections"
                                         + " {{ scratch_dir }}/sections.jsonl --verdicts - --out"
                                         + " {{ scratch_dir }}/functionality-report.md")))));
@@ -123,19 +126,22 @@ class EngineRoundTripTest {
                         "key", "functionality", "category", "functionality", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to the fact step
-                        Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_findings }} >"
+                        Map.of("type", "shell", "name", "facts", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" >"
                                         + " {{ scratch_dir }}/known-findings.txt; python3 -B " + scripts
                                         + "/facts.py --root . --rules '" + fixture.rules
                                         + "' --known {{ scratch_dir }}/known-findings.txt --out {{ scratch_dir }}")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("SECTION_ID", "{{ section.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/sections.jsonl", "variable_name", "section",
                                 "shell_escape_variables", true,
-                                "command", "sh '" + answers + "' {{ section.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "sh '" + answers + "' \"$SECTION_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | python3 -B " + scripts + "/report.py --root ."
+                                        + "\"$VERDICTS\" | python3 -B " + scripts + "/report.py --root ."
                                         + " --facts {{ scratch_dir }}/facts.json --sections"
                                         + " {{ scratch_dir }}/sections.jsonl --verdicts - --out"
                                         + " {{ scratch_dir }}/functionality-report.md")))));
@@ -322,8 +328,12 @@ class EngineRoundTripTest {
         for (String aiOnly : new String[] {"provider", "model", "tools", "untrusted_input"}) {
             verdicts.remove(aiOnly);
         }
+        // The stand-in for the model is a shell line: it takes the item's id as a variable, as every shell line
+        // takes a protected value (the items of an audit run are)
+        verdicts.putObject("values").put("SECTION_ID", "{{ section.id }}");
         verdicts.put("execution_mode", "shell").put("shell_escape_variables", true).put("max_consecutive_failures", 0)
-                .put("command", command);
+                .put("command", command.replace("{{ section.id }}", "\"$SECTION_ID\""));
+
         Files.writeString(copy.resolve("workflow.json"), Fixture.JSON.writeValueAsString(workflow));
         return copy;
     }

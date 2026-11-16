@@ -4,6 +4,7 @@ import traceworks.core.ai.ToolPolicy;
 import traceworks.core.port.WebAccess;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.UntrustedInput;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.CancelledSteps;
 import traceworks.core.engine.SecretNames;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -152,6 +153,11 @@ record InnerStep(BlockDefinition block, boolean shell, boolean escapeVariables, 
                 BlockSettings.of("shell", originalConfig).texts("mounts"), context);
         if (!mounts.isEmpty()) {
             config.put("mounts", mounts);
+        }
+        // Filled in now, for this step: a value may name the loop's item
+        Map<String, String> values = ShellValues.resolve(originalConfig, context);
+        if (!values.isEmpty()) {
+            config.put(ShellValues.KEY, values);
         }
         return BlockDefinition.builder().type("shell").config(config).build();
     }

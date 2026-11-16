@@ -52,7 +52,7 @@ final class RunIfGate {
         String resolved = context.resolveShellTemplate(condition, settings.flag("shell_escape_variables"));
         Instant start = clock.now();
         CommandResult test = commands.run(new CommandRequest(resolved, context.getProjectPath(), TIMEOUT_SECONDS,
-                null, null, null, false));
+                null, null, null, false).withValues(ShellValues.resolve(block.getConfig(), context)));
         int exit = test.exitCode();
         boolean cancelled = context.shouldStop();
         if (exit == 0 && !test.truncated() && !test.timedOut() && !test.didNotRun() && !cancelled) {

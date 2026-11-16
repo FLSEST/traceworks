@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.port.WebAccess;
 import traceworks.core.ai.AiProviderCapabilities;
 import traceworks.core.ai.ToolPolicy;
@@ -181,8 +182,8 @@ class SimpleBlockExecutorTest {
         executor.execute(simple(Map.of("command", "Assess: {{ previous_report }}")), context);
         context.recordOutput("analysis", "a | b");
 
-        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false))
-                .isEqualTo("echo 'a | b'");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test

@@ -51,6 +51,44 @@ class ExecutionContextTaintTest {
         assertThat(taint.export()).doesNotContainKey(ExecutionContext.PLATFORM_IN_SHELL_VARIABLE);
     }
 
+    /** Text a model wrote is quoted and handed on, and the run stays one without untrusted input. */
+    @Test
+    void modelText_isQuoted_exportedAndKept_andIsNoUntrustedInput() {
+        taint.markModelAsked();
+        taint.markModelOutput("ask");
+        taint.markModelVariable("step_0_output");
+
+        assertThat(taint.modelAsked()).isTrue();
+        assertThat(taint.hasUntrustedInput()).isFalse();
+        assertThat(taint.isUntrusted("step_0_output")).isTrue();
+        assertThat(taint.untrustedVariables()).isEmpty();
+        assertThat(taint.snapshot()).isEqualTo(
+                new TemplateResolver.Taint(java.util.Set.of("step_0_output"), java.util.Set.of("ask"), true));
+        assertThat(taint.export()).containsOnly(
+                java.util.Map.entry(ExecutionContext.MODEL_ASKED_VARIABLE, true),
+                java.util.Map.entry(ExecutionContext.MODEL_KEYS_VARIABLE, List.of("step_0_output")),
+                java.util.Map.entry(ExecutionContext.MODEL_OUTPUTS_VARIABLE, List.of("ask", "previous_output")));
+
+        ExecutionContextTaint restored = new ExecutionContextTaint();
+        restored.restore(taint.state());
+        assertThat(restored.state()).isEqualTo(taint.state());
+        assertThat(restored.snapshot()).isEqualTo(taint.snapshot());
+    }
+
+    /** The last label of a variable holds: set as untrusted, or as trusted, it is no model text any more. */
+    @Test
+    void aModelVariable_setAgain_takesTheNewLabel() {
+        taint.markModelVariable("v");
+        taint.markUntrusted("v");
+        assertThat(taint.state().modelText().variables()).isEmpty();
+        assertThat(taint.untrustedVariables()).containsExactly("v");
+
+        taint.markModelVariable("v");
+        assertThat(taint.untrustedVariables()).isEmpty();
+        taint.markTrusted("v");
+        assertThat(taint.snapshot()).isSameAs(TemplateResolver.Taint.NONE);
+    }
+
     @Test
     void markTrusted_clearsEarlierLabel() {
         taint.markPlatform("v");

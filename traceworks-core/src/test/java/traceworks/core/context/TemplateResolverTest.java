@@ -9,15 +9,17 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TemplateResolverTest {
 
     @Test
     void nullTemplate_staysNull_onEveryPath() {
         assertThat(TemplateResolver.resolve(null, "p", Map.of(), Map.of())).isNull();
-        assertThat(TemplateResolver.resolveShellSafe(null, "p", Map.of(), Map.of(), k -> { })).isNull();
-        assertThat(TemplateResolver.resolveShell(null, "p", Map.of(), Map.of(),
-                new TemplateResolver.Taint(Set.of("x"), Set.of(), true), k -> { })).isNull();
+        assertThat(TemplateResolver.shellLine(null, "p", Map.of(), Map.of(), TemplateResolver.Taint.NONE, true))
+                .isNull();
+        assertThat(TemplateResolver.shellLine(null, "p", Map.of(), Map.of(),
+                new TemplateResolver.Taint(Set.of("x"), Set.of(), true), false)).isNull();
     }
 
     @Test
@@ -74,52 +76,58 @@ class TemplateResolverTest {
     }
 
     @Test
-    void resolveShell_withoutTaint_isRawResolution() {
-        Map<String, Object> vars = new HashMap<>(Map.of("v", "a b"));
+    void shellLine_withoutTaint_insertsAsItIs_orInSingleQuotes() {
+        Map<String, Object> vars = new HashMap<>(Map.of("v", "a b", "q", "it's"));
 
-        assertThat(TemplateResolver.resolveShell("echo {{ v }}", "", Map.of(), vars,
-                TemplateResolver.Taint.NONE, k -> { })).isEqualTo("echo a b");
+        assertThat(TemplateResolver.shellLine("echo {{ v }} {{q}} {{ unknown }}", "", Map.of(), vars,
+                TemplateResolver.Taint.NONE, false)).isEqualTo("echo a b it's {{ unknown }}");
+        assertThat(TemplateResolver.shellLine("echo {{ v }} {{q}} {{ unknown }}", "", Map.of(), vars,
+                TemplateResolver.Taint.NONE, true)).isEqualTo("echo 'a b' 'it'\\''s' {{ unknown }}");
     }
 
+    /** A protected value never goes into a shell line: the line is refused, wherever the placeholder stands. */
     @Test
-    void resolveShell_escapesOnlyTaintedValues_andReportsOnlyTaintedVariablesThatOccurred() {
+    void shellLine_thatNamesAProtectedValue_isRefused_withEscapingToo() {
         Map<String, Object> vars = new HashMap<>(Map.of("evil", "$(rm -rf /)", "safe", "ok", "unused", "x"));
         Map<String, String> outputs = Map.of("build", "out'put", "clean", "c");
-        List<String> reported = new ArrayList<>();
         var taint = new TemplateResolver.Taint(Set.of("evil", "unused"), Set.of("build"), true);
 
-        String out = TemplateResolver.resolveShell(
-                "{{ evil }} {{evil}} {{ safe }} {{ block.build.output }} {{ block.clean.output }} {{ previous_output }}",
-                "prev", outputs, vars, taint, reported::add);
-
-        assertThat(out).isEqualTo("'$(rm -rf /)' '$(rm -rf /)' ok 'out'\\''put' c 'prev'");
-        assertThat(reported).containsExactly("evil");
+        for (boolean escapeAll : new boolean[] {false, true}) {
+            for (String line : List.of("echo {{ evil }}", "echo \"{{evil}}\"", "echo '{{ block.build.output }}'",
+                    "true # {{ previous_output }}", "cat <<'EOF'\n{{ evil }}\nEOF", "X={{ evil }}")) {
+                assertThatThrownBy(() -> TemplateResolver.shellLine(line, "prev", outputs, vars, taint, escapeAll))
+                        .as(line).isInstanceOf(ShellLineRefusedException.class)
+                        .hasMessageStartingWith("shell line refused, nothing ran: {{ ");
+            }
+        }
+        assertThat(TemplateResolver.shellLine("echo {{ safe }} {{ block.clean.output }}", "prev", outputs, vars,
+                taint, false)).as("the other values of the same run").isEqualTo("echo ok c");
     }
 
     @Test
-    void resolveShell_taintedUnknownBlock_keepsItsPlaceholder() {
+    void theRefusal_namesEveryPlaceholder_andTheFix() {
+        var taint = new TemplateResolver.Taint(Set.of("item"), Set.of("review"), false);
+        Map<String, Object> vars = new HashMap<>(Map.of("item", "x"));
+
+        assertThatThrownBy(() -> TemplateResolver.shellLine("echo {{ block.review.output }} {{ item }} {{item}}", "",
+                Map.of("review", "r"), vars, taint, false))
+                .hasMessage("shell line refused, nothing ran: {{ block.review.output }}, {{ item }} are text a model"
+                        + " wrote or text from outside the run, and such a value never goes into shell code, quoted"
+                        + " or not. Hand it to the command as a variable: put it under the block's values, for"
+                        + " example \"values\": {\"REVIEW\": \"{{ block.review.output }}\"}, and write \"$REVIEW\""
+                        + " where the placeholder stands");
+        assertThat(ShellLineRefusedException.variableName("step_3_output")).isEqualTo("STEP_3_OUTPUT");
+        assertThat(ShellLineRefusedException.variableName("block.Build Report.output")).isEqualTo("BUILD_REPORT");
+        assertThat(ShellLineRefusedException.variableName("block.1st.output")).isEqualTo("VALUE_1ST");
+    }
+
+    /** A protected name that resolves to nothing stays literal, as it always did: there is no value to protect. */
+    @Test
+    void shellLine_protectedUnknownBlock_keepsItsPlaceholder() {
         var taint = new TemplateResolver.Taint(Set.of(), Set.of("ghost"), false);
 
-        assertThat(TemplateResolver.resolveShell("x {{ block.ghost.output }}", "", Map.of(), Map.of(), taint, k -> { }))
+        assertThat(TemplateResolver.shellLine("x {{ block.ghost.output }}", "", Map.of(), Map.of(), taint, false))
                 .isEqualTo("x {{ block.ghost.output }}");
-    }
-
-    @Test
-    void resolveShell_taintedNullPreviousOutput_becomesEmptyQuotes() {
-        var taint = new TemplateResolver.Taint(Set.of(), Set.of(), true);
-
-        assertThat(TemplateResolver.resolveShell("cat {{ previous_output }}", null, Map.of(), Map.of(), taint, k -> { }))
-                .isEqualTo("cat ''");
-    }
-
-    @Test
-    void resolveShell_taintedValueContainingSentinelLookalikeOrPlaceholder_isNotReExpanded() {
-        Map<String, Object> vars = new HashMap<>(Map.of("evil", "{{ safe }} \u0000untrusted-0\u0000", "safe", "S"));
-        var taint = new TemplateResolver.Taint(Set.of("evil"), Set.of(), false);
-
-        String out = TemplateResolver.resolveShell("{{ evil }}", "", Map.of(), vars, taint, k -> { });
-
-        assertThat(out).isEqualTo("'{{ safe }} \u0000untrusted-0\u0000'");
     }
 
     @Test

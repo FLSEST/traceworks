@@ -53,18 +53,20 @@ class EngineRoundTripTest {
                                 + tool + " facts --rules '" + rules + "' --root . --large-ncloc 1"
                                 + " --facts {{ scratch_dir }}/architecture-facts.json"
                                 + " --candidates {{ scratch_dir }}/candidates.jsonl")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("CANDIDATE_ID", "{{ candidate.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/candidates.jsonl", "variable_name", "candidate",
                                 "shell_escape_variables", true, "continue_on_error", true,
                                 "max_consecutive_failures", 0L, "on_failure", "continue",
-                                "command", "set -euo pipefail; if [ {{ candidate.id }} = C02 ]; then echo boom; exit 1;"
+                                "command", "set -euo pipefail; if [ \"$CANDIDATE_ID\" = C02 ]; then echo boom; exit 1;"
                                         + " fi; printf '{\"candidate\":\"%s\",\"verdict\":\"fine\",\"evidence\":"
                                         + "[{\"line\":1,\"quote\":\"package p;\"}],\"purpose\":\"the home\","
-                                        + "\"change\":\"a port\"}' {{ candidate.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                        + "\"change\":\"a port\"}' \"$CANDIDATE_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --facts "
+                                        + "\"$VERDICTS\" | " + tool + " report --facts "
                                         + "{{ scratch_dir }}/architecture-facts.json --candidates "
                                         + "{{ scratch_dir }}/candidates.jsonl --verdicts - --out "
                                         + "{{ scratch_dir }}/architecture-report.md")))));
@@ -121,20 +123,23 @@ class EngineRoundTripTest {
                         "key", "roundtrip", "category", "architecture", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to facts, which sorts it to the files
-                        Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_findings }} >"
+                        Map.of("type", "shell", "name", "facts", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" >"
                                         + " {{ scratch_dir }}/known-findings.txt; " + tool + " facts --rules '" + rules
                                         + "' --root . --large-ncloc 1 --known {{ scratch_dir }}/known-findings.txt"
                                         + " --facts {{ scratch_dir }}/architecture-facts.json"
                                         + " --candidates {{ scratch_dir }}/candidates.jsonl")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("CANDIDATE_ID", "{{ candidate.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/candidates.jsonl", "variable_name", "candidate",
                                 "shell_escape_variables", true,
-                                "command", "set -euo pipefail; cat {{ package_dir }}/answer-{{ candidate.id }}.json")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                "command", "set -euo pipefail; cat {{ package_dir }}/answer-\"$CANDIDATE_ID\".json")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --facts "
+                                        + "\"$VERDICTS\" | " + tool + " report --facts "
                                         + "{{ scratch_dir }}/architecture-facts.json --candidates "
                                         + "{{ scratch_dir }}/candidates.jsonl --verdicts - --out "
                                         + "{{ scratch_dir }}/architecture-report.md")))));
@@ -211,25 +216,28 @@ class EngineRoundTripTest {
                         "key", "items", "category", "architecture", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows of the items goes to facts
-                        Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,
-                                "command", "set -euo pipefail; printf '%s' {{ audit_findings }} >"
-                                        + " {{ scratch_dir }}/known-findings.txt; printf '%s' {{ audit_items }} >"
+                        Map.of("type", "shell", "name", "facts", "config", Map.of("values", Map.of("KNOWN_FINDINGS", "{{ audit_findings }}", "KNOWN_ITEMS", "{{ audit_items }}"),
+                                "shell_escape_variables", true,
+                                "command", "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" >"
+                                        + " {{ scratch_dir }}/known-findings.txt; printf '%s' \"$KNOWN_ITEMS\" >"
                                         + " {{ scratch_dir }}/known-items.txt; " + tool + " facts --rules '" + rules
                                         + "' --root . --large-ncloc 1 --known {{ scratch_dir }}/known-findings.txt"
                                         + " --items {{ scratch_dir }}/known-items.txt --verdict-version 1"
                                         + " --facts {{ scratch_dir }}/architecture-facts.json"
                                         + " --candidates {{ scratch_dir }}/candidates.jsonl")),
-                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of(
+                        Map.of("type", "foreach", "name", "verdicts", "config", Map.of("values", Map.of("CANDIDATE_ITEM", "{{ candidate.item }}", "CANDIDATE_ID", "{{ candidate.id }}"),
+                                
                                 "execution_mode", "shell", "items_source", "command",
                                 "items_command", "cat {{ scratch_dir }}/candidates.jsonl", "variable_name", "candidate",
                                 "shell_escape_variables", true, "continue_on_error", true, "on_failure", "continue",
-                                "command", "set -euo pipefail; echo {{ candidate.item }} >> '" + asked + "'; if [ -e '"
+                                "command", "set -euo pipefail; echo \"$CANDIDATE_ITEM\" >> '" + asked + "'; if [ -e '"
                                         + fail + "' ]; then echo boom; exit 1; fi; printf '{\"candidate\":\"%s\","
                                         + "\"verdict\":\"fine\",\"reason\":\"One job.\",\"evidence\":[{\"line\":1,"
-                                        + "\"quote\":\"package p;\"}],\"members\":[],\"target\":\"\"}' {{ candidate.id }}")),
-                        Map.of("type", "shell", "name", "report", "config", Map.of(
+                                        + "\"quote\":\"package p;\"}],\"members\":[],\"target\":\"\"}' \"$CANDIDATE_ID\"")),
+                        Map.of("type", "shell", "name", "report", "config", Map.of("values", Map.of("VERDICTS", "{{ block.verdicts.output }}"),
+                                
                                 "shell_escape_variables", true, "command", "set -euo pipefail; printf '%s' "
-                                        + "{{ block.verdicts.output }} | " + tool + " report --facts "
+                                        + "\"$VERDICTS\" | " + tool + " report --facts "
                                         + "{{ scratch_dir }}/architecture-facts.json --candidates "
                                         + "{{ scratch_dir }}/candidates.jsonl --verdicts - --out "
                                         + "{{ scratch_dir }}/architecture-report.md"))))));

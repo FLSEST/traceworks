@@ -167,7 +167,7 @@ class WrapperCommandsTest {
         when(runner.run(new CommandRequest("test -f x", "/test/project", 30, null, null, null, false)))
                 .thenReturn(new CommandResult(1, "", "no such file", 4, false));
 
-        ShellResult result = commands.runCommand("test -f x", 30, context);
+        ShellResult result = commands.runCommand("test -f x", 30, context, Map.of());
 
         assertThat(result.exitCode()).isEqualTo(1);
         assertThat(result.output()).isEqualTo("no such file");

@@ -321,12 +321,92 @@ content, and no blob is written through one.
   With shell tools it can no longer send it anywhere: its container reaches the provider's hosts only (above). It can
   still send it there, under another account. Give AI steps a key you can limit and revoke, and keep `tools: none`
   for steps whose prompt carries content you do not trust.
-- **A model's answer in a shell command.** A shell field inserts `{{ block.<name>.output }}`, `{{ previous_output }}`
-  or `{{ step_N_output }}` as it is, unless the run carries untrusted input or the block sets
-  `shell_escape_variables: true`. A model's answer counts as trusted, but what the model reads (the workspace, a
-  file in it) can steer it, so a `$(…)` or `;` in the answer would run as a command. `traceworks check` warns about
-  such a placeholder without quotes (`unquoted-ai-output`); give the block `shell_escape_variables: true`, the boolean:
-the text `"true"` is refused (the block fails, and `check` reports `invalid-config-value`), not read as off.
+- **A model's answer in a shell command.** Traceworks never writes a protected value into shell code. Protected
+  is text a model wrote, untrusted input, platform data (`previous_report`, `audit_findings`, `audit_items`,
+  `previous_chain_output`) and every output of a run that carries untrusted input. A shell line that names such a
+  placeholder is refused, wherever it stands, quoted or not, with or without `shell_escape_variables`: `check`
+  reports it as an error (`protected-value-in-shell`) where the workflow shows it, and the run refuses the line
+  before anything runs otherwise. The way in is by name: a block lists `values`, a variable name and a template
+  each, and its shell lines find the variables set (`"$REVIEW"`). Traceworks reads no shell text to decide where a
+  value would be harmless; no reading of shell text is bash's.
+  - **How a value arrives.** The text bash parses holds the lines Traceworks writes first, alone and without any
+    text of the workflow, then the command as its author wrote it. The value travels encoded, in letters, digits
+    and `\xHH` inside single quotes, an alphabet that means nothing to bash's parser, and bash itself decodes it
+    into the variable (`printf %b`): what a variable holds, bash does not parse.
+
+    ```
+    case "${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}" in [012].*|3.0) echo "traceworks:3f0c9a…: this bash is older than 3.1, which a step with values needs" >&2; exit 74;; esac
+    TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A; printf -v TRACEWORKS_V '%b' "$3" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v "$1" && printf -v "$1" '%s' "$TRACEWORKS_V" && export -n "$1" && [[ ${!1} == "$TRACEWORKS_V" ]] && { trap '' PIPE; declare -p "$1" 2>/dev/null; :; } | { IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A; [[ $TRACEWORKS_A == "declare -- $1=" ]]; } || { echo "traceworks:3f0c9a…: the value of $1 was not delivered" >&2; exit 74; }; }
+    TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
+    unset -f TRACEWORKS_VALUE
+    printf '%s\n' "$REVIEW" > review.md
+    ```
+
+    Every byte arrives, trailing newlines included, for a value as large as the output limit (16 MiB takes bash
+    some seconds, and up to four times its size in the text). A NUL is taken out before the value is sent: no shell
+    variable holds one. A tool step (`container_args`) runs no shell and takes no values.
+  - **Delivered or nothing runs.** What bash decoded is compared with the length that was sent, and after the
+    assignment the variable itself is compared with what was decoded. A variable that does not hold the value (a
+    readonly one, one bash sets itself) ends the shell with exit code 74 before the command's first line. The line
+    it writes then holds a token, the digest of the lines that carry the values; a value cannot write it, since it
+    would have to hold the digest of a text that holds the value. So the engine tells a failed delivery from a
+    command that ends with 74 by itself: the command counts as not run, a `run_if`, a shell `condition` and the
+    condition of a `while` fail their block on it, and none of them reads it as "false".
+  - **Not exported, unless the command exports it.** A value is the shell's own variable. The name is unset before
+    the assignment, which takes it out of the environment the step started with, the export attribute is taken off
+    after it, and a variable that still has any attribute fails the delivery (`declare -p`, read through a plain pipe, must
+    begin with `declare -- NAME=`); so no process the command starts
+    inherits the value. The author exports it knowingly with `export NAME`. A name that a program reads as its
+    configuration (`GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`) then hands a model's text to that
+    program, which may run what it says: `check` warns about such a name (`value-name-configures-program`). A name
+    bash itself sets or uses is refused (`invalid-value-name`): every variable of the sections "Bourne Shell
+    Variables" and "Bash Variables" of the bash manual, `_`, and the names that start with `BASH`.
+  - **What is model text.** From the first call of a model on (a `simple` or `agentic` step, a wrapper in AI mode,
+    `compress-ai`, a step an AI actor decides, a child workflow that asks one), every step output recorded since
+    and every variable made from one: `{{ block.<name>.output }}`, `{{ previous_output }}`, `{{ step_N_output }}`,
+    a `foreach` item from an `items_command`, an AI actor's answer to a `human-input`, an approval's `auto_answer`
+    filled in from a placeholder. It covers the outputs of the shell steps after the call too, because such a step
+    can print what the model wrote, or a file the model wrote, without naming a placeholder. It holds in a child
+    workflow the values are handed to, for the output of a child (or a child of a child) that asked a model, and
+    after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
+    and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
+    static `items` of a `foreach`, a person's answer.
+  - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
+    which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
+    an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
+    part that does not work in some bash fails the delivery and never skips a check; they use no syntax that depends on the shell's mode, so they read the same in POSIX mode.
+    Run and tested with bash 5.2, also as `bash --posix`;
+    the built-in images have that.
+  - **An output is protected when a value that went into its block was.** Every template a block fills in, for
+    any purpose (a prompt, a question, a default value, an automatic answer, `values`, a `context` entry, a switch
+    expression), notes the mark of each placeholder, and the output the block records takes the strongest of them
+    together with the state of the run: `{{ block.<name>.output }}`, `{{ previous_output }}` and
+    `{{ step_N_output }}` alike. Untrusted input and platform data make the output tainted, and with it the run
+    from there on; model text a parent handed over makes the run one that holds model text. A child workflow hands
+    back whether it asked a model and whether it ended tainted, so its output is protected in the parent, through
+    any number of levels.
+  - **A value built from a protected one is protected.** A variable a block fills in from a template is protected
+    when any placeholder that went into it is, whatever the state of the run: an entry of a `foreach`'s `context`,
+    the `default_value` of a `human-input` taken after a timeout, an approval's `auto_answer`. Built from platform
+    data it is platform data, in a child workflow it is handed to as well (`__platform_keys`); built from untrusted
+    input or from model text it is that.
+  - **What the author's command does with the variable is the author's.** Traceworks guarantees that the value is
+    in the variable and nowhere in the code. Two classic traps remain. An unquoted `$REVIEW` is split into words
+    and its `*` matched against file names: write `"$REVIEW"`. And a command that evaluates what it is given runs
+    the value: `eval "$REVIEW"`, `bash -c "$REVIEW"`, `$REVIEW` as the command itself, and bash's arithmetic, which
+    evaluates a variable's content (`$(( REVIEW ))`, `[[ $REVIEW -eq 1 ]]`, an array index, `declare -i`). The
+    same holds for programs that take code: `xargs`, `find -exec`, `ssh host "$REVIEW"`, an `awk` or `sed` program.
+  - **No protected value outside a shell line either.** A tool step's `container_args`, the host path of a
+    `mounts` entry and a child's `workflow_id` take none, model text included: it would choose what the tool does,
+    what the container sees or which workflow runs. The image of a step (`container_image`), its `network` and its
+    secrets are read as written, without placeholders; a hook gets its payload on standard input and its program
+    and arguments from `traceworks.json`; the git commands of `run --source` take the operator's arguments only.
+  - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it,
+    so it is read closed: a run resumed from one counts as a run that asked a model, and every output and every
+    variable the checkpoint holds is protected (the run's own variables, such as `project_path` and `scratch_dir`,
+    are set anew and trusted). A step after the resume whose shell line names one of them is refused; hand the
+    value over under `values`, or start the run again. A checkpoint written now has a format number such a version
+    refuses.
 - **A gate from an AI step.** A `simple` or `agentic` step can set the run's gate with a `gate_status:` line, since a
   report step delivers its verdict that way; a model steered by what it reads can therefore set a gate too. Keep the
   verdict in a step that checks the model's work, as `examples/self-audit/security` does. The output of a wrapper in

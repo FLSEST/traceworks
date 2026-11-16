@@ -3,6 +3,7 @@ package traceworks.core.blocks;
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.OutputBudget;
 import traceworks.core.context.RecordedItems;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.CancelledSteps;
 import traceworks.core.engine.ExecutionMode;
@@ -148,6 +149,11 @@ public class ForEachBlockExecutor implements BlockExecutor {
             RecordedItems.Completed taken = recorded.completed(stepIndex, i, item);
             StepResult itemResult;
             if (taken != null) {
+                // The item ran before the resume: in AI mode it asked a model then, and its recorded answer is
+                // model text now. (A loop of child runs takes no item over: it runs every one again.)
+                if (!settings.itemStep().shell()) {
+                    context.markModelAsked();
+                }
                 itemResult = takenOver(settings, context, taken);
                 context.getEvents().emit(new ForEachItemFinished(stepIndex, i, item, totalItems,
                         StepStatus.COMPLETED, taken.output(), null, taken.recordedAt()));
@@ -211,11 +217,15 @@ public class ForEachBlockExecutor implements BlockExecutor {
     /**
      * The result of an item a resumed loop takes over from the record instead of running it: completed, with the
      * recorded output. The loop treats it as it treats an item that ran, so its step ends as one pass would: the item
-     * draws its step index, and its command is filled in although it does not run, because filling it in is what
-     * marks the run as carrying untrusted input (platform data that reaches a command line or a prompt).
+     * draws its step index, and its command and, for a shell step, its values are filled in although it does not run,
+     * because filling them in is what marks the run as carrying untrusted input (platform data that reaches a shell
+     * or a prompt).
      */
     private static StepResult takenOver(Settings settings, ExecutionContext context, RecordedItems.Completed taken) {
         settings.itemStep().resolve(context, settings.command());
+        if (settings.itemStep().shell()) {
+            ShellValues.resolve(settings.itemStep().block().getConfig(), context);
+        }
         Instant now = context.getClock().now();
         return StepResult.builder().stepIndex(context.nextStepIndex()).status(StepStatus.COMPLETED)
                 .output(taken.output()).startedAt(now).completedAt(now).durationMs(0L).build();
@@ -280,7 +290,8 @@ public class ForEachBlockExecutor implements BlockExecutor {
         String itemsCommand = context.resolveShellTemplate(
                 BlockSettings.of("foreach", config).text("items_command"), settings.itemStep().escapeVariables());
         // items_command always runs as a shell command: it collects the iteration targets, it is no AI work
-        ShellResult listed = commands.runCommand(itemsCommand, settings.itemStep().shellTimeout(), context);
+        ShellResult listed = commands.runCommand(itemsCommand, settings.itemStep().shellTimeout(), context,
+                ShellValues.resolve(config, context));
         if (context.shouldStop()) {
             // a list the cancel ended is only its first part, or none of it: the loop is cancelled, not empty
             failure.append(CancelledSteps.WHILE_RUNNING);
@@ -323,12 +334,14 @@ public class ForEachBlockExecutor implements BlockExecutor {
     /**
      * One item as a run of workflow {@code workflowId}, through the same {@link SubWorkflowLauncher} as the
      * sub-workflow block. The child sees the item variables and, per {@code context} entry, the resolved value under
-     * its own name; those derived values carry the run's taint like the item itself.
+     * its own name; such a value is protected when a placeholder that went into it is
+     * ({@link ExecutionContext#setTemplateVariable}), and carries the run's taint like the item itself.
      */
     private StepResult runWorkflow(String workflowId, Map<String, Object> mapping, ExecutionContext context) {
         Instant start = context.getClock().now();
         mapping.forEach((name, template) ->
-                context.setDerivedVariable(name, context.resolvePromptTemplate(String.valueOf(template))));
+                context.setTemplateVariable(name, context.resolvePromptTemplate(String.valueOf(template)),
+                        String.valueOf(template)));
         SubWorkflowLauncher.Outcome outcome = subWorkflows.run(workflowId, context);
         Instant end = context.getClock().now();
         StepResult result = CancelledSteps.mark(StepResult.builder()

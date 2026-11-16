@@ -100,7 +100,16 @@ public class ApprovalBlockExecutor implements BlockExecutor {
         if ("Yes always".equalsIgnoreCase(answer) && !outcome.byAi()) {
             context.rememberApproval(question, answer);
         }
-        context.setVariable(variableName, answer);
+        // A person's answer, a remembered one, an AI actor's (one of the options, as the workflow spells it) and an
+        // auto_answer the workflow writes out are trusted. An auto_answer filled in from a placeholder is whatever
+        // that value was, a step's output for one: protected when the placeholder is, whatever the state of the run.
+        boolean filledIn = preset != null && "auto".equals(mode) && autoAnswer != null
+                && rawAutoAnswer != null && rawAutoAnswer.contains("{{");
+        if (filledIn) {
+            context.setTemplateVariable(variableName, answer, rawAutoAnswer);
+        } else {
+            context.setVariable(variableName, answer);
+        }
         return finish(stepIndex, start, question, answer, rejectAnswers, onNo, outcome.metadata(), context);
     }
 

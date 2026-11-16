@@ -38,6 +38,13 @@ final class OutputTaint {
         if (blockName != null && !blockName.isBlank()) outputs.add(blockName);
     }
 
+    /** Whether the placeholder key names an output of this taint: {@code previous_output} or a named block's. */
+    boolean names(String key) {
+        if (ExecutionContext.PREVIOUS_OUTPUT_NAME.equals(key)) return previousOutput.get();
+        return key.startsWith("block.") && key.endsWith(".output")
+                && outputs.contains(key.substring("block.".length(), key.length() - ".output".length()));
+    }
+
     boolean isEmpty() {
         return outputs.isEmpty() && !previousOutput.get();
     }

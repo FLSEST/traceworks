@@ -191,7 +191,7 @@ class ForEachWorkflowItemsTest {
     @Test
     void itemsFromATaintedCommand_reachTheChildAsUntrusted() {
         context.setUntrustedVariable("branch", "main");
-        when(commands.runCommand(eq("list"), anyInt(), any())).thenReturn(new ShellResult("{\"id\": \"x; rm\"}\n", 0, 0));
+        when(commands.runCommand(eq("list"), anyInt(), any(), any())).thenReturn(new ShellResult("{\"id\": \"x; rm\"}\n", 0, 0));
         childRuns(true);
         Map<String, Object> config = new HashMap<>(Map.of("items_source", "command", "items_command", "list",
                 "variable_name", "feature", "workflow_id", "wf-child",

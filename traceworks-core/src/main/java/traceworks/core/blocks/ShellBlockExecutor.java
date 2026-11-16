@@ -2,6 +2,7 @@ package traceworks.core.blocks;
 
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.context.PlaceholderSyntax;
+import traceworks.core.engine.ShellValues;
 import traceworks.core.engine.BlockExecutor;
 import traceworks.core.engine.GateSources;
 import traceworks.core.engine.WorkflowExecutionException;
@@ -76,9 +77,10 @@ public class ShellBlockExecutor implements BlockExecutor {
         ShellTarget target = ShellTarget.of(config, () -> resolveMounts(mounts, context),
                 context.isContainerRun(), context.getSecrets());
 
-        // Untrusted variables (webhook payloads) are always escaped; shell_escape_variables escapes everything.
         traceworks.core.engine.RegisterFolderUse.inCommand(rawCommand, context);
+        // A protected value refuses the line; it reaches the command as one of the block's values
         String command = context.resolveShellTemplate(rawCommand, escapeVariables);
+        Map<String, String> values = ShellValues.resolve(config, context);
         if (checked) {
             command = "set -e -o pipefail\n" + command;
         }
@@ -89,7 +91,8 @@ public class ShellBlockExecutor implements BlockExecutor {
         step.setInput(command);
         step.setStatus(StepStatus.RUNNING);
 
-        CommandResult ran = context.getCommandRunner().run(target.request(command, context.getProjectPath(), timeout));
+        CommandResult ran = context.getCommandRunner().run(
+                target.request(command, context.getProjectPath(), timeout).withValues(values));
         ShellResult result = ShellResult.of(ran, timeout, context.secretValues());
 
         String output = result.exitCode() != 0
@@ -124,8 +127,8 @@ public class ShellBlockExecutor implements BlockExecutor {
      * Takes the optional {@code mounts} config (a list of strings {@code host:container:ro|rw}, read through
      * {@link BlockSettings#texts}; {@code null} for none) and resolves
      * placeholders in them against the current execution context ({@link #resolveMount}). A mount passes no shell that
-     * could quote a value, so an entry that names an untrusted value (untrusted input, a tainted block output, platform
-     * data) is refused, as in the arguments of a tool step: such a value could choose which host path the container
+     * could take a reference, so an entry that names an untrusted value (untrusted input, a tainted block output, platform
+     * data, text a model wrote) is refused, as in the arguments of a tool step: such a value could choose which host path the container
      * sees.
      *
      * @throws WorkflowExecutionException for an entry that names an untrusted value
@@ -139,7 +142,7 @@ public class ShellBlockExecutor implements BlockExecutor {
             if (s.isBlank()) continue;
             if (context.namesEscapedValue(s)) {
                 throw new WorkflowExecutionException("mounts must not contain untrusted values (untrusted input,"
-                        + " tainted block output, platform data): " + s);
+                        + " tainted block output, platform data, text a model wrote): " + s);
             }
             resolved.add(resolveMount(s, context));
         }

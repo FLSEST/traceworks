@@ -71,7 +71,7 @@ class ToolModeIT extends IntegrationTest {
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
         assertThat(run.status()).isEqualTo("FAILED");
         assertThat(run.both()).contains("container_args must not contain untrusted values (untrusted input, tainted"
-                + " block output, platform data): {{ previous_chain_output }}");
+                + " block output, platform data, text a model wrote): {{ previous_chain_output }}");
         RunFolder folder = traceworks.folder(run);
         assertThat(toolCommands(folder)).as("the tool was never started").isEmpty();
         // The refused step ends FAILED with the refusal as its output instead of staying RUNNING (docs/events.md)
@@ -90,7 +90,7 @@ class ToolModeIT extends IntegrationTest {
         RunFolder folder = traceworks.folder(run);
         assertThat(folder.output("quote_it")).isEqualTo("got --config=/etc/x");
         assertThat(run.both()).contains("container_args must not contain untrusted values (untrusted input, tainted"
-                + " block output, platform data): {{ block.quote_it.output }}");
+                + " block output, platform data, text a model wrote): {{ block.quote_it.output }}");
         assertThat(toolCommands(folder)).isEmpty();
     }
 

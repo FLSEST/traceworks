@@ -1,5 +1,6 @@
 package traceworks.core.blocks;
 
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.port.Egress;
 import traceworks.core.container.RunPaths;
 import traceworks.core.context.ExecutionContext;
@@ -354,7 +355,7 @@ class ShellBlockExecutorTest {
         assertThatThrownBy(() -> executor.execute(block, context))
                 .isInstanceOf(WorkflowExecutionException.class)
                 .hasMessage("mounts must not contain untrusted values (untrusted input, tainted block output, platform"
-                        + " data): {{ data_dir }}:/data:ro");
+                        + " data, text a model wrote): {{ data_dir }}:/data:ro");
         verifyNoInteractions(commands);
     }
 
@@ -405,36 +406,30 @@ class ShellBlockExecutorTest {
     }
 
     @Test
-    void execute_untrustedVariable_isEscapedWithoutOptIn() {
+    void execute_untrustedVariableInTheCommand_isRefused() {
         context.setUntrustedVariable("branch", "main; rm -rf /");
-        when(commands.run(onHost("git checkout 'main; rm -rf /'", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
                 .config(new HashMap<>(Map.of("command", "git checkout {{ branch }}")))
                 .build();
 
-        StepResult result = executor.execute(block, context);
-
-        assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("git checkout 'main; rm -rf /'");
+        assertThatThrownBy(() -> executor.execute(block, context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
-    void execute_platformDataVariable_isEscapedWithoutOptIn() {
+    void execute_platformDataInTheCommand_isRefused() {
         // platform data carries text from earlier runs
         context.setUntrustedPlatformVariable("previous_report", "x; rm -rf /");
-        when(commands.run(onHost("echo 'x; rm -rf /'", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
                 .config(new HashMap<>(Map.of("command", "echo {{ previous_report }}")))
                 .build();
 
-        StepResult result = executor.execute(block, context);
-
-        assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("echo 'x; rm -rf /'");
+        assertThatThrownBy(() -> executor.execute(block, context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -452,21 +447,38 @@ class ShellBlockExecutorTest {
         verify(commands).run(onHost("git checkout main", 300));
     }
 
+    /** The block's values reach the runner by name, next to the command, which holds none of them. */
     @Test
-    void execute_taintedPreviousOutput_isEscapedWithoutOptIn() {
+    void execute_values_areFilledIn_andHandedToTheRunnerNextToTheCommand() {
+        context.setUntrustedVariable("branch", "main; rm -rf /");
+        context.setVariable("repo", "tools");
+        when(commands.run(any())).thenReturn(result("ok", 0, 10));
+        BlockDefinition block = BlockDefinition.builder().type("shell").config(new HashMap<>(Map.of(
+                "values", Map.of("BRANCH", "{{ branch }}", "NOTE", "of {{ repo }}: {{ branch }}\u0000"),
+                "command", "git -C {{ repo }} checkout \"$BRANCH\""))).build();
+
+        StepResult result = executor.execute(block, context);
+
+        ArgumentCaptor<CommandRequest> request = ArgumentCaptor.forClass(CommandRequest.class);
+        verify(commands).run(request.capture());
+        assertThat(request.getValue().command()).isEqualTo("git -C tools checkout \"$BRANCH\"");
+        assertThat(request.getValue().values()).containsOnly(Map.entry("BRANCH", "main; rm -rf /"),
+                Map.entry("NOTE", "of tools: main; rm -rf /"));
+        assertThat(result.getInput()).isEqualTo("git -C tools checkout \"$BRANCH\"");
+    }
+
+    @Test
+    void execute_taintedPreviousOutputInTheCommand_isRefused() {
         context.setUntrustedVariable("branch", "main");   // webhook payload: the run is tainted
         context.recordOutput("scan", "x; id");
-        when(commands.run(onHost("echo 'x; id'", 300))).thenReturn(result("ok", 0, 10));
 
         BlockDefinition block = BlockDefinition.builder()
                 .type("shell")
                 .config(new HashMap<>(Map.of("command", "echo {{ previous_output }}")))
                 .build();
 
-        StepResult result = executor.execute(block, context);
-
-        assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(result.getInput()).isEqualTo("echo 'x; id'");
+        assertThatThrownBy(() -> executor.execute(block, context))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     private StepResult runCheckedCommand(String scriptOutput, int exitCode) {

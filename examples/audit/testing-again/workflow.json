@@ -93,7 +93,8 @@
       "type": "shell",
       "name": "report",
       "config": {
-        "command": "set -euo pipefail; printf '%s' {{ block.rate.output }} | bash {{ package_dir }}/scripts/report.sh {{ scratch_dir }} {{ project_path }}",
+        "values": {"RATINGS": "{{ block.rate.output }}"},
+        "command": "set -euo pipefail; printf '%s' \"$RATINGS\" | bash {{ package_dir }}/scripts/report.sh {{ scratch_dir }} {{ project_path }}",
         "shell_escape_variables": true,
         "timeout_seconds": 300
       }

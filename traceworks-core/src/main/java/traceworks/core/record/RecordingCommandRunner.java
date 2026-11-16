@@ -49,6 +49,10 @@ final class RecordingCommandRunner implements CommandRunner {
         ObjectNode fields = Blobs.MAPPER.createObjectNode();
         fields.set("command", blobs.of(request.runsEntrypoint() ? Blobs.json(request.entrypointArgs())
                 : request.command()));
+        if (!request.values().isEmpty()) {
+            // The shell variables the command found set, by name: no part of the command's text
+            fields.set("values", blobs.of(Blobs.json(request.values())));
+        }
         fields.put("working_dir", facts.workingDirectory());
         fields.put("image", facts.image());
         fields.put("image_id", facts.imageId());

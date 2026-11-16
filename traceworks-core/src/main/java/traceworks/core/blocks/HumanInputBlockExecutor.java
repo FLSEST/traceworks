@@ -97,7 +97,7 @@ public class HumanInputBlockExecutor implements BlockExecutor {
             output = storeMultiField(answer, settings, context, typed);
         } else {
             // Single field: the raw answer under variable_name
-            store(context, settings.variableName(), answer, typed);
+            store(context, settings.variableName(), answer, typed, settings.defaultTemplate());
             output = answer;
         }
         return buildResult(stepIndex, start, prompt, output, StepStatus.COMPLETED, metadata, context);
@@ -118,14 +118,16 @@ public class HumanInputBlockExecutor implements BlockExecutor {
 
     /**
      * Sets a variable to an answer. A person's answer is trusted, as it always was. Any other is derived from the
-     * run: untrusted when the run carries untrusted input, so a shell step quotes it and a mount refuses it, as for a
+     * run: untrusted when the run carries untrusted input, so a shell step protects it and a mount refuses it, as for a
      * step's output.
      */
-    private static void store(ExecutionContext context, String name, String value, boolean typed) {
+    private static void store(ExecutionContext context, String name, String value, boolean typed,
+                              String defaultTemplate) {
         if (typed) {
             context.setVariable(name, value);
         } else {
-            context.setDerivedVariable(name, value);
+            // The default value is protected when a placeholder in it is; a model's answer as the run's outputs are
+            context.setTemplateVariable(name, value, defaultTemplate);
         }
     }
 
@@ -187,7 +189,7 @@ public class HumanInputBlockExecutor implements BlockExecutor {
      */
     record Settings(String prompt, String inputType, String variableName, List<String> options,
                     String defaultValue, boolean required, String validationPattern, int timeoutMinutes,
-                    boolean useDefaultOnTimeout, List<Map<String, Object>> fields) {
+                    boolean useDefaultOnTimeout, List<Map<String, Object>> fields, String defaultTemplate) {
 
         static Settings from(Map<String, Object> config, ExecutionContext context) {
             BlockSettings settings = BlockSettings.of(TYPE, config);
@@ -203,7 +205,7 @@ public class HumanInputBlockExecutor implements BlockExecutor {
             List<Map<String, Object>> fields = settings.objects("fields");
             return new Settings(context.resolveTemplate(prompt), inputType, variableName, options,
                     context.resolveTemplate(defaultValue), required, validationPattern, timeoutMinutes,
-                    useDefaultOnTimeout, fields);
+                    useDefaultOnTimeout, fields, defaultValue);
         }
 
         boolean multiField() {
@@ -240,13 +242,13 @@ public class HumanInputBlockExecutor implements BlockExecutor {
         try {
             parsed = JSON.readValue(answer == null ? "{}" : answer, new TypeReference<>() {});
         } catch (Exception e) {
-            store(context, settings.variableName(), answer, typed);
+            store(context, settings.variableName(), answer, typed, settings.defaultTemplate());
             return answer;
         }
         for (Map<String, Object> field : settings.fields()) {
             Object varNameObj = field.get("variable_name");
             if (!(varNameObj instanceof String varName) || varName.isBlank()) continue;
-            store(context, varName, parsed.getOrDefault(varName, ""), typed);
+            store(context, varName, parsed.getOrDefault(varName, ""), typed, settings.defaultTemplate());
         }
         return answer == null ? "" : answer;
     }

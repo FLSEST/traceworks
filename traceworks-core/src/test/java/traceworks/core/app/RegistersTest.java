@@ -41,14 +41,16 @@ class RegistersTest {
         fixture.packages.put(READER, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
                    "category": "example", "report_block": "report"}}, "blocks": [
-                  {"type": "shell", "name": "use", "config": {"command": "./use {{ audit_findings }} {{ previous_report }}"}},
+                  {"type": "shell", "name": "use", "config": {"values": {"KNOWN": "{{ audit_findings }}",
+                      "REPORT": "{{ previous_report }}"}, "command": "./use \\"$KNOWN\\" \\"$REPORT\\""}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.commands.on("./measure", "## FACT SHEET hello\nFACT files: 3\n");
         fixture.packages.put(ITEM_READER, """
                 {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
                    "category": "example", "report_block": "report"}}, "blocks": [
-                  {"type": "shell", "name": "facts", "config": {"command": "./facts {{ audit_items }}"}},
+                  {"type": "shell", "name": "facts", "config": {"values": {"ITEMS": "{{ audit_items }}"},
+                      "command": "./facts \\"$ITEMS\\""}},
                   {"type": "shell", "name": "report", "config": {"command": "./report"}}
                 ]}""");
         fixture.commands.on("./facts", "listed");
@@ -459,26 +461,25 @@ class RegistersTest {
                 .contains("<h2>ACCEPTED_RISK (1)</h2>");
     }
 
-    /** The next run gets what the register knows, as data: quoted in a shell line, never as instructions. */
+    /** The next run gets what the register knows, as data: the value of a shell variable, never shell code. */
     @Test
     void aSecondRun_seesTheFirstRunsFindings_andTheLastReport_asData() {
         fixture.services().start(request(AUDIT), null, null);
 
         fixture.services().start(request(READER), null, null);
 
-        String command = fixture.commands.requests().stream().map(r -> r.command())
+        String command = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./use")).findFirst().orElseThrow();
         assertThat(command).contains("<audit_findings>", "OPEN | MEDIUM | size | A.java | Big A.java | Evidence: files 3",
                 "OPEN | MEDIUM | size | B.java |", "# Report").doesNotContain("traceworks:audit-result")
                 .doesNotContain("{{ audit_findings }}");
-        assertThat(command).as("untrusted platform data is quoted in a shell line").contains("'");
     }
 
     @Test
     void theFirstRun_getsNoKnownFindings_andNoPreviousReport() {
         fixture.services().start(request(READER), null, null);
 
-        String command = fixture.commands.requests().stream().map(r -> r.command())
+        String command = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./use")).findFirst().orElseThrow();
         assertThat(command).contains("(no known findings)", "(no previous report)");
     }
@@ -493,7 +494,7 @@ class RegistersTest {
 
         fixture.services().start(request(READER), null, null);
 
-        String command = fixture.commands.requests().stream().map(r -> r.command())
+        String command = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("# Report").doesNotContain("(no previous report)").contains("<audit_findings>");
         assertThat(state().lastReport().valid()).isFalse();
@@ -652,10 +653,10 @@ class RegistersTest {
         fixture.services().start(request(ITEM_READER), null, null);
         fixture.services().start(request(ITEM_READER), null, null);
 
-        List<String> commands = fixture.commands.requests().stream().map(r -> r.command())
+        List<String> commands = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./facts")).toList();
         assertThat(commands.get(0)).contains("(no known items)").doesNotContain("{{ audit_items }}");
-        assertThat(commands.get(1)).contains("<audit_items>", "clean | bb | p.B", "open | aa | p.A", "'");
+        assertThat(commands.get(1)).contains("<audit_items>", "clean | bb | p.B", "open | aa | p.A");
     }
 
     /** A todo_item line beyond the limits of a finding rejects the report: the register keeps nothing of it. */
@@ -716,7 +717,7 @@ class RegistersTest {
 
         fixture.services().start(request(READER), null, null);
 
-        String command = fixture.commands.requests().stream().map(r -> r.command())
+        String command = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("OPEN | CRITICAL | size | A.java | Big A.java | Evidence: files 9\n")
                 .doesNotContain("DISMISSED | ");
@@ -744,7 +745,7 @@ class RegistersTest {
 
         fixture.services().start(request(READER), null, null);
 
-        String command = fixture.commands.requests().stream().map(r -> r.command())
+        String command = fixture.commands.requests().stream().map(r -> r.command() + "\n" + String.join("\n", r.values().values()))
                 .filter(c -> c.startsWith("./use")).reduce((a, b) -> b).orElseThrow();
         assertThat(command).contains("DISMISSED | CRITICAL | size | A.java | Big A.java | Evidence: files 9"
                 + " | Disposition: false positive | Decided on: LOW, not on CRITICAL\n");

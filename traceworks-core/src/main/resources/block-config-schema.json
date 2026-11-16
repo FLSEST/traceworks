@@ -23,6 +23,9 @@
     "run_if": {
       "type": "string"
     },
+    "values": {
+      "type": "object"
+    },
     "untrusted_input": {
       "type": "boolean",
       "default": false

@@ -202,6 +202,7 @@ public final class ShowCommand implements Command {
                             + (step.attempts() > 1 ? "  (" + step.attempts() + " attempts)" : "")));
             aiCalls(out, step.aiCalls(), text);
             egress(out, step.commands());
+            values(out, step.commands(), text, outputs, full);
             files(out, step.files());
             BlobRef output = step.output();
             if (outputs && output != null) {
@@ -293,6 +294,28 @@ public final class ShowCommand implements Command {
             out.println("  " + time(intervention.at()) + "  "
                     + TerminalFormat.safe(intervention.actor() == null ? "-" : intervention.actor()) + "  "
                     + TerminalFormat.oneLine(intervention.description()));
+        }
+    }
+
+    /**
+     * The shell variables each command of the step found set (the block's {@code values}): their names, and with
+     * the outputs shown their values too, cut as an output is. Commands with the same values are named once.
+     */
+    private static void values(PrintStream out, List<CommandView> commands, Function<String, String> text,
+                               boolean contents, boolean full) {
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (CommandView command : commands) {
+            if (command.values() == null || !seen.add(command.values().sha256())) {
+                continue;
+            }
+            Map<String, String> values = CommandView.values(text.apply(command.values().sha256()));
+            out.println("      values " + TerminalFormat.safe(String.join(", ", values.keySet())));
+            if (contents) {
+                values.forEach((name, value) -> {
+                    out.println("      value " + TerminalFormat.safe(name) + ":");
+                    shown(out, value, full);
+                });
+            }
         }
     }
 

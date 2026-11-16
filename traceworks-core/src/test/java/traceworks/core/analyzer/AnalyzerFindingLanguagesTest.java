@@ -89,18 +89,25 @@ class AnalyzerFindingLanguagesTest {
                 block("sub-workflow", "both", Map.of("workflow_id", "abc", "workflowId", "abc"))), null));
         // Quoting: quoted-placeholder, placeholder-self-compare
         out.addAll(analyzer.analyze(List.of(
-                block("shell", "quoted", Map.of("command", "set -euo pipefail\necho 'CHAIN={{ previous_chain_output }}'")),
+                block("shell", "quoted", Map.of("command", "set -euo pipefail\necho 'LAST={{ previous_output }}'")),
                 block("shell", "unset", Map.of("command", "set -euo pipefail\nX='{{ x }}'\n"
                         + "[ \"$X\" = '{{ x }}' ] && X=default"))), null));
-        // An AI step's output without quotes in a shell command: unquoted-ai-output
+        // An AI step's output in a shell command: protected-value-in-shell
         out.addAll(analyzer.analyze(List.of(
                 block("simple", "review", Map.of("command", "Review the diff")),
                 block("shell", "report", Map.of("command", "set -euo pipefail\nprintf '%s' {{ block.review.output }}"))),
                 null));
+        // The shell variables of a block: invalid-value-name, value-name-configures-program, unused-value
+        out.addAll(analyzer.analyze(List.of(
+                block("shell", "named", Map.of("command", "set -euo pipefail\necho", "values", Map.of("lower", "x"))),
+                block("shell", "family", Map.of("command", "set -euo pipefail\necho \"$NODE_OPTIONS\"",
+                        "values", Map.of("NODE_OPTIONS", "x"))),
+                block("shell", "unused", Map.of("command", "set -euo pipefail\necho", "values", Map.of("NOTE", "x")))),
+                null));
         // Heredoc bodies: heredoc-placeholder (interpreter source, unquoted delimiter, escaped block)
         out.addAll(analyzer.analyze(List.of(
                 block("shell", "source", Map.of("command", "set -euo pipefail\npython3 - <<'PY'\n"
-                        + "x = '''{{ previous_output }}'''\nPY\ncat <<EOF\n{{ previous_chain_output }}\nEOF")),
+                        + "x = '''{{ previous_output }}'''\nPY\ncat <<EOF\n{{ previous_output }}\nEOF")),
                 block("shell", "escaped", Map.of("command", "set -euo pipefail\ncat > out.txt <<'EOF'\n{{ x }}\nEOF",
                         "shell_escape_variables", true))), null));
         // Isolation setting: legacy-install-npm (metadata and first block), unknown-workspace-mode,

@@ -346,7 +346,7 @@ class MainTest {
     void thePackagesFactsStep_passesTheItemsOfTheRegister_andTheVersionOfTheQuestion() throws IOException {
         String workflow = Files.readString(Path.of("../architecture/workflow.json"));
 
-        assertThat(workflow).contains("printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; ",
+        assertThat(workflow).contains("printf '%s' \\\"$KNOWN_ITEMS\\\" > {{ scratch_dir }}/known-items.txt; ",
                 " --items {{ scratch_dir }}/known-items.txt --verdict-version 1 ");
     }
 }

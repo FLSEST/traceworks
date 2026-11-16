@@ -123,6 +123,43 @@ class WorkflowEnginePauseTest {
         assertThat(resumed.steps().getFirst().getOutput()).isEqualTo("[a]: did a\n[b]: did b\n[c]: did c\n[d]: did d");
     }
 
+    /**
+     * A resumed loop that takes over every item asks no model itself, but its items did before the resume: what it
+     * hands on is model text. The loop is the first AI block here, so nothing before it marked the run. A shell
+     * loop marks nothing. (A loop of child runs takes no item over: it runs every one again.)
+     */
+    @Test
+    void aResumedLoopThatTakesOverAnswers_marksTheRunAsOneThatAskedAModel() {
+        Map<String, Object> asking = Map.of("execution_mode", "ai", "items", List.of("a", "b"),
+                "command", "Judge {{ item }}");
+        Map<String, Object> shell = Map.of("execution_mode", "shell", "items", List.of("a", "b"), "command", "./work");
+        BlockDefinition inALine = block("shell", "report", Map.of("command", "./report {{ block.each.output }}"));
+        BlockDefinition asAValue = block("shell", "report", Map.of("values", Map.of("EACH", "{{ block.each.output }}"),
+                "command", "./report \"$EACH\""));
+        RecordedItems items = (step, index, item) -> step == 0
+                ? new RecordedItems.Completed(index == 0 ? "one; id" : "two", 100 + index) : null;
+        java.util.function.BiFunction<Map<String, Object>, BlockDefinition, Session> resume = (loop, report) -> {
+            WorkflowDefinition workflow = workflow("wf-taken-over", block("foreach", "each", loop), report);
+            Session first = new Session();
+            first.run(workflow);   // only its checkpoint before the loop is used
+            Session second = new Session();   // its provider has no answer: a call would fail the step
+            second.commands.on("./report", "reported");
+            second.resume(workflow, first.events.of(Checkpoint.class).getFirst(), items);
+            return second;
+        };
+
+        Session refused = resume.apply(asking, inALine);
+        assertThat(refused.commands.commands()).as("the answers of the AI loop are model text: the line is refused")
+                .isEmpty();
+        Session handed = resume.apply(asking, asAValue);
+        assertThat(handed.commands.commands()).containsExactly("./report \"$EACH\"");
+        assertThat(handed.commands.requests().getFirst().values())
+                .containsOnly(Map.entry("EACH", "[a]: one; id\n[b]: two"));
+        Session plain = resume.apply(shell, inALine);
+        assertThat(plain.commands.commands()).as("a shell loop marks nothing")
+                .containsExactly("./report [a]: one; id\n[b]: two");
+    }
+
     /** A cancel wins over a pause: the run ends CANCELLED, final, and does not park. */
     @Test
     void aCancelAfterAPause_endsTheRunCancelled() {

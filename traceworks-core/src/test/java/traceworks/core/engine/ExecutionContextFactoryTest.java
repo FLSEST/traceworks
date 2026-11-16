@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.container.RunPaths;
 import traceworks.core.model.ContextState;
 import traceworks.core.context.ExecutionContext;
@@ -21,6 +22,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ExecutionContextFactoryTest {
 
@@ -318,7 +320,8 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.isUntrusted("action")).isTrue();
         assertThat(ctx.isUntrusted("env")).isFalse();
-        assertThat(ctx.resolveShellTemplate("run {{ action }} {{ env }}", false)).isEqualTo("run 'deploy' test");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("run {{ action }} {{ env }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -347,8 +350,8 @@ class ExecutionContextFactoryTest {
         ctx.setBlockOutput("scan", "y && z");
 
         assertThat(ctx.hasUntrustedInput()).isTrue();
-        assertThat(ctx.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
-                .isEqualTo("echo 'x; id' 'y && z'");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ previous_output }} {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -362,8 +365,8 @@ class ExecutionContextFactoryTest {
         ExecutionContext ctx = factory.create(seed(input, null, "", "", "", "out"));
 
         assertThat(ctx.isUntrusted("branch")).isTrue();
-        assertThat(ctx.resolveShellTemplate("echo {{ branch }} {{ previous_output }}", false))
-                .isEqualTo("echo 'main; id' 'out'");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ branch }} {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     /**
@@ -374,7 +377,7 @@ class ExecutionContextFactoryTest {
     void create_platformDataUsedInShell_roundTripsWithoutAnyRecordedOutput() {
         ExecutionContext source = ExecutionContext.builder().workflowRunId("run-0").build();
         source.setUntrustedPlatformVariable("previous_report", "report");
-        source.resolveShellTemplate("echo {{ previous_report }}", false);
+        source.resolveShellValue("{{ previous_report }}");
         Map<String, Object> input = new HashMap<>(source.exportTaint());
 
         ExecutionContext ctx = factory.create(seed(input, null, "", "", "", "a | b"));
@@ -382,7 +385,8 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.hasUntrustedInput()).isTrue();
         assertThat(ctx.isUntrusted("item")).isTrue();
-        assertThat(ctx.resolveShellTemplate("cat {{ item }}", false)).isEqualTo("cat 'a.txt; id'");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("cat {{ item }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test
@@ -399,7 +403,10 @@ class ExecutionContextFactoryTest {
 
         assertThat(ctx.isUntrusted("previous_chain_output")).isTrue();
         assertThat(ctx.hasUntrustedInput()).isFalse(); // a taint source on use, like previous_report
-        assertThat(ctx.resolveShellTemplate("echo {{ previous_chain_output }}", false)).isEqualTo("echo 'a; rm -rf ~'");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ previous_chain_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(ctx.hasUntrustedInput()).as("a refused line put nothing into a shell").isFalse();
+        assertThat(ctx.resolveShellValue("{{ previous_chain_output }}")).isEqualTo("a; rm -rf ~");
         assertThat(ctx.hasUntrustedInput()).isTrue();
     }
 
@@ -430,11 +437,90 @@ class ExecutionContextFactoryTest {
      * variables, which the resume sets from its seed exactly as {@code create} does, so they agree with the
      * context's own settings.
      */
+    /**
+     * A state of a version that did not mark model text is read as "everything may be model text"
+     * ({@code RunSnapshotJson}). Restored, a shell line refuses every output and every variable of the run, and
+     * the run's own variables, which the resume sets anew, are trusted.
+     */
+    @Test
+    void restore_ofAStateThatMarksEverythingAsModelText_refusesItsOutputsAndVariables_notTheRunsOwn() {
+        ExecutionContext before = factory.create(seed(Map.of("topic", "the release")));
+        before.recordOutput("ask", "$(touch pwned)");
+        before.setDerivedVariable("step_0_output", "$(touch pwned)");
+        ContextState taken = before.state();
+        Set<String> all = new java.util.HashSet<>(taken.variables().keySet());
+        ContextState closed = new ContextState(taken.variables(), new ContextState.Taint(Set.of(), Set.of(), Set.of(),
+                false, false, false, new ContextState.ModelText(true, all, taken.blockOutputs().keySet(), true)),
+                taken.blockOutputs(), taken.previousOutput(), taken.sourceSteps(), taken.nextStepIndex(),
+                taken.runMetadata(), taken.rememberedApprovals());
+
+        ExecutionContext after = factory.restore(seed(Map.of("topic", "the release")), closed);
+
+        for (String placeholder : List.of("{{ block.ask.output }}", "{{ previous_output }}", "{{ step_0_output }}",
+                "{{ topic }}")) {
+            assertThatThrownBy(() -> after.resolveShellTemplate("echo " + placeholder, false)).as(placeholder)
+                    .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        }
+        assertThat(after.resolveShellTemplate("cd {{ project_path }} && echo {{ workflow_run_id }}", false))
+                .as("the run's own variables").doesNotContain("{{");
+        after.recordOutput("next", "more");
+        assertThatThrownBy(() -> after.resolveShellTemplate("echo {{ block.next.output }}", false))
+                .as("what the resumed run records").isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
+    /** Model text named without the flag: the run counts as one that asked a model all the same. */
+    @Test
+    void create_modelKeysOrModelOutputsWithoutTheFlag_countAsARunThatAskedAModel() {
+        ExecutionContext keys = factory.create(seed(Map.of("handed", "x; touch pwned",
+                ExecutionContext.MODEL_KEYS_VARIABLE, List.of("handed"))));
+        ExecutionContext outputs = factory.create(seed(Map.of(
+                ExecutionContext.MODEL_OUTPUTS_VARIABLE, List.of("ask"))));
+        ExecutionContext neither = factory.create(seed(Map.of("handed", "plain")));
+
+        assertThat(keys.modelAsked()).isTrue();
+        assertThat(outputs.modelAsked()).isTrue();
+        assertThat(neither.modelAsked()).isFalse();
+        keys.setDerivedVariable("item", "x; touch pwned");
+        assertThatThrownBy(() -> keys.resolveShellTemplate("echo {{ item }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
+    /**
+     * What a block derives while it runs takes the mark of what went into the block so far, in a run whose state
+     * says nothing: a model-text variable (set without the run having asked a model) that a value of the block
+     * resolved, then a loop item derived from the command's output.
+     */
+    @Test
+    void aVariableDerivedWhileABlockRuns_takesTheMarkOfWhatWentIntoTheBlock() {
+        ExecutionContext ctx = factory.create(seed(Map.of("previous_chain_output", "x; touch pwned")));
+        ctx.setModelVariable("handed", "x; touch pwned");
+        assertThat(ctx.modelAsked()).isFalse();
+
+        ctx.setDerivedVariable("before", "plain");
+        ctx.resolveShellValue("{{ handed }}");
+        ctx.setDerivedVariable("item", "x; touch pwned");
+
+        assertThat(ctx.resolveShellTemplate("echo {{ before }}", false)).isEqualTo("echo plain");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ item }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        assertThat(ctx.hasUntrustedInput()).as("model text is no untrusted input").isFalse();
+
+        ctx.blockEnded();
+        ctx.setDerivedVariable("next", "plain");
+        assertThat(ctx.resolveShellTemplate("echo {{ next }}", false)).as("the next block starts with nothing")
+                .isEqualTo("echo plain");
+
+        ctx.resolvePromptTemplate("Judge {{ previous_chain_output }}");
+        ctx.setDerivedVariable("from_platform", "x; touch pwned");
+        assertThatThrownBy(() -> ctx.resolveShellTemplate("echo {{ from_platform }}", false))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+    }
+
     @Test
     void restore_bringsBackTheStateAsItWas() {
         ExecutionContext before = factory.create(seed(Map.of("ticket", "a; reboot", "previous_chain_output", "chain",
                 ExecutionContext.UNTRUSTED_KEYS_VARIABLE, List.of("ticket"))));
-        before.resolveShellTemplate("cat {{ previous_chain_output }}", false);
+        before.resolveShellValue("{{ previous_chain_output }}");
         before.recordOutput("build", "built");
         before.resolvePromptTemplate("Use {{ previous_chain_output }}");
         before.getSourceSteps().record("build", sourceStep(0));
@@ -476,8 +562,8 @@ class ExecutionContextFactoryTest {
                         state.rememberedApprovals()));
         assertThat(after.getVariable("ticket")).isEqualTo("a; reboot");
         assertThat(after.getPreviousOutput()).isEqualTo("built");
-        assertThat(after.resolveShellTemplate("echo {{ block.build.output }} {{ ticket }}", false))
-                .isEqualTo("echo 'built' 'a; reboot'");
+        assertThatThrownBy(() -> after.resolveShellTemplate("echo {{ block.build.output }} {{ ticket }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
         assertThat(after.nextStepIndex()).isEqualTo(2);
         assertThat(after.getRememberedApproval("Deploy?")).isEqualTo("Yes always");
         assertThat(after.getWorkflowRunId()).isEqualTo("run-1");

@@ -1,5 +1,6 @@
 package traceworks.core.engine;
 
+import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.ai.AiProviderCapabilities;
 import traceworks.core.context.ApprovalRequest;
 import traceworks.core.context.ExecutionContext;
@@ -478,9 +479,9 @@ class BlockStepRunnerTest {
         runner.runStep(step, block, blockExecutor, context);
 
         assertThat(context.isUntrusted("step_1_output")).isTrue();
-        assertThat(context.resolveShellTemplate(
+        assertThatThrownBy(() -> context.resolveShellTemplate(
                 "{{ previous_output }} {{ block.report.output }} {{ step_1_output }}", false))
-                .isEqualTo("'x; id' 'x; id' 'x; id'");
+                .isInstanceOf(ShellLineRefusedException.class);
     }
 
     @Test

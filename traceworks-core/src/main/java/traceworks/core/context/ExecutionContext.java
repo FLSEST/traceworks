@@ -71,6 +71,22 @@ public class ExecutionContext {
     /** Reserved input-context key: {@code true} once platform data reached a shell command line, so that taint survives resume and hand-over even before an output is recorded. */
     public static final String PLATFORM_IN_SHELL_VARIABLE = "__platform_in_shell";
 
+    /** Reserved input-context key: {@code true} once the run asked a model, so a child workflow records its outputs as model text too. */
+    public static final String MODEL_ASKED_VARIABLE = "__model_asked";
+
+    /** Reserved input-context key: names of the variables that may hold text a model wrote, handed to a child run. */
+    public static final String MODEL_KEYS_VARIABLE = "__model_keys";
+
+    /**
+     * Reserved input-context key: the names of the variables a parent run hands over that it built from platform
+     * data (a foreach {@code context} entry that names {@code audit_findings}, say). The child holds them as
+     * platform data too. The register's own data is not among them: a child never takes it from its input.
+     */
+    public static final String PLATFORM_KEYS_VARIABLE = "__platform_keys";
+
+    /** Reserved input-context key: names of the block outputs that may hold text a model wrote, plus {@link #PREVIOUS_OUTPUT_NAME}. */
+    public static final String MODEL_OUTPUTS_VARIABLE = "__model_outputs";
+
     /** The step index of no step: {@link #parkQuestionOf} with it lets no question park the run. */
     public static final int NO_STEP = -1;
 
@@ -317,11 +333,59 @@ public class ExecutionContext {
         taint.markPlatform(name);
     }
 
-    /** Sets a variable derived from block output ({@code step_N_output}, foreach items): untrusted iff tainted. */
+    /**
+     * Sets a variable derived from block output ({@code step_N_output}, foreach items): untrusted iff tainted, model
+     * text in a run that asked a model, trusted otherwise.
+     */
     public void setDerivedVariable(String name, Object value) {
-        if (hasUntrustedInput()) setUntrustedVariable(name, value);
-        else setVariable(name, value);
+        // What the block derives while it runs (a loop's item from a command's output) takes the mark of what went
+        // into the block so far, not only the state of the run: the output's mark comes only when it is recorded
+        ExecutionContextTaint.Inherited into = taint.intoTheBlock();
+        if (hasUntrustedInput() || into.compareTo(ExecutionContextTaint.Inherited.PLATFORM_DATA) >= 0) {
+            setUntrustedVariable(name, value);
+        } else if (taint.modelAsked() || into == ExecutionContextTaint.Inherited.MODEL_TEXT) {
+            setModelVariable(name, value);
+        } else {
+            setVariable(name, value);
+        }
     }
+
+    /**
+     * Sets a variable to a value that was built from {@code template}: it is protected when any placeholder that
+     * went into it is, and as that one is, whatever the state of the run. Untrusted input or a tainted output makes
+     * it untrusted input, platform data makes it platform data (a shell line refuses it, and it taints the run when
+     * it reaches a shell as a value), model text makes it model text. With no protected part it is a derived
+     * variable ({@link #setDerivedVariable}).
+     */
+    public void setTemplateVariable(String name, Object value, String template) {
+        switch (taint.inheritedBy(template)) {
+            case EXTERNAL_INPUT -> setUntrustedVariable(name, value);
+            case PLATFORM_DATA -> setUntrustedPlatformVariable(name, value);
+            case MODEL_TEXT -> setModelVariable(name, value);
+            case NOTHING -> setDerivedVariable(name, value);
+        }
+    }
+
+    /** The names of the variables that are platform data: the register's, and what a step built from one. */
+    public Set<String> platformVariableNames() { return taint.platformVariables(); }
+
+    /** Sets a variable that may hold text a model wrote: a shell line protects it, the run stays without untrusted input. */
+    public void setModelVariable(String name, Object value) {
+        put(name, value);
+        taint.markModelVariable(name);
+    }
+
+    /**
+     * The run asks a model now, or a child workflow of it did. Every output recorded from here on, and every
+     * variable derived from one, may hold text a model wrote: a shell line protects it. See {@link ExecutionContextTaint}.
+     */
+    public void markModelAsked() { taint.markModelAsked(); }
+
+    /** Whether the run asked a model, itself or through a child workflow. */
+    public boolean modelAsked() { return taint.modelAsked(); }
+
+    /** Re-applies one exported name of an output that is model text ({@link #PREVIOUS_OUTPUT_NAME} or a block name). */
+    public void markOutputModelText(String name) { taint.markModelOutputName(name); }
 
     /** Replaces a variable's value and leaves its trust label untouched (workspace path remapping). */
     public void replaceValue(String name, Object value) {
@@ -386,14 +450,42 @@ public class ExecutionContext {
     /**
      * The single write path for a block result: {@code previous_output} plus, for a named block,
      * {{ block.&lt;name&gt;.output }}. Untrusted iff the run already carries untrusted input (taint is
-     * sticky for the rest of the run) or this block's prompt carried platform data.
+     * sticky for the rest of the run) or this block's prompt carried platform data; model text, which a shell line
+     * quotes just the same, in a run that asked a model.
      */
     public void recordOutput(String blockName, String output) {
-        boolean tainted = taint.consumePlatformPrompt() | hasUntrustedInput(); // | : always consume the flag
+        ExecutionContextTaint.Inherited into = taint.intoTheBlock();
+        boolean tainted = taint.consumePlatformPrompt() | hasUntrustedInput() // | : always consume the flag
+                | into.compareTo(ExecutionContextTaint.Inherited.PLATFORM_DATA) >= 0;
+        if (into == ExecutionContextTaint.Inherited.MODEL_TEXT) {
+            // Model text a parent handed over went into the block: from here on this run holds model text
+            taint.markModelAsked();
+        }
         setPreviousOutput(output);
         setBlockOutput(blockName, output);
         if (tainted) taint.markOutput(blockName);
+        else if (taint.modelAsked()) taint.markModelOutput(blockName);
     }
+
+    /**
+     * Sets the variable {@code step_N_output} of the output just recorded ({@link #recordOutput}): protected as that
+     * output is.
+     */
+    public void setStepOutputVariable(String name, Object value) {
+        setTemplateVariable(name, value, "{{ " + PREVIOUS_OUTPUT_NAME + " }}");
+    }
+
+    /**
+     * The block's step ended, with or without an output: what went into it ({@link #recordOutput}) no longer counts
+     * for the next block.
+     */
+    public void blockEnded() { taint.blockEnded(); }
+
+    /**
+     * A child workflow the block ran ended with untrusted input or a tainted output: its output, which the block
+     * hands on, is that too, so the output this block records is tainted.
+     */
+    public void childWasTainted() { taint.wentIntoTheBlock(ExecutionContextTaint.Inherited.EXTERNAL_INPUT); }
 
     /** Re-applies the exported {@link #PLATFORM_IN_SHELL_VARIABLE} flag of an earlier segment or the parent run. */
     public void markPlatformUsedInShell() { taint.markPlatformUsedInShell(); }
@@ -438,8 +530,12 @@ public class ExecutionContext {
         return blockOutputs.get(blockName);
     }
 
+    /**
+     * Fills in a template. Like every resolution, it notes what went into the block that runs now: the output the
+     * block records is protected when a placeholder that resolved here was ({@link #recordOutput}).
+     */
     public String resolveTemplate(String template) {
-        return TemplateResolver.resolve(template, previousOutput, blockOutputs, variables);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, taint::resolved);
     }
 
     /**
@@ -460,7 +556,8 @@ public class ExecutionContext {
         if (runPaths.packageDirectory() != null) hostVariables.put("package_dir", runPaths.packageDirectory());
         hostVariables.put("scratch_dir", runPaths.scratch() != null ? runPaths.scratch() : "");
         if (runPaths.register() != null) hostVariables.put("register_dir", runPaths.register());
-        return TemplateResolver.resolve(template, previousOutput, blockOutputs, hostVariables);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, hostVariables,
+                taint::resolved);
     }
 
     /** Whether a {{ key }} placeholder would resolve to a value (possibly blank) rather than stay literal — the same lookup {@link #resolveTemplate} performs, for a caller that must decide before substituting. */
@@ -468,29 +565,51 @@ public class ExecutionContext {
 
     /** Prompt path: like {@link #resolveTemplate}, but platform data here marks this block's output untrusted. */
     public String resolvePromptTemplate(String template) {
-        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables,
-                taint::substitutedIntoPrompt);
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, key -> {
+            taint.substitutedIntoPrompt(key);
+            taint.resolved(key);
+        });
     }
 
-    /** Shell-safe: every value wrapped in POSIX single quotes (internal ones as '\''). See {@link TemplateResolver#resolveShellSafe}. */
+    /** A shell command line of a block with {@code shell_escape_variables}: {@link #resolveShellTemplate} with {@code true}. */
     public String resolveTemplateShellSafe(String template) {
-        return TemplateResolver.resolveShellSafe(template, previousOutput, blockOutputs, variables,
-                taint::substitutedIntoShell);
+        return resolveShellTemplate(template, true);
     }
 
     /**
-     * Shell command line: with {@code escapeAll} every placeholder is single-quoted, otherwise only
-     * untrusted variables and tainted block outputs are. Substituted platform data taints the run from
-     * here on ({@link ExecutionContextTaint#substitutedIntoShell}). See {@link TemplateResolver#resolveShell}.
+     * Shell command line: every value is inserted as it is, or with {@code escapeAll} in single quotes. A protected
+     * value (an untrusted or platform variable, a tainted block output, what may hold text a model wrote) never goes
+     * into a shell line: a line that names one is refused. See {@link TemplateResolver#shellLine}.
+     *
+     * @throws ShellLineRefusedException when the line names a protected value, wherever it stands and with
+     *                                   {@code escapeAll} too; nothing is filled in then
      */
     public String resolveShellTemplate(String template, boolean escapeAll) {
-        if (escapeAll) return resolveTemplateShellSafe(template);
-        return TemplateResolver.resolveShell(template, previousOutput, blockOutputs, variables,
-                taint.snapshot(), taint::substitutedIntoShell);
+        return TemplateResolver.shellLine(template, previousOutput, blockOutputs, variables, taint.snapshot(),
+                escapeAll);
     }
 
-    /** Whether the template names a value a shell line would quote (untrusted/platform variable, tainted output). */
-    public boolean namesEscapedValue(String template) { return TemplateResolver.namesEscapedValue(template, taint.snapshot()); }
+    /**
+     * The value of a shell variable a block names under {@code values}: the template with every placeholder filled
+     * in as it is, a protected one too, because the result reaches the shell as a variable's value and never as
+     * shell text. Platform data in it taints the run from here on, as it did in a shell line
+     * ({@link ExecutionContextTaint#substitutedIntoShell}).
+     */
+    public String resolveShellValue(String template) {
+        return TemplateResolver.resolvePrompt(template, previousOutput, blockOutputs, variables, key -> {
+            taint.resolved(key);   // before the run is tainted by it: what the key was, not what the run is now
+            taint.substitutedIntoShell(key);
+        });
+    }
+
+    /**
+     * Whether the template names a protected value (an untrusted or platform variable, a tainted output, what may
+     * hold text a model wrote). The places that take none refuse it: the arguments of a tool step, the host path of
+     * a mount.
+     */
+    public boolean namesEscapedValue(String template) {
+        return TemplateResolver.namesEscapedValue(template, taint.snapshot());
+    }
 
     static String shellEscape(String value) { return TemplateResolver.shellEscape(value); }
 

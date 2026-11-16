@@ -8,6 +8,7 @@ import traceworks.core.port.CommandRunner.Mount;
 import traceworks.core.testing.BackgroundChild;
 import traceworks.core.testing.RecordingTracker;
 import traceworks.core.util.ProcessTracking;
+import traceworks.core.util.ShellVariables;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -83,6 +84,229 @@ class HostCommandRunnerTest {
         assertThat(ascii.run(shell("echo plain", null, 30)).stdout()).as("ASCII passes").isEqualTo("plain\n");
         assertThat(new HostCommandRunner(inherited, "UTF-8").run(request).exitCode()).as("UTF-8 passes").isZero();
         assertThat(marker).exists();
+    }
+
+    /**
+     * The values of a request are shell variables its command finds set. The text bash parses holds none of their
+     * bytes as code, so nothing a value holds runs: every hostile value arrives byte for byte in {@code "$VALUE"},
+     * and no file named {@code pwned} appears. A NUL is taken out before the value is sent.
+     */
+    @Test
+    void run_values_arriveByteForByteInTheirVariable_andNothingOfThemRuns(@TempDir Path dir) throws Exception {
+        String delimiterWithNul = "x\nTRACEWORKS_VALUE_1_EN\u0000D\ntouch pwned\n: <<'TRACEWORKS_VALUE_1_END'";
+        List<String> hostile = new java.util.ArrayList<>(List.of(
+                "$(touch pwned)", "`touch pwned`", "'; touch pwned; '", "\"; touch pwned; \"", "x\ntouch pwned",
+                "\\x27; touch pwned; \\x27", "\\c", "%s %b \\n \\\\", "a b", "*", "-rf /", "", "\n", "\n\n\n",
+                "tail\n\n", "café € 😀", delimiterWithNul, "\u0000", "a\u0000", "\u0000b",
+                "a\u0000\u0000b\u0000", "'\u0000'", "TRACEWORKS_VALUE\u0000 X 1 'x'\nunset -f TRACEWORKS_VALUE\ntouch pwned",
+                "line with 'quotes', \"more\", $(nothing) and `nothing`\n".repeat(1024 * 1024 / 55)));
+        for (int at = 0; at <= "ab'c".length(); at++) {
+            hostile.add(new StringBuilder("ab'c").insert(at, '\u0000').toString());
+        }
+        Path out = dir.resolve("value");
+        String command = "set -euo pipefail\nprintf '%s' \"$VALUE\" > '" + out + "'; printf '%s' \"${#NAME}\"";
+
+        for (String value : hostile) {
+            java.nio.file.Files.deleteIfExists(out);
+            Map<String, String> values = new java.util.LinkedHashMap<>();
+            values.put("VALUE", value);
+            values.put("NAME", "name");
+            CommandRequest request = shell(command, dir.toString(), 60).withValues(values);
+
+            CommandResult result = runner.run(request);
+
+            String what = value.length() > 60 ? value.substring(0, 60) + "…" : value;
+            assertThat(result.exitCode()).as("%s: %s", what, result.stderr()).isZero();
+            assertThat(result.stdout()).as("the second variable: %s", what).isEqualTo("4");
+            assertThat(java.nio.file.Files.readString(out).equals(value.replace("\u0000", "")))
+                    .as("the value, byte for byte, without NUL: %s", what).isTrue();
+            assertThat(dir.resolve("pwned")).as("a command of the value ran: %s", what).doesNotExist();
+            assertThat(request.script()).as("no NUL in the text bash reads").doesNotContain("\u0000");
+        }
+    }
+
+    /** A value as large as the output limit arrives whole, and no child process inherits the variable. */
+    @Test
+    void run_aValueOf16MiB_arrivesWhole_andIsNotExported(@TempDir Path dir) throws Exception {
+        String value = "line with 'quotes', \"more\", $(nothing run) and `nothing`\n".repeat(16 * 1024 * 1024 / 58)
+                + "\n\n";
+        Path out = dir.resolve("value");
+        CommandRequest request = shell("printf '%s' \"$VALUE\" > '" + out + "'; env | grep -c VALUE || true", null, 120)
+                .withValues(Map.of("VALUE", value));
+
+        CommandResult result = new HostCommandRunner(64 * 1024 * 1024).run(request);
+
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(result.stdout()).as("not in the environment of a child").isEqualTo("0\n");
+        assertThat(java.nio.file.Files.readString(out).equals(value)).as("the value, byte for byte").isTrue();
+    }
+
+    /**
+     * A value that does not arrive whole ends the shell before the command's first line: the length bash finds is
+     * compared with the length that was sent, here made wrong on purpose. Run as a script of its own, the result is
+     * what bash gave; the marker is the one of the values.
+     */
+    @Test
+    void run_aValueThatDidNotArriveWhole_endsTheShell_beforeTheCommandRuns(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "four"));
+        String cut = request.script().replace("TRACEWORKS_VALUE VALUE 4 'four'", "TRACEWORKS_VALUE VALUE 4 'fou'");
+        assertThat(cut).isNotEqualTo(request.script());
+
+        CommandResult result = run(cut, 30);
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.stdout() + result.stderr())
+                .contains(ShellVariables.failureMarker(request.values()) + " the value of VALUE was not delivered");
+        assertThat(marker).doesNotExist();
+    }
+
+    /**
+     * A name bash does not keep a value under ({@code _}, which it sets anew after every command): the delivery is
+     * checked on the variable itself, so it fails, the command does not run, and the runner's result says that it
+     * did not run, which no condition takes for an answer. The name rule refuses such a name before; this is what
+     * happens if one gets through.
+     */
+    @Test
+    void run_aNameBashDoesNotKeepAValueUnder_failsTheDelivery_andTheResultSaysTheCommandDidNotRun(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+
+        CommandResult result = runner.run(shell("touch '" + marker + "'", null, 30).withValues(Map.of("_", "x")));
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.didNotRun()).isTrue();
+        assertThat(result.notRunReason()).contains("was not delivered");
+        assertThat(marker).doesNotExist();
+    }
+
+    /**
+     * A bash older than 3.1 ends at the first line, with the marker of a failed delivery, before the command runs.
+     * The version is the shell's own and cannot be set, so the test puts the version an old bash reports in its
+     * place; with this bash's own version the same script runs.
+     */
+    @Test
+    void run_aBashOlderThanTheLinesNeed_endsAtTheFirstLine_withTheMarkerOfAFailedDelivery(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "x"));
+        String version = "\"${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}\"";
+        assertThat(request.script()).startsWith("case " + version + " in ");
+
+        for (String old : List.of("0.0", "2.05", "3.0", "1.14")) {
+            CommandResult result = run(request.script().replace(version, "\"" + old + "\""), 30);
+
+            assertThat(result.exitCode()).as(old).isEqualTo(74);
+            assertThat(result.stdout() + result.stderr()).as(old).startsWith(
+                    ShellVariables.failureMarker(request.values()) + " this bash is older than 3.1");
+            assertThat(ShellVariables.notDelivered(request.values(), result.exitCode(),
+                    result.stdout() + result.stderr())).as(old).isTrue();
+            assertThat(marker).as(old).doesNotExist();
+        }
+        for (String supported : List.of("3.1", "3.2", "4.2", "4.4", "5.2", "10.0", "30.1")) {
+            java.io.File ran = marker.toFile();
+            ran.delete();
+            CommandResult result = run(request.script().replace(version, "\"" + supported + "\""), 30);
+
+            assertThat(result.exitCode()).as(supported + ": " + result.stdout()).isZero();
+            assertThat(marker).as(supported).exists();
+        }
+    }
+
+    /**
+     * The lines that set the values use no syntax that depends on the shell's mode: under {@code bash --posix} they
+     * set the variable, byte for byte and unexported, and a name bash does not keep fails the delivery with its
+     * marker there too.
+     */
+    @Test
+    void theLinesThatSetTheValues_workInPosixMode(@TempDir Path dir) throws Exception {
+        String value = "it's $(not run)\n\n";
+        CommandRequest request = shell("printf '%s' \"$VALUE\"; env | grep -c '^VALUE=' || true", null, 30)
+                .withValues(Map.of("VALUE", value));
+        Path script = Files.writeString(dir.resolve("script"), request.script());
+        Path unkept = Files.writeString(dir.resolve("unkept"),
+                shell("echo ran", null, 30).withValues(Map.of("_", "x")).script());
+
+        CommandResult set = run("bash --posix '" + script + "'", 30);
+        CommandResult failed = run("bash --posix '" + unkept + "'", 30);
+
+        assertThat(set.exitCode()).as(set.stdout()).isZero();
+        assertThat(set.stdout()).isEqualTo(value + "0\n");
+        assertThat(failed.exitCode()).as(failed.stdout()).isEqualTo(74);
+        assertThat(failed.stdout() + failed.stderr()).doesNotContain("ran")
+                .contains(ShellVariables.failureMarker(Map.of("_", "x")) + " the value of _ was not delivered");
+    }
+
+    /** A readonly variable cannot take the value: the delivery fails closed, before the command's first line. */
+    @Test
+    void run_aReadonlyName_failsTheDelivery(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "new"));
+
+        CommandResult result = run("readonly VALUE=old\n" + request.script(), 30);
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.stdout() + result.stderr())
+                .contains(ShellVariables.failureMarker(request.values()) + " the value of VALUE was not delivered");
+        assertThat(marker).doesNotExist();
+    }
+
+    /** A command that ends with 74 by itself ran, whatever it prints: only the marker of its values is a failure. */
+    @Test
+    void run_aCommandThatExits74ByItself_withValues_ran() {
+        CommandResult result = runner.run(shell("echo \"traceworks:00: the value of VALUE was not delivered $VALUE\""
+                + " >&2; exit 74", null, 30).withValues(Map.of("VALUE", "traceworks:")));
+
+        assertThat(result.exitCode()).isEqualTo(74);
+        assertThat(result.didNotRun()).isFalse();
+    }
+
+    /**
+     * A name that is exported in the step's environment is taken out of it: the command finds the value, and no
+     * process it starts inherits it, also when the shell was started to export everything it sets
+     * ({@code SHELLOPTS=allexport}).
+     */
+    @Test
+    void run_aNameExportedInTheStepsEnvironment_isSet_andNoLongerExported() {
+        String value = "it's $(not run)\n";
+        for (String name : List.of("HOSTNAME", "GIT_SSH_COMMAND", "NODE_OPTIONS", "PYTHONPATH", "JAVA_TOOL_OPTIONS",
+                "REVIEW")) {
+            for (Map<String, String> environment : List.of(Map.of(name, "from the environment"),
+                    Map.of(name, "from the environment", "SHELLOPTS", "allexport"))) {
+                // env is a process the command starts: it prints what such a process inherits
+                CommandRequest request = new CommandRequest("printf '%s|' \"$" + name + "\"; env | grep '^" + name
+                        + "=' || echo 'not inherited'", null, 30, environment, null, null, false)
+                        .withValues(Map.of(name, value));
+
+                CommandResult result = runner.run(request);
+
+                assertThat(result.exitCode()).as("%s %s: %s", name, environment, result.stdout()).isZero();
+                assertThat(result.stdout()).as("%s %s", name, environment)
+                        .isEqualTo(value + "|not inherited\n");
+            }
+        }
+    }
+
+    /**
+     * The variables bash sets itself or reads as its own settings: the name rule refuses them
+     * ({@code ShellValues}). If one gets through, the delivery either sets the variable to exactly the value
+     * (unset first, a special variable is an ordinary one) or fails; it never leaves another value under the name
+     * while the command runs.
+     */
+    @Test
+    void run_aNameBashSetsOrUses_holdsExactlyTheValue_orTheDeliveryFails() {
+        for (String name : List.of("EPOCHSECONDS", "EPOCHREALTIME", "SRANDOM", "RANDOM", "SECONDS", "HISTCMD",
+                "DIRSTACK", "LINENO", "FUNCNEST", "EXECIGNORE", "TIMEFORMAT", "INPUTRC", "HISTFILE", "PS1", "_",
+                "BASHPID", "GROUPS", "UID", "PPID", "BASH_VERSINFO", "SHELLOPTS", "BASHOPTS", "FUNCNAME")) {
+            CommandResult result = runner.run(shell("printf '%s' \"${" + name + "}\"", null, 30)
+                    .withValues(Map.of(name, "what was sent")));
+
+            if (result.exitCode() == 0) {
+                assertThat(result.stdout()).as(name).isEqualTo("what was sent");
+            } else {
+                assertThat(result.exitCode()).as("%s: %s", name, result.stdout()).isEqualTo(74);
+                assertThat(result.didNotRun()).as(name).isTrue();
+                assertThat(result.stdout()).as(name).doesNotContain("what was sent");
+            }
+        }
     }
 
     @Test

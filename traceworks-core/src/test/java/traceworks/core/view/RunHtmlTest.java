@@ -413,6 +413,28 @@ class RunHtmlTest {
                 + " image <code>img</code>").doesNotContain("badge host");
     }
 
+    /** The values of a command stand under it, each by name, escaped and cut like any content. */
+    @Test
+    void theValuesOfACommand_areShownUnderIt_byName() {
+        started();
+        emit(new StepStarted(0, "store", "shell", 0, false));
+        Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put("REVIEW", "it's <b>$(not run)</b>\nsecond line");
+        values.put("LONG", "x".repeat(70_000));
+        recorder.recording(request -> new CommandResult(0, "", "", 1, false))
+                .run(new CommandRequest("printf '%s' \"$REVIEW\"", "/w", 30, null, null, null, false)
+                        .withValues(values));
+        emit(new StepFinished(0, "store", "shell", StepStatus.COMPLETED, "i", 5, Map.of()));
+
+        String html = render();
+
+        assertThat(html).contains("<pre>printf &#39;%s&#39; &quot;$REVIEW&quot;</pre>",
+                "<details><summary>value <code>REVIEW</code> (34 characters)</summary><pre>it&#39;s"
+                        + " &lt;b&gt;$(not run)&lt;/b&gt;\nsecond line</pre></details>",
+                "<details><summary>value <code>LONG</code> (70000 characters)</summary><pre>",
+                "<p class=\"cut\">cut at 65536 of 70000 characters; the full values are blob ");
+    }
+
     @Test
     void verificationProblems_areShown() {
         started();

@@ -21,7 +21,7 @@ public final class ProcessCommandRunner implements CommandRunner {
     @Override
     public CommandResult run(CommandRequest request) {
         long start = System.currentTimeMillis();
-        ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c", request.command());
+        ProcessBuilder builder = new ProcessBuilder("/bin/bash", "-c", request.script());
         if (request.image() == null && request.workingDirectory() != null && !request.workingDirectory().isBlank()) {
             builder.directory(new File(request.workingDirectory()));
         }
@@ -44,8 +44,8 @@ public final class ProcessCommandRunner implements CommandRunner {
             }
             out.join(2000);
             err.join(2000);
-            return new CommandResult(finished ? process.exitValue() : 137, stdout.toString(StandardCharsets.UTF_8),
-                    stderr.toString(StandardCharsets.UTF_8), System.currentTimeMillis() - start, !finished);
+            return request.delivered(new CommandResult(finished ? process.exitValue() : 137, stdout.toString(StandardCharsets.UTF_8),
+                    stderr.toString(StandardCharsets.UTF_8), System.currentTimeMillis() - start, !finished));
         } catch (IOException e) {
             return new CommandResult(1, "", "Error: " + e.getMessage(), System.currentTimeMillis() - start, false);
         } catch (InterruptedException e) {

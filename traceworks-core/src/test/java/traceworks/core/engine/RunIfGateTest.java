@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -178,12 +179,16 @@ class RunIfGateTest {
     }
 
     @Test
-    void untrustedValue_isQuoted() {
+    void untrustedValue_refusesTheTest_andReachesItAsAValue() {
         ExecutionContext ctx = context();
         ctx.setUntrustedVariable("x", "a; touch /tmp/pwned");
-        when(commandRunner.run(request("test 'a; touch /tmp/pwned' = y"))).thenReturn(exit(1));
+        when(commandRunner.run(request("test \"$X\" = y").withValues(Map.of("X", "a; touch /tmp/pwned"))))
+                .thenReturn(exit(1));
 
-        assertThat(new RunIfGate(commandRunner, CLOCK)
-                .skipIfUnmet(block(Map.of("run_if", "test {{ x }} = y")), ctx)).isPresent();
+        assertThatThrownBy(() -> new RunIfGate(commandRunner, CLOCK)
+                .skipIfUnmet(block(Map.of("run_if", "test {{ x }} = y")), ctx))
+                .isInstanceOf(traceworks.core.context.ShellLineRefusedException.class);
+        assertThat(new RunIfGate(commandRunner, CLOCK).skipIfUnmet(block(Map.of("values", Map.of("X", "{{ x }}"),
+                "run_if", "test \"$X\" = y")), ctx)).isPresent();
     }
 }

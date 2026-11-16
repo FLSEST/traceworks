@@ -141,6 +141,14 @@ class SubWorkflowLauncher {
             }
             name = child.name();
             ChildRun run = context.getChildRuns().run(child, childContext(context, parentIds, workflowId));
+            if (run.modelAsked()) {
+                // The child's output, and what it left in the workspace, may hold text a model wrote
+                context.markModelAsked();
+            }
+            if (run.tainted()) {
+                // The child's output holds what untrusted input or platform data made of it: tainted here too
+                context.childWasTainted();
+            }
             RunStatus end = run.status();
             return new Outcome(workflowId, name, run.runId(), end, buildOutput(run, context.secretValues()),
                     end == RunStatus.COMPLETED || end == RunStatus.COMPLETED_WITH_ERRORS);
@@ -179,6 +187,13 @@ class SubWorkflowLauncher {
             childContext.remove(TriggerSource.PARENT_CONTEXT_KEY); // unknown origin counts as unattended
         }
         childContext.putAll(context.exportTaint());
+        // What a step built from platform data stays platform data in the child; the register's own data is not
+        // handed over (the child would not take it from its input)
+        List<String> derivedFromPlatformData = context.platformVariableNames().stream()
+                .filter(childContext::containsKey).sorted().toList();
+        if (!derivedFromPlatformData.isEmpty()) {
+            childContext.put(ExecutionContext.PLATFORM_KEYS_VARIABLE, derivedFromPlatformData);
+        }
         return childContext;
     }
 
