@@ -33,6 +33,7 @@ import java.util.stream.Stream;
  * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY [--known FILE] [--items FILE]
  *        [--verdict-version 1] [--max-areas 200] [--max-lines 160] [--context 15] [--judge NAME --judge-provider ID --judge-model MODEL]
  *        [--changes DIR] [--items-file FILE] [--register KEY]
+ * changed --changes DIR --root DIR                                         (writes DIR/wanted)
  * report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT   (and findings.jsonl next to REPORT)
  * </pre>
  *
@@ -48,8 +49,9 @@ import java.util.stream.Stream;
  *
  * <p>With {@code --changes}, {@code find} is the check of the changes: of all the areas it writes only the ones the
  * changes pick ({@link Changes}: a changed line, or one call from a changed member) and the ones the register left
- * open or without a verdict, each with its reason. {@code DIR} is the folder a step before wrote with git's word on
- * what changed. An area the register does not know and the changes do not pick is no item of such a run: nothing
+ * open or without a verdict, each with its reason. {@code DIR} is the folder a step before wrote with the base, the
+ * trees of the base and the workspace commit, and the base blobs that {@code changed} asked for; what changed is
+ * decided here, from content ({@link Changes}). An area the register does not know and the changes do not pick is no item of such a run: nothing
  * looked at it. {@code --items-file} takes the items as the register folder of a run holds them
  * ({@code items.jsonl}), which no cap cuts, in place of {@code --items}. {@code --register} is the key of the
  * audit's register, for the commands the report names. Every name from the workspace is escaped on
@@ -64,6 +66,7 @@ public final class Main {
                               [--max-areas N] [--max-lines N] [--context N]
                               [--judge NAME --judge-provider ID --judge-model MODEL]
                               [--changes DIR] [--items-file FILE] [--register KEY]
+                   areas changed --changes DIR --root DIR
                    areas report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT""";
 
     private static final int SOURCE_ROOT_DEPTH = 6;
@@ -92,6 +95,7 @@ public final class Main {
         try {
             return switch (args[0]) {
                 case "find" -> find(options, out, err);
+                case "changed" -> changed(options, out);
                 case "report" -> report(options, in, out, err);
                 default -> throw new IllegalStateException(args[0]);
             };
@@ -134,8 +138,8 @@ public final class Main {
         // The check of the changes: what git said changed since the base, as a step before wrote it down
         RuleFile rules = RuleFile.parse(Files.readString(rulesFile));
         if (!Files.isDirectory(root)) throw new IllegalArgumentException(root + " is no directory");
-        Changes.Base base = options.containsKey("changes")
-                ? Changes.read(Path.of(required(options, "changes")), root) : null;
+        Changes.Handed handed = options.containsKey("changes")
+                ? Changes.read(Path.of(required(options, "changes"))) : null;
 
         List<Path> sourceRoots = new ArrayList<>();
         for (String given : options.getOrDefault("source-root", List.of())) {
@@ -155,6 +159,10 @@ public final class Main {
         if (sourceRoots.isEmpty()) throw new IllegalArgumentException("no src/main/java below " + root);
 
         Result result = Finder.find(root, sourceRoots, rules);
+        // The check of the changes: what differs from the base, decided here from content, and the changed lines
+        // of exactly the files the finder read
+        Changes.Base base = handed == null ? null : Changes.of(handed, Changes.compare(handed, root), result);
+        Changes.Kinds kinds = base == null ? null : Changes.kinds(base, result);
         notRead.addAll(result.notParsed());
         notRead.sort(java.util.Comparator.comparing(NotParsed::file));
         SecureRandom random = new SecureRandom();
@@ -194,7 +202,8 @@ public final class Main {
             // What the verdict of a picked area sees beside its own code: the changed members it is connected with
             String connected = pick == null ? "" : Changes.connectedText(pick.connected(), result, base.lines());
             String digest = Items.digest(verdictVersion, area.file(), area.rules(),
-                    connected.isEmpty() ? area.code() : area.code() + "\n" + CONNECTED + "\n" + connected);
+                    connected.isEmpty() ? area.code()
+                            : area.code() + "\n" + CONNECTED + "\n" + Changes.connectedWhole(pick.connected(), result));
             Items.Row row = knownItems.get(Known.shown(names.get(i)));
             Map<String, Object> json = new LinkedHashMap<>(area.toJson(token, fence));
             json.put("item", names.get(i));
@@ -307,9 +316,22 @@ public final class Main {
         summary.put("rules", rules.rules().stream().map(Rule::id).toList());
         summary.put("unresolvedTargets", result.unresolvedTargets());
         // Known findings whose member is no area any more: the report names them as gone
-        summary.put("knownGone", Known.orphans(known, null, subjects));
+        List<Map<String, Object>> orphans = Known.orphans(known, null, subjects);
+        List<Map<String, Object>> unowned = new ArrayList<>(Known.unowned(known, null, subjects));
+        if (kinds != null && !kinds.uncompiled().isEmpty() && !orphans.isEmpty()) {
+            // Java code changed or came where the finder does not read. The member of such a finding may have moved
+            // there, so its absence from the areas says nothing: the finding stays open, for a person
+            for (Map<String, Object> orphan : orphans) {
+                Map<String, Object> entry = new LinkedHashMap<>(orphan);
+                entry.put("severity", known.stream().filter(row -> row.asked() && row.ruleKey().equals(orphan.get("ruleKey"))
+                        && row.subject().equals(orphan.get("subject"))).map(Known.Row::severity).findFirst().orElse(""));
+                unowned.add(entry);
+            }
+            orphans = List.of();
+        }
+        summary.put("knownGone", orphans);
         // Open findings that no area carries and that are not gone either: for a person, and for the gate
-        summary.put("knownUnowned", Known.unowned(known, null, subjects));
+        summary.put("knownUnowned", unowned);
         // How many findings {{ audit_findings }} left out: nothing is concluded from a row that is not there
         summary.put("knownMissing", (long) Known.missing(knownText));
         // How many of them are open by the block's own count: with any, an area the register calls open stays open
@@ -318,7 +340,6 @@ public final class Main {
         if (judge != null) summary.put("judge", judge.toJson());
         // The key of the audit's register, for the commands the report names
         summary.put("register", register);
-        List<String> unmapped = base == null ? List.of() : Changes.unmapped(result, base.lines());
         if (base != null) {
             Map<String, Object> changes = new LinkedHashMap<>();
             changes.put("base", base.base());
@@ -335,8 +356,12 @@ public final class Main {
             List<String> outside = Changes.outsideMembers(result, base.lines());
             changes.put("outsideMembers", (long) outside.size());
             changes.put("outside", outside.subList(0, Math.min(outside.size(), MAX_UNMAPPED_NAMED)));
-            changes.put("unmappedFiles", (long) unmapped.size());
-            changes.put("unmapped", unmapped.subList(0, Math.min(unmapped.size(), MAX_UNMAPPED_NAMED)));
+            changes.put("testFiles", (long) kinds.tests().size());
+            changes.put("docFiles", (long) kinds.docs().size());
+            changes.put("uncompiledFiles", (long) kinds.uncompiled().size());
+            changes.put("uncompiled", named(kinds.uncompiled()));
+            changes.put("cannotJudgeFiles", (long) kinds.cannotJudge().size());
+            changes.put("cannotJudge", named(kinds.cannotJudge()));
             changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
             changes.put("areasOfProject", (long) all.size());
             changes.put("changedAreas", (long) changedAreas);
@@ -358,7 +383,10 @@ public final class Main {
             out.println("FACT changes_files_not_compared: " + base.unmappable().size());
             out.println("FACT changes_commits_skipped: " + (base.skipped().isEmpty() ? "0" : base.skipped()));
             for (String file : base.unmappable()) out.println("NOT MEASURED: changes_file " + safe(file));
-            out.println("FACT changes_files_not_mapped: " + unmapped.size());
+            out.println("FACT changes_files_java_not_compiled: " + kinds.uncompiled().size());
+            out.println("FACT changes_files_cannot_judge: " + kinds.cannotJudge().size());
+            out.println("FACT changes_files_tests: " + kinds.tests().size());
+            out.println("FACT changes_files_docs: " + kinds.docs().size());
             out.println("FACT changes_areas_of_project: " + all.size());
             out.println("FACT changes_areas_changed: " + changedAreas);
             out.println("FACT changes_areas_neighbours: " + neighbourAreas);
@@ -458,6 +486,7 @@ public final class Main {
                     "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model",
                     "changes", "items-file", "register");
             case "report" -> Set.of("areas", "summary", "verdicts", "out");
+            case "changed" -> Set.of("changes", "root");
             default -> throw new IllegalArgumentException("unknown command '" + args[0] + "'");
         };
         Map<String, List<String>> options = new HashMap<>();
@@ -524,6 +553,37 @@ public final class Main {
         roots.sort(null);
         linked.sort(null);
         return new Discovery(List.copyOf(roots), List.copyOf(linked));
+    }
+
+    private static List<String> named(List<String> files) {
+        return files.subList(0, Math.min(files.size(), MAX_UNMAPPED_NAMED));
+    }
+
+    /**
+     * {@code changed}: compares the workspace with the base and writes the ids of the base blobs the line
+     * comparison of {@code find --changes} needs into {@code wanted}, one a line. It refuses a base that leaves
+     * nothing to check: one the run named that is the workspace commit itself, with a workspace that does not
+     * differ from it.
+     */
+    private static int changed(Map<String, List<String>> options, PrintStream out) throws IOException {
+        Path dir = Path.of(required(options, "changes"));
+        Path root = Path.of(required(options, "root")).toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) throw new IllegalArgumentException(root + " is no directory");
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Compared compared = Changes.compare(handed, root);
+        if (handed.from().equals("input") && handed.base().equals(handed.head()) && !compared.dirty()) {
+            throw new IllegalArgumentException("nothing to check: the base '" + safe(handed.since())
+                    + "' is the workspace commit itself (" + handed.base()
+                    + (handed.baseDate().isEmpty() ? "" : ", committed " + handed.baseDate())
+                    + "), and the workspace holds no other change. Name an earlier commit or date");
+        }
+        List<String> wanted = Changes.wanted(compared);
+        Files.writeString(dir.resolve("wanted"), wanted.isEmpty() ? "" : String.join("\n", wanted) + "\n",
+                StandardCharsets.UTF_8);
+        out.println("FACT changes_files: " + compared.status().size());
+        out.println("FACT changes_uncommitted: " + compared.dirty());
+        out.println("FACT changes_base_blobs_wanted: " + wanted.size());
+        return 0;
     }
 
     private static long count(Object value) {

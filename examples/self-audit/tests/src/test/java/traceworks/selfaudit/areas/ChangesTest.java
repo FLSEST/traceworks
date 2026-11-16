@@ -144,14 +144,10 @@ class ChangesTest {
     }
 
     @Test
-    void aChangedMemberNothingCalls_picksNoArea_andAFileThatIsNoSourceIsNamedAsNotMapped() throws IOException {
+    void aChangedMemberNothingCalls_picksNoArea() throws IOException {
         project();
-        Map<String, List<Range>> lines = Map.of(SRC + "p/Helper.java", List.of(new Range(7, 7)),
-                "pom.xml", List.of(new Range(1, 3)));
 
-        assertThat(reasons(lines)).isEmpty();
-        Result result = Finder.find(root, List.of(root.resolve(SRC)), RuleFile.parse(RULES));
-        assertThat(Changes.unmapped(result, lines)).containsExactly("pom.xml");
+        assertThat(reasons(Map.of(SRC + "p/Helper.java", List.of(new Range(7, 7))))).isEmpty();
     }
 
     @Test
@@ -199,65 +195,187 @@ class ChangesTest {
         assertThat(pick.connected()).extracting(m -> m.member().label()).containsExactly("Helper.help(String)");
     }
 
-    /** A folder as the step before writes it, with the given manifest. */
-    private Path folder(String manifest) throws IOException {
-        Path dir = Files.createDirectories(root.resolve("changes/base")).getParent();
-        Files.writeString(dir.resolve("base-commit"), "a".repeat(40) + "\n");
-        Files.writeString(dir.resolve("head"), "b".repeat(40) + "\n");
-        Files.writeString(dir.resolve("from"), "input\n");
-        Files.writeString(dir.resolve("since"), "v1.0\n");
-        Files.writeString(dir.resolve("previous-head"), "\n");
-        Files.writeString(dir.resolve("dirty"), "true\n");
-        Files.writeString(dir.resolve("base-date"), "2026-11-10T09:00:00+01:00\n");
-        Files.writeString(dir.resolve("skipped"), "3\n");
-        Files.writeString(dir.resolve("manifest"), manifest);
-        return dir;
+    private Path workFile(String path, String content) throws IOException {
+        Path file = root.resolve("work").resolve(path);
+        Files.createDirectories(file.getParent());
+        return Files.write(file, content.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
     }
 
     @Test
-    void theFolderOfTheStepBefore_givesTheBaseAndEveryFileThatDiffers_withTheLinesOfAChangedJavaFile()
+    void theBlobId_isGits_inBothItsLengths() {
+        assertThat(Changes.blobId(new byte[0], 40)).isEqualTo("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
+        assertThat(Changes.blobId("hello\n".getBytes(), 40)).isEqualTo("ce013625030ba8dba906f756967f9e9ca394464a");
+        assertThat(Changes.blobId(new byte[0], 64))
+                .isEqualTo("473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813");
+    }
+
+    @Test
+    void whatDiffersIsDecidedFromContent_forEveryFileOfTheTrees_andEveryJavaFileOfTheWorkspace() throws IOException {
+        Path work = Files.createDirectories(root.resolve("work"));
+        Map<String, String> before = new java.util.TreeMap<>(Map.of("src/Same.java", "same\n",
+                "src/Changed.java", "one\n", "src/Gone.java", "gone\n", "run.sh", "echo 1\n", "docs/a.md", "a\n",
+                "src/Odd.java", "odd\n", "\"quoted\".java", "old\n", "../outside.java", "x\n",
+                "src/Um\u00e4 laut.java", "one\n"));
+        Map<String, String> head = new java.util.TreeMap<>(before);
+        head.put("Dockerfile", "FROM x\n");
+        head.put("src/Changed.java", "two\n");
+        head.remove("src/Gone.java");
+        workFile("src/Same.java", "same\n");
+        workFile("src/Changed.java", "two\n");
+        workFile("run.sh", "echo 2\n");
+        Files.writeString(Files.createDirectories(work.resolve("src")).resolve("Um\u00e4 laut.java"), "two\n");
+        workFile("docs/a.md", "a\n");
+        workFile("Dockerfile", "FROM x\n");
+        workFile("\"quoted\".java", "new\n");
+        workFile("quoted.java", "old\n");
+        Files.createDirectories(work.resolve("src/Odd.java"));
+        // In no commit: Java files wherever they lie, also where a build or a hidden directory would be
+        workFile("src/main/java/p/build/New.java", "n\n");
+        workFile("src/main/java/p/.hidden/target/node_modules/Deep.java", "d\n");
+        workFile(".git/hooks/NotThis.java", "x\n");
+        workFile("notes.txt", "in no commit, and no Java file\n");
+        Path dir = Handover.write(root.resolve("changes"), before, head);
+
+        Changes.Compared compared = Changes.compare(Changes.read(dir), work);
+
+        assertThat(compared.status()).containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
+                Map.entry("src/Changed.java", "M"), Map.entry("src/Gone.java", "D"), Map.entry("run.sh", "M"),
+                Map.entry("Dockerfile", "A"), Map.entry("src/Odd.java", "U"), Map.entry("\"quoted\".java", "M"),
+                Map.entry("../outside.java", "U"), Map.entry("quoted.java", "A"),
+                Map.entry("src/Um\u00e4 laut.java", "M"),
+                Map.entry("src/main/java/p/build/New.java", "A"),
+                Map.entry("src/main/java/p/.hidden/target/node_modules/Deep.java", "A")));
+        assertThat(compared.dirty()).isTrue();
+        assertThat(Changes.wanted(compared)).as("the base blobs of the changed Java files, by id")
+                .containsExactlyInAnyOrder(Changes.blobId("one\n".getBytes(), 40), Changes.blobId("old\n".getBytes(), 40));
+    }
+
+    @Test
+    void aWorkspaceThatIsItsCommit_isNotDirty_andACommittedChangeAloneLeavesItClean() throws IOException {
+        workFile("A.java", "two\n");
+        workFile("run.sh", "x\n");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", "one\n"),
+                Map.of("A.java", "two\n", "run.sh", "x\n"));
+
+        Changes.Compared compared = Changes.compare(Changes.read(dir), root.resolve("work"));
+
+        assertThat(compared.dirty()).isFalse();
+        assertThat(compared.status()).containsOnly(Map.entry("A.java", "M"), Map.entry("run.sh", "A"));
+    }
+
+    @Test
+    void aLineNumberMeansWhatItMeansToTheCompiler_whateverEndsTheLines() throws IOException {
+        // Three lone carriage returns, a form feed and a line separator in the comment; then CRLF lines
+        String top = "// a\r// b\r// c\r// d\f e  f\r\n";
+        String now = top + "class A {\r\n    void m() {\r\n        changed();\r\n    }\r\n}\r\n";
+        workFile("A.java", new String(now.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.ISO_8859_1));
+        String before = new String(now.replace("changed();", "old();").getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.nio.charset.StandardCharsets.ISO_8859_1);
+        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", before), Map.of("A.java", before));
+        Path work = root.resolve("work");
+        Result result = Handover.read(work, "A.java");
+        int line = result.files().getFirst().lines().indexOf("        changed();") + 1;
+
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Base base = Changes.of(handed, Changes.compare(handed, work), result);
+
+        assertThat(line).as("a lone carriage return ends a line for the finder and for javac; a form feed and a"
+                + " line separator do not").isEqualTo(7);
+        assertThat(base.lines()).containsOnly(Map.entry("A.java", List.of(new Range(line, line))));
+        assertThat(base.unmappable()).isEmpty();
+    }
+
+    @Test
+    void theLinesAreThoseOfTheFilesTheFinderRead_alsoBelowADirectoryCalledBuild_andNoFileItReadIsLeftOut()
             throws IOException {
-        Path work = Files.createDirectories(root.resolve("work/src"));
-        Files.writeString(work.resolve("A.java"), "one\r\nTWO\r\nthree\r\n");
-        Files.write(work.resolve("Latin.java"), new byte[] {'a', '\n', (byte) 0xE4, '\n'});
-        Path dir = folder("M\0src/A.java\0" + "1\0" + "M\0src/Latin.java\0" + "2\0" + "M\0pom.xml\0\0"
-                + "A\0src/New.java\0\0" + "D\0src/Gone.java\0\0" + "U\0src/Odd.java\0\0" + "M\0src/Lost.java\0" + "3\0");
-        Files.writeString(dir.resolve("base/1"), "one\ntwo\nthree\n");
-        Files.write(dir.resolve("base/2"), new byte[] {'a', '\n', (byte) 0xF6, '\n'});
-        Files.writeString(dir.resolve("base/3"), "x\n");
+        Path work = Files.createDirectories(root.resolve("work"));
+        String code = "package p;\nclass %s {\n    void m() {\n        int x = %s;\n    }\n}\n";
+        Map<String, String> before = new java.util.TreeMap<>();
+        for (String dir : List.of("p", "p/build", "p/target", "p/node_modules", "p/.hidden")) {
+            String name = "C" + Math.abs(dir.hashCode() % 1000);
+            before.put("mod/src/main/java/" + dir + "/" + name + ".java", code.formatted(name, "1"));
+            workFile("mod/src/main/java/" + dir + "/" + name + ".java", code.formatted(name, "2"));
+        }
+        workFile("mod/src/main/java/p/build/Fresh.java", code.formatted("Fresh", "3"));
+        Path dir = Handover.write(root.resolve("changes"), before, before);
+        Result result = Finder.find(work, List.of(work.resolve("mod/src/main/java")), RuleFile.parse(RULES));
 
-        Changes.Base base = Changes.read(dir, root.resolve("work"));
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Base base = Changes.of(handed, Changes.compare(handed, work), result);
 
-        assertThat(base.base()).isEqualTo("a".repeat(40));
-        assertThat(base.head()).isEqualTo("b".repeat(40));
-        assertThat(base.from()).isEqualTo("input");
-        assertThat(base.since()).isEqualTo("v1.0");
-        assertThat(base.previousHead()).isEmpty();
-        assertThat(base.dirty()).isTrue();
-        assertThat(base.baseDate()).isEqualTo("2026-11-10T09:00:00+01:00");
-        assertThat(base.skipped()).isEqualTo("3");
-        assertThat(base.lines()).as("line ends alone are no change; bytes that are no UTF-8 are compared all the same")
-                .containsOnly(Map.entry("src/A.java", List.of(new Range(2, 2))),
-                        Map.entry("src/Latin.java", List.of(new Range(2, 2))), Map.entry("pom.xml", List.of()),
-                        Map.entry("src/New.java", List.of(new Range(1, Integer.MAX_VALUE))),
-                        Map.entry("src/Lost.java", List.of(new Range(1, Integer.MAX_VALUE))));
-        assertThat(base.removed()).containsExactly("src/Gone.java");
-        assertThat(base.unmappable()).as("a changed file is never dropped: what could not be compared is named")
-                .containsExactly("src/Odd.java (not a readable regular file)",
-                        "src/Lost.java (it differs from the base, and its lines could not be compared)");
-        assertThat(base.files()).isEqualTo(7);
+        assertThat(result.files()).hasSize(6);
+        assertThat(base.lines().keySet()).as("every file the finder read differs here, and each has its lines")
+                .containsExactlyInAnyOrderElementsOf(result.files().stream().map(f -> f.path()).toList());
+        assertThat(base.lines().get("mod/src/main/java/p/build/Fresh.java"))
+                .containsExactly(new Range(1, Integer.MAX_VALUE));
+        assertThat(base.lines().values().stream().filter(r -> r.equals(List.of(new Range(4, 4))))).hasSize(5);
+        assertThat(Changes.kinds(base, result).uncompiled()).isEmpty();
+    }
+
+    @Test
+    void aChangedFileWhoseBaseBytesAreNotThere_orAreNoText_countsAsAWhole_andIsNamed() throws IOException {
+        workFile("A.java", "now\n");
+        workFile("B.java", "now\n");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", "one\n", "B.java", "ä\n"), Map.of());
+        Files.write(dir.resolve("blobs"), Handover.batch(List.of("ä\n")));
+        Path work = root.resolve("work");
+
+        Changes.Handed handed = Changes.read(dir);
+        Changes.Base base = Changes.of(handed, Changes.compare(handed, work), Handover.read(work, "A.java", "B.java"));
+
+        assertThat(base.lines()).containsOnly(Map.entry("A.java", List.of(new Range(1, Integer.MAX_VALUE))),
+                Map.entry("B.java", List.of(new Range(1, Integer.MAX_VALUE))));
+        assertThat(base.unmappable()).containsExactly(
+                "A.java (it differs from the base, and its lines could not be compared)",
+                "B.java (it differs from the base, and its lines could not be compared)");
+    }
+
+    @Test
+    void theFilesNoAreaComesFrom_areSortedByKind() throws IOException {
+        Path work = Files.createDirectories(root.resolve("work"));
+        for (String path : List.of("mod/src/main/java/p/A.java", "mod/src/test/java/p/ATest.java",
+                "other/src/p/Moved.java", "README.md", "docs/plan.txt", "run.sh", "mod/pom.xml")) {
+            workFile(path, "new\n");
+        }
+        Path dir = Handover.write(root.resolve("changes"), Map.of("Gone.java", "x\n", "gone.sh", "x\n"), Map.of(
+                "README.md", "new\n", "docs/plan.txt", "new\n", "run.sh", "new\n", "mod/pom.xml", "new\n"));
+
+        Changes.Handed handed = Changes.read(dir);
+        Result result = Handover.read(work, "mod/src/main/java/p/A.java");
+        Changes.Base base = Changes.of(handed, Changes.compare(handed, work), result);
+        Changes.Kinds kinds = Changes.kinds(base, result);
+
+        assertThat(kinds.tests()).containsExactly("mod/src/test/java/p/ATest.java");
+        assertThat(kinds.uncompiled()).containsExactly("other/src/p/Moved.java");
+        assertThat(kinds.docs()).containsExactly("README.md", "docs/plan.txt");
+        assertThat(kinds.cannotJudge()).as("a removed script counts too").containsExactly("gone.sh", "mod/pom.xml", "run.sh");
+        assertThat(base.removed()).containsExactly("Gone.java", "gone.sh");
+        assertThat(base.files()).isEqualTo(9);
     }
 
     @Test
     void aFolderThatDoesNotHold_isRefused() throws IOException {
-        Path work = Files.createDirectories(root.resolve("work"));
-        Path dir = folder("M\0pom.xml\0");
-        assertThatThrownBy(() -> Changes.read(dir, work)).hasMessageContaining("the manifest").hasMessageContaining("is cut");
-        Files.writeString(dir.resolve("manifest"), "X\0pom.xml\0\0");
-        assertThatThrownBy(() -> Changes.read(dir, work)).hasMessageContaining("an unknown status");
-        Files.writeString(dir.resolve("manifest"), "");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", "one\n"), Map.of());
+        assertThat(Changes.read(dir).blobs()).containsOnlyKeys(Changes.blobId("one\n".getBytes(), 40));
+
+        byte[] tree = Handover.tree(Map.of("A.java", "one\n"));
+        Files.write(dir.resolve("base-tree"), java.util.Arrays.copyOf(tree, tree.length - 1));
+        assertThatThrownBy(() -> Changes.read(dir)).hasMessageContaining("is cut");
+        Files.write(dir.resolve("base-tree"), ("160000 commit " + "c".repeat(40) + "\tsub\0").getBytes());
+        assertThatThrownBy(() -> Changes.read(dir)).hasMessageContaining("the workspace has a submodule (sub)");
+        Files.write(dir.resolve("base-tree"), "not a tree\0".getBytes());
+        assertThatThrownBy(() -> Changes.read(dir)).hasMessageContaining("holds a line that is none");
+        Files.write(dir.resolve("base-tree"), tree);
+
+        Files.write(dir.resolve("blobs"), (Changes.blobId("one\n".getBytes(), 40) + " blob 4\nother\n").getBytes());
+        assertThatThrownBy(() -> Changes.read(dir)).hasMessageContaining("the blobs of the base");
+        Files.write(dir.resolve("blobs"), (Changes.blobId("one\n".getBytes(), 40) + " blob 4\ntwo\n\n"
+                + "c".repeat(40) + " missing\n").getBytes());
+        assertThat(Changes.read(dir).blobs()).as("bytes that do not give their id are no blob of the base").isEmpty();
+
         Files.writeString(dir.resolve("base-commit"), "main\n");
-        assertThatThrownBy(() -> Changes.read(dir, work)).isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> Changes.read(dir)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("is no commit id");
     }
 

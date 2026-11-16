@@ -130,10 +130,12 @@ class ChangesRoundTripTest {
                         + asked + "'; if [ -f {{ package_dir }}/answer-\"$AREA_ID\".json ]; then cat"
                         + " {{ package_dir }}/answer-\"$AREA_ID\".json; else"
                         + " printf '{\"area\":\"%s\",\"findings\":[]}' \"$AREA_ID\"; fi");
-            } else if (!original.get("name").equals("changes")) {
+            } else if (!command.contains("scripts/changes.sh")) {
                 assertThat(command).satisfiesAnyOf(c -> assertThat(c).containsOnlyOnce("; areas find "),
+                        c -> assertThat(c).containsOnlyOnce("; areas changed "),
                         c -> assertThat(c).containsOnlyOnce("| areas report "));
                 config.put("command", command.replace("; areas find ", "; " + tool + " find ")
+                        .replace("; areas changed ", "; " + tool + " changed ")
                         .replace("| areas report ", "| " + tool + " report "));
             }
             block.put("config", config);
@@ -285,5 +287,53 @@ class ChangesRoundTripTest {
         assertThat(two).as(one).contains("register security-changes:");
         assertThat(askedAndForgotten()).containsExactly(CALLER + ": neighbour of Runner.run(String)");
         assertThat(items()).matches("clean       [0-9a-f]{16}  " + Pattern.quote(CALLER) + "\n");
+    }
+
+    /**
+     * A class with an open finding moves to a directory the finder does not read. Its area is gone, and that must
+     * not read as fixed: the finding stays open in the register, the report names the file, and the gate is not GREEN.
+     */
+    @Test
+    void aClassWithAnOpenFinding_movedWhereTheFinderDoesNotRead_keepsItsFindingOpen_andTheGateIsNotGreen()
+            throws IOException {
+        String first = git("rev-parse", "HEAD");
+        commit("Runner.java", runner("c, c"));
+        Files.writeString(pkg.resolve("answer-A004.json"), "{\"area\":\"A004\",\"findings\":[{\"rule\":"
+                + "\"process_start\",\"severity\":\"high\",\"line\":4,\"quote\":\"new ProcessBuilder(c, c).start();\","
+                + "\"issue\":\"i\",\"fix\":\"f\"}]}");
+        String one = run("--input", "since=" + first);
+        assertThat(one).contains("register security-changes: 1 new, 0 resolved, 0 reopened, 1 open now");
+        askedAndForgotten();
+        Files.delete(pkg.resolve("answer-A004.json"));
+
+        Files.createDirectories(repo.resolve("extra/src/p"));
+        git("mv", SRC + "Runner.java", "extra/src/p/Runner.java");
+        git("commit", "--quiet", "-m", "move");
+        String two = run();
+
+        assertThat(two).as(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 1 open now");
+        String report = newest("security-changes-report.md");
+        assertThat(report).startsWith("# Security check of the changes\n\n**Gate:** RED: of the changes since ")
+                .contains("1 changed Java file that no compiled source root holds",
+                        "`extra/src/p/Runner.java`", "## Open findings that no item carries",
+                        "- HIGH process_start `" + RUNNER + "`");
+        assertThat(cli("findings", "security-changes", "list", "--home", home.toString())).contains("OPEN");
+    }
+
+    /** A committed change of a script is no code this check can judge: the run says so, and is not GREEN over it. */
+    @Test
+    void aChangedScript_keepsTheGateFromGreen_andIsNamed() throws IOException {
+        String first = git("rev-parse", "HEAD");
+        Files.writeString(repo.resolve("run.sh"), "echo 1\n");
+        git("add", "-A");
+        git("commit", "--quiet", "-m", "a script");
+
+        String one = run("--input", "since=" + first);
+
+        assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(newest("security-changes-report.md")).startsWith("# Security check of the changes\n\n**Gate:**"
+                + " YELLOW: of the changes since " + first.substring(0, 12) + ": 1 changed file this check cannot"
+                + " judge; ").contains("so the gate is not GREEN: `run.sh`");
+        assertThat(askedAndForgotten()).isEmpty();
     }
 }

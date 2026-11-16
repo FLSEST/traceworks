@@ -18,7 +18,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The script of the short security check ({@code examples/self-audit/security-changes/scripts/changes.sh}) as it
  * ships, in the built-in shell image: git reads the history of the workspace through the read-only mount, without
  * network, as the person who runs Traceworks, with plumbing commands only; and the checkout of a run started with {@code --source} carries the
- * history the script needs. The package here is the script's step alone: the area finder and the verdicts are
+ * history the script needs. The package here is the script's two modes in one step, with the id of the blob it
+ * shall hand over as an input: the area tool, which decides what changed and asks for blobs, and the verdicts are
  * tested without a container (examples/self-audit/tests). The workspace is made a git repository with the git of
  * the machine that runs the suite.
  */
@@ -30,14 +31,14 @@ class SecurityChangesScriptIT extends IntegrationTest {
               "format_version": 1,
               "id": "0b6f4f0a-5f0e-4b43-8a55-7d0f6c1e2a90",
               "name": "IT security changes script",
-              "default_context": {"since": "", "previous": ""},
+              "default_context": {"since": "", "previous": "", "blob": ""},
               "blocks": [
                 {
                   "type": "shell",
                   "name": "changes",
                   "config": {
-                    "values": {"SINCE": "{{ since }}", "PREVIOUS_REPORT": "{{ previous }}"},
-                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \\"$SINCE\\" \\"$PREVIOUS_REPORT\\"; tr '\\\\0' ' ' < {{ scratch_dir }}/changes/manifest; cat {{ scratch_dir }}/changes/base/1",
+                    "values": {"SINCE": "{{ since }}", "PREVIOUS_REPORT": "{{ previous }}", "BLOB": "{{ blob }}"},
+                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh base {{ scratch_dir }}/changes \\"$SINCE\\" \\"$PREVIOUS_REPORT\\"; tr '\\\\0' '\\\\n' < {{ scratch_dir }}/changes/base-tree; printf '%s\\\\n' \\"$BLOB\\" > {{ scratch_dir }}/changes/wanted; bash {{ package_dir }}/scripts/changes.sh blobs {{ scratch_dir }}/changes; cat {{ scratch_dir }}/changes/blobs",
                     "shell_escape_variables": true
                   }
                 }
@@ -48,6 +49,7 @@ class SecurityChangesScriptIT extends IntegrationTest {
     private Path pkg;
     private String first;
     private String second;
+    private String blob;
 
     private String git(String... args) throws IOException {
         List<String> command = new ArrayList<>(List.of("git"));
@@ -81,6 +83,7 @@ class SecurityChangesScriptIT extends IntegrationTest {
     void repositoryAndPackage() throws IOException {
         git("init", "--quiet", "--initial-branch=main");
         first = commit("one\ntwo\n");
+        blob = git("rev-parse", first + ":A.java");
         second = commit("one\nTWO\n");
         pkg = Files.createDirectories(sandbox.resolve("changes-script"));
         Files.createDirectories(pkg.resolve("scripts"));
@@ -94,12 +97,11 @@ class SecurityChangesScriptIT extends IntegrationTest {
         Files.writeString(traceworks.workspace().resolve("A.java"), "one\nTWO\nthree\n", StandardCharsets.UTF_8);
 
         Result run = traceworks.exec("run", pkg.toString(), "--workspace", traceworks.workspace().toString(),
-                "--no-input", "--input", "since=" + first);
+                "--no-input", "--input", "since=" + first, "--input", "blob=" + blob);
 
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
-                "FACT changes_head: " + second + "\n", "FACT changes_uncommitted: true\n", "M A.java 1 ",
-                "one\ntwo\n");
+                "FACT changes_head: " + second + "\n", "\tA.java\n", blob + " blob 8\none\ntwo\n");
         assertThat(traceworks.workspace().resolve(".git/index.lock")).doesNotExist();
     }
 
@@ -116,11 +118,11 @@ class SecurityChangesScriptIT extends IntegrationTest {
     @Test
     void theCheckoutOfSource_carriesTheHistory_soTheBaseOfAnEarlierRunIsThere() {
         Result run = traceworks.exec("run", pkg.toString(), "--source", traceworks.workspace().toString(),
-                "--no-input", "--input", "previous=FACT changes_head: " + first);
+                "--no-input", "--input", "previous=FACT changes_head: " + first, "--input", "blob=" + blob);
 
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
                 "FACT changes_head: " + second + "\n", "FACT changes_base_from: register\n",
-                "FACT changes_uncommitted: false\n", "M A.java 1 ", "one\ntwo\n");
+                "\tA.java\n", blob + " blob 8\none\ntwo\n");
     }
 }

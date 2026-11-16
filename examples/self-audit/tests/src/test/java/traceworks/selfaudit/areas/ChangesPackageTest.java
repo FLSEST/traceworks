@@ -82,13 +82,22 @@ class ChangesPackageTest {
         assertThat(String.valueOf(verdicts.get("command"))).contains("{{ area.reason }}", "{{ area.connected }}",
                 "{{ area.code }}", "{{ area.known_text }}");
         // The input and what the register hands the run reach a command by name, never as shell text
-        Map<String, Object> changes = config(own, "changes");
+        Map<String, Object> changes = config(own, "base");
         assertThat(changes.get("values")).isEqualTo(Map.of("SINCE", "{{ since }}",
                 "PREVIOUS_REPORT", "{{ previous_report }}", "SKIP_COMMITS", "{{ skip }}"));
         assertThat(String.valueOf(changes.get("command"))).doesNotContain("{{ since }}", "{{ previous_report }}")
                 .contains("\"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"").doesNotContain("{{ skip }}");
         assertThat(changes).as("git is in the shell image: the step needs no image of the package, no network and"
                 + " no writable workspace").doesNotContainKeys("container_image", "network", "workspace_writable");
+        assertThat(String.valueOf(changes.get("command"))).contains("scripts/changes.sh base {{ scratch_dir }}/changes ");
+        // The tool decides what changed and asks for base blobs by id; the script hands them over
+        assertThat(config(own, "changed")).containsEntry("container_image", "./images/areas")
+                .containsEntry("command", "set -euo pipefail; areas changed --changes {{ scratch_dir }}/changes --root .")
+                .doesNotContainKeys("network", "workspace_writable", "values");
+        assertThat(config(own, "blobs")).containsEntry("command", "set -euo pipefail; bash {{ package_dir }}/scripts/"
+                + "changes.sh blobs {{ scratch_dir }}/changes").doesNotContainKeys("container_image", "network",
+                "workspace_writable", "values");
+        assertThat(String.valueOf(own.get("description"))).doesNotContain("git's diff");
         Map<String, Object> areas = config(own, "areas");
         assertThat(String.valueOf(areas.get("command"))).contains(" --changes {{ scratch_dir }}/changes ",
                 " --register security-changes ", " --items-file {{ register_dir }}/items.jsonl ",
@@ -97,12 +106,12 @@ class ChangesPackageTest {
     }
 
     @Test
-    void thePackage_passesCheck_andIsDescribedWithItsInputAndItsFourSteps() {
+    void thePackage_passesCheck_andIsDescribedWithItsInputAndItsSteps() {
         String check = cli("check", PACKAGE.toString(), "--home", temp.resolve("home").toString());
         assertThat(check).doesNotContain("ERROR").doesNotContain("WARN");
 
         String described = cli("describe", PACKAGE.toString(), "--home", temp.resolve("none").toString());
-        assertThat(described).contains("since", "changes", "areas", "verdicts", "report", "security-changes",
+        assertThat(described).contains("since", "base", "changed", "blobs", "areas", "verdicts", "report", "security-changes",
                 "  judge  pick with --input judge=<option>; without it: fable");
     }
 

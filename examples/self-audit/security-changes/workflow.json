@@ -3,7 +3,7 @@
   "format_version": 1,
   "id": "8d0c6a57-3b1f-4f0e-9a64-2c7e51b9d3a8",
   "name": "Security check of the changes",
-  "description": "The short check beside the security self-audit: it judges only the areas of the Traceworks sources whose lines changed since a base commit, and the areas one call away from a changed member. The base is the input since (a commit, a tag or a date), or the workspace commit of the last run of this audit. A deterministic tool picks the areas from git's diff and the compiler's resolved calls, an AI judges each with its code and the changed code it is connected with in the prompt, and a finding counts only when it quotes a line of its area.",
+  "description": "The short check beside the security self-audit: it judges only the areas of the Traceworks sources whose lines changed since a base commit, and the areas one call away from a changed member. The base is the input since (a commit, a tag or a date), or the workspace commit of the last run of this audit. A deterministic tool compares the files with the base by content, picks the areas from the changed lines and the compiler's resolved calls, an AI judges each with its code and the changed code it is connected with in the prompt, and a finding counts only when it quotes a line of its area.",
   "requires": [
     "ai.tools",
     "ai.model_choice",
@@ -47,14 +47,33 @@
   "blocks": [
     {
       "type": "shell",
-      "name": "changes",
+      "name": "base",
       "config": {
         "values": {
           "SINCE": "{{ since }}",
           "PREVIOUS_REPORT": "{{ previous_report }}",
           "SKIP_COMMITS": "{{ skip }}"
         },
-        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"",
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh base {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"",
+        "timeout_seconds": 300,
+        "shell_escape_variables": true
+      }
+    },
+    {
+      "type": "shell",
+      "name": "changed",
+      "config": {
+        "container_image": "./images/areas",
+        "command": "set -euo pipefail; areas changed --changes {{ scratch_dir }}/changes --root .",
+        "timeout_seconds": 300,
+        "shell_escape_variables": true
+      }
+    },
+    {
+      "type": "shell",
+      "name": "blobs",
+      "config": {
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh blobs {{ scratch_dir }}/changes",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

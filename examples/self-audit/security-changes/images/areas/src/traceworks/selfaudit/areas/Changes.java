@@ -25,14 +25,17 @@ import java.util.regex.Pattern;
  * Which areas a check of the changes looks at: the ones whose lines changed since a base commit, and the ones one
  * call away from a member that changed, in either direction ({@link Finder.Result#calls}).
  *
- * <p>Which files differ from the base is the word of a step before, read from the folder it wrote ({@link #read}):
- * the base and the head commit, and a manifest of the files whose content differs, with the bytes the base has of
- * each changed Java file. That step compares content; no diff of git, no index and no ignore rule had a say, so the
- * workspace cannot hide a file from it. Which <em>lines</em> changed is decided here, by comparing the two versions
- * line by line ({@link #changedLines}). The tool starts no git. A line counts as changed when the workspace has it
- * and the base does not have it there; where lines were only removed, the two lines around the gap count. A file
- * the base does not have is changed as a whole. A file that could not be compared is named
- * ({@link Base#unmappable}), and the report does not go GREEN over it.
+ * <p>What changed is decided here, by the tool that also compiles the files, so that no second program has another
+ * idea of which files there are or where a line is. A step before hands over what only git has: the base and the
+ * head commit, the tree of each ({@code git ls-tree -r -z}: every path with its mode and blob id), and the bytes of
+ * the blobs this tool asked for by their ids ({@code git cat-file --batch}). The tool computes the blob id of every
+ * file itself ({@link #blobId}), so no path ever reaches git, and no diff, index, ignore rule, attribute or filter
+ * of the workspace has a say ({@link #compare}). The files whose lines are compared are the files the finder read,
+ * with the lines the finder and the compiler count ({@link String#lines()}): a line counts as changed when the
+ * workspace has it and the base does not have it there; where lines were only removed, the two lines around the
+ * gap count. A file the base does not have is changed as a whole, and so is one whose base bytes are not there.
+ * Every other file that differs is named by its kind ({@link #kinds}), and the report does not go GREEN over a
+ * changed file that this check cannot judge.
  *
  * <p>An area is <em>changed</em> when a changed line lies in it, or when a member it shows a part of changed outside
  * that part. It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
@@ -62,8 +65,12 @@ final class Changes {
         }
     }
 
+    /** A file of a tree: its mode ({@code 100644}, {@code 100755}, {@code 120000} for a link) and its blob id. */
+    record Entry(String mode, String id) {
+    }
+
     /**
-     * What the step before found out about the base, and what differs from it.
+     * What the step before handed over.
      *
      * @param base         the commit the changes are measured from
      * @param head         the commit the workspace is at
@@ -71,25 +78,59 @@ final class Changes {
      *                     workspace commit of the last run of this audit)
      * @param since        the input as it was given; empty without one
      * @param previousHead the workspace commit of the last run of this audit; empty when no report names one
-     * @param dirty        whether the workspace differs from its own commit
-     * @param lines        the changed lines of each file that differs and is still there, by its path below the
-     *                     root; no range for a file whose lines were not compared (no Java file)
      * @param baseDate     when the base was committed, as git writes it; empty when the step did not say
      * @param skipped      how many commits lie after the last run's commit and before the base, which this run
      *                     leaves unjudged: a number, {@code unknown} when the last run's commit is not in the
      *                     checkout, or empty when no earlier run is known
-     * @param removed      the files the base has and the workspace does not
-     * @param unmappable   the files that differ or may differ and could not be compared, each with the reason
+     * @param baseTree     the files of the base, by their path below the root
+     * @param headTree     the files of the workspace commit
+     * @param blobs        the bytes of the blobs that were asked for, by their id
+     */
+    record Handed(String base, String head, String from, String since, String previousHead, String baseDate,
+                  String skipped, Map<String, Entry> baseTree, Map<String, Entry> headTree,
+                  Map<String, byte[]> blobs) {
+    }
+
+    /**
+     * What differs from the base.
+     *
+     * @param dirty      whether the workspace differs from its own commit
+     * @param status     every file that differs, by its path: {@code M} changed, {@code A} new, {@code D} removed,
+     *                   {@code U} not compared (no readable regular file any more, or a path outside the root)
+     * @param baseIds    the blob id the base has of each changed file
+     */
+    record Compared(boolean dirty, Map<String, String> status, Map<String, String> baseIds) {
+    }
+
+    /**
+     * What a check of the changes works with: the base, and what differs from it.
+     *
+     * @param dirty      whether the workspace differs from its own commit
+     * @param lines      the changed lines of each changed or new file the finder read
+     * @param status     every file that differs, by its path ({@link Compared#status})
+     * @param removed    the files the base has and the workspace does not
+     * @param unmappable the files that differ and could not be compared or mapped, each with the reason
      */
     record Base(String base, String head, String from, String since, String previousHead, boolean dirty,
                 Map<String, List<Range>> lines, String baseDate, String skipped, List<String> removed,
-                List<String> unmappable) {
+                List<String> unmappable, Map<String, String> status) {
 
-        /** Every file the step named: changed, new, removed or not compared. */
+        /** Every file that differs: changed, new, removed or not compared. */
         int files() {
-            return lines.size() + removed.size()
-                    + (int) unmappable.stream().filter(u -> u.endsWith(NOT_REGULAR)).count();
+            return status.size();
         }
+    }
+
+    /**
+     * The files that differ and that no area comes from, by their kind, each list sorted.
+     *
+     * @param tests       Java files of a test source root ({@code src/test/java}): not what this audit judges
+     * @param uncompiled  other Java files that the finder did not read: code that nothing looked at
+     * @param docs        documentation: {@code *.md}, and everything below a directory {@code docs}
+     * @param cannotJudge every other file: a script, a workflow, a build file, a resource. It can change what the
+     *                    project does, and this check has no word on it
+     */
+    record Kinds(List<String> tests, List<String> uncompiled, List<String> docs, List<String> cannotJudge) {
     }
 
     /** Why an area is looked at, and the changed members it is connected with outside its own lines. */
@@ -103,15 +144,11 @@ final class Changes {
 
     /**
      * Reads the folder the step before wrote: {@code base-commit}, {@code head}, {@code from}, {@code since},
-     * {@code previous-head}, {@code dirty}, {@code base-date}, {@code skipped}, {@code manifest} and {@code base/}.
-     * The manifest holds three fields per file, each ended by a NUL: the status ({@code M} differs, {@code A} new,
-     * {@code D} removed, {@code U} not compared), the path below the root, and the name of the file under
-     * {@code base/} with the bytes the base has, or nothing. Anything else in the manifest is refused: half a list
-     * must not pass for a whole one.
-     *
-     * @param root the workspace, where the files are as they are now
+     * {@code previous-head}, {@code base-date}, {@code skipped}, {@code base-tree} and {@code head-tree} (the output
+     * of {@code git ls-tree -r -z}), and, once they were asked for, {@code blobs} (the output of
+     * {@code git cat-file --batch}).
      */
-    static Base read(Path dir, Path root) throws IOException {
+    static Handed read(Path dir) throws IOException {
         String base = file(dir, "base-commit").strip();
         String head = file(dir, "head").strip();
         String from = file(dir, "from").strip();
@@ -122,47 +159,16 @@ final class Changes {
         }
         String previous = optional(dir, "previous-head");
         String skipped = optional(dir, "skipped");
-        if (!skipped.matches("\\d{0,9}|unknown")) throw new IllegalArgumentException("the skipped commits in " + dir + " are no number");
+        if (!skipped.matches("\\d{0,9}|unknown")) {
+            throw new IllegalArgumentException("the skipped commits in " + dir + " are no number");
+        }
         String date = optional(dir, "base-date");
-        Map<String, List<Range>> lines = new TreeMap<>();
-        List<String> removed = new ArrayList<>();
-        List<String> unmappable = new ArrayList<>();
-        String[] fields = file(dir, "manifest").split("\0", -1);
-        if (fields.length % 3 != 1 || !fields[fields.length - 1].isEmpty()) {
-            throw new IllegalArgumentException("the manifest in " + dir + " is cut");
-        }
-        for (int i = 0; i + 2 < fields.length; i += 3) {
-            String status = fields[i];
-            String path = fields[i + 1];
-            String kept = fields[i + 2];
-            if (path.isEmpty() || !kept.matches("\\d{0,9}")) {
-                throw new IllegalArgumentException("the manifest in " + dir + " holds a record that is none");
-            }
-            switch (status) {
-                case "A" -> lines.put(path, List.of(new Range(1, Integer.MAX_VALUE)));
-                case "D" -> removed.add(path);
-                case "U" -> unmappable.add(path + NOT_REGULAR);
-                case "M" -> {
-                    if (kept.isEmpty()) {
-                        lines.put(path, List.of());
-                        break;
-                    }
-                    Path now = root.resolve(path);
-                    try {
-                        lines.put(path, changedLines(textLines(Files.readAllBytes(dir.resolve("base").resolve(kept))),
-                                textLines(Files.readAllBytes(now))));
-                    } catch (IOException e) {
-                        // It differs, and nothing can say where: the whole file counts, and the report names it
-                        lines.put(path, List.of(new Range(1, Integer.MAX_VALUE)));
-                        unmappable.add(path + " (it differs from the base, and its lines could not be compared)");
-                    }
-                }
-                default -> throw new IllegalArgumentException("the manifest in " + dir + " holds an unknown status");
-            }
-        }
-        return new Base(base, head, from, optional(dir, "since"), COMMIT.matcher(previous).matches() ? previous : "",
-                file(dir, "dirty").strip().equals("true"), lines, date.matches("[0-9T:+Z-]{1,40}") ? date : "",
-                skipped, List.copyOf(removed), List.copyOf(unmappable));
+        Map<String, byte[]> blobs = Files.exists(dir.resolve("blobs"))
+                ? blobs(Files.readAllBytes(dir.resolve("blobs"))) : Map.of();
+        return new Handed(base, head, from, optional(dir, "since"), COMMIT.matcher(previous).matches() ? previous : "",
+                date.matches("[0-9T:+Z-]{1,40}") ? date : "", skipped,
+                tree(Files.readAllBytes(dir.resolve("base-tree"))), tree(Files.readAllBytes(dir.resolve("head-tree"))),
+                blobs);
     }
 
     private static String file(Path dir, String name) throws IOException {
@@ -173,13 +179,235 @@ final class Changes {
         return Files.exists(dir.resolve(name)) ? file(dir, name).strip() : "";
     }
 
-    /** The lines of a file, whatever its encoding: each byte a character, a carriage return before a line end dropped. */
-    private static List<String> textLines(byte[] bytes) {
-        String text = new String(bytes, StandardCharsets.ISO_8859_1);
-        List<String> lines = new ArrayList<>();
-        for (String line : text.split("\n", -1)) lines.add(line.endsWith("\r") ? line.substring(0, line.length() - 1) : line);
-        if (!lines.isEmpty() && lines.getLast().isEmpty()) lines.removeLast();
-        return lines;
+    /**
+     * The files of a tree as {@code git ls-tree -r -z} lists them: {@code <mode> <type> <id>}, a tab, the path, a
+     * NUL. A list that does not read so is refused, and so is a submodule: the check does not look into one.
+     */
+    static Map<String, Entry> tree(byte[] listed) {
+        Map<String, Entry> tree = new TreeMap<>();
+        int start = 0;
+        for (int i = 0; i < listed.length; i++) {
+            if (listed[i] != 0) continue;
+            String record = new String(listed, start, i - start, StandardCharsets.UTF_8);
+            start = i + 1;
+            int tab = record.indexOf('\t');
+            String[] head = tab < 0 ? new String[0] : record.substring(0, tab).split(" ");
+            if (head.length != 3 || !head[0].matches("[0-7]{6}") || !COMMIT.matcher(head[2]).matches()
+                    || tab + 1 >= record.length()) {
+                throw new IllegalArgumentException("the tree of a commit holds a line that is none");
+            }
+            String path = record.substring(tab + 1);
+            if (head[1].equals("commit")) {
+                throw new IllegalArgumentException("the workspace has a submodule (" + Main.safe(path)
+                        + "): this check does not look into one");
+            }
+            if (!head[1].equals("blob")) throw new IllegalArgumentException("the tree of a commit holds no file at " + Main.safe(path));
+            tree.put(path, new Entry(head[0], head[2]));
+        }
+        if (start != listed.length) throw new IllegalArgumentException("the tree of a commit is cut");
+        return tree;
+    }
+
+    /**
+     * The blobs of {@code git cat-file --batch}: per object a line {@code <id> blob <size>}, the bytes and a line
+     * end; {@code <id> missing} for one git does not have. A blob whose bytes do not give its id is left out, like a
+     * missing one: the file it belongs to then counts as changed as a whole.
+     */
+    static Map<String, byte[]> blobs(byte[] batch) {
+        Map<String, byte[]> blobs = new HashMap<>();
+        int at = 0;
+        while (at < batch.length) {
+            int end = at;
+            while (end < batch.length && batch[end] != '\n') end++;
+            if (end >= batch.length) throw new IllegalArgumentException("the blobs of the base are cut");
+            String[] head = new String(batch, at, end - at, StandardCharsets.ISO_8859_1).split(" ");
+            at = end + 1;
+            if (head.length == 2 && head[1].equals("missing")) continue;
+            if (head.length != 3 || !COMMIT.matcher(head[0]).matches() || !head[2].matches("\\d{1,10}")) {
+                throw new IllegalArgumentException("the blobs of the base hold a line that is none");
+            }
+            long size = Long.parseLong(head[2]);
+            if (at + size + 1 > batch.length) throw new IllegalArgumentException("the blobs of the base are cut");
+            byte[] bytes = java.util.Arrays.copyOfRange(batch, at, at + (int) size);
+            at += (int) size + 1;
+            if (head[1].equals("blob") && blobId(bytes, head[0].length()).equals(head[0])) blobs.put(head[0], bytes);
+        }
+        return blobs;
+    }
+
+    /**
+     * The id git gives a file with these bytes: the SHA-1 (40 hex digits) or the SHA-256 (64) of {@code blob}, a
+     * space, the length, a NUL and the bytes. Computed here, so that no file name is ever handed to git.
+     */
+    static String blobId(byte[] bytes, int hexDigits) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance(hexDigits == 64 ? "SHA-256" : "SHA-1");
+            digest.update(("blob " + bytes.length + "\0").getBytes(StandardCharsets.ISO_8859_1));
+            return java.util.HexFormat.of().formatHex(digest.digest(bytes));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** The id of the file at {@code path}; {@code null} when it is not there, empty when it cannot be compared. */
+    private static String idNow(Path root, String path, String mode, int hexDigits) {
+        Path file;
+        try {
+            file = root.resolve(path).normalize();
+        } catch (java.nio.file.InvalidPathException e) {
+            return "";
+        }
+        if (!file.startsWith(root) || file.equals(root)) return "";
+        try {
+            if (!Files.exists(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null;
+            if (mode.equals("120000")) {
+                if (!Files.isSymbolicLink(file)) return "";
+                return blobId(Files.readSymbolicLink(file).toString().getBytes(StandardCharsets.UTF_8), hexDigits);
+            }
+            if (!Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return "";
+            return blobId(Files.readAllBytes(file), hexDigits);
+        } catch (IOException e) {
+            return "";
+        }
+    }
+
+    /**
+     * Compares the workspace with the base, by content. Every file of the base and of the workspace commit is
+     * looked up in the workspace and its blob id computed: another id is a changed file, no file a removed one. A
+     * file the workspace commit has and the base does not is new, whatever its kind. A {@code .java} file that
+     * neither tree has is new too, whether git tracks it, ignores it or neither: the walk takes every regular
+     * {@code .java} file below the root that is not below a {@code .git} directory, so every file the finder can
+     * read is in it. A new file of another kind that is in no commit is not seen: nothing tells it from the output
+     * of a build.
+     */
+    static Compared compare(Handed handed, Path workspace) throws IOException {
+        Path root = workspace.toAbsolutePath().normalize();
+        int hex = handed.base().length();
+        Map<String, String> status = new TreeMap<>();
+        Map<String, String> baseIds = new HashMap<>();
+        boolean dirty = false;
+        java.util.TreeSet<String> paths = new java.util.TreeSet<>(handed.baseTree().keySet());
+        paths.addAll(handed.headTree().keySet());
+        for (String path : paths) {
+            Entry before = handed.baseTree().get(path);
+            Entry committed = handed.headTree().get(path);
+            String now = idNow(root, path, (committed != null ? committed : before).mode(), hex);
+            if (before != null) {
+                if (now == null) status.put(path, "D");
+                else if (now.isEmpty()) status.put(path, "U");
+                else if (!now.equals(before.id())) {
+                    status.put(path, "M");
+                    baseIds.put(path, before.id());
+                }
+            } else if (now != null) {
+                status.put(path, now.isEmpty() ? "U" : "A");
+            }
+            dirty |= committed == null ? now != null && before == null : !committed.id().equals(now);
+        }
+        List<String> walked = new ArrayList<>();
+        Files.walkFileTree(root, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes a) {
+                return dir.getFileName() != null && dir.getFileName().toString().equals(".git") && !dir.equals(root)
+                        ? java.nio.file.FileVisitResult.SKIP_SUBTREE : java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(Path file, java.nio.file.attribute.BasicFileAttributes a) {
+                if (file.getFileName().toString().endsWith(".java") && (a.isRegularFile() || a.isSymbolicLink())) {
+                    walked.add(root.relativize(file).toString().replace('\\', '/'));
+                }
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException e) {
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
+        for (String path : walked) {
+            if (paths.contains(path)) continue;
+            status.put(path, "A");
+            dirty = true;
+        }
+        return new Compared(dirty, status, baseIds);
+    }
+
+    /** The ids of the base blobs whose bytes the line comparison needs: those of the changed {@code .java} files. */
+    static List<String> wanted(Compared compared) {
+        return compared.status().entrySet().stream()
+                .filter(e -> e.getValue().equals("M") && e.getKey().endsWith(".java"))
+                .map(e -> compared.baseIds().get(e.getKey())).distinct().sorted().toList();
+    }
+
+    /**
+     * What the check works with: what differs, and for each changed or new file the finder read its changed lines.
+     * The lines of the workspace are the finder's own, and the lines of the base are split the same way, so a line
+     * number means here what it means to the compiler. A changed file whose base bytes are not there, or are no
+     * UTF-8, counts as changed as a whole and is named.
+     */
+    static Base of(Handed handed, Compared compared, Result result) {
+        Map<String, List<Range>> lines = new TreeMap<>();
+        List<String> removed = new ArrayList<>();
+        List<String> unmappable = new ArrayList<>();
+        Map<String, SourceFile> read = new HashMap<>();
+        for (SourceFile file : result.files()) read.put(file.path(), file);
+        compared.status().forEach((path, status) -> {
+            if (status.equals("D")) removed.add(path);
+            if (status.equals("U")) unmappable.add(path + NOT_REGULAR);
+            SourceFile file = read.get(path);
+            if (file == null || status.equals("D") || status.equals("U")) return;
+            List<Range> whole = List.of(new Range(1, Integer.MAX_VALUE));
+            if (status.equals("A")) {
+                lines.put(path, whole);
+                return;
+            }
+            byte[] before = handed.blobs().get(compared.baseIds().get(path));
+            String text = null;
+            if (before != null) {
+                try {
+                    text = StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(before)).toString();
+                } catch (java.nio.charset.CharacterCodingException e) {
+                    text = null;
+                }
+            }
+            if (text == null) {
+                // It differs, and nothing can say where: the whole file counts, and the report names it
+                lines.put(path, whole);
+                unmappable.add(path + " (it differs from the base, and its lines could not be compared)");
+            } else {
+                lines.put(path, changedLines(text.lines().toList(), file.lines()));
+            }
+        });
+        return new Base(handed.base(), handed.head(), handed.from(), handed.since(), handed.previousHead(),
+                compared.dirty(), lines, handed.baseDate(), handed.skipped(), List.copyOf(removed),
+                List.copyOf(unmappable), compared.status());
+    }
+
+    /**
+     * The files that differ and that no area comes from, by their kind: every file of {@link Base#status} that the
+     * finder did not read. A removed Java file is in none of them: it is counted as removed.
+     */
+    static Kinds kinds(Base base, Result result) {
+        Set<String> read = new java.util.HashSet<>();
+        for (SourceFile file : result.files()) read.add(file.path());
+        List<String> tests = new ArrayList<>();
+        List<String> uncompiled = new ArrayList<>();
+        List<String> docs = new ArrayList<>();
+        List<String> cannotJudge = new ArrayList<>();
+        base.status().forEach((path, status) -> {
+            // What could not be compared is named as that
+            if (read.contains(path) || status.equals("U")) return;
+            if (path.endsWith(".java")) {
+                if (status.equals("D")) return;
+                (("/" + path).contains("/src/test/java/") ? tests : uncompiled).add(path);
+            } else if (path.endsWith(".md") || ("/" + path).contains("/docs/")) {
+                docs.add(path);
+            } else {
+                cannotJudge.add(path);
+            }
+        });
+        return new Kinds(List.copyOf(tests), List.copyOf(uncompiled), List.copyOf(docs), List.copyOf(cannotJudge));
     }
 
     /**
@@ -277,13 +505,6 @@ final class Changes {
         return changed;
     }
 
-    /** The changed files that are no Java file the finder read: nothing maps their lines to an area. */
-    static List<String> unmapped(Result result, Map<String, List<Range>> lines) {
-        Set<String> read = new java.util.HashSet<>();
-        for (SourceFile file : result.files()) read.add(file.path());
-        return lines.keySet().stream().filter(file -> !read.contains(file)).toList();
-    }
-
     /**
      * The areas the changes pick, by the area's id; an area that is neither changed nor a neighbour is not in the
      * map. A changed area names what it is connected with too, so its verdict sees the other side of a change that
@@ -338,6 +559,25 @@ final class Changes {
     }
 
     /**
+     * The whole code of every changed member an area is connected with, without line numbers: what the digest of
+     * the area holds of them. The prompt shows a part ({@link #connectedText}); the digest must change whenever any
+     * line of any of them does, or a later change beyond what was shown would pass for judged.
+     */
+    static String connectedWhole(List<Declared> connected, Result result) {
+        Map<String, SourceFile> files = new HashMap<>();
+        for (SourceFile file : result.files()) files.put(file.path(), file);
+        StringBuilder out = new StringBuilder();
+        for (Declared member : connected) {
+            out.append(member.file()).append(", ").append(member.member().label()).append(":\n");
+            List<String> code = files.containsKey(member.file()) ? files.get(member.file()).lines() : List.of();
+            for (int line = member.member().start(); line <= member.member().end() && line <= code.size(); line++) {
+                out.append(code.get(line - 1)).append('\n');
+            }
+        }
+        return out.toString();
+    }
+
+    /**
      * The code of the changed members an area is connected with, for the prompt: per member a line with its file and
      * name, then its lines with their numbers, at most {@value #MAX_CONNECTED_LINES} of them from five lines before
      * its first changed line; at most {@value #MAX_CONNECTED} members, the rest named. Empty when there is none.
@@ -364,14 +604,15 @@ final class Changes {
             }
             if (!out.isEmpty()) out.append('\n');
             out.append(member.file()).append(", ").append(member.member().label())
-                    .append(cut ? " (a part of it):" : ":");
+                    .append(cut ? " (cut: " + MAX_CONNECTED_LINES + " of its " + (member.member().end()
+                            - member.member().start() + 1) + " lines; read the rest in the workspace):" : ":");
             List<String> code = files.containsKey(member.file()) ? files.get(member.file()).lines() : List.of();
             for (int line = start; line <= end && line <= code.size(); line++) {
                 out.append('\n').append(line).append("| ").append(code.get(line - 1));
             }
         }
         if (connected.size() > MAX_CONNECTED) {
-            out.append("\nNot shown, changed and connected too: ");
+            out.append("\nCut: not shown, changed and connected too (read them in the workspace): ");
             List<String> names = new ArrayList<>();
             for (Declared member : connected.subList(MAX_CONNECTED, connected.size())) {
                 names.add(member.file() + ", " + member.member().label());

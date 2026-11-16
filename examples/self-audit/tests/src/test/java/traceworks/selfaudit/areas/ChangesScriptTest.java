@@ -16,7 +16,8 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * {@code scripts/changes.sh} of the package {@code security-changes} against a real git repository: how the base is
+ * {@code scripts/changes.sh} of the package {@code security-changes} against a real git repository, with the area
+ * tool deciding what changed from what the script hands over: how the base is
  * found (a commit, a tag, a date, or the workspace commit of the last run), when the script refuses, and what it
  * writes down for the area finder; and what a workspace that is not trusted can neither hide from it nor make it
  * start. It needs {@code bash} and {@code git}, as the script tests of this build do: without them the tests fail.
@@ -86,13 +87,31 @@ class ChangesScriptTest {
     }
 
     private Ran script(String since, String previous, String... skip) throws IOException {
-        List<String> command = new ArrayList<>(List.of("bash", SCRIPT.toString(), out.toString(), since, previous));
+        List<String> command = new ArrayList<>(List.of("bash", SCRIPT.toString(), "base", out.toString(), since,
+                previous));
         command.addAll(List.of(skip));
         return run(repo, Map.of(), command.toArray(String[]::new));
     }
 
+    private Changes.Compared compared;
+
+    /**
+     * What the area tool makes of the folder, the way the steps of the package do it: it compares the workspace with
+     * the trees, asks for the base blobs it wants by their ids, gets them from the script, and compares the lines of
+     * the Java files that differ, which stand in for the files a finder read.
+     */
     private Changes.Base read() throws IOException {
-        return Changes.read(out, repo);
+        Changes.Handed handed = Changes.read(out);
+        compared = Changes.compare(handed, repo);
+        List<String> wanted = Changes.wanted(compared);
+        Files.writeString(out.resolve("wanted"), wanted.isEmpty() ? "" : String.join("\n", wanted) + "\n");
+        Ran blobs = run(repo, Map.of(), "bash", SCRIPT.toString(), "blobs", out.toString());
+        assertThat(blobs.code()).as(blobs.stderr()).isZero();
+        List<String> javaFiles = compared.status().entrySet().stream()
+                .filter(e -> e.getKey().endsWith(".java") && Files.isRegularFile(repo.resolve(e.getKey()),
+                        java.nio.file.LinkOption.NOFOLLOW_LINKS) && !e.getValue().equals("U"))
+                .map(Map.Entry::getKey).toList();
+        return Changes.of(Changes.read(out), compared, Handover.read(repo, javaFiles.toArray(String[]::new)));
     }
 
     private String written(String name) throws IOException {
@@ -111,15 +130,16 @@ class ChangesScriptTest {
     }
 
     @Test
-    void aCommit_aTag_andADate_eachNameTheBase_andTheBaseIsWrittenDownWithTheHead() throws IOException {
+    void aCommit_aTag_andADate_eachNameTheBase_andTheBaseIsWrittenDownWithTheHeadAndTheTrees() throws IOException {
         Ran byCommit = script(second, "");
         assertThat(byCommit.code()).as(byCommit.stderr()).isZero();
         assertThat(written("base-commit")).isEqualTo(second + "\n");
         assertThat(written("head")).isEqualTo(third + "\n");
         assertThat(written("from")).isEqualTo("input\n");
         assertThat(written("since")).isEqualTo(second + "\n");
-        assertThat(written("dirty")).isEqualTo("false\n");
         assertThat(written("base-date")).isEqualTo("2026-02-01T12:00:00+00:00\n");
+        assertThat(Changes.read(out).baseTree()).containsOnlyKeys("src/A.java");
+        assertThat(Changes.read(out).headTree()).containsOnlyKeys("src/A.java", "src/B.java");
         assertThat(byCommit.stdout()).contains("FACT changes_base: " + second + "\n", "FACT changes_head: " + third
                 + "\n", "FACT changes_base_from: input\n", "FACT changes_base_date: 2026-02-01T12:00:00+00:00\n");
 
@@ -149,11 +169,18 @@ class ChangesScriptTest {
         assertThat(written("from")).isEqualTo("register\n");
         assertThat(written("since")).isEmpty();
         assertThat(written("previous-head")).isEqualTo(second + "\n");
+        assertThat(written("skipped")).isEqualTo("0\n");
 
         assertThat(script("v1", previous).code()).isZero();
         assertThat(written("base-commit")).as("the input goes first").isEqualTo(first + "\n");
         assertThat(written("previous-head")).as("and the report's commit is still written down").isEqualTo(second + "\n");
         assertThat(written("skipped")).as("an older base skips nothing").isEqualTo("0\n");
+
+        // Nothing happened since the last run: the base may be the workspace commit then
+        Ran again = script("", "FACT changes_head: " + third + "\n");
+        assertThat(again.code()).as(again.stderr()).isZero();
+        assertThat(read().files()).isZero();
+        assertThat(compared.dirty()).as("a workspace that is its commit").isFalse();
     }
 
     @Test
@@ -193,7 +220,7 @@ class ChangesScriptTest {
 
         Path plain = Files.createDirectories(temp.resolve("plain"));
         Ran noRepository = run(plain, Map.of("GIT_CEILING_DIRECTORIES", temp.toString()), "bash", SCRIPT.toString(),
-                out.toString(), "v1", "");
+                "base", out.toString(), "v1", "");
         assertThat(noRepository.code()).isEqualTo(1);
         assertThat(noRepository.stderr()).contains("the workspace is no git checkout whose history this step can read");
     }
@@ -205,17 +232,16 @@ class ChangesScriptTest {
         Files.writeString(repo.resolve("notes.txt"), "no Java file, and in no commit: not listed\n");
         Files.delete(repo.resolve("src/B.java"));
 
-        Ran ran = script(first, "");
-
-        assertThat(ran.code()).as(ran.stderr()).isZero();
-        assertThat(written("dirty")).isEqualTo("true\n");
-        assertThat(written("manifest")).isEqualTo("M\0src/A.java\0" + "1\0" + "A\0src/New.java\0\0");
-        assertThat(Files.readString(out.resolve("base/1"))).as("the bytes of the base").isEqualTo("one\ntwo\nthree\n");
+        assertThat(script(first, "").code()).isZero();
         Changes.Base base = read();
+
+        assertThat(compared.dirty()).isTrue();
+        assertThat(base.status()).containsOnly(Map.entry("src/A.java", "M"), Map.entry("src/New.java", "A"));
+        assertThat(Files.readAllLines(out.resolve("wanted"))).as("one base blob was asked for, by its id")
+                .containsExactly(git("rev-parse", first + ":src/A.java"));
         assertThat(base.lines()).as("line 2 from the second commit, line 4 from the workspace")
                 .containsOnly(Map.entry("src/A.java", List.of(new Changes.Range(2, 2), new Changes.Range(4, 4))),
                         Map.entry("src/New.java", List.of(new Changes.Range(1, Integer.MAX_VALUE))));
-        assertThat(ran.stdout()).contains("FACT changes_uncommitted: true\n", "FACT changes_files: 2\n");
 
         // Against the third commit, which has B.java: it is gone from the workspace
         assertThat(script(third, "").code()).isZero();
@@ -223,17 +249,24 @@ class ChangesScriptTest {
     }
 
     @Test
-    void aCommittedChangeAlone_leavesTheWorkspaceClean_andAFileThatIsNoJavaFileIsListedWithoutItsBytes()
-            throws IOException {
-        commit("pom.xml", "<project/>\n", "2026-04-01T12:00:00+0000");
-        commit("pom.xml", "<project></project>\n", "2026-04-02T12:00:00+0000");
+    void aCommittedFileOfAnyKind_isCounted_newChangedOrRemoved_andACleanWorkspaceIsNotDirty() throws IOException {
+        commit("run.sh", "echo 1\n", "2026-04-01T12:00:00+0000");
+        commit("pom.xml", "<project/>\n", "2026-04-02T12:00:00+0000");
+        String fifth = commit("META-INF/services/p.Port", "p.One\n", "2026-04-03T12:00:00+0000");
+        commit("run.sh", "echo 2\n", "2026-04-04T12:00:00+0000");
+        commit("Dockerfile", "FROM x\n", "2026-04-05T12:00:00+0000");
+        git("rm", "--quiet", "pom.xml");
+        git("commit", "--quiet", "-m", "no pom");
 
-        Ran ran = script("HEAD~1", "");
+        assertThat(script(fifth, "").code()).isZero();
+        Changes.Base base = read();
 
-        assertThat(ran.code()).as(ran.stderr()).isZero();
-        assertThat(written("dirty")).isEqualTo("false\n");
-        assertThat(written("manifest")).isEqualTo("M\0pom.xml\0\0");
-        assertThat(out.resolve("base")).isEmptyDirectory();
+        assertThat(base.status()).containsOnly(Map.entry("run.sh", "M"), Map.entry("Dockerfile", "A"),
+                Map.entry("pom.xml", "D"));
+        assertThat(compared.dirty()).isFalse();
+        assertThat(Files.readString(out.resolve("wanted"))).as("no bytes are asked for a file that is no Java file")
+                .isEmpty();
+        assertThat(Changes.kinds(base, Handover.read(repo)).cannotJudge()).containsExactly("Dockerfile", "pom.xml", "run.sh");
     }
 
     // --- what a workspace that is not trusted must neither hide nor start ---
@@ -276,9 +309,8 @@ class ChangesScriptTest {
         git("config", "core.bigFileThreshold", "1");
         Files.writeString(repo.resolve("src/A.java"), "one\nTWO\nthree\nfour\n");
 
-        Ran ran = script(second, "");
+        assertThat(script(second, "").code()).isZero();
 
-        assertThat(ran.code()).as(ran.stderr()).isZero();
         assertThat(read().lines()).containsEntry("src/A.java", List.of(new Changes.Range(4, 4)));
     }
 
@@ -291,27 +323,65 @@ class ChangesScriptTest {
         Files.writeString(repo.resolve(".git/info/exclude"), "Ignored.java\n");
         Files.writeString(repo.resolve("src/Ignored.java"), "class Ignored { }\n");
 
-        Ran ran = script(third, "");
+        assertThat(script(third, "").code()).isZero();
 
-        assertThat(ran.code()).as(ran.stderr()).isZero();
         assertThat(read().lines()).containsOnlyKeys("src/A.java", "src/B.java", "src/Ignored.java");
-        assertThat(written("dirty")).isEqualTo("true\n");
+        assertThat(compared.dirty()).isTrue();
     }
 
     @Test
-    void aFileThatCannotBeCompared_isListedAsSuch_andAPathWithALineBreakIsCompared() throws IOException {
-        commit("src/odd\nname.java", "x\n", "2026-04-01T12:00:00+0000");
-        String fourth = commit("src/Link.java", "l\n", "2026-04-02T12:00:00+0000");
+    void aFileMovedBelowADirectoryCalledBuild_andEdited_isANewFileWithItsLines_notOnlyARemoval() throws IOException {
+        Files.createDirectories(repo.resolve("src/build"));
+        git("mv", "src/A.java", "src/build/A.java");
+        Files.writeString(repo.resolve("src/build/A.java"), "one\nTWO\nthree\nedited\n");
+        Files.createDirectories(repo.resolve("src/.hidden/target/node_modules"));
+        Files.writeString(repo.resolve("src/.hidden/target/node_modules/Deep.java"), "d\n");
+
+        assertThat(script(third, "").code()).isZero();
+        Changes.Base base = read();
+
+        assertThat(base.status()).containsOnly(Map.entry("src/A.java", "D"), Map.entry("src/build/A.java", "A"),
+                Map.entry("src/.hidden/target/node_modules/Deep.java", "A"));
+        assertThat(base.lines()).containsKeys("src/build/A.java", "src/.hidden/target/node_modules/Deep.java");
+    }
+
+    @Test
+    void aPathGitWouldReadAsQuoted_orWithALineBreak_isThePathItIs_andADecoyDoesNotStandInForIt() throws IOException {
+        commit("\"A.java\"", "old\n", "2026-04-01T12:00:00+0000");
+        commit("src/odd\nname.java", "x\n", "2026-04-02T12:00:00+0000");
+        String fifth = commit("src/Link.java", "l\n", "2026-04-03T12:00:00+0000");
+        // The file whose name is in quotes changes; a file of the name without the quotes holds the old bytes
+        Files.writeString(repo.resolve("\"A.java\""), "new\n");
+        Files.writeString(repo.resolve("A.java"), "old\n");
         Files.writeString(repo.resolve("src/odd\nname.java"), "y\n");
         Files.delete(repo.resolve("src/Link.java"));
         Files.createSymbolicLink(repo.resolve("src/Link.java"), Path.of("A.java"));
 
-        Ran ran = script(fourth, "");
-
+        Ran ran = script(fifth, "");
         assertThat(ran.code()).as(ran.stderr()).isZero();
         Changes.Base base = read();
+
+        assertThat(base.status()).containsOnly(Map.entry("\"A.java\"", "M"), Map.entry("A.java", "A"),
+                Map.entry("src/odd\nname.java", "M"), Map.entry("src/Link.java", "U"));
+        assertThat(base.lines().get("src/odd\nname.java")).containsExactly(new Changes.Range(1, 1));
         assertThat(base.unmappable()).containsExactly("src/Link.java (not a readable regular file)");
-        assertThat(base.lines()).containsOnlyKeys("src/odd\nname.java");
+    }
+
+    @Test
+    void theScriptHandsOverBlobsByIdOnly_andRefusesAListThatHoldsAnythingElse() throws IOException {
+        assertThat(script(first, "").code()).isZero();
+        Files.writeString(out.resolve("wanted"), git("rev-parse", first + ":src/A.java") + "\n" + "c".repeat(40) + "\n");
+        Ran blobs = run(repo, Map.of(), "bash", SCRIPT.toString(), "blobs", out.toString());
+        assertThat(blobs.code()).as(blobs.stderr()).isZero();
+        assertThat(Changes.read(out).blobs()).as("a blob git does not have is missing, and nothing else")
+                .containsOnlyKeys(git("rev-parse", first + ":src/A.java"));
+
+        for (String line : List.of("HEAD:src/A.java", "--batch-all-objects", "\"src/A.java\"", "")) {
+            Files.writeString(out.resolve("wanted"), line + "\n");
+            Ran refused = run(repo, Map.of(), "bash", SCRIPT.toString(), "blobs", out.toString());
+            assertThat(refused.code()).as(line).isEqualTo(1);
+            assertThat(refused.stderr()).contains("the list of blobs holds a line that is no blob id");
+        }
     }
 
     @Test
@@ -319,7 +389,7 @@ class ChangesScriptTest {
         // refs/replace would show the tree of another commit in place of the base's
         git("replace", second, first);
         assertThat(script(second, "").code()).isZero();
-        assertThat(read().lines()).as("the base is the commit named, not what a replace ref puts in its place")
+        assertThat(read().status()).as("the base is the commit named, not what a replace ref puts in its place")
                 .containsOnlyKeys("src/B.java");
         git("replace", "-d", second);
 
@@ -332,35 +402,34 @@ class ChangesScriptTest {
         git("update-index", "--add", "--cacheinfo", "160000," + first + ",sub");
         git(Map.of("GIT_AUTHOR_DATE", "2026-05-01T12:00:00+0000", "GIT_COMMITTER_DATE", "2026-05-01T12:00:00+0000"),
                 "commit", "--quiet", "-m", "a submodule");
-        Ran submodule = script(first, "");
-        assertThat(submodule.code()).isEqualTo(1);
-        assertThat(submodule.stderr()).contains("the workspace has a submodule (sub)");
+        assertThat(script(first, "").code()).isZero();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> Changes.read(out))
+                .hasMessageContaining("the workspace has a submodule (sub)");
     }
 
     // --- a base that would make the run say more than it looked at ---
 
     @Test
-    void aBaseThatIsTheWorkspaceCommit_withNothingChanged_isRefused_alsoWhenADateResolvesToIt() throws IOException {
-        Ran date = script("2027-01-01", "");
-        assertThat(date.code()).isEqualTo(1);
-        assertThat(date.stderr()).contains("nothing to check: the date 2027-01-01 resolves to the workspace commit"
-                + " itself (" + third + ", committed 2026-03-01T12:00:00+00:00)");
+    void aDateThatResolvesToTheWorkspaceCommit_isWrittenDownAsThat_andTheToolRefusesItWhenNothingDiffers()
+            throws IOException {
+        assertThat(script("2027-01-01", "").code()).isZero();
+        assertThat(written("base-commit")).isEqualTo(third + "\n");
+        assertThat(written("base-date")).isEqualTo("2026-03-01T12:00:00+00:00\n");
 
-        Ran commit = script("HEAD", "");
-        assertThat(commit.code()).isEqualTo(1);
-        assertThat(commit.stderr()).contains("nothing to check: the base 'HEAD' is the workspace commit itself");
+        java.io.ByteArrayOutputStream err = new java.io.ByteArrayOutputStream();
+        int code = Main.run(new String[] {"changed", "--changes", out.toString(), "--root", repo.toString()},
+                java.io.InputStream.nullInputStream(), new java.io.PrintStream(new java.io.ByteArrayOutputStream()),
+                new java.io.PrintStream(err, true, StandardCharsets.UTF_8));
+
+        assertThat(code).isEqualTo(1);
+        assertThat(err.toString(StandardCharsets.UTF_8)).contains("nothing to check: the base '2027-01-01' is the"
+                + " workspace commit itself (" + third + ", committed 2026-03-01T12:00:00+00:00)");
 
         // With a change in no commit there is something to check
         Files.writeString(repo.resolve("src/B.java"), "b\nb2\n");
-        assertThat(script("2027-01-01", "").code()).isZero();
-        assertThat(written("base-commit")).isEqualTo(third + "\n");
-
-        // Without the input the base may be the workspace commit: the run goes on from the last one, and says so
-        Files.writeString(repo.resolve("src/B.java"), "b\n");
-        Ran again = script("", "FACT changes_head: " + third + "\n");
-        assertThat(again.code()).as(again.stderr()).isZero();
-        assertThat(written("manifest")).isEmpty();
-        assertThat(again.stdout()).contains("FACT changes_files: 0\n");
+        assertThat(Main.run(new String[] {"changed", "--changes", out.toString(), "--root", repo.toString()},
+                java.io.InputStream.nullInputStream(), new java.io.PrintStream(new java.io.ByteArrayOutputStream()),
+                new java.io.PrintStream(err, true, StandardCharsets.UTF_8))).isZero();
     }
 
     @Test
@@ -395,12 +464,11 @@ class ChangesScriptTest {
                 + " of this audit (" + first + ")", "--input skip=yes");
         assertThat(out.resolve("base-commit")).doesNotExist();
 
-        Files.writeString(repo.resolve("src/B.java"), "b\nb2\n");
         Ran skipped = script(third, previous, "yes");
         assertThat(skipped.code()).as(skipped.stderr()).isZero();
         assertThat(written("skipped")).isEqualTo("2\n");
         assertThat(skipped.stdout()).contains("FACT changes_commits_skipped: 2\n");
-        assertThat(read().skipped()).isEqualTo("2");
+        assertThat(Changes.read(out).skipped()).isEqualTo("2");
 
         Ran unknown = script(second, "FACT changes_head: " + "c".repeat(40) + "\n");
         assertThat(unknown.code()).isEqualTo(1);
@@ -410,18 +478,20 @@ class ChangesScriptTest {
     }
 
     @Test
-    void aRepositoryWithLongIds_namesItsBaseLikeAnyOther() throws IOException {
+    void aRepositoryWithLongIds_namesItsBaseLikeAnyOther_andTheToolComputesItsIds() throws IOException {
         repo = Files.createDirectories(temp.resolve("sha256"));
         git("init", "--quiet", "--initial-branch=main", "--object-format=sha256");
         String one = commit("src/A.java", "one\n", "2026-01-01T12:00:00+0000");
         String two = commit("src/A.java", "one\ntwo\n", "2026-02-01T12:00:00+0000");
+        commit("src/Same.java", "same\n", "2026-02-02T12:00:00+0000");
         assertThat(one).hasSize(64);
 
-        Ran ran = script("", "FACT changes_head: " + one + "\n");
-
+        Ran ran = script("", "FACT changes_head: " + two + "\n");
         assertThat(ran.code()).as(ran.stderr()).isZero();
-        assertThat(written("base-commit")).isEqualTo(one + "\n");
-        assertThat(written("head")).isEqualTo(two + "\n");
+        assertThat(read().status()).containsOnly(Map.entry("src/Same.java", "A"));
+        assertThat(compared.dirty()).isFalse();
+
+        assertThat(script(one, "", "yes").code()).isZero();
         assertThat(read().lines()).containsEntry("src/A.java", List.of(new Changes.Range(2, 2)));
     }
 }
