@@ -73,6 +73,18 @@ final class Verification {
         } else {
             ledgerState = agrees(copy.get(), run.runId(), chain, view, run.blobs());
         }
+        if (ledgerReason == null) {
+            // An entry is added once, by the commit that names it: one that a later commit changed is not the
+            // entry of this run any more, whatever it holds now
+            try {
+                List<String> changes = ledger.changes(run.runId());
+                if (!changes.isEmpty()) {
+                    ledgerState = "changed: " + String.join("; ", changes);
+                }
+            } catch (RuntimeException e) {
+                ledgerState = "NOT checked: " + e.getMessage();
+            }
+        }
         String sealState = view == null ? VerifyReport.NOT_CHECKED : seal(view.seal());
         String registerState = view == null ? VerifyReport.NOT_CHECKED : registerFolder(run, view.register());
         String startState = start(run, ledger, lines);

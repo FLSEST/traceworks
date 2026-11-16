@@ -91,35 +91,179 @@ class LedgerCheckTest {
         assertThat(services.verify(id).ok()).isTrue();
     }
 
-    /** One added commit with runs/<id>.json: the end entry is parsed and must agree with its commit and its start. */
+    /**
+     * One added commit with runs/<id>.json: the end entry is parsed and must agree with its commit and its start
+     * entry. One that does not is a failure of its own, and the run is still started, never ended, folder gone.
+     */
     @Test
-    void aForgedEndEntry_doesNotMoveALostRunToEnded() throws Exception {
+    void anEndEntryThatIsNoManifestOfTheRun_orDisagreesWithItsCommitOrItsStart_fails_andTheRunStaysLost()
+            throws Exception {
         String id = parked();
         String runStarted = EventChain.sha256Hex(fx.events(id).getFirst().raw());
         fx.store.forget(id);
 
         fx.ledger.forgeEnd(id, "COMPLETED", "anything".getBytes(StandardCharsets.UTF_8));
-        assertThat(services.ledgerReport().problems()).singleElement().satisfies(problem -> {
-            assertThat(problem.code()).isEqualTo("entry-invalid");
-            assertThat(problem.text()).contains("no manifest of this run");
-        });
+        LedgerReport report = services.ledgerReport();
+        assertThat(codes(report)).as("every problem of the run, not the first one")
+                .containsExactlyInAnyOrder(tuple(id, "entry-invalid"), tuple(id, "lost"));
+        assertThat(report.problems()).anySatisfy(problem ->
+                assertThat(problem.text()).contains("no manifest of this run"));
+        assertThat(report.open()).extracting(LedgerReport.Open::folder).containsExactly(LedgerReport.GONE);
+        assertThat(report.endedGone()).isEmpty();
 
         ObjectNode manifest = JSON.createObjectNode().put("run_id", id).put("status", "FAILED");
         fx.ledger.forgeEnd(id, "COMPLETED", JSON.writeValueAsBytes(manifest));
-        assertThat(services.ledgerReport().problems()).singleElement().satisfies(problem ->
+        assertThat(services.ledgerReport().problems()).anySatisfy(problem ->
                 assertThat(problem.text()).contains("the end entry says FAILED", "its commit says COMPLETED"));
 
         manifest.put("status", "COMPLETED");
         fx.ledger.forgeEnd(id, "COMPLETED", JSON.writeValueAsBytes(manifest));
-        assertThat(services.ledgerReport().problems()).singleElement().satisfies(problem ->
+        assertThat(services.ledgerReport().problems()).anySatisfy(problem ->
                 assertThat(problem.text()).contains("does not agree with the start entry", runStarted));
+        assertThat(codes(services.ledgerReport())).contains(tuple(id, "lost"));
+    }
 
-        // What nothing in this version catches: the ledger is not signed, and the start entry says which line to name
-        manifest.put("run_started", runStarted);
+    /**
+     * What nothing in this version finds: the ledger is not signed, and the start entry says which line to name. An
+     * end entry made by hand that is a manifest of the run with the right status and line moves a lost run to ended.
+     */
+    @Test
+    void aWellFormedEndEntryMadeByHand_isNotFound_andTheRunReadsAsEnded() throws Exception {
+        String id = parked();
+        ObjectNode manifest = JSON.createObjectNode().put("run_id", id).put("status", "COMPLETED")
+                .put("run_started", EventChain.sha256Hex(fx.events(id).getFirst().raw()));
+        fx.store.forget(id);
+
         fx.ledger.forgeEnd(id, "COMPLETED", JSON.writeValueAsBytes(manifest));
+
         LedgerReport forged = services.ledgerReport();
         assertThat(forged.ok()).isTrue();
         assertThat(forged.endedGone()).containsExactly(new LedgerReport.Named(id, "COMPLETED"));
+    }
+
+    /**
+     * No history is rewritten: a later, ordinary commit puts another manifest over the end entry, after the record
+     * was rewritten to match. The entry is no longer what its own commit added, and both checks say so.
+     */
+    @Test
+    void anEndEntryChangedByALaterCommit_failsTheCheckOfTheHome_andOfTheRun() {
+        String id = finished();
+        byte[] manifest = fx.run(id).readManifest().orElseThrow();
+        assertThat(services.verify(id).ok()).isTrue();
+
+        fx.ledger.changeEnd(id, manifest, "4f1d2c3b4a59");
+
+        LedgerReport report = services.ledgerReport();
+        assertThat(codes(report)).containsExactly(tuple(id, "entry-changed"));
+        assertThat(report.problems().getFirst().text()).contains("commit 4f1d2c3b4a59", "runs/" + id + ".json");
+        VerifyReport verify = services.verify(id);
+        assertThat(verify.ok()).isFalse();
+        assertThat(verify.ledger()).startsWith("changed").contains("commit 4f1d2c3b4a59", "runs/" + id + ".json");
+    }
+
+    /** The manifest in the run folder must be the end entry, byte for byte: the entry is a copy of it. */
+    @Test
+    void aManifestInTheRunFolderThatIsNotTheEndEntry_failsTheCheckOfTheHome() {
+        String id = finished();
+        String manifest = new String(fx.run(id).readManifest().orElseThrow(), StandardCharsets.UTF_8);
+        assertThat(services.ledgerReport().ok()).isTrue();
+
+        fx.run(id).writeManifest(manifest.replace("\"status\" : \"COMPLETED\"", "\"status\" :  \"COMPLETED\"")
+                .getBytes(StandardCharsets.UTF_8));
+        assertThat(codes(services.ledgerReport())).containsExactly(tuple(id, "manifest-differs"));
+
+        fx.run(id).removeManifest();
+        assertThat(codes(services.ledgerReport())).containsExactly(tuple(id, "manifest-differs"));
+    }
+
+    /**
+     * A run whose process is alive between run.started and the commit of its start entry (it waits for the lock),
+     * or between run.finished and its end entry, is in flight: listed as that, and no failure. Without a live
+     * writer the same record is a problem.
+     */
+    @Test
+    void aRunInFlight_beforeItsStartEntry_orBeforeItsEndEntry_isListedAndDoesNotFail() {
+        String starting = parked();
+        String ending = finished();
+        byte[] start = fx.ledger.findStart(ending).orElseThrow();
+        fx.ledger.startOver();
+        fx.ledger.replaceStart(ending, start);
+        fx.run(starting).simulateOtherWriter(true);
+        fx.run(ending).simulateOtherWriter(true);
+
+        LedgerReport flying = services.ledgerReport();
+
+        assertThat(flying.problems()).isEmpty();
+        assertThat(flying.ok()).isTrue();
+        assertThat(flying.inFlight()).extracting(LedgerReport.Named::runId, LedgerReport.Named::detail)
+                .containsExactlyInAnyOrder(tuple(starting, "its start entry is not written yet"),
+                        tuple(ending, "its end entry is not written yet"));
+
+        fx.run(starting).simulateWriterDied();
+        fx.run(ending).simulateWriterDied();
+
+        LedgerReport dead = services.ledgerReport();
+        assertThat(dead.inFlight()).isEmpty();
+        assertThat(codes(dead)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
+                tuple(ending, "no-end-entry"));
+    }
+
+    /** A folder that was just created and has no line yet, with its process alive: in flight too. */
+    @Test
+    void aRunFolderWithoutALineYet_whoseProcessIsAlive_isInFlight() {
+        String id = "11111111-2222-3333-4444-555555555555";
+        var created = fx.store.create(id, fx.clock.now());
+
+        LedgerReport report = services.ledgerReport();
+        assertThat(report.ok()).isTrue();
+        assertThat(report.inFlight()).containsExactly(new LedgerReport.Named(id, "its record has no line yet"));
+
+        created.close();
+        assertThat(codes(services.ledgerReport())).containsExactly(tuple(id, "unreadable"));
+    }
+
+    /**
+     * An acknowledgement covers the problems it was made on, by what the check said: a problem of the run that
+     * comes later is open again, also one of the same kind with another content.
+     */
+    @Test
+    void anAcknowledgement_coversWhatWasSaid_andALaterProblemOfTheSameKindIsOpenAgain() {
+        String id = finished();
+        byte[] manifest = fx.run(id).readManifest().orElseThrow();
+        fx.ledger.changeEnd(id, manifest, "aaaaaaaaaaaa");
+
+        LedgerReport acknowledged = services.acknowledge(id, "a test commit of mine, the entry is the same bytes");
+        assertThat(acknowledged.ok()).isTrue();
+
+        fx.ledger.changeEnd(id, manifest, "bbbbbbbbbbbb");
+
+        LedgerReport again = services.ledgerReport();
+        assertThat(again.ok()).as("another commit touched the entry").isFalse();
+        assertThat(again.problems()).singleElement().satisfies(problem -> {
+            assertThat(problem.code()).isEqualTo("entry-changed");
+            assertThat(problem.text()).contains("bbbbbbbbbbbb");
+        });
+        assertThat(again.acknowledged()).singleElement().satisfies(run -> {
+            assertThat(run.said()).contains("aaaaaaaaaaaa");
+            assertThat(run.covers()).isTrue();
+        });
+    }
+
+    /** One call acknowledges every problem the check reports of the run then, each by what was said. */
+    @Test
+    void anAcknowledgementOfARunWithTwoProblems_namesBoth() throws Exception {
+        String id = parked();
+        fx.store.forget(id);
+        fx.ledger.forgeEnd(id, "COMPLETED", "anything".getBytes(StandardCharsets.UTF_8));
+        assertThat(services.ledgerReport().problems()).hasSize(2);
+
+        LedgerReport after = services.acknowledge(id, "both are from a test of the ledger");
+
+        assertThat(after.ok()).isTrue();
+        assertThat(after.acknowledged()).extracting(LedgerReport.Acknowledged::problem)
+                .containsExactlyInAnyOrder("entry-invalid", "lost");
+        JsonNode held = JSON.readTree(fx.ledger.runs().runs().getFirst().acks());
+        assertThat(held.path("problems")).hasSize(2);
     }
 
     /** The manifest names the run.started line from now on, which is what ties an end entry to its start entry. */
@@ -168,12 +312,12 @@ class LedgerCheckTest {
 
         LedgerReport report = services.ledgerReport();
 
-        assertThat(codes(report)).containsExactly(tuple(id, "entry-removed"));
+        assertThat(codes(report)).containsExactly(tuple(id, "entry-removed"), tuple(id, "lost"));
         assertThat(report.problems().getFirst().text()).contains("a later commit removed it, or the commit added none");
 
         LedgerReport after = services.acknowledge(id, "a commit made by hand while testing the ledger");
         assertThat(after.ok()).isTrue();
-        assertThat(after.acknowledged()).singleElement().satisfies(run -> assertThat(run.covers()).isTrue());
+        assertThat(after.acknowledged()).hasSize(2).allSatisfy(run -> assertThat(run.covers()).isTrue());
     }
 
     /**
@@ -192,9 +336,9 @@ class LedgerCheckTest {
 
         assertThat(report.started()).isZero();
         assertThat(codes(report)).containsExactlyInAnyOrder(tuple(parked, "no-start-entry"),
-                tuple(finished, "no-start-entry"));
-        assertThat(report.problems()).allSatisfy(problem ->
-                assertThat(problem.text()).contains("the record says the ledger noted the start"));
+                tuple(finished, "no-start-entry"), tuple(finished, "no-end-entry"));
+        assertThat(report.problems()).filteredOn(problem -> problem.code().equals("no-start-entry"))
+                .allSatisfy(problem -> assertThat(problem.text()).contains("the record says the ledger noted the start"));
         assertThat(report.earlier()).isEqualTo(1);
         assertThat(report.earlierOpen()).containsExactly(new LedgerReport.Named(earlier, "PARKED"));
         assertThat(report.ok()).isFalse();
@@ -259,7 +403,7 @@ class LedgerCheckTest {
         JsonNode held = JSON.readTree(fx.ledger.runs().runs().getFirst().acks());
         assertThat(held.path("run_id").asText()).isEqualTo(id);
         assertThat(held.path("actor").asText()).isEqualTo(AppFixture.ACTOR);
-        assertThat(held.path("problem").asText()).isEqualTo("lost");
+        assertThat(held.path("problems").get(0).path("problem").asText()).isEqualTo("lost");
 
         // Another record appears under the id: that is not what was acknowledged
         try (var again = fx.store.create(id, fx.clock.now())) {
@@ -268,7 +412,6 @@ class LedgerCheckTest {
         }
         LedgerReport other = services.ledgerReport();
         assertThat(codes(other)).containsExactly(tuple(id, "other-record"));
-        assertThat(other.problems().getFirst().text()).contains("acknowledged for another reason: lost");
         assertThat(other.acknowledged()).singleElement().satisfies(run -> assertThat(run.covers()).isFalse());
     }
 

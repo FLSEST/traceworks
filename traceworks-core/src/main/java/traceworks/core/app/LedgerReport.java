@@ -2,6 +2,7 @@ package traceworks.core.app;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import traceworks.core.port.Clock;
 import traceworks.core.port.Ledger;
@@ -36,11 +37,15 @@ import java.util.Set;
  * @param endedGone    the runs the ledger saw end whose folder is not in the runs folder, each with its status
  * @param earlierOpen  the run folders of an earlier version whose run has not ended, each with its status: the
  *                     ledger never knew them
- * @param problems     what does not hold, at most one per run; the acknowledged ones are not among them
- * @param acknowledged the runs a person acknowledged, for good, each with the note
+ * @param problems     what does not hold, every problem of every run; the acknowledged ones are not among them
+ * @param acknowledged the problems a person acknowledged, for good, each with the note
+ * @param inFlight     the runs whose process is alive and has not written an entry yet that its record calls for:
+ *                     between {@code run.started} and the start entry (it waits for the ledger's lock), or between
+ *                     {@code run.finished} and the end entry. No failure: the entry is on its way
  */
 public record LedgerReport(int started, int ended, int earlier, List<Open> open, List<Named> endedGone,
-                           List<Named> earlierOpen, List<Problem> problems, List<Acknowledged> acknowledged) {
+                           List<Named> earlierOpen, List<Problem> problems, List<Acknowledged> acknowledged,
+                           List<Named> inFlight) {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -57,6 +62,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         earlierOpen = List.copyOf(earlierOpen);
         problems = List.copyOf(problems);
         acknowledged = List.copyOf(acknowledged);
+        inFlight = List.copyOf(inFlight);
     }
 
     /**
@@ -83,7 +89,10 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      *             {@code no-start-entry} (the record says the ledger noted the start, and it holds no entry),
      *             {@code no-end-entry} (the record ended, and the ledger holds no end entry), {@code entry-removed}
      *             (a commit names an entry the ledger does not hold), {@code entry-invalid} (an entry that cannot be
-     *             read, is not this run's, or an end entry that does not agree with its commit or its start entry)
+     *             read, is not this run's, or an end entry that does not agree with its commit or its start entry),
+     *             {@code entry-changed} (a commit other than the one that added an entry changed or removed it, or
+     *             the entry came in under another message), {@code manifest-differs} (the manifest in the run folder
+     *             is not the end entry)
      * @param text the sentence for a person
      */
     public record Problem(String runId, String code, String text) {
@@ -93,9 +102,9 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      * A run someone acknowledged.
      *
      * @param problem the kind of problem that was acknowledged ({@link Problem#code})
-     * @param said    what the check said then
-     * @param covers  whether the run has that kind of problem now, which the acknowledgement then settles; when it
-     *                has none, or another kind, the acknowledgement settles nothing and is listed all the same
+     * @param said    what the check said then ({@link Problem#text})
+     * @param covers  whether the check says exactly that of the run now, which the acknowledgement then settles;
+     *                when it does not, the acknowledgement settles nothing and is listed all the same
      */
     public record Acknowledged(String runId, String actor, String at, String note, String problem, String said,
                                boolean covers) {
@@ -107,8 +116,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
     }
 
     /**
-     * Acknowledges the one problem the check reports of a run: who, when, what was reported and a note, as one more
-     * entry of that run in the ledger.
+     * Acknowledges the problems the check reports of one run now: who, when, what was reported and a note, as one
+     * more entry of that run in the ledger. It covers those problems as the check worded them, and no other.
      *
      * @param runRef the run id, or a prefix of at least four characters that one reported run has
      * @return the report after it
@@ -120,31 +129,41 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             throw new RunRefusedException("An acknowledgement needs a note that says why: --note \"...\"");
         }
         LedgerReport before = of(ledger, store);
-        List<Problem> hits = before.problems().stream().filter(problem -> problem.runId().equals(runRef)).toList();
-        if (hits.isEmpty() && runRef.length() >= RunStore.MIN_PREFIX) {
-            hits = before.problems().stream().filter(problem -> problem.runId().startsWith(runRef)).toList();
-        }
+        Set<String> reported = new LinkedHashSet<>();
+        before.problems().forEach(problem -> reported.add(problem.runId()));
+        List<String> hits = reported.contains(runRef) ? List.of(runRef) : runRef.length() < RunStore.MIN_PREFIX
+                ? List.of() : reported.stream().filter(id -> id.startsWith(runRef)).toList();
         if (hits.size() != 1) {
             throw new RunRefusedException(hits.isEmpty()
                     ? "The check of the ledger reports nothing of a run " + runRef + ": there is nothing to"
                     + " acknowledge (traceworks verify lists what it reports)"
                     : runRef + " is the start of " + hits.size() + " runs the check reports; name one of them whole");
         }
-        Problem problem = hits.getFirst();
+        String id = hits.getFirst();
         ObjectNode line = JSON.createObjectNode();
-        line.put("run_id", problem.runId());
+        line.put("run_id", id);
         line.put("at", clock.now().toString());
         line.put("actor", actor);
-        line.put("problem", problem.code());
-        line.put("said", problem.text());
         line.put("note", note.strip());
+        ArrayNode problems = line.putArray("problems");
+        before.problems().stream().filter(problem -> problem.runId().equals(id)).forEach(problem ->
+                problems.addObject().put("problem", problem.code()).put("said", problem.text()));
         try {
-            ledger.acknowledge(problem.runId(), JSON.writeValueAsBytes(line));
+            ledger.acknowledge(id, JSON.writeValueAsBytes(line));
         } catch (IOException | RuntimeException e) {
-            throw new RunRefusedException("The ledger could not take the acknowledgement of run " + problem.runId()
-                    + ": " + e.getMessage());
+            throw new RunRefusedException("The ledger could not take the acknowledgement of run " + id + ": "
+                    + e.getMessage());
         }
         return of(ledger, store);
+    }
+
+    /** Collects the problems, each once, in the order they are found. */
+    private static final class Problems {
+        private final Map<String, Problem> found = new LinkedHashMap<>();
+
+        void add(String id, String code, String text) {
+            found.putIfAbsent(id + "\n" + code + "\n" + text, new Problem(id, code, text));
+        }
     }
 
     static LedgerReport of(Ledger ledger, RunStore store) {
@@ -156,36 +175,43 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                     + e.getMessage());
         }
         Set<String> folders = new LinkedHashSet<>(store.runIds());
-        Map<String, Problem> problems = new LinkedHashMap<>();
+        Problems problems = new Problems();
         Map<String, LedgerRuns.Run> known = new LinkedHashMap<>();
         Map<String, Folder> looked = new LinkedHashMap<>();
         List<Open> open = new ArrayList<>();
         List<Named> endedGone = new ArrayList<>();
+        List<Named> inFlight = new ArrayList<>();
         int started = 0;
         int ended = 0;
         for (LedgerRuns.Run run : named.runs()) {
             String id = run.runId();
             known.put(id, run);
             StartEntry start = run.start() == null ? null : StartEntry.parse(run.start()).orElse(null);
-            String entries = entries(run, start);
-            if (entries != null) {
-                problems.putIfAbsent(id, new Problem(id, entries.startsWith("a commit") ? "entry-removed"
-                        : "entry-invalid", entries));
+            run.changes().forEach(change -> problems.add(id, "entry-changed", change));
+            String startProblem = startEntry(run, start);
+            if (startProblem != null) {
+                problems.add(id, startProblem.startsWith("a commit") ? "entry-removed" : "entry-invalid", startProblem);
+            }
+            String endProblem = endEntry(run, start);
+            if (endProblem != null) {
+                problems.add(id, endProblem.startsWith("a commit") ? "entry-removed" : "entry-invalid", endProblem);
             }
             boolean hasStarted = run.startNamed() || run.start() != null;
-            boolean hasEnded = run.endNamed() != null || run.end() != null;
+            // An end entry that is no manifest of the run, or does not agree with its commit or its start entry,
+            // does not end the run: it stays started and not ended, with what its folder says
+            boolean hasEnded = run.end() != null ? endProblem == null : run.endNamed() != null;
             started += hasStarted ? 1 : 0;
             ended += hasEnded ? 1 : 0;
-            Folder folder = folders.contains(id) ? look(store, id, start, run.end() != null) : null;
+            Folder folder = folders.contains(id) ? look(store, id, start, hasEnded ? run.end() : null, hasEnded)
+                    : null;
             if (folder != null) {
                 looked.put(id, folder);
             }
             if (hasStarted && !hasEnded) {
-                String state = folder == null ? GONE : folder.state();
                 open.add(new Open(id, start == null ? null : start.startedAt(),
-                        start == null ? null : start.workflowId(), state));
+                        start == null ? null : start.workflowId(), folder == null ? GONE : folder.state()));
                 if (folder == null) {
-                    problems.putIfAbsent(id, new Problem(id, "lost", "started, never ended, and the folder is gone"));
+                    problems.add(id, "lost", "started, never ended, and the folder is gone");
                 }
             } else if (hasEnded && folder == null) {
                 endedGone.add(new Named(id, run.endNamed() == null ? "-" : run.endNamed()));
@@ -201,76 +227,124 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         java.util.Collections.sort(ids);
         for (String id : ids) {
             LedgerRuns.Run run = known.get(id);
-            Folder folder = looked.containsKey(id) ? looked.get(id) : look(store, id, null, false);
+            Folder folder = looked.containsKey(id) ? looked.get(id) : look(store, id, null, null, false);
             boolean startHeld = run != null && run.start() != null;
             boolean endHeld = run != null && run.end() != null;
             if (folder.state().equals(UNREADABLE)) {
-                problems.putIfAbsent(id, new Problem(id, "unreadable", (run == null ? "a run folder the ledger does"
-                        + " not know" : "the folder of a run the ledger names") + " holds no record that can be read"
-                        + (folder.why() == null ? "" : " (" + folder.why() + ")")));
+                if (folder.alive() && folder.empty()) {
+                    inFlight.add(new Named(id, "its record has no line yet"));
+                } else {
+                    problems.add(id, "unreadable", (run == null ? "a run folder the ledger does not know"
+                            : "the folder of a run the ledger names") + " holds no record that can be read"
+                            + (folder.why() == null ? "" : " (" + folder.why() + ")"));
+                }
                 continue;
             }
             if (folder.state().equals(OTHER_RECORD)) {
-                problems.putIfAbsent(id, new Problem(id, "other-record", "the record in the folder is not the one the"
-                        + " ledger saw start: its run.started line is " + folder.runStarted()));
+                problems.add(id, "other-record", "the record in the folder is not the one the ledger saw start: its"
+                        + " run.started line is " + folder.runStarted());
                 continue;
             }
-            if (folder.ledgerStart() && !startHeld) {
-                problems.putIfAbsent(id, new Problem(id, "no-start-entry", "the record says the ledger noted the start"
-                        + " (" + folder.state() + "), and the ledger holds no start entry of the run"));
+            if (folder.manifestDiffers()) {
+                problems.add(id, "manifest-differs", "the manifest in the run folder is not the end entry of the"
+                        + " ledger, which is a copy of it (traceworks verify " + id + " says which one the record"
+                        + " gives)");
+            }
+            // The ledger was read before the folder: an entry may have come since, so it is asked again
+            if (folder.ledgerStart() && !startHeld && !holdsNow(() -> ledger.findStart(id))) {
+                if (run != null && run.startNamed()) {
+                    // a commit names the start: the missing entry is reported from the ledger's side already
+                } else if (folder.alive()) {
+                    inFlight.add(new Named(id, "its start entry is not written yet"));
+                } else {
+                    problems.add(id, "no-start-entry", "the record says the ledger noted the start ("
+                            + folder.state() + "), and the ledger holds no start entry of the run");
+                }
             } else if (!folder.ledgerStart() && !startHeld) {
                 earlier++;
                 if (!folder.isFinal()) {
                     earlierOpen.add(new Named(id, folder.state()));
                 }
             }
-            if (folder.isFinal() && !endHeld) {
-                problems.putIfAbsent(id, new Problem(id, "no-end-entry", "the record ended " + folder.state()
-                        + ", and the ledger holds no end entry of the run (traceworks resume " + id + " writes it)"));
+            if (folder.isFinal() && !endHeld && !holdsNow(() -> ledger.find(id))) {
+                if (folder.alive()) {
+                    inFlight.add(new Named(id, "its end entry is not written yet"));
+                } else {
+                    problems.add(id, "no-end-entry", "the record ended " + folder.state() + ", and the ledger holds"
+                            + " no end entry of the run (traceworks resume " + id + " writes it)");
+                }
             }
         }
 
+        // An acknowledgement covers a problem by what the check said of it then: its kind and its sentence
         List<Acknowledged> acknowledged = new ArrayList<>();
         for (LedgerRuns.Run run : named.runs()) {
-            JsonNode last = lastAck(run.acks());
             if (run.acks() == null) {
                 continue;
             }
             String id = run.runId();
-            Problem now = problems.get(id);
-            String code = last == null ? null : last.path("problem").asText(null);
-            boolean covers = now != null && now.code().equals(code);
-            if (covers) {
-                problems.remove(id);
-            } else if (now != null) {
-                problems.put(id, new Problem(id, now.code(), now.text() + " (acknowledged for another reason: "
-                        + code + ")"));
+            for (String text : new String(run.acks(), StandardCharsets.UTF_8).strip().split("\n")) {
+                JsonNode line;
+                try {
+                    line = JSON.readTree(text);
+                } catch (IOException e) {
+                    line = null;
+                }
+                if (line == null || !line.isObject()) {
+                    acknowledged.add(new Acknowledged(id, null, null, "(the acknowledgement cannot be read)", null,
+                            null, false));
+                    continue;
+                }
+                for (JsonNode problem : line.path("problems")) {
+                    String code = problem.path("problem").asText(null);
+                    String said = problem.path("said").asText(null);
+                    boolean covers = problems.found.remove(id + "\n" + code + "\n" + said) != null;
+                    acknowledged.add(new Acknowledged(id, line.path("actor").asText(null),
+                            line.path("at").asText(null), line.path("note").asText(""), code, said, covers));
+                }
             }
-            acknowledged.add(new Acknowledged(id, last == null ? null : last.path("actor").asText(null),
-                    last == null ? null : last.path("at").asText(null),
-                    last == null ? "(the acknowledgement cannot be read)" : last.path("note").asText(""),
-                    code, last == null ? null : last.path("said").asText(null), covers));
         }
         return new LedgerReport(started, ended, earlier, open, endedGone, earlierOpen,
-                List.copyOf(problems.values()), acknowledged);
+                List.copyOf(problems.found.values()), acknowledged, inFlight);
+    }
+
+    /** Whether the ledger holds the entry now; a ledger that cannot say counts as not holding it. */
+    private static boolean holdsNow(java.util.function.Supplier<java.util.Optional<byte[]>> entry) {
+        try {
+            return entry.get().isPresent();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /**
-     * What is wrong with the entries of a run as the ledger holds them, without its folder; {@code null} for nothing.
-     * A message of a commit must have its entry; a start entry must be this run's; an end entry must be a manifest
-     * of this run with the status its commit says, and name the {@code run.started} line its start entry names.
+     * What is wrong with the start entry of a run as the ledger holds it; {@code null} for nothing. A message of a
+     * commit must have its entry, and the entry must be this run's. An entry that a later commit removed is named
+     * by that commit ({@link LedgerRuns.Run#changes}), not here again.
      */
-    private static String entries(LedgerRuns.Run run, StartEntry start) {
-        String id = run.runId();
-        if (run.startNamed() && run.start() == null) {
+    private static String startEntry(LedgerRuns.Run run, StartEntry start) {
+        String path = "starts/" + run.runId() + ".json";
+        if (run.startNamed() && run.start() == null && run.changes().stream().noneMatch(c -> c.contains(path))) {
             return "a commit says the run started, and the ledger holds no start entry of it: a later commit removed"
                     + " it, or the commit added none";
         }
-        if (run.start() != null && (start == null || !id.equals(start.runId()))) {
+        if (run.start() != null && (start == null || !run.runId().equals(start.runId()))) {
             return "the start entry cannot be read, or is not this run's";
         }
+        return null;
+    }
+
+    /**
+     * What is wrong with the end entry of a run as the ledger holds it, without its folder; {@code null} for
+     * nothing. A message of a commit must have its entry; the entry must be a manifest of this run with the status
+     * its commit says, and name the {@code run.started} line its start entry names.
+     */
+    private static String endEntry(LedgerRuns.Run run, StartEntry start) {
+        String id = run.runId();
+        String path = "runs/" + id + ".json";
         if (run.endNamed() != null && run.end() == null) {
-            return "a commit says the run ended " + run.endNamed() + ", and the ledger holds no end entry of it: a"
+            return run.changes().stream().anyMatch(c -> c.contains(path)) ? null
+                    : "a commit says the run ended " + run.endNamed() + ", and the ledger holds no end entry of it: a"
                     + " later commit removed it, or the commit added none";
         }
         if (run.end() == null) {
@@ -297,59 +371,60 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         return null;
     }
 
-    /** The last acknowledgement of a run; {@code null} for none, or one that cannot be read. */
-    private static JsonNode lastAck(byte[] acks) {
-        if (acks == null) {
-            return null;
-        }
-        String[] lines = new String(acks, StandardCharsets.UTF_8).strip().split("\n");
-        try {
-            JsonNode last = JSON.readTree(lines[lines.length - 1]);
-            return last != null && last.isObject() ? last : null;
-        } catch (IOException e) {
-            return null;
-        }
-    }
-
     /**
      * What a run folder says.
      *
-     * @param state       the run's status, {@value #UNREADABLE} or {@value #OTHER_RECORD}
-     * @param why         why the record cannot be read; {@code null} otherwise
-     * @param ledgerStart whether {@code run.started} says the ledger noted the start
-     * @param runStarted  the SHA-256 of the first line; {@code null} when there is none
+     * @param state           the run's status, {@code ENDED} for a run the ledger saw end, {@value #UNREADABLE} or
+     *                        {@value #OTHER_RECORD}
+     * @param why             why the record cannot be read; {@code null} otherwise
+     * @param ledgerStart     whether {@code run.started} says the ledger noted the start
+     * @param runStarted      the SHA-256 of the first line; {@code null} when there is none
+     * @param alive           whether a process holds the run's writer lock now: it may be about to write an entry
+     * @param empty           whether the record has no line at all
+     * @param manifestDiffers whether the ledger holds an end entry and the folder's manifest is not that entry
      */
-    private record Folder(String state, String why, boolean ledgerStart, String runStarted, boolean isFinal) {
+    private record Folder(String state, String why, boolean ledgerStart, String runStarted, boolean isFinal,
+                          boolean alive, boolean empty, boolean manifestDiffers) {
     }
 
     /**
      * Reads a run folder: the first line must be the {@code run.started} of the run the folder is named after, and,
-     * when the ledger holds a start entry, the line that entry names. The whole record is read for its status only
-     * when the ledger holds no end entry of the run: a run with one has ended, and {@code traceworks verify <run>}
-     * is what compares its record with the entry.
+     * when the ledger holds a start entry, the line that entry names. Of a run the ledger saw end only the first
+     * line is read, and its manifest, which must be the end entry byte for byte; the whole record is read for its
+     * status only of a run without an end entry. {@code traceworks verify <run>} is what checks a record in full.
+     *
+     * @param end the end entry the ledger holds; {@code null} for none
      */
-    private static Folder look(RunStore store, String id, StartEntry start, boolean ended) {
+    private static Folder look(RunStore store, String id, StartEntry start, byte[] end, boolean ended) {
         try (StoredRun run = store.open(id)) {
-            List<byte[]> lines = run.events().readAll();
-            if (lines.isEmpty()) {
-                return new Folder(UNREADABLE, "it has no event", false, null, false);
+            boolean alive = run.writerAlive();
+            byte[] line = ended ? run.events().first().orElse(null) : null;
+            List<byte[]> lines = ended ? null : run.events().readAll();
+            if (!ended && !lines.isEmpty()) {
+                line = lines.getFirst();
             }
-            RecordedEvent first = RecordedEvent.parse(lines.getFirst());
+            if (line == null) {
+                return new Folder(UNREADABLE, "it has no event", false, null, false, alive, true, false);
+            }
+            RecordedEvent first = RecordedEvent.parse(line);
             if (!RecordTypes.RUN_STARTED.equals(first.type()) || first.parent() != null || !id.equals(first.run())) {
-                return new Folder(UNREADABLE, "its first line is no run.started of this run", false, null, false);
+                return new Folder(UNREADABLE, "its first line is no run.started of this run", false, null, false,
+                        alive, false, false);
             }
-            String hash = EventChain.sha256Hex(lines.getFirst());
+            String hash = EventChain.sha256Hex(line);
             boolean ledgerStart = first.fields().path("ledger_start").asBoolean(false);
             if (start != null && id.equals(start.runId()) && !hash.equals(start.runStarted())) {
-                return new Folder(OTHER_RECORD, null, ledgerStart, hash, false);
+                return new Folder(OTHER_RECORD, null, ledgerStart, hash, false, alive, false, false);
             }
             if (ended) {
-                return new Folder("ENDED", null, ledgerStart, hash, true);
+                boolean differs = end != null
+                        && !run.readManifest().map(manifest -> java.util.Arrays.equals(manifest, end)).orElse(false);
+                return new Folder("ENDED", null, ledgerStart, hash, true, alive, false, differs);
             }
-            var status = RunRecords.view(id, RunRecords.parse(id, lines), run.writerAlive()).status();
-            return new Folder(status.name(), null, ledgerStart, hash, RunRecords.isFinal(status));
+            var status = RunRecords.view(id, RunRecords.parse(id, lines), alive).status();
+            return new Folder(status.name(), null, ledgerStart, hash, RunRecords.isFinal(status), alive, false, false);
         } catch (RuntimeException e) {
-            return new Folder(UNREADABLE, e.getMessage(), false, null, false);
+            return new Folder(UNREADABLE, e.getMessage(), false, null, false, false, false, false);
         }
     }
 }
