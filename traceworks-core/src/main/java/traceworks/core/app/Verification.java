@@ -247,6 +247,11 @@ final class Verification {
             return false;
         }
         Manifest expected = Manifest.of(view, blobs, written.path("traceworks_version").textValue());
+        if (!written.has("run_started") && !view.ledgerStart()) {
+            // A manifest of a version that did not name the run.started line. A run whose start the ledger noted
+            // was finished by a version that names it, so its manifest must
+            expected = expected.withoutRunStarted();
+        }
         if (Manifest.metadataDeleted(view, blobs)) {
             List<String> models = new ArrayList<>();
             for (JsonNode model : written.path("models")) {

@@ -50,6 +50,8 @@ import java.util.Map;
  * @param ledgerStart     whether {@code run.started} says that the ledger noted the start of the run
  *                        ({@code ledger_start}); not for a record of a version that noted no start, and not for a
  *                        child run, which has no entry of its own
+ * @param runStarted      the SHA-256 of the {@code run.started} line, which the start entry of the ledger and the
+ *                        manifest name; {@code null} for a child run
  */
 public record RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                       String packageCommit, Boolean packageDirty,
@@ -59,7 +61,8 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
-                      List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart) {
+                      List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                      String runStarted) {
 
     /** A view of a run whose record does not say that the ledger noted its start. */
     public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
@@ -74,7 +77,7 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
         this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
                 execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
                 lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
-                aiHosts, parkedBy, seal, modelChoices, register, false);
+                aiHosts, parkedBy, seal, modelChoices, register, false, null);
     }
 
     /** One line about the start entry: whether the record says the ledger noted the start of the run. */
