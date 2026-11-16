@@ -1,0 +1,35 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a71",
+  "name": "IT combo-model-choice child",
+  "description": "One simple AI step that refers to a model choice: the inputs of the run that started first pick the option.",
+  "requires": [
+    "ai.model_choice"
+  ],
+  "model_choices": {
+    "judge": {
+      "default": "fable",
+      "options": {
+        "fable": {
+          "provider": "CLAUDE",
+          "model": "claude-fable-5-2"
+        },
+        "astra": {
+          "provider": "PI",
+          "model": "openai/gpt-6-astra"
+        }
+      }
+    }
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "verdict",
+      "config": {
+        "command": "Judge this",
+        "model_choice": "judge"
+      }
+    }
+  ]
+}

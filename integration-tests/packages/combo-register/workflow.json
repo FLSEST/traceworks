@@ -1,0 +1,63 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a80",
+  "name": "IT combo-register",
+  "description": "An audit without any AI whose loop and whose child workflow read the register folder of the run: each says what the register knew of the files of the workspace. A loop item and a child try to write the folder and must fail. Every file of the workspace is a finding.",
+  "metadata": {
+    "audit": {
+      "enabled": true,
+      "key": "combo-register",
+      "category": "test",
+      "report_block": "report"
+    }
+  },
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "per_file",
+      "config": {
+        "execution_mode": "shell",
+        "items": [
+          "a.txt",
+          "b.txt"
+        ],
+        "command": "echo \"known: $(grep -c '\"subject\":\"{{ item }}\"' \"{{ register_dir }}/findings.jsonl\")\""
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "child_reads",
+      "config": {
+        "workflow_id": "./reads"
+      }
+    },
+    {
+      "type": "foreach",
+      "name": "loop_writes",
+      "config": {
+        "execution_mode": "shell",
+        "items": [
+          "probe-of-the-loop"
+        ],
+        "on_failure": "continue",
+        "command": "touch \"{{ register_dir }}/{{ item }}\""
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "child_writes",
+      "config": {
+        "workflow_id": "./writes",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "report",
+      "config": {
+        "command": "bash \"{{ package_dir }}/scripts/report.sh\" \"{{ project_path }}\""
+      }
+    }
+  ]
+}
