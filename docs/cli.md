@@ -2542,6 +2542,22 @@ categories (`LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`, `LC_TIME`, `LC_NUMERIC`, `LC_CO
 name), `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` and `TZ`, plus what the step sets itself. API keys and tokens
 stay out.
 
+**A process the command leaves behind.** A command on the host can end while something it started still writes to
+its output: a background job (`server &`), or a process substitution, which bash does not wait for
+(`exec > >(tee log)`). The step's output holds what such a process writes until it closes the output, for a bounded
+time: up to 5 seconds after a command that ended by itself, up to 2 seconds after one that Traceworks stopped (a
+timeout, an output beyond the limit). The step takes that much longer. A process that still holds the output then
+is not ended: the output is closed, so its next write fails (it gets SIGPIPE), and what it would have written is not
+in the record; the record does not say that it was cut. Let the command wait for what it starts (`wait`) when its
+output matters, and send the output of a server it leaves running to a file.
+
+Reading past the command's end rests on how the JDK handles the output of a process on Linux and macOS (tested with
+a JDK 21). On a JDK or a platform that handles it differently, the output ends with the command: what a process it
+left behind writes afterwards is lost. A test of Traceworks fails when that changes.
+
+In a container there is no such process: the container ends with its command, and everything the command started
+ends with it.
+
 ## Isolated workspace
 
 `traceworks run <package> --source <path|url> [--ref <ref>]` runs the package in a new checkout of a git repository,
