@@ -434,22 +434,68 @@ class QuotingRulesTest {
                 "command", "Judge {{ item }}")), shell("echo {{ step_0_output }}"))).hasSize(1);
     }
 
-    /** A wrapper draws further step indices, so after one step_N_output cannot be told from the block list. */
+    /**
+     * A wrapper draws further step indices, so after one the block list does not tell which step step_N_output is.
+     * In a workflow that asks a model before the block it may be what the model wrote: the same error. Before the
+     * first AI step, and in a workflow without one, it is not.
+     */
     @Test
-    void should_notGuessAStepIndex_afterAWrapper() {
-        assertThat(unquotedAi(named("foreach", "lint", Map.of("execution_mode", "shell", "items", List.of("a"),
-                "command", "lint")), REVIEW, shell("echo {{ step_1_output }}"))).isEmpty();
+    void should_reportAStepIndexAfterAWrapper_whenAModelIsAskedBeforeTheBlock() {
+        BlockDefinition lint = named("foreach", "lint", Map.of("execution_mode", "shell", "items", List.of("a"),
+                "command", "lint"));
+        assertThat(unquotedAi(lint, REVIEW, shell("echo {{ step_1_output }}"))).singleElement().satisfies(f -> {
+            assertThat(f.severity()).isEqualTo(Severity.ERROR);
+            assertThat(f.detail()).startsWith("puts {{ step_1_output }} into shell code without"
+                    + " shell_escape_variables, an output whose step the workflow does not tell, in a run that asks a"
+                    + " model before it (the AI step review), so it may hold what the model wrote — ");
+        });
+        assertThat(rule("quoted-placeholder", apply(lint, REVIEW, shell("echo \"{{ step_4_output }}\""))))
+                .singleElement().satisfies(f -> assertThat(f.severity()).isEqualTo(Severity.ERROR));
+        assertThat(unquotedAi(lint, shell("echo {{ step_1_output }}"), REVIEW)).as("before the AI step").isEmpty();
+        assertThat(unquotedAi(lint, shell("echo {{ step_1_output }}"))).as("no AI step").isEmpty();
     }
 
-    /** A shell text of a nested block counts too; its previous_output may be an inner block's, so only names do. */
+    /** A shell text of a nested block counts too; its previous_output may be an inner block's, an untold step. */
     @Test
-    void should_checkNestedShellTexts_byName() {
+    void should_checkNestedShellTexts_byName_andTheirPreviousOutput() {
         Map<String, Object> inner = Map.of("type", "shell", "name", "send", "config",
                 Map.of("command", "notify {{ block.review.output }} {{ previous_output }}"));
         BlockDefinition loop = named("foreach", "each", Map.of("execution_mode", "shell", "items", List.of("a"),
                 "blocks", List.of(inner)));
-        assertThat(unquotedAi(REVIEW, loop)).singleElement()
-                .satisfies(f -> assertThat(f.detail()).startsWith("puts {{ block.review.output }} into shell code"));
+        assertThat(unquotedAi(REVIEW, loop)).singleElement().satisfies(f -> assertThat(f.detail())
+                .startsWith("puts {{ block.review.output }}, {{ previous_output }} into shell code"));
+        assertThat(unquotedAi(loop, REVIEW)).as("before the AI step, previous_output is none of its answers")
+                .singleElement().satisfies(f -> assertThat(f.detail()).doesNotContain("previous_output"));
+    }
+
+    /**
+     * previous_output of a shell block nested after an AI block in the same switch case is that block's answer, and
+     * the output of a nested shell block that runs after a nested AI block may hold it: both are refused. A nested
+     * block written before the AI block of a switch is not; in a loop, where the blocks run again, it is.
+     */
+    @Test
+    void should_reportNestedBlocksAfterANestedAiBlock_inTheWrapperThatAsksFirst() {
+        Map<String, Object> probe = Map.of("type", "shell", "name", "probe", "config", Map.of("command", "ls"));
+        Map<String, Object> draft = Map.of("type", "simple", "name", "draft", "config", Map.of("command", "Draft"));
+        Map<String, Object> echo = Map.of("type", "shell", "name", "echo", "config",
+                Map.of("command", "echo \"{{ previous_output }}\""));
+        Map<String, Object> store = Map.of("type", "shell", "name", "store", "config", Map.of("command", "cat"));
+        BlockDefinition route = named("switch", "route", Map.of("expression", "x",
+                "cases", List.of(Map.of("value", "a", "blocks", List.of(probe, draft, echo, store)))));
+
+        assertThat(rule("quoted-placeholder", apply(route))).singleElement().satisfies(f -> {
+            assertThat(f.severity()).isEqualTo(Severity.ERROR);
+            assertThat(f.blockIndex()).isZero();
+        });
+        assertThat(unquotedAi(route, shell("echo {{ block.store.output }}"))).singleElement()
+                .satisfies(f -> assertThat(f.detail()).contains("the output of the step store, which runs after the"
+                        + " AI step route"));
+        assertThat(unquotedAi(route, shell("echo {{ block.probe.output }}"))).as("written before the AI block")
+                .isEmpty();
+
+        BlockDefinition loop = named("foreach", "each", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
+                "blocks", List.of(probe, draft)));
+        assertThat(unquotedAi(loop, shell("echo {{ block.probe.output }}"))).as("a loop runs probe again").hasSize(1);
     }
 
     @Test

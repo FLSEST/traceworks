@@ -505,6 +505,7 @@ public class ExecutionContext {
 
     /** Shell-safe: every value wrapped in POSIX single quotes (internal ones as '\''). See {@link TemplateResolver#resolveShellSafe}. */
     public String resolveTemplateShellSafe(String template) {
+        TemplateResolver.refuseQuotedValues(template, previousOutput, blockOutputs, variables, taint.snapshot());
         return TemplateResolver.resolveShellSafe(template, previousOutput, blockOutputs, variables,
                 taint::substitutedIntoShell);
     }
@@ -513,11 +514,17 @@ public class ExecutionContext {
      * Shell command line: with {@code escapeAll} every placeholder is single-quoted, otherwise only
      * untrusted variables, tainted block outputs and what may hold text a model wrote are. Substituted platform data taints the run from
      * here on ({@link ExecutionContextTaint#substitutedIntoShell}). See {@link TemplateResolver#resolveShell}.
+     *
+     * @throws ShellLineRefusedException when a value the run quotes stands where its quotes do not hold (inside the
+     *                                   author's quotes, a heredoc body and so on); nothing is filled in then, with
+     *                                   {@code escapeAll} too
      */
     public String resolveShellTemplate(String template, boolean escapeAll) {
         if (escapeAll) return resolveTemplateShellSafe(template);
+        TemplateResolver.Taint quoted = taint.snapshot();
+        TemplateResolver.refuseQuotedValues(template, previousOutput, blockOutputs, variables, quoted);
         return TemplateResolver.resolveShell(template, previousOutput, blockOutputs, variables,
-                taint.snapshot(), taint::substitutedIntoShell);
+                quoted, taint::substitutedIntoShell);
     }
 
     /**

@@ -1,8 +1,9 @@
-package traceworks.core.analyzer;
+package traceworks.core.context;
 
-import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
-import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
-import traceworks.core.analyzer.ShellQuoteScanner.Quote;
+import traceworks.core.context.ShellQuoteScanner.Context;
+import traceworks.core.context.ShellQuoteScanner.Heredoc;
+import traceworks.core.context.ShellQuoteScanner.Placeholder;
+import traceworks.core.context.ShellQuoteScanner.Quote;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -10,6 +11,53 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ShellQuoteScannerTest {
+
+    private static List<Context> contexts(String code) {
+        return ShellQuoteScanner.occurrences(code).stream().map(ShellQuoteScanner.Occurrence::context).toList();
+    }
+
+    /** Every placeholder of the text has a place, those in comments and heredoc bodies too, in the text's order. */
+    @Test
+    void occurrences_tellEveryPlace() {
+        assertThat(contexts("echo {{ a }} \"{{ b }}\" '{{ c }}' `echo {{ d }}` $(( {{ e }} )) # {{ f }}\n"
+                + "cat <<'EOF'\n{{ g }}\nEOF\necho \\{{ h }} \"$(printf '%s' {{ i }})\" x{{ j }}y"))
+                .containsExactly(Context.BARE, Context.DOUBLE_QUOTES, Context.SINGLE_QUOTES, Context.BACKTICKS,
+                        Context.ARITHMETIC, Context.COMMENT, Context.HEREDOC, Context.UNREAD, Context.BARE,
+                        Context.BARE);
+        assertThat(ShellQuoteScanner.occurrences("echo {{ a }} {{b}}"))
+                .containsExactly(new ShellQuoteScanner.Occurrence("a", 5, Context.BARE),
+                        new ShellQuoteScanner.Occurrence("b", 13, Context.BARE));
+        assertThat(ShellQuoteScanner.occurrences(null)).isEmpty();
+    }
+
+    /** In {@code $'…'} a backslash escapes the quote, so the string goes on past it. */
+    @Test
+    void occurrences_readAnsiQuotesWithTheirBackslash() {
+        assertThat(contexts("echo $'it\\'s {{ a }}' {{ b }}"))
+                .containsExactly(Context.SINGLE_QUOTES, Context.BARE);
+        assertThat(contexts("echo $'\\'' x '{{ a }}'")).containsExactly(Context.SINGLE_QUOTES);
+        assertThat(contexts("echo 'a\\' {{ a }}")).as("plain single quotes know no backslash")
+                .containsExactly(Context.BARE);
+    }
+
+    /** The {@code )} of a case pattern closes no {@code $(}; {@code case} as an argument is a plain word. */
+    @Test
+    void occurrences_readACaseInsideASubstitution_andCaseAsAWord() {
+        assertThat(contexts("X=\"$(case $1 in a) echo \"{{ a }}\";; *) echo {{ b }};; esac)\"; echo {{ c }}"))
+                .containsExactly(Context.DOUBLE_QUOTES, Context.BARE, Context.BARE);
+        assertThat(contexts("if true; then case x in x) echo '{{ a }}';; esac; fi; echo \"$(echo esac) {{ b }}\""))
+                .containsExactly(Context.SINGLE_QUOTES, Context.DOUBLE_QUOTES);
+        assertThat(contexts("echo \"$(echo case) {{ a }}\"")).containsExactly(Context.DOUBLE_QUOTES);
+    }
+
+    /** A text left with something open was not understood: nothing in it is bare. */
+    @Test
+    void occurrences_ofATextWithAnOpenQuoteOrBracket_areNeverBare() {
+        assertThat(contexts("echo {{ a }} \"open")).containsExactly(Context.UNREAD);
+        assertThat(contexts("echo {{ a }} $(open")).containsExactly(Context.UNREAD);
+        assertThat(contexts("echo {{ a }} `open")).containsExactly(Context.UNREAD);
+        assertThat(contexts("echo {{ a }} '{{ b }}")).containsExactly(Context.UNREAD, Context.SINGLE_QUOTES);
+    }
 
     private static List<Placeholder> scan(String code) {
         return ShellQuoteScanner.scan(code);

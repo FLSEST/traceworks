@@ -118,14 +118,44 @@ final class TemplateResolver {
      */
     static boolean namesEscapedValue(String template, Taint taint) {
         for (String key : PlaceholderSyntax.keysIn(template)) {
-            if (taint.variables().contains(key)) return true;
-            if ("previous_output".equals(key) && taint.previousOutput()) return true;
-            if (key.startsWith("block.") && key.endsWith(".output")
-                    && taint.outputs().contains(key.substring("block.".length(), key.length() - ".output".length()))) {
-                return true;
-            }
+            if (names(key, taint)) return true;
         }
         return false;
+    }
+
+    /** Whether the placeholder key names a value of {@code taint}. */
+    private static boolean names(String key, Taint taint) {
+        if (taint.variables().contains(key)) return true;
+        if ("previous_output".equals(key)) return taint.previousOutput();
+        return key.startsWith("block.") && key.endsWith(".output")
+                && taint.outputs().contains(key.substring("block.".length(), key.length() - ".output".length()));
+    }
+
+    /**
+     * Refuses a shell line in which a value of {@code taint} stands where quoting it does not make it one literal
+     * argument. The run single-quotes such a value; that holds for a bare word only. Inside the author's double
+     * quotes a {@code $(…)} in the value still runs, inside single quotes the two pairs cancel out, inside backticks
+     * and arithmetic the shell expands the text again, in a heredoc body a line of the value can end the body, and in
+     * a comment a line break of the value ends the comment. {@link ShellQuoteScanner} tells the places, the same
+     * reader the analyzer uses. A placeholder that names nothing stays literal and is no reason, and a run without
+     * such values is not looked at: it resolves as it always did.
+     *
+     * @throws ShellLineRefusedException naming every such placeholder and its place
+     */
+    static void refuseQuotedValues(String template, String previousOutput, Map<String, String> blockOutputs,
+                                   Map<String, Object> vars, Taint taint) {
+        if (template == null || taint.isEmpty()) return;
+        Set<String> places = new java.util.LinkedHashSet<>();
+        String first = null;
+        for (ShellQuoteScanner.Occurrence occurrence : ShellQuoteScanner.occurrences(template)) {
+            if (occurrence.context() == ShellQuoteScanner.Context.BARE) continue;
+            String key = occurrence.key();
+            if (!names(key, taint) || lookup(key, previousOutput, blockOutputs, vars) == null) continue;
+            String shown = "{{ " + key + " }}";
+            if (first == null) first = shown;
+            places.add(shown + " stands " + occurrence.context().words());
+        }
+        if (!places.isEmpty()) throw new ShellLineRefusedException(places, first);
     }
 
     /** {@code value} quoted for the shell ({@link ShellQuoting#quote}), the form the record's redactor knows too. */

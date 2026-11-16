@@ -1,9 +1,10 @@
 package traceworks.core.analyzer;
 
 import traceworks.core.analyzer.AnalyzerFinding.Severity;
-import traceworks.core.analyzer.ShellQuoteScanner.Heredoc;
-import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
-import traceworks.core.analyzer.ShellQuoteScanner.Quote;
+import traceworks.core.context.ShellQuoteScanner;
+import traceworks.core.context.ShellQuoteScanner.Heredoc;
+import traceworks.core.context.ShellQuoteScanner.Placeholder;
+import traceworks.core.context.ShellQuoteScanner.Quote;
 import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.engine.NestedBlocks;
 import traceworks.core.engine.StepModes;
@@ -55,8 +56,12 @@ import java.util.regex.Pattern;
  * the analyzer can find the child), and the output of every block after the first of them, because the run quotes
  * those too: a later step can print what the model wrote without naming it. The block is found through
  * {@code block.<name>.output}, {@code previous_output} in the block's own fields, and {@code step_N_output} while no
- * wrapper before it draws further step indices. What the list does not tell (a loop item, a variable, a child whose
- * reference is a placeholder) the run quotes all the same.
+ * wrapper before it draws further step indices. A {@code step_N_output} after such a wrapper, and a
+ * {@code previous_output} in a nested block, name an output whose step the list does not tell: they count as what a
+ * model wrote when the workflow asks a model before the block. What the list does not tell at all (a loop item, a
+ * variable, a child whose reference is a placeholder, the values a parent hands to a child) the run decides: it
+ * quotes such a value where it stands bare and refuses the shell line where it does not
+ * ({@code ShellLineRefusedException}).
  *
  * <p>The TODO and goal variables ({@code todo_title}, {@code open_todos}, {@code goal_status}, ...) are no outside
  * text: Traceworks does not provide them. A run input of the same name is used as is (never
@@ -145,8 +150,18 @@ final class QuotingRules {
                         + " file, write printf '%s\\n' " + placeholders.iterator().next() + " | tool, or > file"));
     }
 
-    /** A block a placeholder stands for, and the position of the top-level block it is, or is nested in. */
-    private record Source(BlockDefinition block, int position) {}
+    /**
+     * A block a placeholder stands for, and the position of the top-level block it is, or is nested in.
+     *
+     * @param afterNestedModel for a nested block: whether a block nested in the same top-level block may ask a model
+     *                         before it runs, one written before it in a {@code switch}, any one in a loop
+     */
+    private record Source(BlockDefinition block, int position, boolean afterNestedModel) {
+
+        Source(BlockDefinition block, int position) {
+            this(block, position, false);
+        }
+    }
 
     /**
      * The blocks of a workflow that ask a model, as far as the definition tells, and with them what a run quotes as
@@ -171,18 +186,29 @@ final class QuotingRules {
         String sourceOf(int i, String name, boolean own) {
             if (first < 0) return null;
             Source source = null;
+            // Whether the name is an output whose step the block list does not tell
+            boolean untold = false;
             Matcher byName = BLOCK_OUTPUT.matcher(name);
             Matcher byIndex = STEP_OUTPUT.matcher(name);
             if (byName.matches()) {
-                source = named(blocks, byName.group(1));
+                source = named(blocks, children, byName.group(1));
             } else if ("previous_output".equals(name)) {
                 source = own && i > 0 && blocks.get(i - 1) != null ? new Source(blocks.get(i - 1), i - 1) : null;
+                untold = !own;   // in a nested block it may be the output of the step nested before it
             } else if (byIndex.matches()) {
-                source = atStepIndex(blocks, Integer.parseInt(byIndex.group(1)), i);
+                int index = Integer.parseInt(byIndex.group(1));
+                source = atStepIndex(blocks, index, i);
+                untold = source == null && drawnBefore(blocks, Math.min(index, own ? i : i + 1));
             }
-            if (source == null) return null;
+            if (source == null) {
+                // The run quotes it when it was recorded after a model was asked: possible from the first AI step on
+                boolean afterModel = first < i || (first == i && !own);
+                return untold && afterModel ? "an output whose step the workflow does not tell, in a run that asks"
+                        + " a model before it (the AI step " + label(blocks.get(first)) + "), so it may hold what the"
+                        + " model wrote" : null;
+            }
             if (asksModel(source.block(), children)) return "the output of the AI step " + label(source.block());
-            if (source.position() > first) {
+            if (source.position() > first || source.afterNestedModel()) {
                 return "the output of the step " + label(source.block()) + ", which runs after the AI step "
                         + label(blocks.get(first)) + " and may hold what the model wrote";
             }
@@ -195,7 +221,7 @@ final class QuotingRules {
     }
 
     /** The block of that name: a top-level one first, else a nested one. */
-    private static Source named(List<BlockDefinition> blocks, String name) {
+    private static Source named(List<BlockDefinition> blocks, WorkflowResolver children, String name) {
         for (int j = 0; j < blocks.size(); j++) {
             if (blocks.get(j) != null && name.equals(blocks.get(j).getName())) return new Source(blocks.get(j), j);
         }
@@ -203,14 +229,25 @@ final class QuotingRules {
         for (int j = 0; j < blocks.size(); j++) {
             if (blocks.get(j) == null) continue;
             int position = j;
+            // A switch runs its nested blocks once, in the order written; any other wrapper may run them again
+            boolean inOrder = "switch".equals(blocks.get(j).getType());
+            boolean[] modelBefore = {!inOrder && asksModel(blocks.get(j), children)};
             NestedBlocks.visit(blocks.get(j).getConfig(), inner -> {
-                if (name.equals(inner.name())) {
-                    nested.add(new Source(BlockDefinition.builder().type(inner.type()).name(inner.name())
-                            .config(inner.config() != null ? inner.config() : Map.of()).build(), position));
-                }
+                BlockDefinition block = BlockDefinition.builder().type(inner.type()).name(inner.name())
+                        .config(inner.config() != null ? inner.config() : Map.of()).build();
+                if (name.equals(inner.name())) nested.add(new Source(block, position, modelBefore[0]));
+                if (inner.type() != null && asksModel(block, children)) modelBefore[0] = true;
             });
         }
         return nested.isEmpty() ? null : nested.getFirst();
+    }
+
+    /** Whether a block before position {@code end} draws further step indices, so the numbers after it are not known. */
+    private static boolean drawnBefore(List<BlockDefinition> blocks, int end) {
+        for (int j = 0; j < Math.min(end, blocks.size()); j++) {
+            if (blocks.get(j) == null || INDEX_DRAWING.contains(blocks.get(j).getType())) return true;
+        }
+        return false;
     }
 
     /** The block at position {@code index}, before {@code i}, while no block before it draws further indices. */
