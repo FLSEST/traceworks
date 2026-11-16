@@ -22,7 +22,9 @@ jq --slurpfile known "$register/findings.jsonl" '
     | from_entries ) as $decided
   # The reason of a rating is the first line of the description, "Rating: ...". A finding without that line that an
   # earlier version of this audit wrote may hold the reason at the end of its evidence, as ". Rated: ...".
-  | ( [ $known[] | {key: .subject, value: {severity, why: (
+  # An accepted or dismissed finding stays in findings.jsonl for a while after a report left it out (absent_reports
+  # counts those reports): the method was rated low then, so that finding is no rating of now.
+  | ( [ $known[] | select((.absent_reports // 0) == 0) | {key: .subject, value: {severity, why: (
           (.description // "" | capture("^Rating: (?<why>[^\n]*)").why)
           // (.evidence // "" | capture("\\. Rated: (?<why>.*)$").why) // "")}} ]
       | from_entries ) as $before

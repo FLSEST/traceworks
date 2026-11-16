@@ -182,6 +182,50 @@ class TestingAuditScriptsIT extends IntegrationTest {
     }
 
     /**
+     * A method a person dismissed and a later rating lowers to low leaves the findings of the report. The register
+     * keeps the dismissed finding for a while, counted as absent: the next run does not take it for a rating, so the
+     * method stays low and is no finding.
+     */
+    @Test
+    void aDecidedMethodThatIsRatedLowLater_staysLowInTheNextRun() throws IOException {
+        Path dir = audit();
+        Files.writeString(dir.resolve("answers-none.txt"), "", StandardCharsets.UTF_8);
+        Files.writeString(dir.resolve("answers-low.txt"), "{\"ratings\":["
+                + "{\"method\":\"demo.Flow#step\",\"severity\":\"high\",\"why\":\"a wrong result\"},"
+                + "{\"method\":\"demo.Guard#check\",\"severity\":\"low\",\"why\":\"nothing breaks\"},"
+                + "{\"method\":\"demo.Flow#quiet\",\"severity\":\"low\",\"why\":\"nothing reads it\"}]}\n",
+                StandardCharsets.UTF_8);
+        assertThat(run(dir).out()).contains("RED (testing)");
+        decide("dismiss", "demo.Guard#check");
+
+        // The decision is part of what a rating sees, so the package is rated again, and the answer lowers the method
+        Result lowered = run(dir, "--input", "answers=low");
+
+        assertThat(lowered.code()).as(lowered.describe()).isZero();
+        assertThat(traceworks.folder(lowered).output("findings")).contains("FACT packages_to_rate: 1 of 1\n");
+        assertThat(traceworks.folder(lowered).output("report"))
+                .contains("1 methods are rated above low. A person decided on 0 of them; 1 are left to decide, 1 of "
+                        + "them high:")
+                .doesNotContain("\"subject\":\"demo.Guard#check\"");
+
+        Result next = run(dir, "--input", "answers=none");
+
+        // The register still holds the dismissed finding, absent from one report. The package is not rated again,
+        // and the method is still low and no finding
+        assertThat(next.code()).as(next.describe()).isZero();
+        assertThat(registerFile(next, "findings.jsonl")).content()
+                .contains("{\"absent_reports\":1,\"description\":\"Rating: a user sees the wrong page\\n");
+        assertThat(traceworks.folder(next).output("findings")).contains("FACT packages_to_rate: 0 of 1\n");
+        assertThat(traceworks.folder(next).output("report"))
+                .contains("A model rated 0 of them in this run, in 0 of 1 packages; the others keep their rating. 1 "
+                        + "methods are rated above low. A person decided on 0 of them; 1 are left to decide, 1 of them "
+                        + "high:\n\n- `demo.Flow#step`: a wrong result\n")
+                .doesNotContain("\"subject\":\"demo.Guard#check\"");
+        assertThat(next.out()).contains("RED (testing)")
+                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+    }
+
+    /**
      * A register that the version before this one wrote holds the reason of a rating at the end of the evidence
      * ({@code . Rated: ...}) and none in the description. The first run on it rates nothing again and keeps the
      * rating with its reason, now in the description. And a reason is a model's text: one with the end of an HTML
