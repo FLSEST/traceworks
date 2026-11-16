@@ -1,0 +1,118 @@
+Traceworks
+Copyright 2026 Florian Stampe
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License only (GPL-3.0-only).
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program, in the file LICENSE. If not, see <https://www.gnu.org/licenses/>.
+
+Other licensing terms may be available from the copyright holder.
+
+------------------------------------------------------------------------------
+
+Additional term under section 7(e) of the License
+
+The License does not grant permission to use the name "Traceworks" or its
+logo. Forks and derived works are welcome under the terms of the License, but
+should carry their own name.
+
+==============================================================================
+
+Third-party software
+
+This distribution includes Jackson:
+
+  jackson-databind     2.22.4
+  jackson-core         2.22.4
+  jackson-annotations  2.22
+
+Copyright FasterXML, LLC. Licensed under the Apache License 2.0. The text of
+that license is in the jar as META-INF/LICENSE, and at
+<https://www.apache.org/licenses/LICENSE-2.0>.
+
+jackson-core bundles code of two other projects under the MIT license. Its
+notice below names them, and the license files it refers to
+(FastDoubleParser-LICENSE, FastDoubleParser-ThirdParty-LICENSE and
+Schubfach-LICENSE) are in the jar under META-INF/.
+
+The NOTICE files of the three libraries follow, as they are in their jars.
+
+------------------------------------------------------------------------------
+NOTICE of jackson-databind 2.22.4 and of jackson-annotations 2.22 (the same
+text in both)
+------------------------------------------------------------------------------
+
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Copyright
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+## Licensing
+
+Jackson 2.x core and extension components are licensed under Apache License 2.0
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS(-2.x) file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+------------------------------------------------------------------------------
+NOTICE of jackson-core 2.22.4
+------------------------------------------------------------------------------
+
+# Jackson JSON processor
+
+Jackson is a high-performance, Free/Open Source JSON processing library.
+It was originally written by Tatu Saloranta (tatu.saloranta@iki.fi), and has
+been in development since 2007.
+It is currently developed by a community of developers.
+
+## Copyright
+
+Copyright 2007-, Tatu Saloranta (tatu.saloranta@iki.fi)
+
+## Licensing
+
+Jackson 2.x core and extension components are licensed under Apache License 2.0
+To find the details that apply to this artifact see the accompanying LICENSE file.
+
+## Credits
+
+A list of contributors may be found from CREDITS(-2.x) file, which is included
+in some artifacts (usually source distributions); but is always available
+from the source code management (SCM) system project uses.
+
+## FastDoubleParser
+
+jackson-core bundles a shaded copy of FastDoubleParser <https://github.com/wrandelshofer/FastDoubleParser>.
+That code is available under an MIT license <https://github.com/wrandelshofer/FastDoubleParser/blob/main/LICENSE>
+under the following copyright.
+
+Copyright © 2023 Werner Randelshofer, Switzerland. MIT License.
+
+See FastDoubleParser-LICENSE and also FastDoubleParser-ThirdParty-LICENSE for details of other source code
+included in FastDoubleParser and the licenses and copyrights that apply to that code.
+
+## Schubfach
+
+jackson-core bundles a copy of the Schubfach number writing code <https://github.com/c4f7fcce9cb06515/Schubfach>.
+That code is available under an MIT license <https://github.com/c4f7fcce9cb06515/Schubfach/blob/master/todec/LICENSE>
+under the following copyright.
+
+Copyright 2018-2020 Raffaello Giulietti
+
+See Schubfach-LICENSE.
