@@ -69,6 +69,8 @@ public final class InMemoryLedger implements Ledger {
     public synchronized LedgerRuns runs() {
         if (readFailure != null) throw readFailure;
         java.util.Set<String> ids = new java.util.TreeSet<>(startNamed);
+        ids.addAll(changes.keySet());
+        ids.addAll(unjudged.keySet());
         ids.addAll(starts.keySet());
         ids.addAll(manifests.keySet());
         ids.addAll(endNamed.keySet());
@@ -78,12 +80,30 @@ public final class InMemoryLedger implements Ledger {
             runs.add(new LedgerRuns.Run(id, startNamed.contains(id), starts.get(id), endNamed.get(id),
                     manifests.get(id), acks.containsKey(id)
                     ? acks.get(id).getBytes(java.nio.charset.StandardCharsets.UTF_8) : null,
-                    changes.getOrDefault(id, List.of())));
+                    changes.getOrDefault(id, List.of()), unjudged.getOrDefault(id, List.of())));
         }
-        return new LedgerRuns(runs);
+        return new LedgerRuns(runs, unjudged.values().stream().flatMap(List::stream).toList(), pins);
     }
 
     private final Map<String, List<String>> changes = new LinkedHashMap<>();
+    private final Map<String, List<String>> unjudged = new LinkedHashMap<>();
+    private final List<String> pins = new ArrayList<>();
+
+    @Override
+    public synchronized List<String> unjudged(String runId) {
+        return List.copyOf(unjudged.getOrDefault(runId, List.of()));
+    }
+
+    /** Says that no hash covers the end entry of {@code runId}, as for a run of a version that named none. */
+    public synchronized void endWithoutHash(String runId) {
+        unjudged.computeIfAbsent(runId, id -> new ArrayList<>()).add("runs/" + runId + ".json");
+    }
+
+    /** A problem of the anchors of the register {@code key}, as the git ledger words one. */
+    public synchronized void anchorProblem(String key, String sentence) {
+        changes.computeIfAbsent("registers." + key, id -> new ArrayList<>()).add(sentence);
+    }
+
 
     @Override
     public synchronized List<String> changes(String runId) {

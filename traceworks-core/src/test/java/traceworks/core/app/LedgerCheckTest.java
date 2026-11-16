@@ -228,12 +228,12 @@ class LedgerCheckTest {
         fx.run(starting).simulateOtherWriter(true);
         fx.run(ending).simulateOtherWriter(true);
 
-        LedgerReport soon = LedgerReport.of(fx.ledger, fx.store, later(fx, java.time.Duration.ofSeconds(90)));
+        LedgerReport soon = LedgerReport.of(fx.ledger, fx.store, later(fx, java.time.Duration.ofSeconds(90)), true);
         assertThat(soon.ok()).isTrue();
         assertThat(soon.inFlight()).extracting(LedgerReport.Named::detail).allSatisfy(detail ->
                 assertThat(detail).containsPattern("is not written yet \\(run\\.(started|finished) 9\\d s ago\\)"));
 
-        LedgerReport late = LedgerReport.of(fx.ledger, fx.store, later(fx, LedgerReport.IN_FLIGHT.plusSeconds(60)));
+        LedgerReport late = LedgerReport.of(fx.ledger, fx.store, later(fx, LedgerReport.IN_FLIGHT.plusSeconds(60)), true);
         assertThat(late.inFlight()).isEmpty();
         assertThat(codes(late)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
                 tuple(ending, "no-end-entry"));
@@ -347,6 +347,73 @@ class LedgerCheckTest {
                         "entry-changed", "manifest-differs", "lost", "other-record", "unreadable", "no-start-entry",
                         "no-end-entry");
         said.forEach((kind, sentences) -> assertThat(sentences[1]).as(kind).isNotEqualTo(sentences[0]));
+    }
+
+    /** The last line of the record of {@code id} with another status, the rest and the manifest left alone. */
+    private void forgeRecord(String id, String status) {
+        String last = new String(fx.events(id).getLast().raw(), StandardCharsets.UTF_8);
+        fx.run(id).log().replaceLast(last.replaceFirst("\"status\":\"[A-Z_]+\"", "\"status\":\"" + status + "\"")
+                .getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * A record rewritten while its manifest is left alone: the check of the home verifies the record of every ended
+     * run against its end entry, so it does not take the manifest's word. With --quick it reads the first line and
+     * the manifest only, and says so.
+     */
+    @Test
+    void aRecordForgedWhileItsManifestIsLeftAlone_failsTheCheckOfTheHome_unlessQuick() {
+        String id = finished();
+        assertThat(services.ledgerReport().ok()).isTrue();
+        assertThat(services.ledgerReport().records()).isTrue();
+
+        forgeRecord(id, "FAILED");
+
+        LedgerReport report = services.ledgerReport();
+        assertThat(codes(report)).containsExactly(tuple(id, "record-broken"));
+        String first = report.problems().getFirst().text();
+        assertThat(first).contains("is not the manifest the record gives", "traceworks verify " + id);
+        forgeRecord(id, "CANCELLED");
+        assertThat(services.ledgerReport().problems().getFirst().text()).as("another forgery, another sentence")
+                .isNotEqualTo(first);
+
+        LedgerReport quick = services.ledgerReport(false);
+        assertThat(quick.ok()).isTrue();
+        assertThat(quick.records()).isFalse();
+    }
+
+    /**
+     * An entry no hash covers is not judged, and the checks say so instead of a plain OK: the home's check names
+     * the paths, and the run's check says it on its ledger line. Neither fails: the next run pins the entry.
+     */
+    @Test
+    void anEntryNoHashCovers_isNamedAsNotJudged_byBothChecks() {
+        String id = finished();
+        fx.ledger.endWithoutHash(id);
+
+        LedgerReport home = services.ledgerReport();
+        assertThat(home.ok()).isTrue();
+        assertThat(home.unjudged()).containsExactly("runs/" + id + ".json");
+        VerifyReport run = services.verify(id);
+        assertThat(run.ok()).isTrue();
+        assertThat(run.ledgerReason()).startsWith("not judged: no hash covers runs/" + id + ".json");
+        assertThat(services.verify(finished()).ledgerReason()).isNull();
+    }
+
+    /** A problem of the anchors of a register is listed under registers.<key>, and acknowledged like one of a run. */
+    @Test
+    void aProblemOfTheAnchorsOfARegister_isListedAndAcknowledgedLikeOneOfARun() {
+        fx.ledger.anchorProblem("hello", "commit 4f1d2c3b4a59 (\"register hello seq 1\") names registers/hello.jsonl"
+                + " without a SHA-256");
+
+        LedgerReport report = services.ledgerReport();
+        assertThat(codes(report)).containsExactly(tuple("registers.hello", "entry-changed"));
+        assertThat(report.open()).isEmpty();
+
+        LedgerReport after = services.acknowledge("registers.hello", "one run of an older jar on 2026-11-16");
+        assertThat(after.ok()).isTrue();
+        assertThat(after.acknowledged()).singleElement().satisfies(ack ->
+                assertThat(ack.said()).contains("commit 4f1d2c3b4a59"));
     }
 
     /** A folder that was just created and has no line yet, with its process alive: in flight too. */

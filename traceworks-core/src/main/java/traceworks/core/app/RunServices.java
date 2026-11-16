@@ -315,7 +315,16 @@ public final class RunServices {
      * @throws RecordDamagedException if the ledger exists and cannot be read
      */
     public LedgerReport ledgerReport() {
-        return LedgerReport.of(ledger, store, clock);
+        return ledgerReport(true);
+    }
+
+    /**
+     * {@link #ledgerReport()}, with or without verifying the record of every ended run against its end entry.
+     *
+     * @param records whether to read and verify every record and every blob of the home
+     */
+    public LedgerReport ledgerReport(boolean records) {
+        return LedgerReport.of(ledger, store, clock, records);
     }
 
     /**

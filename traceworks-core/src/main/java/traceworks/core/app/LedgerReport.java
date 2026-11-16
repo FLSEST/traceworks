@@ -44,10 +44,16 @@ import java.util.Set;
  * @param inFlight     the runs whose process is alive and has not written an entry yet that its record calls for:
  *                     between {@code run.started} and the start entry (it waits for the ledger's lock), or between
  *                     {@code run.finished} and the end entry. No failure: the entry is on its way
+ * @param unjudged     the paths of the entries of the ledger that no hash covers: written by a version whose
+ *                     messages named none, and not pinned yet. Nothing is said of them, so a check that holds does
+ *                     not hold for them; the next run pins them
+ * @param pins         the pins of the ledger, oldest first, one sentence each
+ * @param records      whether the record of every ended run was verified against the end entry (its chain, its
+ *                     blobs and the manifest it gives); without, only its first line and its manifest were read
  */
 public record LedgerReport(int started, int ended, int earlier, List<Open> open, List<Named> endedGone,
                            List<Named> earlierOpen, List<Problem> problems, List<Acknowledged> acknowledged,
-                           List<Named> inFlight) {
+                           List<Named> inFlight, List<String> unjudged, List<String> pins, boolean records) {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -65,6 +71,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         problems = List.copyOf(problems);
         acknowledged = List.copyOf(acknowledged);
         inFlight = List.copyOf(inFlight);
+        unjudged = List.copyOf(unjudged);
+        pins = List.copyOf(pins);
     }
 
     /**
@@ -93,7 +101,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      *             (an entry that cannot be read, is not this run's, or an end entry that does not agree with its
      *             commit or its start entry), {@code entry-changed} (an entry is not what the commit that names it
      *             left: changed, removed, named twice or by no commit), {@code manifest-differs} (the manifest in
-     *             the run folder is not the end entry)
+     *             the run folder is not the end entry), {@code record-broken} (the record of an ended run does not
+     *             verify, or does not give the end entry)
      * @param text the sentence for a person. It holds what tells this problem from another one of its kind (a
      *             SHA-256, a commit), because an acknowledgement covers a problem by its kind and its sentence
      */
@@ -130,7 +139,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         if (note == null || note.isBlank()) {
             throw new RunRefusedException("An acknowledgement needs a note that says why: --note \"...\"");
         }
-        LedgerReport before = of(ledger, store, clock);
+        LedgerReport before = of(ledger, store, clock, true);
         Set<String> reported = new LinkedHashSet<>();
         before.problems().forEach(problem -> reported.add(problem.runId()));
         List<String> hits = reported.contains(runRef) ? List.of(runRef) : runRef.length() < RunStore.MIN_PREFIX
@@ -156,7 +165,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             throw new RunRefusedException("The ledger could not take the acknowledgement of run " + id + ": "
                     + e.getMessage());
         }
-        return of(ledger, store, clock);
+        return of(ledger, store, clock, true);
     }
 
     /** Collects the problems, each once, in the order they are found. */
@@ -175,7 +184,13 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      */
     static final Duration IN_FLIGHT = Duration.ofMinutes(5);
 
-    static LedgerReport of(Ledger ledger, RunStore store, Clock clock) {
+    /**
+     * @param records whether to verify the record of every ended run against its end entry: the chain, the blobs
+     *                and the manifest the record gives. It reads every record and every blob of the home; without
+     *                it, a record that was forged while its manifest was left alone is found by
+     *                {@code traceworks verify <run>} only
+     */
+    static LedgerReport of(Ledger ledger, RunStore store, Clock clock, boolean records) {
         Instant now = clock.now();
         LedgerRuns named;
         try {
@@ -212,8 +227,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             boolean hasEnded = run.end() != null ? endProblem == null : run.endNamed() != null;
             started += hasStarted ? 1 : 0;
             ended += hasEnded ? 1 : 0;
-            Folder folder = folders.contains(id) ? look(store, id, start, hasEnded ? run.end() : null, hasEnded)
-                    : null;
+            Folder folder = folders.contains(id)
+                    ? look(store, id, start, hasEnded ? run.end() : null, hasEnded, records) : null;
             if (folder != null) {
                 looked.put(id, folder);
             }
@@ -239,7 +254,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         java.util.Collections.sort(ids);
         for (String id : ids) {
             LedgerRuns.Run run = known.get(id);
-            Folder folder = looked.containsKey(id) ? looked.get(id) : look(store, id, null, null, false);
+            Folder folder = looked.containsKey(id) ? looked.get(id) : look(store, id, null, null, false, records);
             boolean startHeld = run != null && run.start() != null;
             boolean endHeld = run != null && run.end() != null;
             if (folder.state().equals(UNREADABLE)) {
@@ -258,6 +273,9 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                 problems.add(id, "other-record", "the record in the folder is not the one the ledger saw start: its"
                         + " run.started line is " + folder.runStarted());
                 continue;
+            }
+            if (folder.record() != null) {
+                problems.add(id, "record-broken", folder.record());
             }
             if (folder.manifest() != null) {
                 problems.add(id, "manifest-differs", "the manifest in the run folder (" + folder.manifest()
@@ -323,7 +341,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             }
         }
         return new LedgerReport(started, ended, earlier, open, endedGone, earlierOpen,
-                List.copyOf(problems.found.values()), acknowledged, inFlight);
+                List.copyOf(problems.found.values()), acknowledged, inFlight, named.unjudged(), named.pins(),
+                records);
     }
 
     /** Whether a line written at {@code at} is young enough for its entry to be on its way. */
@@ -413,15 +432,18 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      * @param startedAt       the time of {@code run.started}; {@code null} when there is none
      * @param lastAt          the time of the last line; {@code null} when the record was not read whole
      * @param head            the SHA-256 of the last line; {@code null} when the record was not read whole
+     * @param record          for an ended run whose record was verified and does not hold: what is wrong with it;
+     *                        {@code null} otherwise
      */
     private record Folder(String state, String why, boolean ledgerStart, String runStarted, boolean isFinal,
                           boolean alive, boolean empty, String manifest, Instant startedAt, Instant lastAt,
-                          String head) {
+                          String head, String record) {
 
         /** A folder of which only {@code state} and {@code why} can be said, and the first line's hash if any. */
         static Folder unreadable(String state, String why, String runStarted, boolean ledgerStart, boolean alive,
                                  boolean empty) {
-            return new Folder(state, why, ledgerStart, runStarted, false, alive, empty, null, null, null, null);
+            return new Folder(state, why, ledgerStart, runStarted, false, alive, empty, null, null, null, null,
+                    null);
         }
     }
 
@@ -433,7 +455,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      *
      * @param end the end entry the ledger holds; {@code null} for none
      */
-    private static Folder look(RunStore store, String id, StartEntry start, byte[] end, boolean ended) {
+    private static Folder look(RunStore store, String id, StartEntry start, byte[] end, boolean ended,
+                               boolean records) {
         try (StoredRun run = store.open(id)) {
             boolean alive = run.writerAlive();
             byte[] line = ended ? run.events().first().orElse(null) : null;
@@ -465,14 +488,38 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                         .isPresent() ? null : manifest.map(bytes -> "SHA-256 " + EventChain.sha256Hex(bytes))
                         .orElse("none");
                 return new Folder("ENDED", null, ledgerStart, hash, true, alive, false, differs, first.at(), null,
-                        null);
+                        null, records && end != null ? record(run, id, end) : null);
             }
             List<RecordedEvent> events = RunRecords.parse(id, lines);
             var status = RunRecords.view(id, events, alive).status();
             return new Folder(status.name(), null, ledgerStart, hash, RunRecords.isFinal(status), alive, false, null,
-                    first.at(), events.getLast().at(), EventChain.sha256Hex(lines.getLast()));
+                    first.at(), events.getLast().at(), EventChain.sha256Hex(lines.getLast()), null);
         } catch (RuntimeException e) {
             return Folder.unreadable(UNREADABLE, e.getMessage(), null, false, false, false);
+        }
+    }
+
+    /**
+     * The record of an ended run against its end entry: the chain and the blobs must verify, and the manifest the
+     * record gives must be the end entry byte for byte. So a record that was rewritten while its manifest was left
+     * alone does not pass.
+     *
+     * @return what is wrong, with the head of the record as it is; {@code null} for nothing
+     */
+    private static String record(StoredRun run, String id, byte[] end) {
+        try {
+            List<byte[]> lines = run.events().readAll();
+            traceworks.core.record.ChainReport chain =
+                    traceworks.core.record.ChainVerifier.verify(id, lines, run.blobs());
+            if (!chain.intact()) {
+                return "the record does not verify (" + chain.problems().getFirst() + "; it ends with the line "
+                        + chain.head() + "): traceworks verify " + id + " says more";
+            }
+            return Verification.matches(end, RunRecords.view(id, RunRecords.parse(id, lines), false), run.blobs())
+                    ? null : "the end entry of the ledger is not the manifest the record gives (the record ends with"
+                    + " the line " + chain.head() + "): traceworks verify " + id + " says more";
+        } catch (RuntimeException e) {
+            return "the record cannot be read (" + e.getMessage() + ")";
         }
     }
 }

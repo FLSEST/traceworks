@@ -84,6 +84,16 @@ final class Verification {
             } catch (RuntimeException e) {
                 ledgerState = "NOT checked: " + e.getMessage();
             }
+            try {
+                // An entry no hash covers is not judged: this must not read as an entry that holds
+                List<String> unjudged = ledger.unjudged(run.runId());
+                if (!unjudged.isEmpty()) {
+                    ledgerReason = "not judged: no hash covers " + String.join(", ", unjudged) + " yet, an entry of"
+                            + " a version that named none; the next run pins it";
+                }
+            } catch (RuntimeException e) {
+                // the ledger line says that it cannot be read
+            }
         }
         String sealState = view == null ? VerifyReport.NOT_CHECKED : seal(view.seal());
         String registerState = view == null ? VerifyReport.NOT_CHECKED : registerFolder(run, view.register());
