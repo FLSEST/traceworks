@@ -5,6 +5,7 @@ import traceworks.core.testing.BackgroundChild;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -117,6 +118,29 @@ class ProcessTreeTest {
                 .as("child %d, which outlived its parent, still alive", child).isTrue();
         assertThat(BackgroundChild.endsWithin(grandchild, Duration.ofSeconds(1)))
                 .as("grandchild %d, started during the grace period, still alive", grandchild).isTrue();
+    }
+
+    /**
+     * A command line that is stopped starts nothing more. The shell here waits for a command and would print
+     * {@code next} after it. When the command is told to end before its shell is, the shell sees it end and goes on
+     * to the next one, until its own signal arrives. The command has a hundred children, which are signalled between
+     * the two, so the shell has the time to go on; with one child it does so in a few of a hundred stops.
+     */
+    @Test
+    void theCommandAfterTheOneInFlight_doesNotStart() throws Exception {
+        Process proc = new ProcessBuilder("/bin/sh", "-c", "echo started; "
+                + "/bin/sh -c 'i=0; while [ $i -lt 100 ]; do sleep 300 & i=$((i+1)); done; wait'; echo next")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        try (BufferedReader output = proc.inputReader()) {
+            assertThat(output.readLine()).isEqualTo("started");
+            while (proc.descendants().count() < 101) {
+                Thread.sleep(5);   // until the command and its children are in flight
+            }
+
+            ProcessTree.terminate(proc).get(10, TimeUnit.SECONDS);
+
+            assertThat(output.readLine()).as("what the shell printed after it was stopped").isNull();
+        }
     }
 
     /** The handle a runner reports: cancelling the run ends the process and what it started in the background. */
