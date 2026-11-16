@@ -6,6 +6,15 @@ writes everything that happened to a run folder, and exits.
 The key features, each explained on one page with drawings: [features.html](features.html). Open it in a browser;
 it loads nothing from the network. The register, round by round: [audit-loop.html](audit-loop.html).
 
+## The system and what it talks to
+
+![Traceworks is one process on the operator's machine. Around it on the machine: the package, the workspace, the home, git and ssh-keygen, and Docker or Podman. Outside the machine: a model provider, reached only through the proxy, an image registry, and by the operator's choice a remote for the ledger and the target of a hook.](context.svg)
+
+Traceworks is one process. It starts no service and keeps no database. It needs a container runtime (Docker or
+Podman), `git` and, for seals, `ssh-keygen`. What leaves the machine are the prompts and answers of AI steps, to the
+provider a step names and through a proxy that lets nothing else out; an image registry is asked when images are
+built. A remote for the ledger and a hook that reports what changed in a register are the operator's choice.
+
 ## The terms and how they nest
 
 ![How the terms lie inside one another: on the left the package that is defined before a run, with its workflow, blocks, steps and containers; on the right the home the tool keeps, with runs, registers and the ledger; the workspace between them, mounted read-only.](concepts.svg)
@@ -44,6 +53,36 @@ Everything is a file that an editor, `jq` or `git` can show; there is no databas
   folders, with one commit per run and per state of a register.
 - The three point at each other: the first line of a run names the digest of its package, the register names the run
   that reported each finding, and the ledger names the last line of both.
+
+## The states of a run and of a finding
+
+![Two state diagrams. A run is RUNNING, may be PARKED or INTERRUPTED and go on, and ends COMPLETED, COMPLETED_WITH_ERRORS, FAILED or CANCELLED. A finding is OPEN, may be accepted as a risk or dismissed, awaits verification when a review date has passed, is RESOLVED when it is no longer reported, and goes back to OPEN when it is reported again or above the severity a decision was made on.](states.svg)
+
+A run moves a finding by reporting it or not. A person or an agent moves it by deciding, and the register records
+who. The exact rules, also for a rule a model judges, are in [registers.md](registers.md); the statuses of a run
+and their exit codes are in [cli.md](cli.md).
+
+## Glossary
+
+| Term | What it is |
+|---|---|
+| Package | a directory with a `workflow.json`, its scripts, rule files and container images; written by hand, generated, or taken over |
+| Workflow | what a package defines: inputs, blocks, and optionally a gate and an audit |
+| Block | one entry of a workflow: a shell command, an AI call, a loop, a condition, a question, or another workflow |
+| Step | one execution of a block: one command or one model call, in a container of its own |
+| Workspace | the project the steps look at; mounted read-only unless a block declares otherwise |
+| Run | one start of a workflow with its inputs on a workspace; it has a folder of its own that is never overwritten |
+| Record | the events of a run, one line each, every line holding the hash of the line before |
+| Blob | an output, a prompt or another text of a run or register, in a file named by the hash of its content |
+| Gate | the verdict a run ends with: `GREEN`, `YELLOW` or `RED`; it does not change the status of the run |
+| Audit | a workflow whose report feeds a register |
+| Register | what an audit knows across its runs: findings, items and decisions, in a chained log of its own |
+| Finding | one thing an audit reports, with a rule, a subject, a severity and evidence; the register tracks its state |
+| Item | one thing an audit judges, with a digest; an item that did not change is not judged again |
+| Decision | accepting or dismissing a finding, with a note; the register records who decided and on which severity |
+| Ledger | a git repository in the home that notes the start and the end of every run and the state of every register |
+| Seal | a signature over the digest of a package; a sealed package that changed is refused |
+| Home | the operator's folder with the settings, the runs, the registers and the ledger |
 
 ## Modules
 
