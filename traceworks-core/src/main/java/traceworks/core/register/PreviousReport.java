@@ -24,16 +24,31 @@ public final class PreviousReport {
 
     /** The report as the next run gets it; {@link #NONE} for no report or one that was nothing but an envelope. */
     public static String defused(String report) {
-        if (report == null) {
-            return NONE;
-        }
-        String text = ENVELOPE.matcher(report).replaceAll("");
-        if (text.isBlank()) {
+        String text = withoutEnvelope(report);
+        if (text == null) {
             return NONE;
         }
         if (text.length() > MAX_CHARS) {
             text = text.substring(0, MAX_CHARS) + TRUNCATED;
         }
         return UntrustedText.defuseLines(text);
+    }
+
+    /**
+     * The whole report, defused as {@link #defused} does it and not cut: what the file of a run's register folder
+     * holds ({@link RegisterFiles}). Empty for no report or one that was nothing but an envelope.
+     */
+    public static String whole(String report) {
+        String text = withoutEnvelope(report);
+        return text == null ? "" : UntrustedText.defuseLines(text);
+    }
+
+    /** The report without its envelopes; {@code null} when nothing is left. */
+    private static String withoutEnvelope(String report) {
+        if (report == null) {
+            return null;
+        }
+        String text = ENVELOPE.matcher(report).replaceAll("");
+        return text.isBlank() ? null : text;
     }
 }

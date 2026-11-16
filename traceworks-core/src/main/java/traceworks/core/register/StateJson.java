@@ -91,6 +91,39 @@ public final class StateJson {
         }
     }
 
+    /**
+     * One finding as one line of JSON with its line feed, for a file a step reads ({@link RegisterFiles}): the fields
+     * of {@link #findings}, and in {@code disposition} always the severity the decision was made on, where it is
+     * known, and {@code in_force}. The line is ASCII only and holds no {@code <}: every other character is escaped,
+     * so a text of a report can neither break the line nor stand in the file as a marker or a tag.
+     */
+    @SuppressWarnings("unchecked")
+    static String fileLine(Finding f) {
+        Map<String, Object> map = finding(f, false);
+        if (f.disposition() != null) {
+            Map<String, Object> disposition = (Map<String, Object>) map.get("disposition");
+            disposition.put("severity", f.disposition().severity() == null ? null : f.disposition().severity().name());
+            disposition.put("in_force", f.decisionInForce());
+        }
+        return fileLine(map);
+    }
+
+    /** One item as one line of JSON with its line feed, as {@link #fileLine(Finding)}: the fields of {@link #items}. */
+    static String fileLine(Item item, List<Finding> findings) {
+        Map<String, Object> row = item(item);
+        row.put("state", ItemState.of(item, findings).word());
+        return fileLine(row);
+    }
+
+    private static String fileLine(Map<String, Object> map) {
+        try {
+            return JSON.writer().with(JsonWriteFeature.ESCAPE_NON_ASCII).writeValueAsString(map)
+                    .replace("\u007f", "\\u007f").replace("<", "\\u003c") + "\n";
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static Map<String, Object> item(Item item) {
         return map("name", item.name(), "digest", item.digest(), "verdict_digest", item.verdictDigest(),
                 "verdict", seen(item.verdict()));
