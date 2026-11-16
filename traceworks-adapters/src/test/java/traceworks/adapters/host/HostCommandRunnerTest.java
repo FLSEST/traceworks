@@ -85,6 +85,42 @@ class HostCommandRunnerTest {
         assertThat(marker).exists();
     }
 
+    /** The lines a run puts before a shell line to set a variable to a value it protects (docs/cli.md, "check"). */
+    private static String valueAssignment(String value) {
+        return "IFS= read -r -d '' TRACEWORKS_VALUE_1 <<'TRACEWORKS_VALUE_1_END' || :\n" + value
+                + "\nTRACEWORKS_VALUE_1_END\nTRACEWORKS_VALUE_1=${TRACEWORKS_VALUE_1%$'\\n'}\n";
+    }
+
+    /**
+     * A shell line of a run starts by setting a variable to each value the run protects, from a heredoc that holds
+     * the value as it is. The command travels on stdin, so a value as large as the output limit arrives whole, with
+     * every quote and its trailing newlines, in a variable no child process inherits, also under {@code set -e}.
+     */
+    @Test
+    void run_aLineWithAValueAssignment_keepsALargeValueByteForByte_andDoesNotExportIt(@TempDir Path dir)
+            throws Exception {
+        String value = "line with 'quotes', \"more\", $(nothing run) and `nothing`\n".repeat(16 * 1024 * 1024 / 58)
+                + "\n\n";
+        Path out = dir.resolve("value");
+        String command = "set -euo pipefail\n" + valueAssignment(value)
+                + "printf '%s' \"${TRACEWORKS_VALUE_1}\" > '" + out + "'; env | grep -c TRACEWORKS_VALUE || true";
+
+        CommandResult result = new HostCommandRunner(64 * 1024 * 1024).run(shell(command, null, 120));
+
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(result.stdout()).as("not in the environment of a child").isEqualTo("0\n");
+        assertThat(java.nio.file.Files.readString(out).equals(value)).as("the value, byte for byte").isTrue();
+    }
+
+    /** bash holds no NUL in a script or a variable: the byte is dropped from a value, and bash says so. */
+    @Test
+    void run_aNulByteInAValue_isDropped() {
+        CommandResult result = run(valueAssignment("a\u0000b") + "printf '%s' \"${TRACEWORKS_VALUE_1}\"", 30);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).endsWith("ab").doesNotContain("\u0000");
+    }
+
     @Test
     void run_failingCommand_returnsItsExitCode() {
         CommandResult result = run("exit 42", 30);
