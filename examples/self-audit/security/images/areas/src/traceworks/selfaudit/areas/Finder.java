@@ -81,6 +81,13 @@ import java.util.stream.Stream;
  *
  * <p>A file that does not parse, a second copy of a class, a symbolic link (to a file or a directory) and a file that
  * is no UTF-8 are not read, and {@link Result#notParsed} names them.
+ *
+ * <p>The same pass knows who calls whom: {@link Result#members} names every member of the files read, and
+ * {@link Result#calls} every call, creation and method reference that resolved to a member of these sources, from
+ * the member that holds it. A call of a method that others override counts each of them too, so a call through an
+ * interface reaches every implementation in the sources. A call that did not resolve (a receiver of a library type)
+ * is no call here, and neither is the read of a field. No rule looks at these; the check of the changes takes its
+ * neighbours from them ({@link Changes}).
  */
 final class Finder {
 
@@ -102,6 +109,14 @@ final class Finder {
     record Hit(String rule, String file, int line, String what, String resolved, Member member) {
     }
 
+    /** A member where it is declared: the file, and the member with its lines. */
+    record Declared(String file, Member member) {
+    }
+
+    /** One member of the sources calls, creates or refers to another, directly or through a method it overrides. */
+    record Call(Declared from, Declared to) {
+    }
+
     /** A file that was not read, with the reason. */
     record NotParsed(String file, String reason) {
     }
@@ -111,10 +126,10 @@ final class Finder {
      * nor in the sources, so their matchers can match only through imports or names.
      */
     record Result(List<SourceFile> files, List<Hit> hits, List<NotParsed> notParsed, int unresolved,
-                  List<String> unresolvedTargets) {
+                  List<String> unresolvedTargets, List<Declared> members, List<Call> calls) {
 
         Result(List<SourceFile> files, List<Hit> hits, List<NotParsed> notParsed, int unresolved) {
-            this(files, hits, notParsed, unresolved, List.of());
+            this(files, hits, notParsed, unresolved, List.of(), List.of(), List.of());
         }
     }
 
@@ -191,8 +206,12 @@ final class Finder {
         List<Hit> hits = new ArrayList<>(scan.hits);
         hits.sort(Comparator.comparing(Hit::file).thenComparingInt(Hit::line)
                 .thenComparingInt(h -> ruleOrder.indexOf(h.rule())));
+        Comparator<Declared> place = Comparator.comparing(Declared::file)
+                .thenComparingInt((Declared d) -> d.member().start()).thenComparing(d -> d.member().label());
+        List<Declared> members = new ArrayList<>(scan.members);
+        members.sort(place);
         return new Result(List.copyOf(files), List.copyOf(hits), sortedNotParsed(notParsed), scan.unresolved,
-                unresolvedTargets);
+                unresolvedTargets, List.copyOf(members), scan.calls());
     }
 
     /** Names each source with an error that {@code counts} as not read, once, with the first such error. */
@@ -283,6 +302,12 @@ final class Finder {
         private final Map<String, Optional<TypeElement>> targets = new HashMap<>();
         private final Map<CompilationUnitTree, Map<String, String>> importsByUnit = new HashMap<>();
         final List<Hit> hits = new ArrayList<>();
+        /** Every member of the files scanned, in the order of the scan. */
+        final List<Declared> members = new ArrayList<>();
+        /** The member each method and constructor of the sources is, or lies in (a method of an anonymous class). */
+        private final Map<Element, Declared> declaredBy = new HashMap<>();
+        /** Each resolved call: the member that holds it, and the method or constructor it resolved to. */
+        private final List<Map.Entry<Declared, ExecutableElement>> called = new ArrayList<>();
         int unresolved;
 
         Scan(Trees trees, Elements elements, Types types, RuleFile rules) {
@@ -319,6 +344,39 @@ final class Finder {
                 }
             }
             return List.copyOf(missing);
+        }
+
+        /**
+         * The calls between the members of the sources, in the order they were found, each once. A method that is
+         * called stands for every method of the sources that overrides it: the type of the receiver says which of
+         * them runs, and that is not known here. A member's call of itself is none.
+         */
+        List<Call> calls() {
+            Map<String, List<ExecutableElement>> byName = new HashMap<>();
+            for (Element element : declaredBy.keySet()) {
+                if (element.getKind() == ElementKind.METHOD) {
+                    byName.computeIfAbsent(element.getSimpleName().toString(), k -> new ArrayList<>())
+                            .add((ExecutableElement) element);
+                }
+            }
+            Set<Call> calls = new java.util.LinkedHashSet<>();
+            for (Map.Entry<Declared, ExecutableElement> call : called) {
+                Declared from = call.getKey();
+                ExecutableElement callee = call.getValue();
+                Declared direct = declaredBy.get(callee);
+                if (direct != null && !direct.equals(from)) calls.add(new Call(from, direct));
+                if (callee.getKind() != ElementKind.METHOD) continue;
+                for (ExecutableElement other : byName.getOrDefault(callee.getSimpleName().toString(), List.of())) {
+                    if (other != callee && other.getEnclosingElement() instanceof TypeElement type
+                            && elements.overrides(other, callee, type) && !declaredBy.get(other).equals(from)) {
+                        calls.add(new Call(from, declaredBy.get(other)));
+                    }
+                }
+            }
+            Comparator<Declared> place = Comparator.comparing(Declared::file)
+                    .thenComparingInt((Declared d) -> d.member().start()).thenComparing(d -> d.member().label());
+            return calls.stream().sorted(Comparator.comparing(Call::from, place)
+                    .thenComparing(Call::to, place)).toList();
         }
 
         private Optional<TypeElement> target(String type) {
@@ -372,6 +430,8 @@ final class Finder {
             /** The variables declared so far in this unit, so a local's declaration is found again. */
             private final Map<Element, VariableTree> declarations = new HashMap<>();
             private Member member;
+            /** {@link #member} with its file, as the calls name it. */
+            private Declared declared;
 
             UnitScanner(CompilationUnitTree unit, String path, List<Rule> applying) {
                 this.unit = unit;
@@ -398,8 +458,12 @@ final class Finder {
                 // A constructor javac generates has no place in the source, and its super() is javac's, not the code's
                 if (positions.getEndPosition(unit, node) == NOPOS) return null;
                 String name = node.getName().contentEquals("<init>") ? null : node.getName().toString();
-                return inMember(node, () -> label(name) + "(" + parameters(node) + ")",
-                        () -> super.visitMethod(node, unused));
+                Element element = trees.getElement(getCurrentPath());
+                return inMember(node, () -> label(name) + "(" + parameters(node) + ")", () -> {
+                    // Inside a member, a method (of an anonymous or a local class) is part of that member
+                    if (element != null && declared != null) declaredBy.put(element, declared);
+                    return super.visitMethod(node, unused);
+                });
             }
 
             @Override
@@ -422,10 +486,20 @@ final class Finder {
                 }
                 member = new Member(label.get(), line(positions.getStartPosition(unit, node)),
                         line(positions.getEndPosition(unit, node) - 1), false);
+                declared = new Declared(path, member);
+                members.add(declared);
                 try {
                     return scan.get();
                 } finally {
                     member = null;
+                    declared = null;
+                }
+            }
+
+            /** Notes that the member around the current node calls {@code callee}, when that resolved. */
+            private void calls(Element callee) {
+                if (declared != null && callee instanceof ExecutableElement executable) {
+                    called.add(Map.entry(declared, executable));
                 }
             }
 
@@ -449,6 +523,7 @@ final class Finder {
 
             @Override
             public Void visitNewClass(NewClassTree node, Void unused) {
+                calls(trees.getElement(getCurrentPath()));
                 TypeMirror type = trees.getTypeMirror(getCurrentPath());
                 String imported = null;
                 if (type == null || type.getKind() == TypeKind.ERROR) {
@@ -472,9 +547,10 @@ final class Finder {
                 ExpressionTree select = node.getMethodSelect();
                 String name = select instanceof MemberSelectTree ms ? ms.getIdentifier().toString()
                         : select.toString();
-                // Constructor chaining is part of the constructor, no call of a method
-                if (name.equals("this") || name.equals("super")) return super.visitMethodInvocation(node, unused);
                 Element element = trees.getElement(getCurrentPath());
+                calls(element);
+                // Constructor chaining is part of the constructor, no call of a method a rule could name
+                if (name.equals("this") || name.equals("super")) return super.visitMethodInvocation(node, unused);
                 ExpressionTree receiverTree = select instanceof MemberSelectTree ms ? ms.getExpression() : null;
                 TypeMirror receiver = receiverTree != null ? typeOf(receiverTree) : null;
                 boolean resolved = element instanceof ExecutableElement;
@@ -514,6 +590,7 @@ final class Finder {
                 boolean creation = node.getMode() == MemberReferenceTree.ReferenceMode.NEW;
                 TypeMirror qualifier = typeOf(node.getQualifierExpression());
                 Element element = trees.getElement(getCurrentPath());
+                calls(element);
                 boolean resolved = creation ? qualifier != null && qualifier.getKind() == TypeKind.DECLARED
                         : element instanceof ExecutableElement;
                 String written = null;
