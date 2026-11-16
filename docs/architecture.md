@@ -13,7 +13,8 @@ it loads nothing from the network. The register, round by round: [audit-loop.htm
 Traceworks is one process. It starts no service and keeps no database. It needs a container runtime (Docker or
 Podman), `git` and, for seals, `ssh-keygen`. What leaves the machine are the prompts and answers of AI steps, to the
 provider a step names and through a proxy that lets nothing else out; an image registry is asked when images are
-built. A remote for the ledger and a hook that reports what changed in a register are the operator's choice.
+built. An operator may name a model server of their own instead of a provider (`local_models`, off by default):
+then the step reaches that server and nothing else. A remote for the ledger and a hook that reports what changed in a register are the operator's choice.
 
 ## The terms and how they nest
 
