@@ -74,7 +74,8 @@ class RegisterFilesIT extends IntegrationTest {
         }
         assertThat(mount).as("the record names the mount of the folder").isNotNull();
         assertThat(mount.path("read_only").asBoolean()).isTrue();
-        assertThat(mount.path("host").asText()).isEqualTo(register.toString());
+        // The run mounts the real path of the folder: the sandbox may lie behind a link
+        assertThat(Path.of(mount.path("host").asText()).toRealPath()).isEqualTo(register.toRealPath());
 
         // The record names what the run got: the head of the register's log and the digest of each file
         JsonNode recorded = folder.only("run.started").path("register");
