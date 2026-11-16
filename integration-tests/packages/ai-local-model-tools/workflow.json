@@ -1,0 +1,23 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "2f9d4c7a-6b1e-4d83-a0c5-7e3b9f1d2a64",
+  "name": "IT ai-local-model-tools",
+  "description": "One simple Pi step with shell tools on a model server of the operator's: the stand-in model has it run a command that asks the step's proxy for a provider's host.",
+  "provider": "PI",
+  "requires": [
+    "ai.tools"
+  ],
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "probe",
+      "config": {
+        "command": "Run the probe you were given and say what it printed.",
+        "model": "llm/stand-in-1",
+        "tools": "shell",
+        "timeout_seconds": 90
+      }
+    }
+  ]
+}

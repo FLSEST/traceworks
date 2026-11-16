@@ -379,6 +379,84 @@ class OperatorConfigFileTest {
         }
     }
 
+    /** {@code local_models}: missing or null is none; an object names the operator's model servers. */
+    @Test
+    void localModels_areNoneByDefault_andAnObjectOfBackends() throws IOException {
+        config("{}");
+        assertThat(OperatorConfigFile.read(home).localModels().isEmpty()).isTrue();
+        config("{\"local_models\": null}");
+        assertThat(OperatorConfigFile.read(home).localModels().isEmpty()).isTrue();
+        config("{\"local_models\": {}}");
+        assertThat(OperatorConfigFile.read(home).localModels().isEmpty()).isTrue();
+        config("""
+                {"local_models": {
+                  "llm": {"url": "http://llm.internal:8080/v1", "api": "openai-completions",
+                          "models": ["qwen2.5-coder:7b", "llama3.3"], "secret": "LLM_KEY"},
+                  "lab": {"url": "https://lab.example.org", "api": "openai-completions", "models": ["m"],
+                          "secret": null}}}""");
+
+        traceworks.core.port.LocalModels local = OperatorConfigFile.read(home).localModels();
+
+        assertThat(local.ids()).containsExactly("lab", "llm");
+        assertThat(local.backends().get("llm")).isEqualTo(new traceworks.core.port.LocalModels.Backend("llm",
+                "http://llm.internal:8080/v1", "openai-completions", List.of("qwen2.5-coder:7b", "llama3.3"),
+                "LLM_KEY"));
+        assertThat(local.backends().get("lab").secret()).isNull();
+        assertThat(local.backends().get("lab").host()).isEqualTo("lab.example.org:443");
+    }
+
+    @Test
+    void localModels_aWrongShape_anUnknownKey_andAValueOutsideTheGrammar_areRefused_namingTheKey()
+            throws IOException {
+        Path file = home.resolve("traceworks.json");
+        for (String wrong : List.of("[]", "\"llm\"", "5", "true")) {
+            config("{\"local_models\": " + wrong + "}");
+            assertThatThrownBy(() -> OperatorConfigFile.read(home)).as(wrong)
+                    .isInstanceOf(IllegalArgumentException.class).hasMessage("'local_models' in " + file
+                            + " must be an object of backend id to {url, api, models, secret}");
+        }
+        String ok = "\"url\": \"http://llm.internal/v1\", \"api\": \"openai-completions\", \"models\": [\"m\"]";
+        java.util.Map<String, String> refused = new java.util.LinkedHashMap<>();
+        refused.put("{\"llm\": \"http://llm.internal/v1\"}", "'local_models.llm' in " + file
+                + " must be an object {url, api, models, secret}");
+        refused.put("{\"llm\": {" + ok + ", \"headers\": {}}}", "Unknown key 'headers' in 'local_models.llm' of "
+                + file + "; known keys are url, api, models and secret");
+        refused.put("{\"llm\": {\"api\": \"openai-completions\", \"models\": [\"m\"]}}", "'local_models.llm.url' in "
+                + file + " must be a string, such as \"http://llm.internal:8080/v1\"");
+        refused.put("{\"llm\": {\"url\": \"http://llm.internal/v1\", \"models\": [\"m\"]}}",
+                "'local_models.llm.api' in " + file + " must be a string, one of openai-completions");
+        refused.put("{\"llm\": {\"url\": \"http://llm.internal/v1\", \"api\": \"openai-completions\"}}",
+                "'local_models.llm.models' in " + file + " must be a list of model names");
+        refused.put("{\"llm\": {\"url\": \"http://llm.internal/v1\", \"api\": \"openai-completions\","
+                + " \"models\": [5]}}", "'local_models.llm.models' in " + file
+                + " must be a list of model names, each a string");
+        refused.put("{\"llm\": {" + ok + ", \"secret\": 5}}", "'local_models.llm.secret' in " + file
+                + " must be the name of a secret, a string, or null");
+        refused.put("{\"openai\": {" + ok + "}}", "'local_models' in " + file + ": the local backend id \"openai\""
+                + " is the backend of a provider; choose another id, such as local-openai");
+        refused.put("{\"llm\": {" + ok + ", \"secret\": \"OPENAI_API_KEY\"}}", "'local_models' in " + file
+                + ": the secret of the local backend llm \"OPENAI_API_KEY\" is the credential of an AI provider;"
+                + " store the server's key under another name");
+        refused.put("{\"llm\": {\"url\": \"http://llm.internal/v1\", \"api\": \"anthropic-messages\","
+                + " \"models\": [\"m\"]}}", "'local_models' in " + file + ": the api of the local backend llm must be"
+                + " one of openai-completions, not \"anthropic-messages\"");
+        refused.forEach((value, message) -> {
+            try {
+                config("{\"local_models\": " + value + "}");
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+            assertThatThrownBy(() -> OperatorConfigFile.read(home)).as(value)
+                    .isInstanceOf(IllegalArgumentException.class).hasMessage(message);
+        });
+        config("{\"local_models\": {\"llm\": {\"url\": \"http://localhost:11434/v1\", \"api\":"
+                + " \"openai-completions\", \"models\": [\"m\"]}}}");
+        assertThatThrownBy(() -> OperatorConfigFile.read(home)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageStartingWith("'local_models' in " + file + ": the url of the local backend llm names this"
+                        + " machine's loopback (localhost), which the container of an AI step cannot reach")
+                .hasMessageEndingWith("such as http://192.168.1.20:11434/v1");
+    }
+
     @Test
     void aiHosts_areMoreHostsByCli_inLowerCase() throws IOException {
         config("{\"ai_hosts\": {\"claude\": [\"Gateway.Corp.example:8443\", \"10.0.0.7:443\"], \"pi\": []}}");

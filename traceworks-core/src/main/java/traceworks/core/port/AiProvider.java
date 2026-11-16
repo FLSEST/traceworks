@@ -45,6 +45,15 @@ public interface AiProvider {
         return ConversationPrompt.build(history);
     }
 
+    /**
+     * The model server of the operator's that a call with {@code model} goes to ({@link LocalModels}); empty for a
+     * call to the provider. The record names it with the call, so a reader can tell a local call from a provider
+     * call.
+     */
+    default java.util.Optional<LocalModels.Use> local(String model) {
+        return java.util.Optional.empty();
+    }
+
     // --- Request records ---
 
     /**

@@ -46,7 +46,8 @@ import java.util.TreeSet;
  *   <li>a deterministic step whose status or output differs, or that only one run has, and a {@code foreach} item of
  *       such a step likewise. An output is compared by the hash of its blob. This holds also after an AI output that
  *       differed: the reason then says so;</li>
- *   <li>an AI call with another setup: provider, model asked for, effort, tool policy, web mode and hosts, system
+ *   <li>an AI call with another setup: provider, model asked for, the model server of the operator's it went to
+ *       (or none), effort, tool policy, web mode and hosts, system
  *       prompt, prompt, or the model that answered (when both calls report one). A prompt that differs counts only
  *       when no AI output before the call differed; after one, it is that output carried on, and the setup is the
  *       same.</li>
@@ -338,6 +339,7 @@ public final class RunComparer {
             if (ca != null && cb != null) {
                 differs("provider", ca.provider(), cb.provider(), setup);
                 differs("model", ca.model(), cb.model(), setup);
+                differs("local backend", ca.localSummary(), cb.localSummary(), setup);
                 differs("effort", ca.effort(), cb.effort(), setup);
                 differs("tools", ca.tools(), cb.tools(), setup);
                 differs("web", web(ca), web(cb), setup);
@@ -405,7 +407,8 @@ public final class RunComparer {
         AiCallView.Response response = call.response();
         return new Call(call.provider(), call.model(), response == null ? null : response.model(), call.effort(),
                 call.tools(), web(call), response == null ? null : response.inputTokens(),
-                response == null ? null : response.outputTokens(), response == null ? null : response.costUsd());
+                response == null ? null : response.outputTokens(), response == null ? null : response.costUsd(),
+                call.localSummary());
     }
 
     /** The child runs the step started, pair by pair: by {@code foreach} item where an item names its run, else in order. */
