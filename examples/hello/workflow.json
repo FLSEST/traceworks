@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "b1445bda-e182-479a-bf85-f5b519d68ad2",
   "name": "Hello",
   "description": "A small workflow that greets, counts the files in the workspace, asks for approval and says it is done.",
-  "defaultContext": {"name": "world"},
+  "default_context": {"name": "world"},
   "metadata": {"gate": {"expected": true}},
   "blocks": [
     {

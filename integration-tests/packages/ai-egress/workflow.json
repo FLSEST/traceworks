@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "3d0a7c7e-51d2-4b0e-9f0a-6c1f4b2d8e11",
   "name": "IT ai-egress",
   "description": "An AI step whose fake CLI tries to connect: to the target the run names, and to a host nobody listed.",
-  "defaultContext": {
+  "default_context": {
     "target": "127.0.0.1:9"
   },
   "blocks": [

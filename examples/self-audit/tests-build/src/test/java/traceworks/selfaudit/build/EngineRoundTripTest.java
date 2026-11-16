@@ -93,7 +93,7 @@ class EngineRoundTripTest {
         String rules = "{{ package_dir }}/build.rules";
         String scratch = "{{ scratch_dir }}";
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "3f0c5f53-6a1e-4a43-9a43-1c3a2e2b7d10", "name", "Round trip",
                 "metadata", Map.of("gate", Map.of("expected", true)),
                 "blocks", List.of(

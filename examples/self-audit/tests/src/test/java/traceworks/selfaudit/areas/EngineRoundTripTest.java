@@ -42,7 +42,7 @@ class EngineRoundTripTest {
         String tool = "'" + java + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String rules = Path.of("../security/rules/security.rules").toAbsolutePath().normalize().toString();
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "6f1d1f1e-5d43-4c69-9d3e-0b1f0f2a7c11", "name", "Round trip",
                 "metadata", Map.of("gate", Map.of("expected", true)),
                 "blocks", List.of(
@@ -110,10 +110,10 @@ class EngineRoundTripTest {
                 + "\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"The model's words.\",\"fix\":\"More of them.\"}]}";
         Files.writeString(pkg.resolve("answer-a001.json"), answer);
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "6f1d1f1e-5d43-4c69-9d3e-0b1f0f2a7c12", "name", "Round trip into a register",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "roundtrip", "category", "security", "reportBlock", "report")),
+                        "key", "roundtrip", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         Map.of("type", "shell", "name", "areas", "config", Map.of("command", "set -euo pipefail; "
                                 + tool + " find --rules '" + rules + "' --root . --out {{ scratch_dir }}/areas.jsonl"
@@ -163,10 +163,10 @@ class EngineRoundTripTest {
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String rules = Path.of("../security/rules/security.rules").toAbsolutePath().normalize().toString();
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "6f1d1f1e-5d43-4c69-9d3e-0b1f0f2a7c13", "name", "Round trip through the register",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "roundtrip", "category", "security", "reportBlock", "report")),
+                        "key", "roundtrip", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to find, which sorts it to the areas
                         Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,
@@ -267,10 +267,10 @@ class EngineRoundTripTest {
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String rules = Path.of("../security/rules/security.rules").toAbsolutePath().normalize().toString();
         Files.writeString(pkg.resolve("workflow.json"), Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "0c0a4c0e-6d0b-4c56-8a52-1a8f3e1c9d77", "name", "Items round trip",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "items", "category", "security", "reportBlock", "report")),
+                        "key", "items", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,
                                 "command", "set -euo pipefail; printf '%s' {{ audit_items }} > {{ scratch_dir }}/known-items.txt; "
@@ -344,10 +344,10 @@ class EngineRoundTripTest {
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String rules = Path.of("../security/rules/security.rules").toAbsolutePath().normalize().toString();
         Files.writeString(pkg.resolve("workflow.json"), Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "6f1d1f1e-5d43-4c69-9d3e-0b1f0f2a7c14", "name", "A gone that is not taken",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "held", "category", "security", "reportBlock", "report")),
+                        "key", "held", "category", "security", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows of findings and items goes to find
                         Map.of("type", "shell", "name", "areas", "config", Map.of("shell_escape_variables", true,

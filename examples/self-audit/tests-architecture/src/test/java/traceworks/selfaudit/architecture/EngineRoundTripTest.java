@@ -45,7 +45,7 @@ class EngineRoundTripTest {
         String java = ProcessHandle.current().info().command().orElse("java");
         String tool = "'" + java + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "0b7d6c2e-3f41-4a8e-9a57-2c1d5e8f9a10", "name", "Round trip",
                 "metadata", Map.of("gate", Map.of("expected", true)),
                 "blocks", List.of(
@@ -115,10 +115,10 @@ class EngineRoundTripTest {
         String jvm = ProcessHandle.current().info().command().orElse("java");
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         String workflow = Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "0b7d6c2e-3f41-4a8e-9a57-2c1d5e8f9a11", "name", "Round trip through the register",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "roundtrip", "category", "architecture", "reportBlock", "report")),
+                        "key", "roundtrip", "category", "architecture", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows goes to facts, which sorts it to the files
                         Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,
@@ -205,10 +205,10 @@ class EngineRoundTripTest {
         String jvm = ProcessHandle.current().info().command().orElse("java");
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
         Files.writeString(pkg.resolve("workflow.json"), Json.write(Map.of(
-                "format", "traceworks-workflow", "formatVersion", 1L,
+                "format", "traceworks-workflow", "format_version", 1L,
                 "id", "0b7d6c2e-3f41-4a8e-9a57-2c1d5e8f9a12", "name", "Items round trip",
                 "metadata", Map.of("gate", Map.of("expected", true), "audit", Map.of("enabled", true,
-                        "key", "items", "category", "architecture", "reportBlock", "report")),
+                        "key", "items", "category", "architecture", "report_block", "report")),
                 "blocks", List.of(
                         // As the package's step: what the register knows of the items goes to facts
                         Map.of("type", "shell", "name", "facts", "config", Map.of("shell_escape_variables", true,

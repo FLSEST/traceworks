@@ -1,13 +1,13 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "00269840-cbbf-4055-b907-cc07c314040c",
   "name": "IT tool mode",
   "description": "The tool mode of the shell block: a package image's entrypoint runs with container_args, no shell in between. The input 'case' picks the blocks that run.",
   "requires": [
     "package.images"
   ],
-  "defaultContext": {
+  "default_context": {
     "case": "args",
     "who": "nobody"
   },

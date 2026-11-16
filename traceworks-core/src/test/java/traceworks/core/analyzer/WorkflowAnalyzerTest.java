@@ -88,7 +88,7 @@ class WorkflowAnalyzerTest {
     void auditFindingsWithoutAnAuditWorkflow_areAFinding_withAValidAuditBlockNot() {
         var blocks = List.of(block("simple", "report", Map.of("command", "Known findings: {{ audit_findings }}")));
         Map<String, Object> audit = Map.of("audit", Map.of(
-                "enabled", true, "key", "project.security", "category", "security", "reportBlock", "report"));
+                "enabled", true, "key", "project.security", "category", "security", "report_block", "report"));
 
         assertThat(rules(blocks, null)).contains("audit-only-placeholder");
         assertThat(analyzer.analyze(blocks, null, Map.of("gate", Map.of("expected", true))))
@@ -104,7 +104,7 @@ class WorkflowAnalyzerTest {
     void analyzingADefinition_readsItsMetadata() {
         var blocks = List.of(block("simple", "report", Map.of("command", "Known findings: {{ audit_findings }}")));
         WorkflowDefinition audit = definition(blocks, Map.of("audit", Map.of(
-                "enabled", true, "key", "project.security", "category", "security", "reportBlock", "report")), null);
+                "enabled", true, "key", "project.security", "category", "security", "report_block", "report")), null);
         WorkflowDefinition plain = definition(blocks, null, null);
 
         assertThat(analyzer.analyze(audit)).extracting(AnalyzerFinding::rule).doesNotContain("audit-only-placeholder");

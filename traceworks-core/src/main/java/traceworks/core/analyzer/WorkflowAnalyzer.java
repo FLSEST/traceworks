@@ -130,7 +130,7 @@ public final class WorkflowAnalyzer {
 
     /**
      * What is wrong with the inputs of a run of {@code workflow}, one English text per input: an input that no block
-     * reads and that is not in {@code defaultContext}, so that it changes nothing in the run ({@link VariableRules}).
+     * reads and that is not in {@code default_context}, so that it changes nothing in the run ({@link VariableRules}).
      * No finding of a definition: it judges one run's inputs.
      *
      * @param inputNames the names of the run's inputs

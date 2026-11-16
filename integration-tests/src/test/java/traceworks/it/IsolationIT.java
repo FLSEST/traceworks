@@ -117,7 +117,7 @@ class IsolationIT extends IntegrationTest {
     @Test
     void theGitDirectoryOfThePackage_isEmptyInAContainer() throws Exception {
         Path pkg = Files.createDirectories(traceworks.workspace().resolve("git-package"));
-        Files.writeString(pkg.resolve("workflow.json"), "{\"format\": \"traceworks-workflow\", \"formatVersion\": 1,"
+        Files.writeString(pkg.resolve("workflow.json"), "{\"format\": \"traceworks-workflow\", \"format_version\": 1,"
                 + " \"id\": \"9a1b2c3d-0000-4000-8000-0000000000a1\", \"name\": \"IT git package\", \"blocks\": ["
                 + "{\"type\": \"shell\", \"name\": \"look\", \"config\": {\"command\":"
                 + " \"ls -A {{ package_dir }}/.git | wc -l; cat {{ package_dir }}/.git/payload || echo hidden\"}}]}");

@@ -52,7 +52,7 @@ class ModelChoicePackageTest {
     @Test
     @SuppressWarnings("unchecked")
     void thePackage_declaresTheChoiceJudge_withFableAsItsDefault_andOneVerdictStepRefersToIt() throws IOException {
-        Map<String, Object> judge = (Map<String, Object>) ((Map<String, Object>) workflow().get("modelChoices"))
+        Map<String, Object> judge = (Map<String, Object>) ((Map<String, Object>) workflow().get("model_choices"))
                 .get("judge");
 
         assertThat(judge.get("default")).isEqualTo("fable");
@@ -64,7 +64,7 @@ class ModelChoicePackageTest {
         assertThat(verdicts).as("one question, one step, whoever answers").hasSize(1);
         assertThat(config(verdicts.getFirst())).containsEntry("model_choice", "judge")
                 .doesNotContainKeys("provider", "model");
-        assertThat(workflow().get("defaultContext")).as("the default stands in the declaration").isNull();
+        assertThat(workflow().get("default_context")).as("the default stands in the declaration").isNull();
         assertThat((List<String>) workflow().get("requires")).contains("ai.model_choice");
     }
 
@@ -80,7 +80,7 @@ class ModelChoicePackageTest {
                 + " {{ judge_model }} ").doesNotContain("workflow.json");
         assertThat((Map<String, Object>) ((Map<String, Object>) workflow().get("metadata")).get("audit"))
                 .as("one register, whoever judges").containsEntry("key", "security")
-                .containsEntry("reportBlock", "report");
+                .containsEntry("report_block", "report");
     }
 
     @Test

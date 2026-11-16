@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "fe88f63c-8154-4183-b056-4f1f5b4132b8",
   "name": "AI hello",
   "description": "One AI step that may read the workspace, but not change it, and says in two sentences what it holds.",

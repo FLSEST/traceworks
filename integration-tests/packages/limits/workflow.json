@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "fdbe0ef0-4ca0-4a55-a5cb-c717157d4892",
   "name": "IT limits",
   "description": "Prints the limits the container's cgroup carries (memory, processes, CPUs) and what the container may do as a process.",

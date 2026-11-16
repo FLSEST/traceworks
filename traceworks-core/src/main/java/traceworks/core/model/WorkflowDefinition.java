@@ -1,6 +1,7 @@
 package traceworks.core.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,7 +11,11 @@ import java.util.Map;
 
 /**
  * A workflow as {@code workflow.json} defines it: its name, blocks, settings and metadata, a stable {@code id}, the
- * {@code requires} list and the format marker ({@code format} and {@code formatVersion}).
+ * {@code requires} list and the format marker ({@code format} and {@code format_version}).
+ *
+ * <p>{@link WorkflowJson} reads one from a file: a key of two words is written with an underscore
+ * ({@code default_context}, {@code format_version}, {@code model_choices}), and the reader takes the earlier
+ * camel-case name for it too.
  *
  * <p>Absent collections read as empty ones. The collections are read-only copies; the blocks themselves stay
  * mutable {@link BlockDefinition}s.
@@ -41,11 +46,11 @@ public record WorkflowDefinition(
         String provider,
         String effort,
         Map<String, Object> metadata,
-        Map<String, Object> defaultContext,
+        @JsonProperty("default_context") Map<String, Object> defaultContext,
         List<String> requires,
         String format,
-        Integer formatVersion,
-        @JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, Object> modelChoices
+        @JsonProperty("format_version") Integer formatVersion,
+        @JsonProperty("model_choices") @JsonInclude(JsonInclude.Include.NON_EMPTY) Map<String, Object> modelChoices
 ) {
 
     /** A workflow that opens no model choice. */

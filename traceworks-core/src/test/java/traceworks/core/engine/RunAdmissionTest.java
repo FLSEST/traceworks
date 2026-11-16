@@ -304,7 +304,7 @@ class RunAdmissionTest {
     void aNewerFormatVersion_isRefused() {
         assertRefused(workflow(List.of(block("shell", "build", Map.of("command", "make"))), Map.of(), null,
                 WorkflowDefinition.FORMAT, 2),
-                "formatVersion 2 is newer than this version of Traceworks reads (1)");
+                "format_version 2 is newer than this version of Traceworks reads (1)");
     }
 
     @Test
@@ -469,7 +469,7 @@ class RunAdmissionTest {
 
         assertRefused(definition,
                 "format \"other\" is not traceworks-workflow",
-                "formatVersion 3 is newer than this version of Traceworks reads (1)",
+                "format_version 3 is newer than this version of Traceworks reads (1)",
                 "requires names \"gpu\", which Traceworks does not know (known: container.network, package.images,"
                         + " ai.tools, ai.web, ai.model_choice)",
                 ISOLATED,
@@ -493,7 +493,7 @@ class RunAdmissionTest {
     }
 
     private static Map<String, Object> audit(String key, String reportBlock) {
-        return Map.of("audit", Map.of("enabled", true, "key", key, "category", "security", "reportBlock",
+        return Map.of("audit", Map.of("enabled", true, "key", key, "category", "security", "report_block",
                 reportBlock));
     }
 
@@ -519,7 +519,7 @@ class RunAdmissionTest {
     @Test
     void anAuditWhoseReportBlockNamesNoTopLevelBlock_isRefused() {
         assertRefused(auditing(audit("architecture", "report"), block("shell", "build", Map.of("command", "make"))),
-                "metadata.audit.reportBlock 'report' names no top-level block");
+                "metadata.audit.report_block 'report' names no top-level block");
     }
 
     /** A null block beside an audit is one more reason, not a failure of the check. */

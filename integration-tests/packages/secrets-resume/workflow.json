@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "4f0b8a2e-6c1d-4e5a-9b7f-2d3c8e1a6b90",
   "name": "IT secrets resume",
   "description": "A secret's value that occurs in workflow.json itself: the steps after a resume run it as written, while the record holds its name.",

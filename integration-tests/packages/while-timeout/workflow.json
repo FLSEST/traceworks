@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "7b3e5c18-2a94-4f6d-8c7b-5e0d9a1f4c32",
   "name": "IT while timeout",
   "description": "A while whose shell condition holds once and then sleeps past the block's timeout_seconds fails after one iteration.",

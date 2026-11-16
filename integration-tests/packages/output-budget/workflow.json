@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "1b4e4613-adcd-4aac-a877-0ca6d252dfdd",
   "name": "IT output budget",
   "description": "A foreach whose four items print 768 KiB each, then a step: within the default budget the run completes; with an output budget of 2 MiB the third item does not fit, and the run ends at the foreach although it says on_failure: continue.",

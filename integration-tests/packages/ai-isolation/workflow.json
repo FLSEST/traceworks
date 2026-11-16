@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "f6194167-affd-47a3-a390-dd4718697497",
   "name": "IT ai-isolation",
   "description": "An AI step that tries to write /workspace: refused in a read-only workspace, possible with workspace_writable.",

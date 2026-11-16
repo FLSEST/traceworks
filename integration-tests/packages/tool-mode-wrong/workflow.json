@@ -1,13 +1,13 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "19b86b7d-22f9-4507-8c21-6d89e3b0eb19",
   "name": "IT tool mode wrong",
   "description": "Two tool-mode blocks that cannot run: container_args without a container_image, and container_args that is no list. The input 'case' picks the block.",
   "requires": [
     "package.images"
   ],
-  "defaultContext": {
+  "default_context": {
     "case": "image"
   },
   "blocks": [

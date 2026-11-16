@@ -28,7 +28,7 @@ import java.util.Set;
 /** Reading the record of a stored run, and going on writing it after the process that wrote it has ended. */
 final class RunRecords {
 
-    /** Reads {@code workflow.json} as the package loader does: unknown properties fail. */
+    /** Reads the inputs a run recorded; a recorded {@code workflow.json} is read by {@code WorkflowJson}. */
     private static final ObjectMapper DEFINITIONS = new ObjectMapper();
 
     /**
@@ -239,7 +239,7 @@ final class RunRecords {
 
     static WorkflowDefinition definition(String runId, byte[] workflowJson) {
         try {
-            return DEFINITIONS.readValue(workflowJson, WorkflowDefinition.class);
+            return traceworks.core.model.WorkflowJson.read(workflowJson);
         } catch (IOException e) {
             throw new RecordDamagedException("The recorded workflow definition of run " + runId + " cannot be read: "
                     + e.getMessage() + RecordDamagedException.seeVerify(runId));

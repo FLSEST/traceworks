@@ -1,10 +1,10 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "fa2ffd2d-d373-4ec5-b89a-ad05c5b72d3d",
   "name": "IT ai-marker",
   "description": "A simple AI step for Claude and one for Pi, both with the input prompt, which names the fake CLI's behaviour by a marker; a failed step does not stop the run.",
-  "defaultContext": {
+  "default_context": {
     "prompt": "plain"
   },
   "blocks": [

@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  * {@link PackageImageRules}.
  * <ul>
  *   <li>{@code unknown-format} ({@code ERROR}, refused): a {@code format} other than {@value WorkflowDefinition#FORMAT}
- *       or a {@code formatVersion} above {@value WorkflowDefinition#FORMAT_VERSION}. A definition without them
+ *       or a {@code format_version} above {@value WorkflowDefinition#FORMAT_VERSION}. A definition without them
  *       is fine.</li>
  *   <li>{@code unknown-requirement} ({@code ERROR}, refused): an entry of {@code requires} outside
  *       {@link WorkflowDefinition#KNOWN_REQUIREMENTS}.</li>
@@ -50,7 +50,7 @@ import java.util.regex.Pattern;
  *   <li>{@code unbalanced-placeholder} ({@code ERROR}): {@code {{x }}} or {@code {{ x}}}. The resolver reads only
  *       {@code {{x}}} and {@code {{ x }}}; anything else stays literal.</li>
  *   <li>{@code report-block-required} ({@code ERROR}): {@code previous_report} without
- *       {@code metadata.audit.reportBlock}. The previous report is the output of that block.</li>
+ *       {@code metadata.audit.report_block}. The previous report is the output of that block.</li>
  *   <li>{@code unprovided-variable} ({@code WARNING}): a placeholder of a variable Traceworks does not
  *       provide: the engine's {@link PlatformVariables} except {@code previous_report}
  *       and {@code audit_findings}, which Traceworks keeps ({@code open_todos}, {@code request_metrics},
@@ -105,7 +105,7 @@ final class TraceworksRules {
 
     /**
      * The audit rules of a definition: {@code invalid-audit-config} and {@code invalid-audit-key} for a broken
-     * {@code metadata.audit}, {@code report-block-missing} when {@code reportBlock} names no top-level block, and
+     * {@code metadata.audit}, {@code report-block-missing} when {@code report_block} names no top-level block, and
      * {@code previous-report-outside-audit} for {@code previous_report} in a workflow without an audit block
      * (decided 2026-11-11: an error, not a literal).
      */
@@ -120,7 +120,7 @@ final class TraceworksRules {
         AuditConfig config = AuditConfig.of(metadata).orElse(null);
         if (config != null && workflow.blocks().stream().noneMatch(block -> block != null
                 && config.reportBlock().equals(block.getName()))) {
-            out.add(AnalyzerFinding.of("report-block-missing", Severity.ERROR, -1, null, "metadata.audit.reportBlock '"
+            out.add(AnalyzerFinding.of("report-block-missing", Severity.ERROR, -1, null, "metadata.audit.report_block '"
                     + config.reportBlock() + "' names no top-level block, so no run has a report to feed the register"));
         }
         if (metadata == null || metadata.get("audit") == null) {
@@ -132,7 +132,7 @@ final class TraceworksRules {
                 }
                 out.add(AnalyzerFinding.of("previous-report-outside-audit", Severity.ERROR, i, block.getName(),
                         "uses {{ previous_report }}, which only an audit workflow has (metadata.audit with enabled,"
-                                + " key, category and reportBlock); nothing else fills it, and Traceworks refuses the"
+                                + " key, category and report_block); nothing else fills it, and Traceworks refuses the"
                                 + " run rather than run it with the placeholder left in the text"));
             }
         }
@@ -178,7 +178,7 @@ final class TraceworksRules {
                     + "\" is not " + WorkflowDefinition.FORMAT + " — Traceworks refuses the workflow"));
         }
         if (workflow.formatVersion() != null && workflow.formatVersion() > WorkflowDefinition.FORMAT_VERSION) {
-            out.add(AnalyzerFinding.of("unknown-format", Severity.ERROR, -1, null, "formatVersion "
+            out.add(AnalyzerFinding.of("unknown-format", Severity.ERROR, -1, null, "format_version "
                     + workflow.formatVersion() + " is newer than this version of Traceworks reads ("
                     + WorkflowDefinition.FORMAT_VERSION + ") — it refuses the workflow"));
         }
@@ -200,7 +200,7 @@ final class TraceworksRules {
                       List<AnalyzerFinding> out) {
         BlockConfigSchema schema = BlockConfigSchema.get();
         boolean reportBlock = metadata.get("audit") instanceof Map<?, ?> audit
-                && audit.get("reportBlock") instanceof String name && !name.isBlank();
+                && audit.get("report_block") instanceof String name && !name.isBlank();
         for (int i = 0; i < blocks.size(); i++) {
             BlockDefinition block = blocks.get(i);
             unsupportedBlockType(block, i, blockTypes, out);
@@ -290,7 +290,7 @@ final class TraceworksRules {
     private static void reportBlockRequired(BlockDefinition block, int i, List<AnalyzerFinding> out) {
         if (!PlaceholderSyntax.keysIn(BlockText.joined(block)).contains("previous_report")) return;
         out.add(AnalyzerFinding.of("report-block-required", Severity.ERROR, i, block.getName(),
-                "uses {{ previous_report }}, but metadata.audit.reportBlock names no block — the previous report is"
+                "uses {{ previous_report }}, but metadata.audit.report_block names no block — the previous report is"
                         + " the output of that block; name the"
                         + " block that writes the report"));
     }

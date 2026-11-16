@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * it says is refused as a whole instead of running up to the point where it goes
  * wrong (docs/workflow-format.md). Refused are:
  * <ul>
- *   <li>a {@code format} other than {@value WorkflowDefinition#FORMAT} and a {@code formatVersion} above
+ *   <li>a {@code format} other than {@value WorkflowDefinition#FORMAT} and a {@code format_version} above
  *       {@value WorkflowDefinition#FORMAT_VERSION}; a definition without them is admitted;</li>
  *   <li>a {@code requires} entry outside {@link WorkflowDefinition#KNOWN_REQUIREMENTS};</li>
  *   <li>a workflow that asks for an isolated run workspace ({@link WorkflowDefinition#requestsIsolatedWorkspace}):
@@ -119,7 +119,7 @@ public final class RunAdmission {
         reasons.addAll(traceworks.core.model.AuditConfig.problems(definition.metadata()));
         traceworks.core.model.AuditConfig.of(definition.metadata()).ifPresent(audit -> {
             if (definition.blocks().stream().noneMatch(b -> b != null && audit.reportBlock().equals(b.getName()))) {
-                reasons.add("metadata.audit.reportBlock '" + audit.reportBlock() + "' names no top-level block");
+                reasons.add("metadata.audit.report_block '" + audit.reportBlock() + "' names no top-level block");
             }
         });
         if (definition.requestsIsolatedWorkspace()) {
@@ -175,7 +175,7 @@ public final class RunAdmission {
             reasons.add("format \"" + definition.format() + "\" is not " + WorkflowDefinition.FORMAT);
         }
         if (definition.formatVersion() != null && definition.formatVersion() > WorkflowDefinition.FORMAT_VERSION) {
-            reasons.add("formatVersion " + definition.formatVersion() + " is newer than this version of Traceworks"
+            reasons.add("format_version " + definition.formatVersion() + " is newer than this version of Traceworks"
                     + " reads (" + WorkflowDefinition.FORMAT_VERSION + ")");
         }
     }

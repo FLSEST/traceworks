@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import traceworks.core.model.WorkflowDefinition;
+import traceworks.core.model.WorkflowJson;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.PackageLoader;
 import traceworks.core.seal.Seal;
@@ -18,7 +19,8 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
- * Loads a package from a directory: {@code workflow.json} (an unknown top-level key is an error), the
+ * Loads a package from a directory: {@code workflow.json} (an unknown top-level key is an error, and so are both
+ * spellings of one key: {@link WorkflowJson}), the
  * {@linkplain PackageDigest digest} and the {@linkplain GitInfo git state}, the images under {@code images/} and the
  * bytes of the seal file when the package carries one. A
  * package in the runs' checkouts is refused before anything of it is read ({@link CheckoutsDirectory}).
@@ -105,7 +107,7 @@ public final class FilePackageLoader implements PackageLoader {
             // anything is read, so a link to a file of the operator never reaches the parser and its error message
             String digest = PackageDigest.of(directory);
             byte[] json = bounded(file);
-            WorkflowDefinition definition = mapper.readValue(json, WorkflowDefinition.class);
+            WorkflowDefinition definition = WorkflowJson.read(json);
             GitInfo git = GitInfo.of(directory, gitExecutable, gitTimeoutMillis);
             Path images = directory.resolve(IMAGES_DIRECTORY);
             Path catalog = directory.resolve(CATALOG_FILE);
@@ -118,10 +120,10 @@ public final class FilePackageLoader implements PackageLoader {
                     seal(directory));
         } catch (JsonProcessingException e) {
             if (e instanceof com.fasterxml.jackson.databind.JsonMappingException mapping
-                    && !mapping.getPath().isEmpty() && "modelChoices".equals(mapping.getPath().getFirst()
+                    && !mapping.getPath().isEmpty() && "model_choices".equals(mapping.getPath().getFirst()
                     .getFieldName()) && mapping.getPath().size() == 1) {
                 // The parser's own words for a value of the wrong shape say nothing of what the key is for
-                throw new IllegalArgumentException("Cannot read " + file + ": modelChoices must be an object that"
+                throw new IllegalArgumentException("Cannot read " + file + ": model_choices must be an object that"
                         + " maps the name of each model choice to its default and options (invalid-model-choice;"
                         + " docs/cli.md, \"Model choices\")", e);
             }

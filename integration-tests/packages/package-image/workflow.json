@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "591b2bf1-f9d6-4a81-bf47-2d5fe7ac677d",
   "name": "IT package image",
   "description": "A step runs in the package's own image ./images/probe, which traceworks images build builds.",

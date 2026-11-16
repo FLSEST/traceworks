@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "897709a6-8fd1-40e4-9996-64b211fd90d0",
   "name": "IT approval",
   "description": "A shell step, an approval that parks the run and fails it on a rejection, and a shell step after it.",

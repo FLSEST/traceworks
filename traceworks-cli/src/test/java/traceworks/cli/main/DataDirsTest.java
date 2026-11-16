@@ -102,7 +102,7 @@ class DataDirsTest {
                 + "'{\"snapshotComplete\":true,\"findings\":[{\"ruleKey\":\"size\",\"subject\":\"A.java\","
                 + "\"severity\":\"MEDIUM\",\"title\":\"Big A.java\"}]}' '-->'";
         return pkg("audit", "\"metadata\":{\"audit\":{\"enabled\":true,\"key\":\"hello\",\"category\":\"example\","
-                + "\"reportBlock\":\"report\"}},", "{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
+                + "\"report_block\":\"report\"}},", "{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}");
     }
 

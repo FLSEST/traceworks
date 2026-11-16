@@ -1,6 +1,6 @@
 {
   "format": "traceworks-workflow",
-  "formatVersion": 1,
+  "format_version": 1,
   "id": "f6507e30-0820-42ba-ae38-cfb5d4b911db",
   "name": "IT tool mode twin",
   "description": "A second package with a package image of the same name as tool-mode's: its tool cache is another folder.",

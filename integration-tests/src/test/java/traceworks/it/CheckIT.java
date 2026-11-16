@@ -83,7 +83,7 @@ class CheckIT extends IntegrationTest {
 
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(run.err()).contains("traceworks: warning: input \"nme\" is read by no block and is not in"
-                + " defaultContext, so it changes nothing in this run");
+                + " default_context, so it changes nothing in this run");
     }
 
     @Test

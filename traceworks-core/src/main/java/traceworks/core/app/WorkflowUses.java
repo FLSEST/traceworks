@@ -46,7 +46,7 @@ final class WorkflowUses {
 
         /**
          * The run of {@code root} with {@code inputs}: its picks, and those of the child workflows, which pick from
-         * the inputs the root run starts with (its {@code defaultContext} under its inputs), as the engine does.
+         * the inputs the root run starts with (its {@code default_context} under its inputs), as the engine does.
          *
          * @param inputs the run's inputs; {@code null} for none
          */

@@ -13,9 +13,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DescriptionTextTest {
 
     private static final String SAMPLE = """
-            {"id":"wf-1","name":"Deploy","description":"Builds\\nand ships.","defaultContext":{"target":"staging"},
+            {"id":"wf-1","name":"Deploy","description":"Builds\\nand ships.","default_context":{"target":"staging"},
              "requires":["container.network"],
-             "metadata":{"audit":{"enabled":true,"key":"deploys","category":"ops","reportBlock":"report"}},
+             "metadata":{"audit":{"enabled":true,"key":"deploys","category":"ops","report_block":"report"}},
              "blocks":[
               {"type":"shell","name":"build","config":{"command":"make build\\nmake more","network":true,
                "secrets":["DEPLOY_TOKEN"]}},

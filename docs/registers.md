@@ -15,7 +15,7 @@ A workflow feeds a register when its `metadata.audit` says so:
 
 ```json
 "metadata": {
-  "audit": {"enabled": true, "key": "architecture", "category": "architecture", "reportBlock": "report"}
+  "audit": {"enabled": true, "key": "architecture", "category": "architecture", "report_block": "report"}
 }
 ```
 
@@ -24,8 +24,8 @@ A workflow feeds a register when its `metadata.audit` says so:
 | `enabled` | `true` to feed a register; `false` or absent is an ordinary workflow |
 | `key` | the register, `[a-z0-9][a-z0-9._-]{0,127}`. A register belongs to the workflow (by its `id`) whose run created it; a run of another workflow with the same key is refused at its start and writes nothing |
 | `category` | a word for the register's page and `findings` |
-| `reportBlock` | the name of the top-level block whose output is the report, with the envelope at its end |
-| `schemaVersion` | optional, `1` |
+| `report_block` | the name of the top-level block whose output is the report, with the envelope at its end |
+| `schema_version` | optional, `1` |
 
 `traceworks check` refuses an audit configuration it does not understand (`invalid-audit-config`,
 `invalid-audit-key`, `report-block-missing`, `catalog-invalid`), and so does the start of a run (docs/cli.md,

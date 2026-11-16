@@ -66,12 +66,12 @@ starts a run picks an option with `--input judge=<option>`; without the input th
 | `opus` | `CLAUDE` | `claude-opus-5-5` |
 | `astra` | `PI` | `openai/gpt-6-astra` |
 
-- **The package decides what can be picked.** The options stand in `modelChoices` of `workflow.json`
+- **The package decides what can be picked.** The options stand in `model_choices` of `workflow.json`
   ([docs/cli.md](../../../docs/cli.md), "Model choices"). A value that is none of them refuses the run before it
   exists, with the options listed. `traceworks describe` shows the choice before a run, and a seal of the package
   covers the default and the list: an input picks among the options that were sealed and cannot bring another model.
   The operator can narrow the list for a home with `allowed_models` in `traceworks.json`.
-- **Another judge** is another option: add it to `modelChoices.judge.options` with its `provider` and `model`.
+- **Another judge** is another option: add it to `model_choices.judge.options` with its `provider` and `model`.
 - **The run says who judged.** Traceworks hands the steps the pick as the variables `{{ judge }}`,
   `{{ judge_provider }}` and `{{ judge_model }}`; the `areas` step passes them to the tool, which reads no
   declaration itself. The report starts with `**Judged by:** provider ..., model ...`, and every place of a finding in
