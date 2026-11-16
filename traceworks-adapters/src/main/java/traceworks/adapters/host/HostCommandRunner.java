@@ -134,11 +134,13 @@ public final class HostCommandRunner implements CommandRunner {
             process = OwnSession.start(pb::start);
             stop = ProcessTree.stopHandle(process);
             tracker.started(stop);
-            BashScript.supply(process, BashScript.stdin(command));
 
-            // Read the output on a thread of its own, so a full pipe never blocks the process
+            // Read the output on a thread of its own, so a full pipe never blocks the process. The reading starts
+            // before bash gets its script: bash cannot end before the reader holds the stream, and so the output is
+            // read to the end of the pipe, also what a child of the command writes after the command ended
             BoundedOutput output = new BoundedOutput(outputLimit);
             Thread reader = output.drain(process.getInputStream(), "host-command-output");
+            BashScript.supply(process, BashScript.stdin(command));
 
             // An output beyond the limit stops the process the way a timeout does
             boolean timedOut = false;

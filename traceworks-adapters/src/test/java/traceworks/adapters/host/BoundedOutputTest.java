@@ -1,11 +1,15 @@
 package traceworks.adapters.host;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -126,5 +130,40 @@ class BoundedOutputTest {
 
         assertThat(output.text()).isEqualTo("a");
         assertThat(output.exceeded()).isFalse();
+    }
+
+    /**
+     * A process ends while the reader is between two reads, and a child it left behind writes afterwards. The JDK
+     * closes the stream of a process at its end with what is in the pipe at that instant, unless a thread holds the
+     * stream; the reader holds it from before {@code drain} returns, so the child's line is read.
+     *
+     * <p>The shell waits for the end of its stdin, which comes after {@code drain}. The test holds the output, so the
+     * reader stops after its first read, where it keeps the bytes, until the shell has ended and the child has
+     * written.
+     */
+    @Test
+    void aProcessThatEndsBetweenTwoReads_isReadToTheEndOfItsOutput(@TempDir Path dir) throws Exception {
+        Path written = dir.resolve("late-written");
+        Process process = new ProcessBuilder("/bin/sh", "-c",
+                "read go; (trap '' PIPE; sleep 0.2; echo late; touch \"$0\") 2>/dev/null & echo first",
+                written.toString())
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024);
+
+        Thread reader;
+        synchronized (output) {
+            reader = output.drain(process.getInputStream(), "test-output");
+            process.getOutputStream().close();
+            assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!Files.exists(written) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(written).as("the child wrote its line").exists();
+        }
+        reader.join(10_000);
+
+        assertThat(reader.isAlive()).isFalse();
+        assertThat(output.text()).isEqualTo("first\nlate\n");
     }
 }

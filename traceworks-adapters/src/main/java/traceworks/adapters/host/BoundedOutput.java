@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
 
 /**
  * What a runner keeps of one stream of a process: everything up to a limit (the operator's {@code output_limit_mib},
@@ -44,18 +45,51 @@ public final class BoundedOutput {
     /**
      * Reads {@code stream} to its end on a virtual thread named {@code name}, and closes it then. A stream that fails
      * (the process was ended) ends the reading; what came before is kept.
+     *
+     * <p><b>The end is the end of the pipe, not of the process.</b> When a process ends, the JDK takes what is in the
+     * pipe at that instant and closes it ({@code ProcessImpl.ProcessPipeInputStream.processExited}, a synchronized
+     * method of the stream): whatever a child the process left behind writes afterwards is lost, and the child gets
+     * SIGPIPE. A read holds the stream, so that only happened to a reader between two reads. The reader here holds
+     * the stream for all of its reading, so the JDK waits until the last writer has closed the pipe. This rests on
+     * how the JDK locks, which no documentation promises; {@code BoundedOutputTest} fails when it changes.
+     *
+     * <p>The reader holds the stream when this method returns. A process that ended before that (within the instant
+     * of its start) is still read up to its own end only; a caller that needs more starts the reading before the
+     * process gets its work, as the host command runner does with the script on stdin.
      */
     public Thread drain(InputStream stream, String name) {
-        return Thread.ofVirtual().name(name).start(() -> {
+        CountDownLatch held = new CountDownLatch(1);
+        Thread reader = Thread.ofVirtual().name(name).start(() -> {
             byte[] chunk = new byte[CHUNK];
-            try (stream) {
-                for (int n = stream.read(chunk); n != -1; n = stream.read(chunk)) {
-                    keep(chunk, n);
+            synchronized (stream) {
+                held.countDown();
+                try (stream) {
+                    for (int n = stream.read(chunk); n != -1; n = stream.read(chunk)) {
+                        keep(chunk, n);
+                    }
+                } catch (IOException ignored) {
+                    // the process was ended: on a timeout, a cancel or this limit
                 }
-            } catch (IOException ignored) {
-                // the process was ended: on a timeout, a cancel or this limit
             }
         });
+        awaitUninterrupted(held);
+        return reader;
+    }
+
+    /** Waits for the reader to hold its stream, which takes no longer than its start; an interrupt stays set. */
+    private static void awaitUninterrupted(CountDownLatch held) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                held.await();
+                break;
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /** How many bytes of the stream are kept at most. */
