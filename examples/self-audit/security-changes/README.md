@@ -6,7 +6,7 @@ call away from it: a handful of calls after a day's work. It asks the same quest
 rules, the same judge and the same evidence check, and keeps a register of its own, `security-changes`.
 
 ```
-changes   (shell, the shell image)   asks git: the base, and what changed since     -> changes/ (base, head, diff, ...)
+changes   (shell, the shell image)   finds the base, compares the files with it     -> changes/ (base, head, manifest, ...)
 areas     (shell, ./images/areas)    picks the changed areas and their neighbours   -> areas.jsonl, areas-summary.json
 verdicts  (foreach, AI, tools: read) one verdict per picked area, its code and the changed code next to it in the prompt
 report    (shell, ./images/areas)    checks the evidence, counts, sets the gate     -> security-changes-report.md
@@ -35,9 +35,25 @@ The changes are measured from one commit, the **base**, to the files of the work
 | The run got | The base is |
 |---|---|
 | `--input since=<commit or tag>` | that commit (`git rev-parse`); a short id works |
-| `--input since=<YYYY-MM-DD>`, with or without a time (`2026-11-10T14:00`) | the last commit of the workspace's history before that moment. A date without a time is its first second, in the time zone of the step (UTC in the shell image) |
+| `--input since=<YYYY-MM-DD>`, with or without a time (`2026-11-10T14:00`) | the newest commit on the first-parent line of the workspace commit whose author date and committer date are both before that moment. A date without a zone is UTC, and a date without a time is its first second |
 | no `since` | the workspace commit of the last run of this check |
 | no `since`, and no earlier run | none: **the run fails in its first step** and says what to give. It never takes "everything" or "nothing" for a base nobody named |
+
+The first step refuses a base that would make the run say more than it looked at:
+
+- **A base that is no ancestor of the workspace commit** (another branch, a rewritten history): the difference to
+  it is not what changed in this history.
+- **A base that is the workspace commit itself, with a workspace that holds no other change**, when `since` named
+  it: there is nothing to check, and a GREEN run would read as an audit. A date can do that (every commit is older
+  than it); the message names the commit the date resolved to and its date. Both dates of a commit count because
+  whoever makes a commit sets them: a commit that claims to be old in one of them is not taken for old. One that
+  claims it in both can be the base; it is then the workspace commit or lies below changes that are compared.
+  Without `since` the base may be the workspace commit (nothing happened since the last run); the report then
+  begins with `nothing changed since ...` and says so in words.
+- **A `since` that leaves commits after the last run unjudged.** When commits lie after the workspace commit of
+  the last run and at or before the base, no later run would come back to them. The step refuses and names the
+  number; `--input skip=yes` goes on knowingly. The report of such a run names the range and the number, and its
+  gate is not GREEN. The same holds when the last run's commit is not in the checkout, so nothing can be counted.
 
 **Where the last run's commit comes from.** A run of an audit gets what its register knew: the placeholders
 `{{ audit_findings }}`, `{{ audit_items }}` and `{{ previous_report }}`, and the same as files in the register
@@ -49,13 +65,39 @@ workspace was at right after the gate (`FACT changes_head: <commit>`), the regis
 name of the workspace, and no text of a model is in that output. The register hands a run the last report it
 *applied*: a run that failed, or whose report the register rejected, does not move the base.
 
-The base and the workspace commit are in the output of the `changes` step, in `areas-summary.json` and in the
-report. When the input names another base than the last run's commit, the report shows both.
+The base, its commit date and the workspace commit are in the output of the `changes` step, in
+`areas-summary.json` and in the report.
 
-**Changes that are in no commit count as changed.** The diff runs from the base to the files as they are, and a
-file git does not track (and does not ignore) is changed as a whole. The report says whether the workspace held
-such changes. The next run measures from the commit, so it sees them again; an area that was judged as it is now
-is not judged twice (below).
+**Changes that are in no commit count as changed.** A file is compared as it lies in the workspace, and a `.java`
+file the base does not have is new, whether git tracks it, ignores it or neither. The report says whether the
+workspace differs from its own commit. The next run measures from the commit, so it sees such changes again; an
+area that was judged as it is now is not judged twice (below).
+
+## What changed
+
+What changed is decided from **content**, not from what git's diff says. The workspace is not trusted, and git's
+diff, status and file listing obey things the workspace sets: an attribute (`*.java -diff`, `binary`) turns a
+changed file into "Binary files differ", a bit in the index (`skip-worktree`, `assume-unchanged`) hides one, an
+ignore rule leaves a new file out, and a filter named in `.gitattributes` and `.git/config` is a program git
+starts. So `scripts/changes.sh` asks git only for objects:
+
+1. the tree of the base (`git ls-tree -r`): every path with its blob id;
+2. the blob id of each of those files as it lies in the workspace (`git hash-object --no-filters`): the same id
+   is the same bytes;
+3. for a `.java` file that differs, the bytes the base has (`git cat-file blob`).
+
+A `.java` file the tree does not have is found by walking the workspace, not below `.git`, a hidden directory,
+`target`, `build` or `node_modules`, where the finder does not look either. The area tool then compares the two
+versions of each changed `.java` file line by line itself (a longest common subsequence): a line the base does not
+have in its place is changed, and where lines were only removed, the two lines around the gap are. Line ends alone
+are no change.
+
+**A changed file never drops out silently.** Every file that differs is in the manifest and is counted in the
+report: changed, new, removed, and *not compared* (it is no readable regular file any more, or its lines could not
+be read). A file that could not be compared is named, and **the gate is not GREEN** while there is one. A changed
+file that is no Java source the tool read (a `pom.xml`, a test, a workflow) and a changed place that lies in no
+member (an import, the head of a class, an annotation of a type) are counted and named too; no area comes from
+them, and the gate does not wait for them.
 
 ## What is looked at
 
@@ -88,14 +130,16 @@ the connected code the prompt showed. A picked area that the register calls clea
 digest is left out: the same question was answered. That is what keeps a second run over the same uncommitted
 change from asking again.
 
-The report names the base, counts the changed files and members, the areas with a changed line, the neighbours,
-the areas earlier runs left, and **the areas of the project that were not looked at**, and lists every area of the
-run with its reason.
+The report names the base and its date, counts the files that differ (removed ones, ones that are no source,
+ones that could not be compared), the changed members, the areas with a changed line, the neighbours, the areas
+earlier runs left, and **the areas of the project that were not looked at**, and lists every area of the run with
+its reason. A run in which no file differs says `Nothing changed.`
 
 ## The gate speaks about the changes
 
 The gate follows the items of the run, as in the long audit: RED while an open finding of high severity stands,
-YELLOW while an item is open or not judged (or a file could not be read), GREEN when every item is settled. The
+YELLOW while an item is open or not judged, a file could not be read or compared, or the run skipped commits
+(`skip=yes`); GREEN when every item is settled. The
 items here are the areas this check ever picked. So GREEN means: nothing stands in what changed and in what
 earlier runs of this check left. It says nothing about the rest of the project, and the description says so in
 every run: `of the changes since 4f2a91c03b7e: no verified finding; 3 of 3 areas judged; ...; 104 of 110 areas of
@@ -128,11 +172,35 @@ this check reports it, and the other way round.
 
 ## What it needs of git
 
-The `changes` step runs `scripts/changes.sh` in the built-in shell image, which has git. It needs no network and
-writes nothing into the workspace, which every container sees read-only: git only reads (`rev-parse`, `rev-list`,
-`diff`, `ls-files`), with `GIT_OPTIONAL_LOCKS=0`. The workspace's git configuration is not trusted: the calls start
-no fsmonitor, no external diff, no textconv and no pager. The area tool starts no git; it reads what the step
-wrote.
+The `changes` step runs `scripts/changes.sh` in the built-in shell image, which has git and bash. It needs no
+network and writes nothing into the workspace, which every container sees read-only. The area tool starts no git;
+it reads what the step wrote.
+
+The script runs these git commands and no other, each with `--no-pager`, `--no-replace-objects`,
+`GIT_OPTIONAL_LOCKS=0`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_TERMINAL_PROMPT=0`:
+
+| Command | What it reads | Why the workspace cannot make it start a program |
+|---|---|---|
+| `rev-parse --is-inside-work-tree`, `rev-parse --verify <name>^{commit}` | the repository's layout, a reference, an object | it resolves names; `since` is refused when it starts with `-` and stands after `--end-of-options` |
+| `config --get-regexp` | `.git/config` | it prints values and runs none |
+| `rev-list --first-parent --format`, `rev-list --count`, `rev-list --no-walk --format`, `merge-base --is-ancestor`, `cat-file -e` | commit objects | they walk the history; replace references are off, so a commit is the commit its id names |
+| `ls-tree -r -z` | tree objects | it lists a tree; it does not read the index or the files |
+| `hash-object --no-filters --stdin-paths`, `hash-object --stdin` | the files of the workspace | `--no-filters` hashes the bytes as they are: no clean filter, no attribute, no line-end conversion; nothing is written (no `-w`) |
+| `cat-file blob <id>` | blob objects | it prints the bytes; text conversion needs `--textconv`, which is not given |
+
+None of them reads or writes the index, so no index bit counts and no `fsmonitor` or `post-index-change` hook is
+asked. None of them runs a diff, so no external diff, text conversion or diff attribute counts. None of them
+updates a reference or checks a file out, so no hook runs. None of them talks to a remote. **A partial clone is
+refused** (`extensions.partialclone`, a `promisor` remote): reading an object it does not have would start a fetch.
+**A workspace with a submodule is refused**: the check does not look into one.
+
+What was tried, with git 2.43 on the host (`ChangesScriptTest`): a repository whose configuration names a program
+for `diff.external`, `core.fsmonitor`, `core.pager`, a `clean`, `smudge` and `process` filter, `textconv`,
+`core.sshCommand`, `core.alternateRefsCommand`, `core.editor`, `credential.helper` and
+`uploadpack.packObjectsHook`, with those hooks in `.git/hooks` and the filter and diff driver set for `*.java` in
+`.gitattributes`: the program did not run. A file under `-diff`, `binary` and `core.bigFileThreshold=1`, a file
+with `skip-worktree` or `assume-unchanged`, and an ignored new file were each found changed; a replace reference
+did not move the base. Not tried: other versions of git, and the script in a container.
 
 - **The workspace must hold its history**: a checkout with its `.git` directory. A linked worktree (`git worktree
   add`) has a `.git` file that points outside the workspace, which the container does not see; the step fails and
@@ -141,6 +209,8 @@ wrote.
   base is there as long as a branch or tag of the source reaches it. Such a workspace has no uncommitted changes.
 - A base that the checkout does not have (the last run was in another clone, or the commit was rewritten) fails
   the step with the commit named; give `since`.
+- The script needs bash 4 and, for a date, the `date -d` of GNU coreutils; the shell image has both. A commit id
+  has 40 hex digits, or 64 in a SHA-256 repository.
 
 ## What it does not see
 
@@ -149,15 +219,21 @@ wrote.
   supertype without a changed method. And a call the compiler could not resolve: on a library type, or through
   reflection.
 - **A base that was never audited.** The check judges the changes; it takes the base as it is. Run the long audit
-  once, or accept that the code before the base is unjudged. A `since` later than the last run's commit skips the
-  commits between the two; the report shows both commits then.
+  once, or accept that the code before the base is unjudged. A `since` later than the last run's commit is
+  refused, unless `skip=yes` says that the commits between the two shall stay unjudged.
 - **Changes outside the Java sources.** A changed rule file, workflow, Dockerfile or `pom.xml` maps to no area. The
   report counts and names such files.
 - **Renamed members.** An item and a finding are known by the file and the member. After a rename the area is a
   new item, the old item leaves the register, and an open finding of the old name is named as gone and comes back
   as new if it still holds, without the decision a person made on the old one.
-- **Removed code.** A removed file has no lines. Where lines were removed inside a member, the lines around the gap
-  count as changed; the callers of a removed method changed with it, or the code does not compile.
+- **Removed code.** A removed file is counted and has no lines. Where lines were removed inside a member, the
+  lines around the gap count as changed. The calls are those of the sources as they are now, so a removed member
+  has no neighbours: when an overriding method is removed, its callers still compile, now reach the inherited
+  method, and are not looked at unless they changed themselves.
+- **New files that are no Java file**, when no commit holds them: the walk for new files looks for `.java` only,
+  since nothing else tells a new source from a build's output. A changed or removed file of any kind that the
+  base has is counted.
+- **A sparse checkout.** A file the base has and the workspace does not is removed, whatever the reason.
 - **A neighbour whose call failed is judged without its context.** The next run judges it, but the diff has moved
   on, so its prompt no longer shows the changed code.
 - Everything the long audit does not see ([../security/README.md](../security/README.md), "Limits").
@@ -172,8 +248,9 @@ it is the long audit's finder. Change the tool in `../security/images/areas/src`
 ## Tests
 
 In [`examples/self-audit/tests`](../tests), without a container and without an AI: the calls the finder knows
-(`CallsTest`), the diff and the picks (`ChangesTest`), the tool and the report (`ChangesMainTest`), the script
-against a real git repository (`ChangesScriptTest`), the package as it ships (`ChangesPackageTest`), and the
+(`CallsTest`), the line comparison and the picks (`ChangesTest`), the tool and the report (`ChangesMainTest`), the
+script against real git repositories, hostile ones among them (`ChangesScriptTest`; it needs bash and git and
+fails without them), the package as it ships (`ChangesPackageTest`), and the
 package through the engine into its register across runs with different bases, with a shell loop in the model's
 place (`ChangesRoundTripTest`). `SecurityChangesScriptIT` in `integration-tests` runs the script in the shell image
-(`mvn -Pit`).
+(`mvn -Pit`); it is written and was not run.

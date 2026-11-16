@@ -243,11 +243,14 @@ keeps it short: a run judges what changed, by the digest of each area. It still 
 time, and it sees a change only where the changed lines lie in an area.
 
 [`security-changes`](security-changes/README.md) is the check for the time between two long audits, after a day's
-work or before a merge. It asks git what changed since a base (`--input since=<commit|tag|date>`, or without the
-input since the last run of the check), maps the changed lines to the areas the same finder produces, and adds the
+work or before a merge. It compares the files of the workspace with a base commit (`--input since=<commit|tag|date>`, or
+without the input the commit of the last run of the check), by content and not by what git's diff says, since a
+workspace can make that say less; it maps the changed lines to the areas the same finder produces, and adds the
 areas one call away from a changed member, in both directions and through an interface to every implementation:
 a helper that no rule points at brings in the areas that call it. The model judges only those, each with the
-changed code it is connected with in its prompt. Without a base the run refuses.
+changed code it is connected with in its prompt. Without a base the run refuses, and so it does for a base that is the workspace commit itself or
+that would leave commits after the last run unjudged (`skip=yes` goes on knowingly, and the gate is not GREEN
+then).
 
 ```bash
 traceworks run examples/self-audit/security-changes --input since=v0.1.0
