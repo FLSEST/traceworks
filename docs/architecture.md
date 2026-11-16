@@ -85,7 +85,7 @@ the run calls the handles; how a process and everything it started end is the ad
 | `Inbox` | the requests that other processes drop for a running run |
 | `PackageLoader` | reads a package directory: `workflow.json`, the package digest, the git state and the bytes of the seal file when the package carries one |
 | `SourceCheckout` | the checkout of a git repository that a run started with `--source` works in: cloned below the home and detached at one commit without running anything of the source, and removed again |
-| `Ledger` | notes the start of a run before its first step, commits the manifest of a finished run and finds both again; lists the runs it saw start and end; anchors the head of a register after every write, and lists the anchors |
+| `Ledger` | notes the start of a run before its first step, commits the manifest of a finished run and finds both again; lists the runs it names with their entries, and keeps the acknowledgement of a run; anchors the head of a register after every write, and lists the anchors |
 | `RegisterStore` | the registers of the home (docs/registers.md): one per key, each a hash-chained log, blobs and the derived `state.json` and `report.html`; opened for reading, or for writing under the one lock per register that serialises the writers of every process |
 | `HookRunner` | runs an operator's hook: a program on the host, started without a shell, with a payload on its standard input |
 | `SealStore` | the seals of the home (docs/cli.md, "seal, unseal and seals"): the hash-chained seal log, opened for reading or for writing under its one lock, the operator's allowed signers file, and the seal file `traceworks.seal` of a package directory |

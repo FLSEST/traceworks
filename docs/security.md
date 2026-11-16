@@ -233,19 +233,33 @@ empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's con
 changed blob, and a manifest or ledger entry that does not match the log.
 
 **A run that began is named outside its folder.** The ledger gets an entry when a run starts, before its first step,
-and no step runs without it (docs/events.md, "The start entry"). So a run that is killed when an unwelcome result
-shows, and whose folder is then deleted, is visible: `traceworks verify` without a run lists it as started, never
-ended, folder gone, and exits 8; a run folder whose start entry was taken out fails its own `verify`. What this
-does not stop: the ledger is a git repository on the same machine, written as the user who runs the runs, and it is
-not signed. An added commit that removes an entry is found, because the list is read from the messages of the ledger's commits. A rewritten
-history is not: someone who can rewrite the ledger's history, and delete the run folder, can still hide a run.
-What closes that is a copy that others hold. The ledger is a plain git repository, so the operator can push it to a
-remote they do not control alone and that refuses a rewritten history (a protected branch without force push, or
-an append-only mirror); a start entry that was pushed can then not be removed without the remote showing it.
-Traceworks does not push by itself and has no setting for a remote, and it writes the ledger without git hooks, so
-the push is the operator's: a cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are
-not pushed yet are only as safe as the machine, so the time between two pushes is the time in which a run can still
-be hidden. `run.html` has no scripts and loads
+and no step runs without it, at a start and at a resume (docs/events.md, "The start entry"). What that gives, in
+three groups:
+
+- **What the check finds on this machine** (`traceworks verify` without a run, exit 8): a run that started, never
+  ended, and whose folder is gone, empty or holds another record; an entry removed by an added commit, and a commit
+  that names a run without its entry; an end entry added by hand that is no manifest of the run or does not agree
+  with its commit and its start entry; a run folder whose record says its start was noted and that has no start
+  entry (a ledger deleted and made again, another `ledger_dir`, a kill between `run.started` and the commit); and a
+  ledger with replace refs, a shallow or grafts file, alternates, a second branch, a detached HEAD, a commit HEAD
+  does not reach, or a setting of its own that changes what git shows. An honest cause is acknowledged with a note,
+  which the ledger keeps and the check lists for good.
+- **What only a ledger that others hold finds:** a rewritten history that no reference names any more. The ledger
+  is a plain git repository, so the operator can push it to a remote they do not control alone and that refuses a
+  rewritten history (a protected branch without force push, or an append-only mirror); an entry that was pushed can
+  then not be removed without the remote showing it. Traceworks does not push by itself, has no setting for a
+  remote and writes the ledger without git hooks, so the push is the operator's: a cron entry, a timer or CI that
+  runs `git push` in the ledger folder. Entries that are not pushed yet are only as safe as the machine, so the
+  time between two pushes is the time in which a run can still be hidden.
+- **What nothing in this version finds:** a forged entry made with write access to the ledger (the ledger is not
+  signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
+  or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
+  started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
+  `ledger_dir`, a jar of a version that noted no start). Against the last, start audits only from a place that owns
+  the home, such as a CI job with its own account that pushes the ledger after every run, and accept as a result
+  only a run whose start entry is in the pushed ledger.
+
+`run.html` has no scripts and loads
 nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's

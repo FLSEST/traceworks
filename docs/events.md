@@ -247,7 +247,7 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `seal` | the seal the package carried and the seal check accepted (docs/cli.md, "seal, unseal and seals"): `{workflow_id, digest, signer, sealed_at, key, principals, signature}`. `digest` is the seal digest, which covers the package and the packages it calls, so it differs from `package.digest`; `signer` and `sealed_at` are what the seal says; `key` is the fingerprint of the key that signed (`SHA256:...`); `principals` are the names the allowed signers file of the home gave that key when the run started; `signature` is the armored SSH signature. `null` for a package that is not sealed. A record of an earlier version has no such field |
 | `model_choices` | only for a workflow that declares a model choice (docs/cli.md, "Model choices"): an object by the name of the choice, each `{option, default, provider, model}`: the option the run picked, whether it is the choice's default, and the provider and the model of that option, which the steps that refer to the choice ran with. The pick comes from the run's inputs (the `inputs` blob), and a resume keeps it. A run of a workflow without a choice has no such field, so its `run.started` is byte for byte what earlier versions wrote; a child run has no `run.started`, and its calls name their provider and model in `ai.request` |
 | `register` | only for an audit workflow (docs/registers.md, "The register folder of a run"): what the register handed the run before its first step. `key` is the register; `seq` and `head` are the last line of the register's log the run read, its sequence number and its SHA-256, both `null` when the register did not exist yet; `files` lists the files of the run's `register/` folder in the order they were written, each `{name, sha256, size}`. The files are not blobs of the run: the folder is part of the run folder, `traceworks verify` compares it with these digests, a host run does so before each command that gets the folder, and a resume refuses a folder that differs. A run of any other workflow has no such field, so its `run.started` is byte for byte what earlier versions wrote |
-| `ledger_start` | `true`: the ledger notes the start of this run, with an entry written right after this line and before the first step ("The start entry" below). No step runs without the entry, so a run with this field and without an entry lost it, and `traceworks verify` fails. A record of an earlier version has no such field, and no start entry |
+| `ledger_start` | `true`: the ledger notes the start of this run, with an entry written right after this line and before the first step ("The start entry" below). No step runs without the entry, so a run with this field and without an entry lost it, and `traceworks verify` fails. A record of an earlier version has no such field, and no start entry until it is resumed |
 | `workspace` | the directory the steps work in, as its real path (symbolic links resolved); with `--source`, the run's checkout `<home>/workspaces/<run-id>` |
 | `workspace_source` | only with `--source`: the source the workspace is a checkout of, a local path as an absolute path, a URL without its credentials, query and fragment (`https://user:token@host/repo?x=1#y` is `https://host/repo`; an `ssh://` URL keeps its user name, which is no credential) |
 | `workspace_source_sha` | only with `--source`: the full commit the checkout is detached at, which the steps also see as `workspace_source_sha` |
@@ -854,6 +854,7 @@ lines: its parent's lines follow it in the same log.
 | `tool_versions` | `{}` in this version |
 | `events` | the number of lines in `events.jsonl` |
 | `head` | the hash of the last line |
+| `run_started` | the SHA-256 of the `run.started` line, which the start entry of the ledger names too ("The start entry" below): it ties an end entry to its start entry without the run folder. A manifest of an earlier version has no such field; `traceworks verify` accepts that for a run whose `run.started` has no `ledger_start`, and for no other |
 | `status` | the final status |
 | `gate` | `{status, category}` or `null` |
 | `started_at`, `finished_at` | ISO-8601 UTC times |
@@ -875,6 +876,7 @@ one per write of a register:
 ```
 ledger/starts/<run-id>.json   the start entry: the run began, and with which first line
 ledger/runs/<run-id>.json     a byte-identical copy of the manifest
+ledger/acks/<run-id>.jsonl    the acknowledgements of a run: one line per acknowledgement
 ledger/registers/<key>.jsonl  the anchors of a register: one line {"seq":N,"head":"<sha256>"} per write
 ```
 
@@ -883,7 +885,8 @@ repository cannot be created. If the manifest or the ledger entry still cannot b
 `traceworks resume` writes them later from the record, and adds nothing to the log.
 
 The commit message is `run <run-id> STARTED` for a start, `run <run-id> <STATUS>` for an end (`COMPLETED`,
-`COMPLETED_WITH_ERRORS`, `FAILED`, `CANCELLED`), or `register <key> seq <N>` for an anchor. Author and committer are
+`COMPLETED_WITH_ERRORS`, `FAILED`, `CANCELLED`), `run <run-id> ACKNOWLEDGED` for an acknowledgement, or
+`register <key> seq <N>` for an anchor. Author and committer are
 `Traceworks <traceworks@localhost.invalid>`.
 
 ### The start entry
@@ -921,32 +924,93 @@ step runs:
   `run.started` and `run.finished` as its only lines, the error says why, and `traceworks run` exits 6. A record with
   events is never removed, so the folder stays. Once the ledger can be written, `traceworks resume <run>` writes the
   start entry, the manifest and the end entry of that run; it runs no step.
-- **One per run.** A resume is the same run and adds no start entry, and the ledger notes nothing between the start
-  and the end of a run (no pause, no resume). A child run has no folder, no manifest and no entry of its own: its
-  lines are in the record of the run that started it. The end entry does not replace the start entry; a finished
-  run has both.
+- **One per run.** A resume is the same run and adds no start entry to a run that has one, and the ledger notes
+  nothing between the start and the end of a run (no pause, no resume). A child run has no folder, no manifest and
+  no entry of its own: its lines are in the record of the run that started it. The end entry does not replace the
+  start entry; a finished run has both, and the manifest names the same `run.started` line (`run_started`).
 - **Which runs have one.** `run.started` of a run that gets a start entry holds `"ledger_start": true`. A record
-  without the field was written by a version that noted no start; it has no entry, and a resume gives it none.
+  without the field was written by a version that noted no start, and has no entry while it rests.
+- **A resume makes sure of it.** Before a resume goes on, the ledger must hold the start entry of the run. A run
+  without one gets it then, from the first line of its record: a run of an earlier version, a run whose process was
+  killed between `run.started` and the commit, a run whose entry was removed. When the ledger cannot take it, the
+  resume is refused (exit 6) and records nothing. So no step of this version runs in a run the ledger does not
+  name.
 - **Reading it back.** `traceworks verify <run>` compares the entry with the first line of the record, and
-  `traceworks verify` without a run lists the runs that started and never ended, with what their folder says, and
-  the runs whose folder is gone (docs/cli.md, "verify"). The second takes the runs from the messages of the
-  ledger's commits, so an entry that a later commit removed still counts and is reported as removed.
-- **What it does not do.** The ledger is not signed, and it lies on the machine that runs the runs. Someone who can
-  rewrite its git history (not just add a commit) can take a start entry out so that nothing shows it. What closes
-  that is a copy others hold: the ledger is a plain git repository, so it can be pushed to a remote that the
-  operator does not control alone and that refuses a rewritten history (a protected branch without force push, or
-  an append-only mirror). A start entry that was pushed can then not be removed without the remote showing it.
-  Traceworks does not push and has no setting for a remote: the push is the operator's (a `post-commit` hook is not
-  run, since the ledger is written without hooks; a cron entry, a systemd timer or CI that runs `git push` in the
-  ledger folder does it). An entry that is not pushed yet is only as safe as the machine.
+  `traceworks verify` without a run checks the ledger against the runs folder, both ways (docs/cli.md, "verify").
+
+### What the ledger shows, and what it does not
+
+The ledger is not signed, and it lies on the machine that runs the runs, written as the user who runs them. What
+follows is what that gives, in three groups.
+
+**What the check finds** (`traceworks verify` without a run, exit 8), with nothing but this machine:
+
+- a run that started, never ended, and whose folder is gone, is empty, or holds another record than the one that
+  started (the start entry names the first line);
+- an entry taken out by an added commit, and a commit that names a run without adding its entry: the runs are
+  taken from the messages of the commits, which a later commit cannot take back;
+- an end entry added by hand that is no manifest of the run, does not have the status its commit says, or does
+  not name the `run.started` line of the start entry;
+- a run folder whose record says the ledger noted its start, without a start entry: a ledger that was deleted and
+  made again, another `ledger_dir` that was in force for the run, a process killed between `run.started` and the
+  commit; and a finished run without its end entry;
+- a ledger that git would show otherwise than its commits hold it. The ledger is read with replace objects off, and
+  the check fails on replace refs, `.git/info/grafts`, `.git/shallow`, `.git/objects/info/alternates`, a `.git`
+  that is a file or a link or has a `commondir`, a HEAD that names no branch, a second branch, a commit that a
+  reference holds and HEAD does not reach (a history that was rewound while a branch, a tag or a remote-tracking
+  reference still names the old one), and any key in the ledger's own git configuration other than those
+  `git init` writes or a push needs (`core.repositoryformatversion`, `core.filemode`, `core.bare`,
+  `core.logallrefupdates`, `core.ignorecase`, `core.precomposeunicode`, `core.symlinks`,
+  `extensions.objectformat`, and the sections `remote`, `branch`, `user`, `push`, `credential`, `http`, `gc`).
+
+**What only a ledger that others hold finds.** Someone who rewrites the ledger's history so that no reference names
+the old one (a reset, an amended commit, a new repository with the same entries but one) leaves nothing on this
+machine that the check can see. The ledger is a plain git repository, so it can be pushed to a remote that the
+operator does not control alone and that refuses a rewritten history (a protected branch without force push, or an
+append-only mirror). An entry that was pushed can then not be removed without the remote showing it: the next push
+is refused. Traceworks does not push and has no setting for a remote. It writes the ledger without git hooks, so a
+`post-commit` hook does not run: the push is the operator's, by a cron entry, a timer or CI that runs `git push` in
+the ledger folder. An entry that is not pushed yet is only as safe as the machine.
+
+**What nothing in this version finds:**
+
+- **A forged entry made with write access to the ledger.** The ledger is not signed. Whoever can commit to it can
+  add an end entry that is a well-formed manifest and names the right `run.started` line (the start entry says
+  which), or an acknowledgement under any name. The run then reads as ended, or as acknowledged; both stay listed.
+- **A record cut to its first line.** It cannot be told from a crash right after the start: the run reads
+  `INTERRUPTED` and its own `verify` holds, because the start entry pins the first line only. What remains is that
+  the run stays listed as started and not ended, for good, until someone resumes or cancels it, which is recorded.
+- **A run the ledger never sees.** An audit run in another home, under another `ledger_dir`, or with a jar of a
+  version that noted no start leaves nothing in this ledger. What an operator can do: start audits only from a
+  place that owns the home, such as a CI job with its own account, that pushes the ledger after every run, and
+  take as an audit result only a run whose start entry is in the pushed ledger.
+
+### Acknowledging a run
+
+A deleted folder of an interrupted run, a `runs_dir` that changed, or a ledger two homes share makes the check fail
+although nothing was hidden. `traceworks verify --acknowledge <run> --note "..."` settles one such run on the
+record: one commit `run <run-id> ACKNOWLEDGED` adds a line to `acks/<run-id>.jsonl`:
+
+```json
+{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"operator@box","problem":"lost","said":"started, never ended, and the folder is gone","note":"deleted by hand, the disk was full"}
+```
+
+`actor` and `at` are who acknowledged and when, as a decision in a register records them; `problem` and `said` are
+what the check reported; `note` is required. Only a run the check reports can be acknowledged, one per call. The
+check then lists the run under `acknowledged` with the note, for good, and does not fail for that problem. It fails
+again when the run has a problem of another kind. The line is not signed, like everything in the ledger.
+
 The ledger is written with an empty git configuration, no hooks and no signing, so the operator's git setup does
 not change it. Writers take `ledger.lock` (beside the ledger, or in the ledger folder when `ledger_dir` places it;
-never committed), so two runs that start or end at the same time commit one after the other. An entry names its run by id,
-not by a path, so the runs folder and the ledger can each be moved.
+never committed), so two runs that start or end at the same time commit one after the other. A writer waits at
+most 60 seconds for the lock; then it gives up with a message that names the lock file, which refuses a run before
+it starts (exit 6). An entry names its run by id, not by a path, so the runs folder and the ledger can each be
+moved.
 
 `traceworks verify` checks that the ledger's copy equals `manifest.json`, and that the start entry names the first
-line of the record. The ledger is a second place that names the first line and the head of the run: to change a
-record unnoticed, or to make a run disappear, you would have to change both.
+line of the record. The ledger is a second place that names the first line and the head of a finished run: to
+change such a record unnoticed, you would have to change both. Of a run that has not finished it names the first
+line only ("What the ledger shows, and what it does not").
 
 An anchor of a register says that line `N` of its log had the hash `head` when it was written. The file keeps every
 anchor, oldest first, and an anchor equal to the last one is not added again. `traceworks findings <key> verify`
