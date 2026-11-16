@@ -123,6 +123,37 @@ class WorkflowEnginePauseTest {
         assertThat(resumed.steps().getFirst().getOutput()).isEqualTo("[a]: did a\n[b]: did b\n[c]: did c\n[d]: did d");
     }
 
+    /**
+     * A resumed loop that takes over every item asks no model itself, but its items did before the resume: what it
+     * hands on is model text. The loop is the first AI block here, so nothing before it marked the run. A shell
+     * loop marks nothing. (A loop of child runs takes no item over: it runs every one again.)
+     */
+    @Test
+    void aResumedLoopThatTakesOverAnswers_marksTheRunAsOneThatAskedAModel() {
+        Map<String, Map<String, Object>> loops = new java.util.LinkedHashMap<>();
+        loops.put("'[a]: one; id\n[b]: two'", Map.of("execution_mode", "ai", "items", List.of("a", "b"),
+                "command", "Judge {{ item }}"));
+        loops.put("[a]: one; id\n[b]: two", Map.of("execution_mode", "shell", "items", List.of("a", "b"),
+                "command", "./work"));
+
+        loops.forEach((handedOn, loop) -> {
+            WorkflowDefinition workflow = workflow("wf-taken-over", block("foreach", "each", loop),
+                    block("shell", "report", Map.of("command", "./report {{ block.each.output }}")));
+            Session first = new Session();
+            first.run(workflow);   // only its checkpoint before the loop is used
+            RecordedItems items = (step, index, item) -> step == 0
+                    ? new RecordedItems.Completed(index == 0 ? "one; id" : "two", 100 + index) : null;
+            Session second = new Session();   // its provider has no answer: a call would fail the step
+            second.commands.on("./report", "reported");
+
+            RunOutcome resumed = second.resume(workflow, first.events.of(Checkpoint.class).getFirst(), items);
+
+            assertThat(resumed.status()).as(loop + ": " + resumed.error()).isEqualTo(RunStatus.COMPLETED);
+            assertThat(second.commands.commands()).as(loop.toString())
+                    .containsExactly("./report " + handedOn.strip());
+        });
+    }
+
     /** A cancel wins over a pause: the run ends CANCELLED, final, and does not park. */
     @Test
     void aCancelAfterAPause_endsTheRunCancelled() {

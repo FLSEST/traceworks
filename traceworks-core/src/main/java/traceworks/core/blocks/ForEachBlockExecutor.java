@@ -148,6 +148,11 @@ public class ForEachBlockExecutor implements BlockExecutor {
             RecordedItems.Completed taken = recorded.completed(stepIndex, i, item);
             StepResult itemResult;
             if (taken != null) {
+                // The item ran before the resume: in AI mode it asked a model then, and its recorded answer is
+                // model text now. (A loop of child runs takes no item over: it runs every one again.)
+                if (!settings.itemStep().shell()) {
+                    context.markModelAsked();
+                }
                 itemResult = takenOver(settings, context, taken);
                 context.getEvents().emit(new ForEachItemFinished(stepIndex, i, item, totalItems,
                         StepStatus.COMPLETED, taken.output(), null, taken.recordedAt()));

@@ -244,6 +244,45 @@ class ModelTextQuotingTest {
                 .startsWith("set -- 'a b");
     }
 
+    /**
+     * An auto_answer filled in from a placeholder is whatever that value was: after an AI step, model text, which
+     * stays quoted in the variable. One the workflow writes out is the author's text and is used as before.
+     */
+    @Test
+    void anAutoAnswerFilledInFromAModelsAnswer_staysModelText_andOneWrittenOutIsTrusted() {
+        claude.answers("yes; echo pwned", "fine");
+
+        RunOutcome outcome = run(workflow("wf", ask(),
+                block("approval", "taken", Map.of("question", "Release?", "mode", "auto",
+                        "auto_answer", "{{ block.ask.output }}", "variable_name", "taken")),
+                shell("use", "set -- {{ taken }}; printf '%s|%s' \"$#\" \"$1\""),
+                block("approval", "written", Map.of("question", "Release?", "mode", "auto", "auto_answer", "Yes",
+                        "variable_name", "written")),
+                shell("compare", "[ \"{{ written }}\" = Yes ] && echo released")));
+
+        assertThat(outcome.status()).as(outcome.error()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(output(outcome, 2)).isEqualTo("1|yes; echo pwned");
+        assertThat(output(outcome, 4)).isEqualTo("released");
+    }
+
+    /**
+     * A trusted write takes the mark off a variable, as it takes off the mark of untrusted input: the static items
+     * of a loop are the workflow's own text, also in a variable that held a model's answer before.
+     */
+    @Test
+    void aVariableThatHeldModelText_setAgainFromTheWorkflowsOwnText_isTrustedAgain() {
+        claude.answers("x y");
+
+        RunOutcome outcome = run(workflow("wf", ask(),
+                block("foreach", "from_answer", Map.of("execution_mode", "shell", "items_source", "command",
+                        "items_command", "printf '%s\\n' {{ block.ask.output }}", "command", "echo {{ item }}")),
+                block("foreach", "written", Map.of("execution_mode", "shell", "items", List.of("a b"),
+                        "command", "echo \"{{ item }}\""))));
+
+        assertThat(outcome.status()).as(outcome.error()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(commandLines).containsExactly("printf '%s\\n' 'x y'", "echo 'x y'", "echo \"a b\"");
+    }
+
     /** Model text is quoted; it does not make the run one with untrusted input, so an AI actor still decides. */
     @Test
     void aRunThatAskedAModel_carriesNoUntrustedInput_soAnAiActorStillAnswers() {
