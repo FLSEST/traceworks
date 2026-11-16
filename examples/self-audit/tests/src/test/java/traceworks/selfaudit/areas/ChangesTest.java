@@ -226,6 +226,7 @@ class ChangesTest {
         Files.writeString(Files.createDirectories(work.resolve("src")).resolve("Um\u00e4 laut.java"), "two\n");
         workFile("docs/a.md", "a\n");
         workFile("Dockerfile", "FROM x\n");
+        workFile("src/Gone.java", "gone\n");
         workFile("\"quoted\".java", "new\n");
         workFile("quoted.java", "old\n");
         Files.createDirectories(work.resolve("src/Odd.java"));
@@ -239,7 +240,7 @@ class ChangesTest {
         Changes.Compared compared = Changes.compare(Changes.read(dir), work);
 
         assertThat(compared.status()).containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
-                Map.entry("src/Changed.java", "M"), Map.entry("src/Gone.java", "D"), Map.entry("run.sh", "M"),
+                Map.entry("src/Changed.java", "M"), Map.entry("run.sh", "M"),
                 Map.entry("Dockerfile", "A"), Map.entry("src/Odd.java", "U"), Map.entry("\"quoted\".java", "M"),
                 Map.entry("../outside.java", "U"), Map.entry("quoted.java", "A"),
                 Map.entry("src/Um\u00e4 laut.java", "M"),
@@ -393,8 +394,10 @@ class ChangesTest {
         Map<String, List<Range>> lines = Map.of(SRC + "p/Runner.java", List.of(new Range(1, 2)));
 
         assertThat(reasons(lines)).as("an import or the head of the class can change what every call in the file"
-                + " resolves to").containsExactly(Map.entry("p/Runner.java#Runner.run(String)",
-                "changed: the head of its file (outside every member)"));
+                + " resolves to, and what a call into the file reaches").containsExactly(
+                Map.entry("p/Caller.java#Caller.call(Runner)", "neighbour of Runner.run(String)"),
+                Map.entry("p/Far.java#Far.far(Caller)", "neighbour of Runner (the head of its class)"),
+                Map.entry("p/Runner.java#Runner.run(String)", "changed: the head of its file (outside every member)"));
         Result result = Finder.find(root, List.of(root.resolve(SRC)), RuleFile.parse(RULES));
         assertThat(Changes.outsideMembers(result, lines)).containsExactly(SRC + "p/Runner.java:1-2");
         assertThat(Changes.outsideMembers(result, Map.of(SRC + "p/Runner.java",
@@ -500,5 +503,16 @@ class ChangesTest {
         assertThat(kinds.removedJava()).containsExactly("mod/src/main/java/p/Removed.java", "tool/src/Removed.java");
         assertThat(kinds.cannotJudge()).containsExactly("scripts/Added.sh", "scripts/Changed.sh", "scripts/Removed.sh");
         assertThat(base.unmappable()).hasSize(6);
+    }
+
+    @Test
+    void aFileTheBaseHasAndTheWorkspaceCommitDoesNot_stillOnDisk_makesTheWorkspaceDiffer() throws IOException {
+        workFile("old.sh", "x\n");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("old.sh", "x\n"), Map.of());
+
+        Changes.Compared compared = Changes.compare(Changes.read(dir), root.resolve("work"));
+
+        assertThat(compared.status()).isEmpty();
+        assertThat(compared.dirty()).as("the commit removed it, the disk has it").isTrue();
     }
 }

@@ -167,7 +167,6 @@ class ChangesMainTest {
                 Map.entry("docFiles", 1L), Map.entry("uncompiledFiles", 0L), Map.entry("uncompiled", List.of()),
                 Map.entry("cannotJudgeFiles", 0L), Map.entry("cannotJudge", List.of()),
                 Map.entry("removedJavaFiles", 0L), Map.entry("removedJava", List.of()),
-                Map.entry("judgedUpTo", HEAD),
                 Map.entry("baseDate", "2026-11-10T09:00:00Z"), Map.entry("skipped", ""),
                 Map.entry("removedFiles", 0L), Map.entry("unmappable", List.of()),
                 Map.entry("outsideMembers", 0L), Map.entry("outside", List.of()),
@@ -374,7 +373,10 @@ class ChangesMainTest {
 
         assertThat(run("", find())).as(err.toString()).isZero();
         assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason"))
-                .containsExactly(RUNNER + ": changed: the head of its file (outside every member)");
+                .as("every area of the file, and the areas that call into it").containsExactly(
+                        CALLER + ": neighbour of Runner.run(String)",
+                        FAR + ": neighbour of Runner (the head of its class)",
+                        RUNNER + ": changed: the head of its file (outside every member)");
         assertThat(report()).isZero();
 
         assertThat(Files.readString(work.resolve("report.md")))
@@ -566,7 +568,170 @@ class ChangesMainTest {
                 .contains("\nFACT changes_base: " + BASE + "\nFACT changes_head: " + BASE + "\n")
                 .doesNotContain("FACT changes_head: " + HEAD);
         assertThat(Files.readString(work.resolve("report.md"))).contains("with changes that are in no commit",
-                "| The next run without `since` starts from | `" + BASE + "`: the base of this run again, since the"
-                        + " files that were judged are not the workspace commit |");
+                "| The next run without `since` starts from | `" + BASE + "`: **the base of this run again**, because"
+                        + " the files that were judged are not the workspace commit |");
+    }
+
+    // --- what an area means, not only its text ---
+
+    private void source(String path, String content) throws IOException {
+        Path file = root.resolve("app/src/main/java").resolve(path);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content);
+    }
+
+    /** The folder for a workspace that is its commit, whose base has {@code file} with {@code before} as its content. */
+    private void baseHas(String file, String before) throws IOException {
+        Map<String, String> head = Handover.files(root);
+        Map<String, String> base = new java.util.TreeMap<>(head);
+        base.put("app/src/main/java/" + file, before);
+        Handover.write(work.resolve("changes"), base, head);
+    }
+
+    /** The register's word that every area written by the last {@code find} is clean as it was judged. */
+    private Path settled() throws IOException {
+        StringBuilder items = new StringBuilder();
+        for (Map<String, Object> item : items()) {
+            items.append("{\"digest\":\"").append(item.get("digest")).append("\",\"name\":\"").append(item.get("name"))
+                    .append("\",\"state\":\"clean\",\"verdict\":{\"at\":\"t\",\"run_id\":\"r\"},\"verdict_digest\":\"")
+                    .append(item.get("digest")).append("\"}\n");
+        }
+        return Files.writeString(work.resolve("items.jsonl"), items.toString());
+    }
+
+    private static final String GUARDED = "package p;\nimport %s.Checks;\nclass Guarded {\n"
+            + "    void start(String c) throws Exception {\n        Checks.verify(c);\n"
+            + "        new ProcessBuilder(c).start();\n    }\n}\n";
+
+    @Test
+    void anAreaWhoseCallIsRePointedByAnImport_isJudgedAgain_alsoWhenTheRegisterCallsItsTextSettled() throws IOException {
+        source("safe/Checks.java", "package safe;\npublic class Checks {\n    public static void verify(String c) {\n"
+                + "        if (c.isEmpty()) throw new IllegalArgumentException();\n    }\n}\n");
+        source("lax/Checks.java", "package lax;\npublic class Checks {\n    public static void verify(String c) {\n"
+                + "    }\n}\n");
+        // An earlier run judged the area while it called safe.Checks: the register calls it clean with that digest
+        source("p/Guarded.java", GUARDED.formatted("safe"));
+        baseHas("p/Guarded.java", GUARDED.formatted("safe").replace("ProcessBuilder(c)", "ProcessBuilder(c, c)"));
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(areas()).extracting(a -> a.get("item")).containsExactly(SRC + "Guarded.java#Guarded.start(String)");
+        Path items = settled();
+        // The same run again leaves the area out: it was judged as it is
+        assertThat(run("", find("--items-file", items.toString()))).isZero();
+        assertThat(areas()).isEmpty();
+
+        // Now only the import changes: the text of the member is the same, and it calls other code
+        source("p/Guarded.java", GUARDED.formatted("lax"));
+        baseHas("p/Guarded.java", GUARDED.formatted("safe"));
+        assertThat(run("", find("--items-file", items.toString()))).as(err.toString()).isZero();
+
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason")).containsExactly(
+                SRC + "Guarded.java#Guarded.start(String): changed: the head of its file (outside every member)");
+    }
+
+    private static final String USER = "package p;\nclass User {\n    void start(String c) throws Exception {\n"
+            + "        new Guard().verify(c);\n        new ProcessBuilder(c).start();\n    }\n}\n";
+
+    @Test
+    void aChangedSupertypeInAFileWithoutAreas_makesTheAreaThatCallsThroughItANeighbour_onAFirstRunAndASettledOne()
+            throws IOException {
+        source("p/Safe.java", "package p;\nclass Safe {\n    void verify(String c) {\n"
+                + "        if (c.isEmpty()) throw new IllegalArgumentException();\n    }\n}\n");
+        source("p/Lax.java", "package p;\nclass Lax {\n    void verify(String c) {\n    }\n}\n");
+        source("p/User.java", USER);
+        // An earlier run judged User while Guard was a Safe
+        source("p/Guard.java", "package p;\nclass Guard extends Safe {\n}\n");
+        baseHas("p/User.java", USER.replace("ProcessBuilder(c)", "ProcessBuilder(c, c)"));
+        run("", find());
+        Path items = settled();
+
+        source("p/Guard.java", "package p;\nclass Guard extends Lax {\n}\n");
+        baseHas("p/Guard.java", "package p;\nclass Guard extends Safe {\n}\n");
+
+        // A first run, with a register that knows nothing
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason")).containsExactly(
+                SRC + "User.java#User.start(String): neighbour of Guard (the head of its class); neighbour of Lax.verify(String)");
+        // And with the register calling the area settled by its earlier text and targets
+        assertThat(run("", find("--items-file", items.toString()))).isZero();
+        assertThat(areas()).extracting(a -> a.get("item")).containsExactly(SRC + "User.java#User.start(String)");
+    }
+
+    @Test
+    void aChangedRecordHeader_makesTheAreaThatCreatesTheRecordANeighbour() throws IOException {
+        source("p/Command.java", "package p;\nrecord Command(String name, boolean shell) {\n}\n");
+        source("p/Starter.java", "package p;\nclass Starter {\n    void start(String c) throws Exception {\n"
+                + "        Command command = new Command(c, false);\n"
+                + "        new ProcessBuilder(command.name()).start();\n    }\n}\n");
+        baseHas("p/Command.java", "package p;\nrecord Command(String name) {\n}\n");
+
+        assertThat(run("", find())).as(err.toString()).isZero();
+
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason")).containsExactly(
+                SRC + "Starter.java#Starter.start(String): neighbour of Command (the head of its class)");
+    }
+
+    // --- the base moves only past what was judged ---
+
+    private String headLine() {
+        return out().lines().filter(line -> line.startsWith("FACT changes_head: ")).findFirst().orElseThrow();
+    }
+
+    @Test
+    void theBaseStays_whenAFileWasNotRead_anAreaGotNoVerdict_orAFileWasNotCompared_andTheReportSaysWhy()
+            throws IOException {
+        // A file of a source root that does not parse
+        source("p/Broken.java", "package p;\nclass Broken {\n    void f() { new ProcessBuilder(\"sh\") }\n}\n");
+        changes(SRC + "Runner.java");
+        run("", find());
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        String all = "[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[]}\n"
+                + "[" + lines.get(1) + "]: {\"area\":\"A003\",\"findings\":[]}\n";
+        assertThat(run(all, "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).isZero();
+        assertThat(headLine()).isEqualTo("FACT changes_head: " + BASE);
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| The next run without `since` starts from | `"
+                + BASE + "`: **the base of this run again**, because 1 file of a source root was not read |");
+        Files.delete(root.resolve("app/src/main/java/p/Broken.java"));
+
+        // An area without a verdict
+        changes(SRC + "Runner.java");
+        run("", find());
+        lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        assertThat(run("[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[]}\n", "report", "--areas",
+                work.resolve("areas.jsonl").toString(), "--summary", work.resolve("areas-summary.json").toString(),
+                "--verdicts", "-", "--out", work.resolve("report.md").toString())).isZero();
+        assertThat(headLine()).isEqualTo("FACT changes_head: " + BASE);
+        assertThat(Files.readString(work.resolve("report.md"))).contains("**the base of this run again**, because 1"
+                + " area of this run got no verdict");
+
+        // The same with every verdict: the base moves
+        all = "[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[]}\n"
+                + "[" + lines.get(1) + "]: {\"area\":\"A003\",\"findings\":[]}\n";
+        assertThat(run(all, "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).isZero();
+        assertThat(headLine()).isEqualTo("FACT changes_head: " + HEAD);
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| The next run without `since` starts from | `"
+                + HEAD + "`: the workspace commit |");
+    }
+
+    @Test
+    void aFileThisCheckCanNeverJudge_doesNotHoldTheBase_itIsPassedUnjudged_andTheReportSaysSo() throws IOException {
+        changes(SRC + "Runner.java", "run.sh");
+        run("", find());
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        String all = "[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[]}\n"
+                + "[" + lines.get(1) + "]: {\"area\":\"A003\",\"findings\":[]}\n";
+
+        assertThat(run(all, "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).isZero();
+
+        assertThat(out()).startsWith("gate_status: YELLOW\n");
+        assertThat(headLine()).isEqualTo("FACT changes_head: " + HEAD);
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| The next run without `since` starts from | `"
+                + HEAD + "`: the workspace commit. **Passed unjudged**: 1 changed file this check cannot judge. No"
+                + " later run of this check comes back to it |");
     }
 }

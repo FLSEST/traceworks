@@ -76,7 +76,7 @@ final class Report {
      */
     record Outcome(List<Finding> verified, List<Finding> unverified, List<NotJudged> notJudged, int areas, int judged,
                    String gate, String description, String markdown, String envelope, String findingsJsonl,
-                   List<Gone> gone, List<String> notAnswered, List<Finding> low) {
+                   List<Gone> gone, List<String> notAnswered, List<Finding> low, String nextBase) {
     }
 
     /**
@@ -299,15 +299,63 @@ final class Report {
         String description = sinceBase(summary)
                 + description(verified, unverified, notAnswered, areas.size(), judged, summary, low, states)
                 + notLookedAt(summary);
+        // How many areas of this run have no verdict to keep: no answer, or one with a finding that did not verify
+        int withoutVerdict = (int) areas.stream().filter(a -> withoutAnswer.contains(text(a.get("id")))).count();
+        List<String> holds = holds(summary, withoutVerdict);
         String markdown = markdown(verified, unverified, low, notJudged, gone, notAnswered, areas.size(), judged, summary,
-                gate, description, states, areas) + unowned(summary, "findings", "area", register)
+                gate, description, states, areas, holds) + unowned(summary, "findings", "area", register)
                 + decided(decided, register) + unseen(missing, "area");
         // An area without a verdict (its call failed, or it got no place) is an item not judged, which the envelope
         // says. Only a file nobody could read makes the snapshot partial: nothing looked for findings there
         boolean complete = list(summary.get("notRead")).isEmpty();
         return new Outcome(List.copyOf(verified), List.copyOf(unverified), List.copyOf(notJudged), areas.size(), judged,
                 gate, description, markdown, envelope(verified, gone, complete, summary, itemOfArea, judgedItems),
-                findingsJsonl(verified, itemOfArea, Judge.fromJson(summary.get("judge"))), gone, List.copyOf(notAnswered), List.copyOf(low));
+                findingsJsonl(verified, itemOfArea, Judge.fromJson(summary.get("judge"))), gone, List.copyOf(notAnswered), List.copyOf(low),
+                nextBase(summary, holds));
+    }
+
+    /**
+     * Why the base of a check of the changes does not move with this run: what the run left unjudged that a later
+     * run can judge. A file of a source root that was not read, a changed file that could not be compared, an area
+     * the cap cut, an area without a verdict, and files that are not the workspace commit. Were the base to move,
+     * the code behind each of these would never be looked at: the next run would measure from after it. Empty when
+     * the base moves. What this check can never judge (a script, Java outside the source roots, a removed file,
+     * commits skipped knowingly) does not hold the base: it would hold it for ever. It is named, keeps this run's
+     * gate from GREEN, and is passed.
+     */
+    private static List<String> holds(Map<String, Object> summary, int withoutVerdict) {
+        Map<String, Object> changes = changes(summary);
+        List<String> holds = new ArrayList<>();
+        if (changes == null) return holds;
+        if (Boolean.TRUE.equals(changes.get("dirty"))) holds.add("the files that were judged are not the workspace commit");
+        int notRead = list(summary.get("notRead")).size();
+        if (notRead > 0) holds.add(count(notRead, "file") + " of a source root " + (notRead == 1 ? "was" : "were") + " not read");
+        int unmappable = list(changes.get("unmappable")).size();
+        if (unmappable > 0) holds.add(count(unmappable, "changed file") + " could not be compared");
+        int cut = list(summary.get("cut")).size();
+        if (cut > 0) holds.add(count(cut, "area") + " got no place under the cap");
+        if (withoutVerdict > 0) holds.add(count(withoutVerdict, "area") + " of this run got no verdict");
+        return holds;
+    }
+
+    /** The commit the next run without {@code since} starts from: the workspace commit, or this run's base again. */
+    private static String nextBase(Map<String, Object> summary, List<String> holds) {
+        Map<String, Object> changes = changes(summary);
+        return changes == null ? "" : text(changes.get(holds.isEmpty() ? "head" : "base"));
+    }
+
+    /** What this run named and did not judge, and no later run will: for the report's word "passed unjudged". */
+    private static List<String> passed(Map<String, Object> changes) {
+        List<String> passed = new ArrayList<>();
+        int uncompiled = number(changes.get("uncompiledFiles"));
+        if (uncompiled > 0) passed.add(count(uncompiled, "changed Java file") + " that no compiled source root holds");
+        int removedJava = number(changes.get("removedJavaFiles"));
+        if (removedJava > 0) passed.add(count(removedJava, "removed Java file"));
+        int cannotJudge = number(changes.get("cannotJudgeFiles"));
+        if (cannotJudge > 0) passed.add(count(cannotJudge, "changed file") + " this check cannot judge");
+        String skipped = text(changes.get("skipped"));
+        if (skipped.equals("unknown") || skipped.matches("[1-9][0-9]{0,8}")) passed.add("the commits skipped");
+        return passed;
     }
 
     /**
@@ -562,7 +610,8 @@ final class Report {
     }
 
     /** The part of the report only a check of the changes has: the base, the counts, and why each area was in. */
-    private static void changesSection(StringBuilder md, Map<String, Object> changes, List<Map<String, Object>> areas) {
+    private static void changesSection(StringBuilder md, Map<String, Object> changes, List<Map<String, Object>> areas,
+                                       List<String> holds) {
         String base = text(changes.get("base"));
         String head = text(changes.get("head"));
         String previous = text(changes.get("previousHead"));
@@ -581,10 +630,11 @@ final class Report {
         row(md, "Workspace commit", fullId(head) + (dirty ? ", with changes that are in no commit (a `.java` file git ignores is one); they count as"
                 + " changed"
                 : ", with nothing uncommitted"));
-        if (dirty) {
-            row(md, "The next run without `since` starts from", fullId(base) + ": the base of this run again, since"
-                    + " the files that were judged are not the workspace commit");
-        }
+        List<String> passed = passed(changes);
+        row(md, "The next run without `since` starts from", !holds.isEmpty()
+                ? fullId(base) + ": **the base of this run again**, because " + String.join("; ", holds)
+                : fullId(head) + ": the workspace commit" + (passed.isEmpty() ? "" : ". **Passed unjudged**: "
+                + String.join("; ", passed) + ". No later run of this check comes back to it"));
         String skipped = text(changes.get("skipped"));
         if (input && !previous.isEmpty() && !previous.equals(base)) {
             row(md, "Workspace commit of the last run of this audit", fullId(previous) + ": not the base of this run");
@@ -694,12 +744,12 @@ final class Report {
                                    List<NotJudged> notJudged,
                                    List<Gone> gone, List<String> notAnswered, int areas, int judged,
                                    Map<String, Object> summary, String gate, String description,
-                                   States.Counts states, List<Map<String, Object>> areaLines) {
+                                   States.Counts states, List<Map<String, Object>> areaLines, List<String> holds) {
         StringBuilder md = new StringBuilder();
         Map<String, Object> changes = changes(summary);
         md.append(changes == null ? "# Security self-audit\n\n" : "# Security check of the changes\n\n");
         md.append("**Gate:** ").append(gate).append(": ").append(description).append("\n\n");
-        if (changes != null) changesSection(md, changes, areaLines);
+        if (changes != null) changesSection(md, changes, areaLines, holds);
         Judge judge = Judge.fromJson(summary.get("judge"));
         if (judge != null) {
             md.append("**Judged by:** provider ").append(code(judge.provider())).append(", model ")

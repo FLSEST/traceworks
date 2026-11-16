@@ -354,7 +354,8 @@ final class Changes {
                 // Of the workspace commit and not of the base. (One that is in neither any more is no change.)
                 status.put(path, now.isEmpty() ? "U" : "A");
             }
-            dirty |= committed == null ? now != null && before == null
+            // A file the workspace commit does not have and the disk does makes the two differ, whatever the base
+            dirty |= committed == null ? now != null
                     : !committed.id().equals(now) || !committed.mode().equals(mode);
         }
         List<String> walked = new ArrayList<>();
@@ -599,6 +600,19 @@ final class Changes {
     static Map<String, Pick> picks(List<Area> areas, Result result, Map<String, List<Range>> lines) {
         List<Declared> changed = changedMembers(result, lines);
         Set<Declared> isChanged = new java.util.HashSet<>(changed);
+        for (Declared head : result.heads()) {
+            if (touched(lines, head.file(), head.member().start(), head.member().end())) isChanged.add(head);
+        }
+        // A changed line outside every member (an import, the package, the head of a class) can change what any
+        // name in its file means and what its classes inherit. So every member of that file counts as changed for
+        // who calls it, and so does every member of the files that hold a supertype or a subtype of its classes:
+        // a call that goes through the changed class may reach other code now
+        Set<String> headChanged = new java.util.HashSet<>();
+        for (String outside : outsideMembers(result, lines)) headChanged.add(outside.substring(0, outside.lastIndexOf(':')));
+        Set<String> reached = new java.util.HashSet<>(headChanged);
+        for (String file : headChanged) reached.addAll(result.related().getOrDefault(file, Set.of()));
+        for (Declared member : result.members()) if (reached.contains(member.file())) isChanged.add(member);
+        for (Declared head : result.heads()) if (reached.contains(head.file())) isChanged.add(head);
         // Who is one call from whom, in either direction, in the finder's order
         Map<Declared, Set<Declared>> near = new HashMap<>();
         for (Call call : result.calls()) {
@@ -610,8 +624,6 @@ final class Changes {
         Comparator<Declared> place = Comparator.comparing(Declared::file)
                 .thenComparingInt((Declared d) -> d.member().start()).thenComparing(d -> d.member().label());
 
-        Set<String> headChanged = new java.util.HashSet<>();
-        for (String outside : outsideMembers(result, lines)) headChanged.add(outside.substring(0, outside.lastIndexOf(':')));
         Map<String, Pick> picks = new LinkedHashMap<>();
         for (Area area : areas) {
             List<Declared> held = byFile.getOrDefault(area.file(), List.of()).stream()
@@ -646,6 +658,38 @@ final class Changes {
             if (!reasons.isEmpty()) picks.put(area.id(), new Pick(changedArea, List.copyOf(reasons), List.copyOf(connected)));
         }
         return picks;
+    }
+
+    /**
+     * What the code of an area means beyond its text, for its digest: what the calls of its members resolved to (the
+     * declaring type and the signature of each, as the compiler resolved them), and the lines of its file that lie
+     * in no member (the package, the imports, the heads of the classes). When an import, a supertype or an overload
+     * points a call of the area at other code, this text changes although the area's own lines do not, so the area
+     * does not pass for judged as it is.
+     */
+    static String meaning(Area area, Result result) {
+        java.util.TreeSet<String> targets = new java.util.TreeSet<>();
+        List<Declared> inFile = new ArrayList<>();
+        for (Declared member : result.members()) {
+            if (!member.file().equals(area.file())) continue;
+            inFile.add(member);
+            if (member.member().start() <= area.end() && member.member().end() >= area.start()) {
+                targets.addAll(result.resolves().getOrDefault(member, List.of()));
+            }
+        }
+        StringBuilder out = new StringBuilder("# resolves\n");
+        for (String target : targets) out.append(target).append('\n');
+        out.append("# head\n");
+        for (SourceFile file : result.files()) {
+            if (!file.path().equals(area.file())) continue;
+            for (int line = 1; line <= file.lines().size(); line++) {
+                int at = line;
+                if (inFile.stream().noneMatch(m -> m.member().start() <= at && m.member().end() >= at)) {
+                    out.append(file.lines().get(line - 1)).append('\n');
+                }
+            }
+        }
+        return out.toString();
     }
 
     /**

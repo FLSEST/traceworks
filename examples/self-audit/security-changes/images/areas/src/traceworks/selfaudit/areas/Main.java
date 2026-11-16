@@ -201,9 +201,12 @@ public final class Main {
             Changes.Pick pick = picks.get(area.id());
             // What the verdict of a picked area sees beside its own code: the changed members it is connected with
             String connected = pick == null ? "" : Changes.connectedText(pick.connected(), result, base.lines());
+            // In a check of the changes the digest also holds what the code means: what its calls resolve to, and
+            // the head of its file. An import or a supertype can change that without touching a line of the area
+            String seen = base == null ? area.code() : area.code() + "\n" + Changes.meaning(area, result);
             String digest = Items.digest(verdictVersion, area.file(), area.rules(),
-                    connected.isEmpty() ? area.code()
-                            : area.code() + "\n" + CONNECTED + "\n" + Changes.connectedWhole(pick.connected(), result));
+                    connected.isEmpty() ? seen
+                            : seen + "\n" + CONNECTED + "\n" + Changes.connectedWhole(pick.connected(), result));
             Items.Row row = knownItems.get(Known.shown(names.get(i)));
             Map<String, Object> json = new LinkedHashMap<>(area.toJson(token, fence));
             json.put("item", names.get(i));
@@ -365,10 +368,7 @@ public final class Main {
             changes.put("cannotJudge", named(kinds.cannotJudge()));
             changes.put("removedJavaFiles", (long) kinds.removedJava().size());
             changes.put("removedJava", named(kinds.removedJava()));
-            // Up to where the history counts as judged: the workspace commit, when the files that were judged are
-            // that commit. A workspace that differs from it was judged as it is, not as the commit is, so the next
-            // run starts from this run's base again and no commit is left out
-            changes.put("judgedUpTo", base.dirty() ? base.base() : base.head());
+
             changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
             changes.put("areasOfProject", (long) all.size());
             changes.put("changedAreas", (long) changedAreas);
@@ -462,12 +462,11 @@ public final class Main {
         out.println("gate_description: " + outcome.description());
         // Right after the gate, before any name of the workspace: the next run of the audit reads its base from
         // the first changes_head line of this output, which the register hands it as the previous report. It is
-        // the commit up to which this run judged: the workspace commit, or this run's base again when the files
-        // were not that commit
+        // the commit up to which this run judged: the workspace commit, or this run's base again when the run
+        // left something unjudged that a later run can judge (Report, "holds")
         if (summary.get("changes") instanceof Map<?, ?> changes) {
             out.println("FACT changes_base: " + safe(String.valueOf(changes.get("base"))));
-            out.println("FACT changes_head: " + safe(String.valueOf(changes.containsKey("judgedUpTo")
-                    ? changes.get("judgedUpTo") : changes.get("head"))));
+            out.println("FACT changes_head: " + safe(outcome.nextBase()));
             out.println("FACT changes_areas_changed: " + count(changes.get("changedAreas")));
             out.println("FACT changes_areas_neighbours: " + count(changes.get("neighbourAreas")));
             out.println("FACT changes_areas_carried: " + count(changes.get("carriedAreas")));

@@ -363,4 +363,29 @@ class ChangesRoundTripTest {
         assertThat(newest("security-changes-report.md"))
                 .contains("| Base: the commit the changes are measured from | `" + first + "`");
     }
+
+    /**
+     * One commit changes an area and breaks its file, so the file is not read; the next commit only mends the file.
+     * The first run must not count the first commit as judged, or the changed area would never be looked at.
+     */
+    @Test
+    void aRunThatCouldNotReadAFile_doesNotMoveTheBase_soTheChangeInItIsJudgedOnceTheFileReads() throws IOException {
+        String first = git("rev-parse", "HEAD");
+        commit("Runner.java", runner("\"sh\", \"-c\", c").replace("    }\n}\n", "    }\n} }\n"));
+
+        String one = run("--input", "since=" + first);
+        assertThat(askedAndForgotten()).as("the area is in a file that does not parse").doesNotContain(RUNNER + ": changed");
+
+        commit("Runner.java", runner("\"sh\", \"-c\", c"));
+        String two = run();
+        if (two.contains("no base")) {
+            // The register did not take the first report, so no run names a base: the operator names it again
+            two = run("--input", "since=" + first);
+        }
+
+        assertThat(two).as(one).contains("register security-changes:");
+        assertThat(askedAndForgotten()).contains(RUNNER + ": changed");
+        assertThat(newest("security-changes-report.md"))
+                .contains("| Base: the commit the changes are measured from | `" + first + "`");
+    }
 }

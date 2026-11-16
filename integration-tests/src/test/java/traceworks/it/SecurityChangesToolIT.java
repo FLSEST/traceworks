@@ -21,7 +21,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * area tool in the package's own image ({@code changed}, {@code areas}, {@code report}), on a small git repository
  * as the workspace. The image, the rules and the script are the package's; a shell loop that finds nothing stands
  * in for the model, and no register is fed. It asserts which files differ, which areas are picked and what the gate
- * says. The image is built here ({@code traceworks images build}), on the JDK image the package pins.
+ * says. The image is built here, once for the class ({@code traceworks images build}), on the JDK image the package
+ * pins by digest: that base image must be in the local image store, or the registry must be reachable. A later
+ * test finds the image by its tag, which the package's id and the content of its image directory give.
  */
 class SecurityChangesToolIT extends IntegrationTest {
 
@@ -67,6 +69,10 @@ class SecurityChangesToolIT extends IntegrationTest {
               ]
             }
             """;
+
+    /** Six container steps, one of them javac over the workspace. */
+    private static final long RUN_SECONDS = 900;
+    private static boolean built;
 
     private Path pkg;
     private String first;
@@ -128,15 +134,18 @@ class SecurityChangesToolIT extends IntegrationTest {
         pkg = Files.createDirectories(sandbox.resolve("changes-tool"));
         for (String part : List.of("images", "rules", "scripts")) copyTree(example.resolve(part), pkg.resolve(part));
         Files.writeString(pkg.resolve("workflow.json"), WORKFLOW, StandardCharsets.UTF_8);
-        Result built = traceworks.exec(1800, "images", "build", pkg.toString());
-        assertThat(built.code()).as(built.describe()).isZero();
+        if (!built) {
+            Result build = traceworks.exec(1800, "images", "build", pkg.toString());
+            assertThat(build.code()).as(build.describe()).isZero();
+            built = true;
+        }
     }
 
     private Result run(String... more) {
         List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--workspace",
                 traceworks.workspace().toString(), "--no-input"));
         args.addAll(List.of(more));
-        return traceworks.exec(args.toArray(String[]::new));
+        return traceworks.exec(RUN_SECONDS, args.toArray(String[]::new));
     }
 
     @Test
@@ -154,8 +163,9 @@ class SecurityChangesToolIT extends IntegrationTest {
         assertThat(folder.output("blobs")).contains("FACT changes_base_blobs: 1\n");
         assertThat(folder.output("areas")).contains("FACT changes_areas_of_project: 3\n",
                 "FACT changes_areas_changed: 1\n", "FACT changes_areas_neighbours: 1\n",
-                "FACT changes_areas_not_looked_at: 1\n", "because: changed\n",
-                "because: neighbour of Runner.run(String)\n");
+                "FACT changes_areas_not_looked_at: 1\n",
+                " Runner.run(String) [process_start] because: changed\n",
+                " Caller.call(Runner) [env_pass] because: neighbour of Runner.run(String)\n");
         assertThat(folder.output("report")).startsWith("gate_status: GREEN\ngate_category: security\n"
                 + "gate_description: of the changes since " + first.substring(0, 12) + ": no verified finding; 2 of 2"
                 + " areas judged; ").contains("1 of 3 areas of the project not looked at");
@@ -179,7 +189,8 @@ class SecurityChangesToolIT extends IntegrationTest {
         RunFolder folder = traceworks.folder(run);
         assertThat(folder.output("changed")).contains("FACT changes_files: 3\n", "FACT changes_uncommitted: true\n");
         assertThat(folder.output("areas")).contains("FACT changes_files_cannot_judge: 1\n",
-                "because: changed: the head of its file (outside every member)\n", "Fresh.f()", "because: changed\n");
+                " Lone.home() [env_pass] because: changed: the head of its file (outside every member)\n",
+                " Fresh.f() [env_pass] because: changed\n");
         assertThat(folder.output("report")).startsWith("gate_status: YELLOW\n")
                 .contains("1 changed file this check cannot judge", "\nFACT changes_head: " + first + "\n");
     }

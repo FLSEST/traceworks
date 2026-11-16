@@ -86,8 +86,12 @@ import java.util.stream.Stream;
  * {@link Result#calls} every call, creation and method reference that resolved to a member of these sources, from
  * the member that holds it. A call of a method that others override counts each of them too, so a call through an
  * interface reaches every implementation in the sources. A call that did not resolve (a receiver of a library type)
- * is no call here, and neither is the read of a field. No rule looks at these; the check of the changes takes its
- * neighbours from them ({@link Changes}).
+ * is no call here, and neither is the read of a field. A call the compiler resolved to something a class has
+ * without a line of its own (the constructor nobody wrote, the accessor of a record) goes to the head of that
+ * class ({@link Result#heads}). {@link Result#resolves} names what each member's calls resolved to, by declaring
+ * type and signature, and {@link Result#related} which files hold a supertype or a subtype of a type of a file. No
+ * rule looks at these; the check of the changes takes its neighbours and the meaning of an area from them
+ * ({@link Changes}).
  */
 final class Finder {
 
@@ -126,10 +130,16 @@ final class Finder {
      * nor in the sources, so their matchers can match only through imports or names.
      */
     record Result(List<SourceFile> files, List<Hit> hits, List<NotParsed> notParsed, int unresolved,
-                  List<String> unresolvedTargets, List<Declared> members, List<Call> calls) {
+                  List<String> unresolvedTargets, List<Declared> members, List<Call> calls, List<Declared> heads,
+                  Map<Declared, List<String>> resolves, Map<String, Set<String>> related) {
 
         Result(List<SourceFile> files, List<Hit> hits, List<NotParsed> notParsed, int unresolved) {
-            this(files, hits, notParsed, unresolved, List.of(), List.of(), List.of());
+            this(files, hits, notParsed, unresolved, List.of(), List.of(), List.of(), List.of(), Map.of(), Map.of());
+        }
+
+        Result(List<SourceFile> files, List<Hit> hits, List<NotParsed> notParsed, int unresolved,
+               List<String> unresolvedTargets, List<Declared> members, List<Call> calls) {
+            this(files, hits, notParsed, unresolved, unresolvedTargets, members, calls, List.of(), Map.of(), Map.of());
         }
     }
 
@@ -211,7 +221,8 @@ final class Finder {
         List<Declared> members = new ArrayList<>(scan.members);
         members.sort(place);
         return new Result(List.copyOf(files), List.copyOf(hits), sortedNotParsed(notParsed), scan.unresolved,
-                unresolvedTargets, List.copyOf(members), scan.calls());
+                unresolvedTargets, List.copyOf(members), scan.calls(), scan.heads(place), scan.resolves(),
+                scan.related());
     }
 
     /** Names each source with an error that {@code counts} as not read, once, with the first such error. */
@@ -308,6 +319,8 @@ final class Finder {
         private final Map<Element, Declared> declaredBy = new HashMap<>();
         /** Each resolved call: the member that holds it, and the method or constructor it resolved to. */
         private final List<Map.Entry<Declared, ExecutableElement>> called = new ArrayList<>();
+        /** The head of each named class of the sources: its lines before its first member. */
+        private final Map<Element, Declared> headOf = new LinkedHashMap<>();
         int unresolved;
 
         Scan(Trees trees, Elements elements, Types types, RuleFile rules) {
@@ -351,6 +364,52 @@ final class Finder {
          * called stands for every method of the sources that overrides it: the type of the receiver says which of
          * them runs, and that is not known here. A member's call of itself is none.
          */
+        /** The heads of the named classes, in the order of {@code place}. */
+        List<Declared> heads(Comparator<Declared> place) {
+            return headOf.values().stream().sorted(place).toList();
+        }
+
+        /** What a method or constructor is, apart from where it is written: its declaring type and its signature. */
+        private String identity(ExecutableElement callee) {
+            StringBuilder out = new StringBuilder(String.valueOf(callee.getEnclosingElement())).append('#')
+                    .append(callee.getSimpleName()).append('(');
+            for (int i = 0; i < callee.getParameters().size(); i++) {
+                if (i > 0) out.append(',');
+                out.append(types.erasure(callee.getParameters().get(i).asType()));
+            }
+            return out.append(')').toString();
+        }
+
+        /** What the calls of each member resolved to, each target once, sorted. */
+        Map<Declared, List<String>> resolves() {
+            Map<Declared, Set<String>> targets = new HashMap<>();
+            for (Map.Entry<Declared, ExecutableElement> call : called) {
+                targets.computeIfAbsent(call.getKey(), k -> new TreeSet<>()).add(identity(call.getValue()));
+            }
+            Map<Declared, List<String>> resolves = new HashMap<>();
+            targets.forEach((member, set) -> resolves.put(member, List.copyOf(set)));
+            return resolves;
+        }
+
+        /** For each file, the other files that hold a supertype or a subtype of one of its named classes. */
+        Map<String, Set<String>> related() {
+            Map<String, Set<String>> related = new HashMap<>();
+            for (Map.Entry<Element, Declared> type : headOf.entrySet()) {
+                Deque<TypeMirror> open = new ArrayDeque<>(types.directSupertypes(type.getKey().asType()));
+                Set<Element> seen = new HashSet<>();
+                while (!open.isEmpty()) {
+                    Element above = types.asElement(open.removeFirst());
+                    if (above == null || !seen.add(above)) continue;
+                    open.addAll(types.directSupertypes(above.asType()));
+                    Declared head = headOf.get(above);
+                    if (head == null || head.file().equals(type.getValue().file())) continue;
+                    related.computeIfAbsent(type.getValue().file(), k -> new TreeSet<>()).add(head.file());
+                    related.computeIfAbsent(head.file(), k -> new TreeSet<>()).add(type.getValue().file());
+                }
+            }
+            return related;
+        }
+
         List<Call> calls() {
             Map<String, List<ExecutableElement>> byName = new HashMap<>();
             for (Element element : declaredBy.keySet()) {
@@ -364,6 +423,9 @@ final class Finder {
                 Declared from = call.getKey();
                 ExecutableElement callee = call.getValue();
                 Declared direct = declaredBy.get(callee);
+                // What a class has without a line of its own (a constructor nobody wrote, a record's accessor) is
+                // written in its head
+                if (direct == null) direct = headOf.get(callee.getEnclosingElement());
                 if (direct != null && !direct.equals(from)) calls.add(new Call(from, direct));
                 if (callee.getKind() != ElementKind.METHOD) continue;
                 for (ExecutableElement other : byName.getOrDefault(callee.getSimpleName().toString(), List.of())) {
@@ -446,6 +508,20 @@ final class Finder {
                         && (parent instanceof CompilationUnitTree || parent instanceof ClassTree);
                 if (!named) return super.visitClass(node, unused);
                 classNames.addLast(node.getSimpleName().toString());
+                Element type = trees.getElement(getCurrentPath());
+                if (type != null) {
+                    int start = line(positions.getStartPosition(unit, node));
+                    int end = line(positions.getEndPosition(unit, node) - 1);
+                    for (Tree inner : node.getMembers()) {
+                        long at = positions.getStartPosition(unit, inner);
+                        // A member javac made up has no place, or the place of the class itself
+                        if (at != NOPOS && positions.getEndPosition(unit, inner) != NOPOS && line(at) > start) {
+                            end = Math.min(end, line(at) - 1);
+                        }
+                    }
+                    headOf.put(type, new Declared(path, new Member(String.join(".", classNames)
+                            + " (the head of its class)", start, Math.max(start, end), true)));
+                }
                 try {
                     return super.visitClass(node, unused);
                 } finally {
