@@ -725,6 +725,239 @@ class GitLedgerTest {
         assertTrue(e.getMessage().contains("core.worktree"), e.getMessage());
     }
 
+    private String head() throws Exception {
+        return git("rev-parse", "HEAD").strip();
+    }
+
+    /**
+     * An ordinary commit over an entry, no history rewritten: the entry is no longer what its own commit added, and
+     * the ledger says so with the commit and the path.
+     */
+    @Test
+    void anEntryChangedByALaterCommit_isNamedWithTheCommitAndThePath() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.recordStart("r1", start("r1"));
+        ledger.record("r1", "COMPLETED", manifest("r1"));
+        ledger.recordStart("r2", start("r2"));
+        assertTrue(ledger.changes("r1").isEmpty() && run("r1").changes().isEmpty(), "as added");
+
+        Files.writeString(home.resolve("ledger/runs/r1.json"), "{\"run\":\"r1\",\"gate\":\"GREEN\"}");
+        git(ME, "commit", "-q", "-m", "run r1 COMPLETED", "--", "runs/r1.json");
+        String endChanged = head();
+        Files.writeString(home.resolve("ledger/starts/r1.json"), new String(start("r1")).strip());
+        git(ME, "commit", "-q", "-m", "tidy", "--", "starts/r1.json");
+        String startChanged = head();
+
+        List<String> changes = ledger.changes("r1");
+        assertEquals(2, changes.size(), changes.toString());
+        assertTrue(changes.stream().anyMatch(change -> change.contains(endChanged.substring(0, 12))
+                && change.contains("runs/r1.json") && change.contains("changed")), changes.toString());
+        assertTrue(changes.stream().anyMatch(change -> change.contains(startChanged.substring(0, 12))
+                && change.contains("starts/r1.json") && change.contains("changed")), changes.toString());
+        assertEquals(changes, run("r1").changes());
+        assertTrue(ledger.changes("r2").isEmpty() && run("r2").changes().isEmpty(), "another run is not touched");
+    }
+
+    @Test
+    void anEntryDeletedByALaterCommit_isNamedWithTheCommitAndThePath() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.recordStart("r1", start("r1"));
+        git(ME, "rm", "-q", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "tidy");
+        String removed = head();
+
+        assertEquals(1, ledger.changes("r1").size());
+        assertTrue(ledger.changes("r1").getFirst().contains(removed.substring(0, 12))
+                && ledger.changes("r1").getFirst().contains("removed starts/r1.json"), ledger.changes("r1").toString());
+        assertEquals(ledger.changes("r1"), run("r1").changes());
+
+        // Put back by hand, with the same bytes: still not what one commit added and none touched
+        Files.createDirectories(home.resolve("ledger/starts"));
+        Files.write(home.resolve("ledger/starts/r1.json"), start("r1"));
+        git(ME, "add", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "run r1 STARTED");
+        assertEquals(2, ledger.changes("r1").size(), ledger.changes("r1").toString());
+    }
+
+    /** The message of an entry's commit names the SHA-256 of the entry: what is compared instead of walking trees. */
+    @Test
+    void theCommitOfAnEntry_namesItsSha256() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(start("r1")));
+        assertEquals("run r1 STARTED\n\nsha256 " + sha, git("log", "-1", "--format=%B").strip());
+    }
+
+    /** An entry as a commit of the time before the hash added it, by hand here: the subject alone, no hash. */
+    private void legacyEnd(String id) throws Exception {
+        Files.createDirectories(home.resolve("ledger/runs"));
+        Files.write(home.resolve("ledger/runs/" + id + ".json"), manifest(id));
+        git(ME, "add", "runs/" + id + ".json");
+        git(ME, "commit", "-q", "-m", "run " + id + " COMPLETED");
+    }
+
+    /**
+     * The entries of the time before messages held the hash are judged by the commits that touched them: untouched
+     * they hold, and a change is found whether it came before the last of them or after.
+     */
+    @Test
+    void anEntryOfTheTimeBeforeTheHash_holdsUntouched_andAChangeIsFoundBeforeAndAfterTheLastOfThem() throws Exception {
+        ledger().prepare();
+        legacyEnd("old1");
+        legacyEnd("old2");
+        Files.writeString(home.resolve("ledger/runs/old1.json"), "{\"run\":\"old1\",\"gate\":\"GREEN\"}");
+        git(ME, "commit", "-q", "-m", "early", "--", "runs/old1.json");
+        String early = head();
+        legacyEnd("old3");
+        ledger().recordStart("r1", start("r1"));
+        ledger().record("r1", "COMPLETED", manifest("r1"));
+
+        assertTrue(run("old2").changes().isEmpty() && run("old3").changes().isEmpty() && run("r1").changes().isEmpty());
+        assertEquals(1, run("old1").changes().size(), run("old1").changes().toString());
+        assertTrue(run("old1").changes().getFirst().contains(early.substring(0, 12)), run("old1").changes().toString());
+
+        Files.writeString(home.resolve("ledger/runs/old3.json"), "{\"run\":\"old3\",\"gate\":\"GREEN\"}");
+        git(ME, "commit", "-q", "-m", "late", "--", "runs/old3.json");
+        String late = head();
+
+        assertEquals(1, run("old3").changes().size(), run("old3").changes().toString());
+        assertTrue(run("old3").changes().getFirst().contains(late.substring(0, 12))
+                && run("old3").changes().getFirst().contains("changed runs/old3.json"),
+                run("old3").changes().toString());
+        assertTrue(run("old2").changes().isEmpty());
+    }
+
+    /** A second commit under the message of an entry, also one that changes nothing: an entry is added once. */
+    @Test
+    void aSecondCommitUnderTheMessageOfAnEntry_isNamed() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "commit", "-q", "--allow-empty", "-m", "run r1 STARTED");
+
+        assertEquals(1, ledger().changes("r1").size(), ledger().changes("r1").toString());
+        assertTrue(ledger().changes("r1").getFirst().contains("2 commits name starts/r1.json"),
+                ledger().changes("r1").toString());
+    }
+
+    /** An entry is added by the commit that names it: a file that rode in under another message is no entry. */
+    @Test
+    void anEntryAddedUnderAnotherMessage_isNamed() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        Files.createDirectories(home.resolve("ledger/runs"));
+        Files.write(home.resolve("ledger/runs/r0.json"), manifest("r0"));
+        git(ME, "add", "runs/r0.json");
+        git(ME, "commit", "-q", "-m", "housekeeping");
+
+        assertEquals(1, ledger().changes("r0").size());
+        assertTrue(ledger().changes("r0").getFirst().contains("runs/r0.json")
+                && ledger().changes("r0").getFirst().contains("housekeeping"), ledger().changes("r0").toString());
+    }
+
+    /** The acknowledgements of a run are only added to, each by a commit that says so. */
+    @Test
+    void anAcknowledgementRewrittenOrRemoved_isNamed() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.recordStart("r1", start("r1"));
+        ledger.acknowledge("r1", "{\"note\":\"first\"}".getBytes(StandardCharsets.UTF_8));
+        ledger.acknowledge("r1", "{\"note\":\"second\"}".getBytes(StandardCharsets.UTF_8));
+        assertTrue(ledger.changes("r1").isEmpty(), ledger.changes("r1").toString());
+
+        Files.writeString(home.resolve("ledger/acks/r1.jsonl"), "{\"note\":\"another\"}\n");
+        git(ME, "commit", "-q", "-m", "fix a typo", "--", "acks/r1.jsonl");
+
+        assertEquals(1, ledger.changes("r1").size());
+        assertTrue(ledger.changes("r1").getFirst().contains("acks/r1.jsonl"), ledger.changes("r1").toString());
+    }
+
+    /** The anchors of a register are only added to as well; a commit that rewrites them fails the whole check. */
+    @Test
+    void anAnchorFileRewrittenByAnotherCommit_failsTheCheck() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.anchorRegister("hello", 0, "a".repeat(64));
+        ledger.anchorRegister("hello", 1, "b".repeat(64));
+        ledger.runs();
+
+        Files.writeString(home.resolve("ledger/registers/hello.jsonl"), "{\"seq\":0,\"head\":\"" + "c".repeat(64)
+                + "\"}\n");
+        git(ME, "commit", "-q", "-m", "register hello seq 0", "--", "registers/hello.jsonl");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, ledger::runs);
+        assertTrue(e.getMessage().contains("registers/hello.jsonl") && e.getMessage().contains(head().substring(0, 12)),
+                e.getMessage());
+    }
+
+    /** A merge can bring in a change that the walk over the commits' own changes does not show. */
+    @Test
+    void aMergeCommit_failsTheCheck() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        git(ME, "checkout", "-q", "-b", "aside");
+        git(ME, "commit", "-q", "--allow-empty", "-m", "aside");
+        git(ME, "checkout", "-q", "main");
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "merge", "-q", "--no-ff", "-m", "merged", "aside");
+        git(ME, "branch", "-q", "-d", "aside");
+
+        assertNotOneHistory("merge");
+    }
+
+    /**
+     * A .git that is a file pointing elsewhere (or a link): the commits would go to another repository. Not written
+     * to, and not read.
+     */
+    @Test
+    void aLedgerWhoseDotGitIsAFile_isRefused_alsoForWriting() throws Exception {
+        Path elsewhere = Files.createDirectories(home.resolve("elsewhere"));
+        new GitLedger(elsewhere, home.resolve("other.lock")).recordStart("r0", start("r0"));
+        Files.createDirectories(home.resolve("ledger"));
+        Files.writeString(home.resolve("ledger/.git"), "gitdir: " + elsewhere.resolve(".git") + "\n");
+
+        for (org.junit.jupiter.api.function.Executable write : List.<org.junit.jupiter.api.function.Executable>of(
+                () -> ledger().prepare(), () -> ledger().recordStart("r1", start("r1")),
+                () -> ledger().record("r1", "COMPLETED", manifest("r1")),
+                () -> ledger().anchorRegister("hello", 0, "a".repeat(64)),
+                () -> ledger().acknowledge("r1", "{}".getBytes(StandardCharsets.UTF_8)), () -> ledger().runs())) {
+            IllegalStateException e = assertThrows(IllegalStateException.class, write);
+            assertTrue(e.getMessage().contains(".git"), e.getMessage());
+        }
+        ProcessBuilder count = new ProcessBuilder("git", "-C", elsewhere.toString(), "rev-list", "--count", "HEAD");
+        assertEquals("1", new String(count.start().getInputStream().readAllBytes()).strip(), "nothing went elsewhere");
+    }
+
+    @Test
+    void aLedgerWithACommondir_isRefused_alsoForWriting() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        Files.writeString(home.resolve("ledger/.git/commondir"), "../../elsewhere/.git\n");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ledger().recordStart("r1", start("r1")));
+        assertTrue(e.getMessage().contains("commondir"), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().prepare());
+    }
+
+    /**
+     * The rule for the ledger's own configuration is the same for a start as for a check: a key that could change
+     * what git writes or shows refuses the run before it starts, with what to do; what a push needs is allowed.
+     */
+    @Test
+    void aForeignSetting_refusesTheStartToo_andWhatAPushNeedsIsAllowed() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        for (String[] setting : new String[][] {{"core.sshCommand", "ssh -i /keys/ledger"}, {"pull.rebase", "true"},
+                {"fetch.prune", "true"}, {"maintenance.auto", "false"}, {"url.git@host:.insteadOf", "https://host/"},
+                {"remote.origin.url", "/nowhere.git"}, {"branch.main.remote", "origin"}}) {
+            git(ME, "config", setting[0], setting[1]);
+        }
+        ledger().prepare();
+        ledger().runs();
+        ledger().findStart("r0");
+
+        git(ME, "config", "core.autocrlf", "true");
+        for (org.junit.jupiter.api.function.Executable call : List.<org.junit.jupiter.api.function.Executable>of(
+                () -> ledger().prepare(), () -> ledger().runs(), () -> ledger().findStart("r0"))) {
+            IllegalStateException e = assertThrows(IllegalStateException.class, call);
+            assertTrue(e.getMessage().contains("core.autocrlf") && e.getMessage().contains("config --unset")
+                    && e.getMessage().contains("git -c"), e.getMessage());
+        }
+    }
+
     /** A lock that is never let go must not leave a run waiting for ever: the writer gives up and names the lock. */
     @Test
     void aLockThatIsHeld_isWaitedForABoundedTime_thenTheWriteIsRefused() throws Exception {

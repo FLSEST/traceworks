@@ -62,6 +62,15 @@ public interface Ledger {
     LedgerRuns runs();
 
     /**
+     * What the history did to the entries of one run that Traceworks never does ({@link LedgerRuns.Run#changes}):
+     * an entry is added once, by the commit that names it, and never touched again. Empty when the entries are as
+     * they were added, and for a run the ledger does not name.
+     *
+     * @throws IllegalStateException with the reason when the ledger exists and cannot be read
+     */
+    List<String> changes(String runId);
+
+    /**
      * Records that a person acknowledged a run the check of the ledger against the runs folder reports: one more
      * entry of that run, which the ledger keeps for good.
      *

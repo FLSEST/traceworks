@@ -77,9 +77,28 @@ public final class InMemoryLedger implements Ledger {
         for (String id : ids) {
             runs.add(new LedgerRuns.Run(id, startNamed.contains(id), starts.get(id), endNamed.get(id),
                     manifests.get(id), acks.containsKey(id)
-                    ? acks.get(id).getBytes(java.nio.charset.StandardCharsets.UTF_8) : null));
+                    ? acks.get(id).getBytes(java.nio.charset.StandardCharsets.UTF_8) : null,
+                    changes.getOrDefault(id, List.of())));
         }
         return new LedgerRuns(runs);
+    }
+
+    private final Map<String, List<String>> changes = new LinkedHashMap<>();
+
+    @Override
+    public synchronized List<String> changes(String runId) {
+        if (readFailure != null) throw readFailure;
+        return List.copyOf(changes.getOrDefault(runId, List.of()));
+    }
+
+    /**
+     * Puts {@code json} in the place of the end entry of {@code runId}, as a later commit {@code commit} that
+     * changes {@code runs/<run-id>.json} would.
+     */
+    public synchronized void changeEnd(String runId, byte[] json, String commit) {
+        manifests.put(runId, json.clone());
+        changes.computeIfAbsent(runId, id -> new ArrayList<>()).add("commit " + commit + " changed runs/" + runId
+                + ".json, which another commit added");
     }
 
     @Override

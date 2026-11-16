@@ -218,6 +218,11 @@ class RegisterAnchorTest {
             }
 
             @Override
+            public List<String> changes(String runId) {
+                return fixture.ledger.changes(runId);
+            }
+
+            @Override
             public List<RegisterAnchor> registerAnchors(String key) {
                 throw new IllegalStateException("git show failed: no git");
             }
@@ -264,6 +269,11 @@ class RegisterAnchorTest {
             @Override
             public void acknowledge(String runId, byte[] line) {
                 fixture.ledger.acknowledge(runId, line);
+            }
+
+            @Override
+            public List<String> changes(String runId) {
+                return fixture.ledger.changes(runId);
             }
 
             @Override

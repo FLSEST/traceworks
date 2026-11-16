@@ -319,6 +319,11 @@ class RunServicesTest {
             public void acknowledge(String runId, byte[] line) {
                 fx.ledger.acknowledge(runId, line);
             }
+
+            @Override
+            public List<String> changes(String runId) {
+                return fx.ledger.changes(runId);
+            }
         };
     }
 

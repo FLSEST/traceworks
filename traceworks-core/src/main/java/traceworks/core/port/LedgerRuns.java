@@ -25,7 +25,21 @@ public record LedgerRuns(List<Run> runs) {
      *                   none
      * @param acks       the acknowledgements of the run the ledger holds now, one JSON line each, oldest first;
      *                   {@code null} when it holds none
+     * @param changes    what the history did to the entries of the run that Traceworks never does, one sentence
+     *                   each, naming the commit and the path: an entry that a commit other than the one that added
+     *                   it changed or removed, an entry added under another message than its own, an
+     *                   acknowledgement that was not only added to
      */
-    public record Run(String runId, boolean startNamed, byte[] start, String endNamed, byte[] end, byte[] acks) {
+    public record Run(String runId, boolean startNamed, byte[] start, String endNamed, byte[] end, byte[] acks,
+                      List<String> changes) {
+
+        public Run {
+            changes = List.copyOf(changes);
+        }
+
+        /** A run whose entries are as the commits that name them added them. */
+        public Run(String runId, boolean startNamed, byte[] start, String endNamed, byte[] end, byte[] acks) {
+            this(runId, startNamed, start, endNamed, end, acks, List.of());
+        }
     }
 }
