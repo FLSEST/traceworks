@@ -79,7 +79,10 @@ class PiCliLocalModelTest {
     void theSecretOfAServer_isNamedInTheConfiguration_andItsValueIsNowhereInTheInvocation() {
         AiInvocation invocation = withSecret.invocation(call(null, "llm/qwen2.5-coder:7b"));
 
-        assertThat(modelsJson(invocation)).contains("\"apiKey\":\"$LLM_KEY\"");
+        assertThat(modelsJson(invocation)).as("Pi sends a key as Authorization: Bearer only with authHeader")
+                .contains("\"apiKey\":\"$LLM_KEY\",\"authHeader\":true,");
+        assertThat(modelsJson(cli.invocation(call(null, "llm/qwen2.5-coder:7b"))))
+                .as("a server without a secret gets no header of a key").doesNotContain("authHeader");
         assertThat(invocation.environment()).as("the run passes the value, as every credential's; the CLI names it")
                 .containsOnlyKeys(PiModelsLaunch.VARIABLE);
         assertThat(withSecret.credentialNames(call(null, "llm/qwen2.5-coder:7b"))).containsExactly("LLM_KEY");

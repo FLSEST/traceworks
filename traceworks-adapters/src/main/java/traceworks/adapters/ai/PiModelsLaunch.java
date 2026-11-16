@@ -24,6 +24,7 @@ import java.util.Map;
  *     "baseUrl": "http://llm.internal:8080/v1",
  *     "api": "openai-completions",
  *     "apiKey": "$LLM_KEY",
+ *     "authHeader": true,
  *     "models": [{"id": "qwen2.5-coder"}]}}}
  * </pre>
  *
@@ -34,7 +35,9 @@ import java.util.Map;
  *   <li><b>The model</b> is the one the call asks for, and no other; it is one the operator listed.</li>
  *   <li><b>The key</b> is never in the file. For a server with a secret the file says {@code "$NAME"}, which Pi
  *       resolves from its environment when it sends a request, and the value travels as every credential does, in
- *       the container's environment. For a server without one the file holds the word {@value #NO_KEY}: Pi offers
+ *       the container's environment; with it the file says {@code "authHeader": true}, which Pi's reference
+ *       describes as "whether to send the resolved API key as Authorization: Bearer" and which is off by
+ *       default. For a server without one the file holds the word {@value #NO_KEY}: Pi offers
  *       a model only when its provider has a key, and a server that wants none ignores it.</li>
  *   <li><b>No extension:</b> a provider in {@code models.json} with a {@code baseUrl} and an {@code api} is Pi's
  *       own feature. {@code --no-extensions} and the other options of a call stay as they are.</li>
@@ -75,7 +78,8 @@ final class PiModelsLaunch {
 
     /**
      * The text of {@code models.json} for a call to {@code use}: one provider, {@value #PROVIDER}, with the server's
-     * URL and API, the name of its secret as {@code $NAME} (or {@value #NO_KEY}), and the one model of the call.
+     * URL and API, the name of its secret as {@code $NAME} with {@code authHeader} (or {@value #NO_KEY} without
+     * it), and the one model of the call.
      */
     static String modelsJson(LocalModels.Use use) {
         LocalModels.Backend backend = use.backend();
@@ -84,6 +88,11 @@ final class PiModelsLaunch {
         provider.put("baseUrl", backend.url());
         provider.put("api", backend.api());
         provider.put("apiKey", backend.secret() == null ? NO_KEY : "$" + backend.secret());
+        if (backend.secret() != null) {
+            // Pi's models-configuration.md: authHeader, false by default, is "whether to send the resolved API key
+            // as Authorization: Bearer". A server that wants a key wants it there.
+            provider.put("authHeader", true);
+        }
         provider.putArray("models").addObject().put("id", use.model());
         return root.toString();
     }
