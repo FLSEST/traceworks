@@ -11,7 +11,9 @@
   ],
   "default_context": {
     "since": "",
-    "skip": ""
+    "skip": "",
+    "full_audit": "",
+    "green": "yes"
   },
   "model_choices": {
     "judge": {
@@ -52,9 +54,10 @@
         "values": {
           "SINCE": "{{ since }}",
           "PREVIOUS_REPORT": "{{ previous_report }}",
-          "SKIP_COMMITS": "{{ skip }}"
+          "SKIP_COMMITS": "{{ skip }}",
+          "FULL_AUDIT": "{{ full_audit }}"
         },
-        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh base {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"",
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh base {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\" \"$FULL_AUDIT\"",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }
@@ -84,9 +87,10 @@
       "config": {
         "container_image": "./images/areas",
         "values": {
-          "KNOWN_FINDINGS": "{{ audit_findings }}"
+          "KNOWN_FINDINGS": "{{ audit_findings }}",
+          "SAY_GREEN": "{{ green }}"
         },
-        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; areas find --rules {{ package_dir }}/rules/security.rules --root . --changes {{ scratch_dir }}/changes --register security-changes --known {{ scratch_dir }}/known-findings.txt --items-file {{ register_dir }}/items.jsonl --verdict-version 1 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
+        "command": "set -euo pipefail; printf '%s' \"$KNOWN_FINDINGS\" > {{ scratch_dir }}/known-findings.txt; areas find --rules {{ package_dir }}/rules/security.rules --root . --changes {{ scratch_dir }}/changes --register security-changes --green \"$SAY_GREEN\" --known {{ scratch_dir }}/known-findings.txt --items-file {{ register_dir }}/items.jsonl --verdict-version 1 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
         "timeout_seconds": 600,
         "shell_escape_variables": true
       }

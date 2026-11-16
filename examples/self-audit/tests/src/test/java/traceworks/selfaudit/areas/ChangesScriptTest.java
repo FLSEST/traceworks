@@ -495,4 +495,21 @@ class ChangesScriptTest {
         assertThat(script(one, "", "yes").code()).isZero();
         assertThat(read().lines()).containsEntry("src/A.java", List.of(new Changes.Range(2, 2)));
     }
+
+    @Test
+    void theScriptCountsTheCommitsOfTheRange_andResolvesTheFullAuditThatWasNamed() throws IOException {
+        Ran ran = run(repo, Map.of(), "bash", SCRIPT.toString(), "base", out.toString(), first, "", "", "v1");
+        assertThat(ran.code()).as(ran.stderr()).isZero();
+        assertThat(written("commits")).isEqualTo("2\n");
+        assertThat(written("full-audit")).isEqualTo(first + "\n");
+        assertThat(written("full-audit-behind")).isEqualTo("2\n");
+
+        assertThat(script(second, "").code()).isZero();
+        assertThat(written("commits")).isEqualTo("1\n");
+        assertThat(written("full-audit")).as("none was given").isBlank();
+
+        Ran unknown = run(repo, Map.of(), "bash", SCRIPT.toString(), "base", out.toString(), first, "", "", "nope");
+        assertThat(unknown.code()).isEqualTo(1);
+        assertThat(unknown.stderr()).contains("the full audit 'nope' names no commit of this checkout");
+    }
 }

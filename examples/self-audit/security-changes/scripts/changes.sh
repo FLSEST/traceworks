@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # What only git knows, handed to the area tool: the base of a check of the changes, and objects of the repository.
 #
-#   changes.sh base OUT_DIR SINCE PREVIOUS_REPORT [SKIP]     (run in the workspace)
+#   changes.sh base OUT_DIR SINCE PREVIOUS_REPORT [SKIP] [FULL_AUDIT]     (run in the workspace)
 #   changes.sh blobs OUT_DIR                                 (run in the workspace)
 #
 # "base" finds the base commit and writes it down with the tree of the base and of the workspace commit.
@@ -9,10 +9,13 @@
 # names a zone). Empty means: the workspace commit of the last run of this audit, which that run's report names in
 # its first "FACT changes_head:" line; PREVIOUS_REPORT is that report as the register hands it to this run. Without
 # either there is no base, and the script refuses: it never takes "everything" or "nothing" for a base nobody named.
-# SKIP is "yes" when the operator knows that SINCE leaves commits after the last run unjudged.
+# SKIP is "yes" when the operator knows that SINCE leaves commits after the last run unjudged. FULL_AUDIT is the
+# commit the operator names as the one the last full audit ran on; the report prints it and how far behind it is.
 # It writes into OUT_DIR: base-commit, head (commit ids), base-date, from ("input" or "register"), since,
 # previous-head, skipped (how many commits lie after the last run's commit and before the base; empty when no
-# earlier run is known), base-tree and head-tree (git ls-tree -r -z: mode, type, blob id and path of every file).
+# earlier run is known), commits (how many commits lie after the base up to the workspace commit), full-audit and
+# full-audit-behind (the commit that was named, and how many commits lie after it; empty without one), base-tree
+# and head-tree (git ls-tree -r -z: mode, type, blob id and path of every file).
 #
 # "blobs" reads OUT_DIR/wanted, blob ids one a line, which the area tool wrote, and writes their bytes to
 # OUT_DIR/blobs (git cat-file --batch).
@@ -61,6 +64,7 @@ fi
 since=$3
 previous=$4
 skip=${5:-}
+full_audit=${6:-}
 
 rm -rf "$out"
 mkdir -p "$out"
@@ -135,7 +139,22 @@ if [ -n "$previous_head" ]; then
     fi
 fi
 
+# The last full audit, as the operator names it: nothing here can look it up
+full=
+behind=
+if [ -n "$full_audit" ]; then
+    case $full_audit in
+        -*) refuse "the full audit '$full_audit' starts with '-', which git would read as an option" ;;
+    esac
+    full=$(g rev-parse --verify --quiet --end-of-options "$full_audit^{commit}") \
+        || refuse "the full audit '$full_audit' names no commit of this checkout"
+    behind=$(g rev-list --count "$full..$head")
+fi
+
 printf '%s\n' "$base" > "$out/base-commit"
+printf '%s\n' "$(g rev-list --count "$base..$head")" > "$out/commits"
+printf '%s\n' "$full" > "$out/full-audit"
+printf '%s\n' "$behind" > "$out/full-audit-behind"
 printf '%s\n' "$head" > "$out/head"
 printf '%s\n' "$base_date" > "$out/base-date"
 printf '%s\n' "$from" > "$out/from"

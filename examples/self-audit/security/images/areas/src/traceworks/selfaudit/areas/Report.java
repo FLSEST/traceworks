@@ -76,7 +76,8 @@ final class Report {
      */
     record Outcome(List<Finding> verified, List<Finding> unverified, List<NotJudged> notJudged, int areas, int judged,
                    String gate, String description, String markdown, String envelope, String findingsJsonl,
-                   List<Gone> gone, List<String> notAnswered, List<Finding> low, String nextBase) {
+                   List<Gone> gone, List<String> notAnswered, List<Finding> low, String nextBase,
+                   String details) {
     }
 
     /**
@@ -294,16 +295,28 @@ final class Report {
                 highUnanswered || unownedHigh(summary) || verified.stream().anyMatch(f -> f.severity().equals("high")),
                 openMissing);
         String gate = gate(states, summary);
+        // The one place where a check of the changes is kept from saying GREEN, when the run was started so
+        boolean noGreen = gate.equals("GREEN") && changes(summary) != null
+                && Boolean.FALSE.equals(changes(summary).get("green"));
+        if (noGreen) gate = "YELLOW";
         String register = summary.get("register") instanceof String key && key.matches("[a-z0-9][a-z0-9._-]{0,127}")
                 ? key : "security";
-        String description = sinceBase(summary)
+        String details = sinceBase(summary)
                 + description(verified, unverified, notAnswered, areas.size(), judged, summary, low, states)
                 + notLookedAt(summary);
+        Set<String> noVerdict = new HashSet<>();
+        for (NotJudged a : notJudged) noVerdict.add(a.id());
+        for (Finding f : unverified) noVerdict.add(f.area());
+        // For a check of the changes the description is the scope, in one line; the counts are the details
+        String description = changes(summary) == null ? details
+                : (noGreen ? "nothing found in what changed (this check does not say GREEN): " : "")
+                + scope(summary, areas.size(), noVerdict.size(), verified, holds(summary, noVerdict.size()));
+        if (changes(summary) == null) details = "";
         // How many areas of this run have no verdict to keep: no answer, or one with a finding that did not verify
         int withoutVerdict = (int) areas.stream().filter(a -> withoutAnswer.contains(text(a.get("id")))).count();
         List<String> holds = holds(summary, withoutVerdict);
         String markdown = markdown(verified, unverified, low, notJudged, gone, notAnswered, areas.size(), judged, summary,
-                gate, description, states, areas, holds) + unowned(summary, "findings", "area", register)
+                gate, description, states, areas, holds, details) + unowned(summary, "findings", "area", register)
                 + decided(decided, register) + unseen(missing, "area");
         // An area without a verdict (its call failed, or it got no place) is an item not judged, which the envelope
         // says. Only a file nobody could read makes the snapshot partial: nothing looked for findings there
@@ -311,7 +324,42 @@ final class Report {
         return new Outcome(List.copyOf(verified), List.copyOf(unverified), List.copyOf(notJudged), areas.size(), judged,
                 gate, description, markdown, envelope(verified, gone, complete, summary, itemOfArea, judgedItems),
                 findingsJsonl(verified, itemOfArea, Judge.fromJson(summary.get("judge"))), gone, List.copyOf(notAnswered), List.copyOf(low),
-                nextBase(summary, holds));
+                nextBase(summary, holds), details);
+    }
+
+    /**
+     * What the colour of a check of the changes covers, in one line: how many areas were picked since which commit,
+     * whether all were judged, what was found, and what was passed unjudged or holds the base.
+     */
+    private static String scope(Map<String, Object> summary, int picked, int withoutVerdict, List<Finding> verified,
+                                List<String> holds) {
+        Map<String, Object> changes = changes(summary);
+        String commits = text(changes.get("commits"));
+        String since = " since " + shortId(text(changes.get("base")))
+                + (commits.matches("[1-9][0-9]*") ? " (" + count(Integer.parseInt(commits), "commit") + ")" : "");
+        int notJudged = withoutVerdict + list(summary.get("cut")).size();
+        StringBuilder out = new StringBuilder();
+        if (number(changes.get("changedFiles")) == 0) out.append("nothing changed").append(since).append(", ");
+        if (picked + list(summary.get("cut")).size() == 0) {
+            out.append("no area picked");
+            if (number(changes.get("changedFiles")) > 0) out.append(since);
+        } else {
+            out.append(count(picked + list(summary.get("cut")).size(), "area")).append(" picked");
+            if (number(changes.get("changedFiles")) > 0) out.append(since);
+            out.append(notJudged == 0 ? ", all judged" : ", " + notJudged + " not judged");
+            long high = severityCount(verified, "high");
+            out.append(verified.isEmpty() ? ", nothing found" : ", " + count(verified.size(), "finding") + " (" + high
+                    + " high)");
+        }
+        int passed = number(changes.get("uncompiledFiles")) + number(changes.get("removedJavaFiles"))
+                + number(changes.get("cannotJudgeFiles"));
+        if (passed > 0) out.append("; ").append(count(passed, "file")).append(" passed unjudged");
+        String skipped = text(changes.get("skipped"));
+        if (skipped.equals("unknown") || skipped.matches("[1-9][0-9]{0,8}")) out.append("; commits skipped");
+        int notRead = list(summary.get("notRead")).size() + list(changes.get("unmappable")).size();
+        if (notRead > 0) out.append("; ").append(count(notRead, "file")).append(" not read or not compared");
+        if (!holds.isEmpty()) out.append("; the base does not move");
+        return out.toString();
     }
 
     /**
@@ -625,6 +673,11 @@ final class Report {
         String date = text(changes.get("baseDate"));
         row(md, "Base: the commit the changes are measured from", fullId(base)
                 + (date.matches("[0-9T:+Z-]{1,40}") ? ", committed " + date : ""));
+        String full = text(changes.get("fullAudit"));
+        row(md, "Last full audit (`examples/self-audit/security`)", full.isEmpty()
+                ? "not given (the input `full_audit`)" : fullId(full) + ", as the input `full_audit` names it: "
+                + count(number(text(changes.get("fullAuditBehind")).isEmpty() ? 0L
+                : Long.parseLong(text(changes.get("fullAuditBehind")))), "commit") + " before the workspace commit");
         row(md, "Where the base is from", input ? "the input `since`: " + code(text(changes.get("since")))
                 : "the workspace commit of the last run of this audit, as its report names it");
         row(md, "Workspace commit", fullId(head) + (dirty ? ", with changes that are in no commit (a `.java` file git ignores is one); they count as"
@@ -744,11 +797,13 @@ final class Report {
                                    List<NotJudged> notJudged,
                                    List<Gone> gone, List<String> notAnswered, int areas, int judged,
                                    Map<String, Object> summary, String gate, String description,
-                                   States.Counts states, List<Map<String, Object>> areaLines, List<String> holds) {
+                                   States.Counts states, List<Map<String, Object>> areaLines, List<String> holds,
+                                   String details) {
         StringBuilder md = new StringBuilder();
         Map<String, Object> changes = changes(summary);
         md.append(changes == null ? "# Security self-audit\n\n" : "# Security check of the changes\n\n");
         md.append("**Gate:** ").append(gate).append(": ").append(description).append("\n\n");
+        if (!details.isEmpty()) md.append("**Details:** ").append(details).append("\n\n");
         if (changes != null) changesSection(md, changes, areaLines, holds);
         Judge judge = Judge.fromJson(summary.get("judge"));
         if (judge != null) {

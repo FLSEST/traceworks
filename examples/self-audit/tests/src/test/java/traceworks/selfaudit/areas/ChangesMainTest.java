@@ -46,6 +46,20 @@ class ChangesMainTest {
         return out.toString(StandardCharsets.UTF_8);
     }
 
+    /** The output of {@code report} with the details in the place of the scope line: what the tests of the details read. */
+    private String details() {
+        return out().replaceFirst("(?m)^(gate_description: ).*\nDETAILS: ", "$1");
+    }
+
+    private String scope() {
+        return out().lines().filter(line -> line.startsWith("gate_description: ")).findFirst().orElseThrow()
+                .substring("gate_description: ".length());
+    }
+
+    private String reportText() throws IOException {
+        return Files.readString(work.resolve("report.md")).replaceFirst("(\\*\\*Gate:\\*\\* [A-Z]+: ).*\n\n\\*\\*Details:\\*\\* ", "$1");
+    }
+
     /** Runner.run starts a process; Caller.call calls it; Far.far calls Caller.call. Three areas. */
     @BeforeEach
     void project() throws IOException {
@@ -167,6 +181,8 @@ class ChangesMainTest {
                 Map.entry("docFiles", 1L), Map.entry("uncompiledFiles", 0L), Map.entry("uncompiled", List.of()),
                 Map.entry("cannotJudgeFiles", 0L), Map.entry("cannotJudge", List.of()),
                 Map.entry("removedJavaFiles", 0L), Map.entry("removedJava", List.of()),
+                Map.entry("commits", ""), Map.entry("fullAudit", ""), Map.entry("fullAuditBehind", ""),
+                Map.entry("green", true),
                 Map.entry("baseDate", "2026-11-10T09:00:00Z"), Map.entry("skipped", ""),
                 Map.entry("removedFiles", 0L), Map.entry("unmappable", List.of()),
                 Map.entry("outsideMembers", 0L), Map.entry("outside", List.of()),
@@ -254,12 +270,12 @@ class ChangesMainTest {
 
         String described = "of the changes since aaaaaaaaaaaa: no verified finding; 2 of 2 areas judged; 2 of 2 items"
                 + " settled (2 clean, 0 decided; 0 open, 0 not judged); 1 of 3 areas of the project not looked at";
-        assertThat(out()).startsWith("gate_status: GREEN\ngate_category: security\ngate_description: " + described
+        assertThat(details()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: " + described
                 + "\nFACT changes_base: " + BASE + "\nFACT changes_head: " + HEAD + "\nFACT changes_areas_changed: 1\n"
                 + "FACT changes_areas_neighbours: 1\nFACT changes_areas_carried: 0\n"
                 + "FACT changes_areas_not_looked_at: 1\n");
         assertThat(out()).contains("\"expectedItems\":2,\"items\":[{\"name\":\"" + CALLER + "\"");
-        assertThat(Files.readString(work.resolve("report.md"))).startsWith("# Security check of the changes\n\n"
+        assertThat(reportText()).startsWith("# Security check of the changes\n\n"
                         + "**Gate:** GREEN: " + described + "\n\n**This gate speaks about the changes only.** It says"
                         + " nothing about the 1 of 3 areas of the project that this run did not look at; the long"
                         + " audit judges every area.\n\n## What was looked at\n")
@@ -292,7 +308,7 @@ class ChangesMainTest {
                 work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
                 work.resolve("report.md").toString())).isZero();
 
-        assertThat(out()).startsWith("gate_status: GREEN\ngate_category: security\ngate_description: nothing"
+        assertThat(details()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: nothing"
                 + " changed since aaaaaaaaaaaa: ").contains("\nFACT changes_head: " + HEAD + "\n",
                 "3 of 3 areas of the project not looked at");
         assertThat(Files.readString(work.resolve("report.md"))).contains("No area: nothing changed in an area or next"
@@ -329,7 +345,7 @@ class ChangesMainTest {
 
         assertThat(report()).isZero();
 
-        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
+        assertThat(details()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: of the changes"
                 + " since aaaaaaaaaaaa: 1 changed file could not be compared; 1 removed Java file; no verified finding; ");
         assertThat(Files.readString(work.resolve("report.md")))
                 .contains("| Files that differ from the base | 2 (1 of them removed) |",
@@ -353,7 +369,7 @@ class ChangesMainTest {
                 work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
                 work.resolve("report.md").toString())).isZero();
 
-        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
+        assertThat(details()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: of the changes"
                 + " since aaaaaaaaaaaa: 4 commits after the last run skipped and not judged; no verified finding; 2 of"
                 + " 2 areas judged; 2 of 2 items settled");
         assertThat(Files.readString(work.resolve("report.md"))).contains("| **Commits skipped** | **4**: the commits"
@@ -363,7 +379,7 @@ class ChangesMainTest {
         Files.writeString(dir.resolve("skipped"), "unknown\n");
         run("", find());
         assertThat(report()).isZero();
-        assertThat(out()).startsWith("gate_status: YELLOW\n").contains("the commit of the last run is not in this"
+        assertThat(details()).startsWith("gate_status: YELLOW\n").contains("the commit of the last run is not in this"
                 + " checkout, so commits may have been skipped");
     }
 
@@ -396,7 +412,7 @@ class ChangesMainTest {
 
         assertThat(report()).isZero();
 
-        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
+        assertThat(details()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: of the changes"
                 + " since aaaaaaaaaaaa: 3 changed files this check cannot judge; no verified finding; ");
         assertThat(Files.readString(work.resolve("report.md")))
                 .contains("| Of them tests (`src/test/java`), not judged by this check | 1 |",
@@ -411,7 +427,7 @@ class ChangesMainTest {
         changes("README.md", "app/src/test/java/p/RunnerTest.java");
         run("", find());
         assertThat(report()).isZero();
-        assertThat(out()).startsWith("gate_status: GREEN\n");
+        assertThat(details()).startsWith("gate_status: GREEN\n");
     }
 
     @Test
@@ -436,7 +452,7 @@ class ChangesMainTest {
         assertThat(summary().get("knownUnowned")).isEqualTo(List.of(Map.of("ruleKey", "process_start",
                 "subject", RUNNER, "severity", "HIGH")));
         assertThat(report()).isZero();
-        assertThat(out()).startsWith("gate_status: RED\ngate_category: security\ngate_description: of the changes"
+        assertThat(details()).startsWith("gate_status: RED\ngate_category: changes\ngate_description: of the changes"
                 + " since aaaaaaaaaaaa: 1 changed Java file that no compiled source root holds; ")
                 .doesNotContain("\"gone\"");
         assertThat(Files.readString(work.resolve("report.md")))
@@ -454,7 +470,7 @@ class ChangesMainTest {
         assertThat(run("", find("--known", known.toString()))).isZero();
         assertThat(summary().get("knownGone")).isEqualTo(List.of());
         assertThat(report()).isZero();
-        assertThat(out()).startsWith("gate_status: RED\n");
+        assertThat(details()).startsWith("gate_status: RED\n");
         Files.move(test.resolve("Runner.java"), moved.resolve("Runner.java"));
 
         // Without such a file, a member that is gone takes its finding with it
@@ -464,8 +480,8 @@ class ChangesMainTest {
         assertThat(run("", find("--known", known.toString()))).isZero();
         assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER)));
         assertThat(report()).isZero();
-        assertThat(out()).as("its file is removed, and that is said").startsWith("gate_status: YELLOW\ngate_category:"
-                + " security\ngate_description: of the changes since aaaaaaaaaaaa: 1 removed Java file; ");
+        assertThat(details()).as("its file is removed, and that is said").startsWith("gate_status: YELLOW\ngate_category:"
+                + " changes\ngate_description: of the changes since aaaaaaaaaaaa: 1 removed Java file; ");
     }
 
     @Test
@@ -728,10 +744,109 @@ class ChangesMainTest {
                 work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
                 work.resolve("report.md").toString())).isZero();
 
-        assertThat(out()).startsWith("gate_status: YELLOW\n");
+        assertThat(details()).startsWith("gate_status: YELLOW\n");
         assertThat(headLine()).isEqualTo("FACT changes_head: " + HEAD);
         assertThat(Files.readString(work.resolve("report.md"))).contains("| The next run without `since` starts from | `"
                 + HEAD + "`: the workspace commit. **Passed unjudged**: 1 changed file this check cannot judge. No"
                 + " later run of this check comes back to it |");
+    }
+
+    // --- what the gate says in words ---
+
+    private String verdicts(String... answers) throws IOException {
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        StringBuilder all = new StringBuilder();
+        for (int i = 0; i < lines.size() && i < answers.length; i++) {
+            String id = String.valueOf(((Map<?, ?>) Json.parse(lines.get(i))).get("id"));
+            all.append("[").append(lines.get(i)).append("]: ").append(answers[i].replace("ID", id)).append("\n");
+        }
+        return all.toString();
+    }
+
+    private int report(String verdicts) {
+        return run(verdicts, "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString());
+    }
+
+    private static final String CLEAN = "{\"area\":\"ID\",\"findings\":[]}";
+
+    @Test
+    void theGateSaysInOneLineWhatItsColourCovers_forEveryColour_andItsCategoryIsChanges() throws IOException {
+        Path dir = changes(SRC + "Runner.java");
+        Files.writeString(dir.resolve("commits"), "3\n");
+
+        run("", find());
+        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
+        assertThat(out()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: 2 areas picked"
+                + " since aaaaaaaaaaaa (3 commits), all judged, nothing found\nDETAILS: of the changes since ");
+        assertThat(Files.readString(work.resolve("report.md"))).startsWith("# Security check of the changes\n\n"
+                + "**Gate:** GREEN: 2 areas picked since aaaaaaaaaaaa (3 commits), all judged, nothing found\n\n"
+                + "**Details:** of the changes since aaaaaaaaaaaa: no verified finding; ");
+
+        assertThat(report(verdicts(CLEAN))).isZero();
+        assertThat(out()).startsWith("gate_status: YELLOW\n");
+        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa (3 commits), 1 not judged, nothing found;"
+                + " the base does not move");
+
+        assertThat(report(verdicts(CLEAN, "{\"area\":\"ID\",\"findings\":[{\"rule\":\"process_start\",\"severity\":"
+                + "\"high\",\"line\":4,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\",\"fix\":\"f\"}]}")))
+                .isZero();
+        assertThat(out()).startsWith("gate_status: RED\n");
+        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa (3 commits), all judged, 1 finding (1 high)");
+
+        // Files the check cannot judge are passed, and that keeps the gate from GREEN
+        Files.writeString(changes(SRC + "Runner.java", "run.sh", "Dockerfile").resolve("commits"), "1\n");
+        run("", find());
+        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
+        assertThat(out()).startsWith("gate_status: YELLOW\n");
+        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa (1 commit), all judged, nothing found;"
+                + " 2 files passed unjudged");
+        Files.delete(root.resolve("run.sh"));
+        Files.delete(root.resolve("Dockerfile"));
+
+        // Nothing changed
+        Files.delete(changes().resolve("commits"));
+        run("", find());
+        assertThat(report("")).isZero();
+        assertThat(scope()).isEqualTo("nothing changed since aaaaaaaaaaaa, no area picked");
+    }
+
+    @Test
+    void withGreenNo_whatWouldBeGreenIsYellow_andSaysThatThisCheckDoesNotSayGreen() throws IOException {
+        changes(SRC + "Runner.java");
+
+        assertThat(run("", find("--green", "no"))).as(err.toString()).isZero();
+        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
+        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: nothing found in"
+                + " what changed (this check does not say GREEN): 2 areas picked since aaaaaaaaaaaa, all judged,"
+                + " nothing found\n");
+
+        // What is not GREEN anyway keeps its words
+        assertThat(report(verdicts(CLEAN))).isZero();
+        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa, 1 not judged, nothing found; the base does"
+                + " not move");
+        // The default says GREEN, and anything but yes or no is refused
+        assertThat(run("", find("--green", "yes"))).isZero();
+        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
+        assertThat(out()).startsWith("gate_status: GREEN\n");
+        assertThat(run("", find("--green", "maybe"))).isEqualTo(2);
+    }
+
+    @Test
+    void theReportNamesTheLastFullAudit_asItWasGiven_orSaysThatNoneWas() throws IOException {
+        Path dir = changes(SRC + "Runner.java");
+        run("", find());
+        report(verdicts(CLEAN, CLEAN));
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| Last full audit (`examples/self-audit/"
+                + "security`) | not given (the input `full_audit`) |");
+
+        Files.writeString(dir.resolve("full-audit"), "d".repeat(40) + "\n");
+        Files.writeString(dir.resolve("full-audit-behind"), "17\n");
+        run("", find());
+        report(verdicts(CLEAN, CLEAN));
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| Last full audit (`examples/self-audit/"
+                + "security`) | `" + "d".repeat(40) + "`, as the input `full_audit` names it: 17 commits before the"
+                + " workspace commit |");
     }
 }

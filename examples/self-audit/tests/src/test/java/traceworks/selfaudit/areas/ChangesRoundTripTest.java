@@ -163,8 +163,10 @@ class ChangesRoundTripTest {
 
     private String newest(String file) throws IOException {
         try (Stream<Path> walk = Files.walk(home.resolve("runs"))) {
+            // The gate line of a report holds the scope; these tests read the details in its place
             return Files.readString(walk.filter(p -> p.getFileName().toString().equals(file))
-                    .max(java.util.Comparator.comparing(p -> p.toFile().lastModified())).orElseThrow());
+                    .max(java.util.Comparator.comparing(p -> p.toFile().lastModified())).orElseThrow())
+                    .replaceFirst("(\\*\\*Gate:\\*\\* [A-Z]+: ).*\n\n\\*\\*Details:\\*\\* ", "$1");
         }
     }
 

@@ -72,7 +72,7 @@ class ChangesPackageTest {
         assertThat(own.get("model_choices")).isEqualTo(security.get("model_choices"));
         assertThat(own.get("requires")).isEqualTo(security.get("requires"));
         assertThat(own.get("default_context")).as("without the input, the base comes from the register")
-                .isEqualTo(Map.of("since", "", "skip", ""));
+                .isEqualTo(Map.of("since", "", "skip", "", "full_audit", "", "green", "yes"));
         Map<String, Object> verdicts = config(own, "verdicts");
         Map<String, Object> theirs = config(security, "verdicts");
         for (String key : List.of("execution_mode", "model_choice", "tools", "untrusted_input", "items_command",
@@ -84,9 +84,10 @@ class ChangesPackageTest {
         // The input and what the register hands the run reach a command by name, never as shell text
         Map<String, Object> changes = config(own, "base");
         assertThat(changes.get("values")).isEqualTo(Map.of("SINCE", "{{ since }}",
-                "PREVIOUS_REPORT", "{{ previous_report }}", "SKIP_COMMITS", "{{ skip }}"));
+                "PREVIOUS_REPORT", "{{ previous_report }}", "SKIP_COMMITS", "{{ skip }}", "FULL_AUDIT", "{{ full_audit }}"));
         assertThat(String.valueOf(changes.get("command"))).doesNotContain("{{ since }}", "{{ previous_report }}")
-                .contains("\"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"").doesNotContain("{{ skip }}");
+                .contains("\"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\" \"$FULL_AUDIT\"")
+                .doesNotContain("{{ skip }}", "{{ full_audit }}");
         assertThat(changes).as("git is in the shell image: the step needs no image of the package, no network and"
                 + " no writable workspace").doesNotContainKeys("container_image", "network", "workspace_writable");
         assertThat(String.valueOf(changes.get("command"))).contains("scripts/changes.sh base {{ scratch_dir }}/changes ");
@@ -101,7 +102,8 @@ class ChangesPackageTest {
         Map<String, Object> areas = config(own, "areas");
         assertThat(String.valueOf(areas.get("command"))).contains(" --changes {{ scratch_dir }}/changes ",
                 " --register security-changes ", " --items-file {{ register_dir }}/items.jsonl ",
-                " --judge {{ judge }} ").doesNotContain("{{ audit_findings }}");
+                " --judge {{ judge }} ", " --green \"$SAY_GREEN\" ").doesNotContain("{{ audit_findings }}", "{{ green }}");
+        assertThat((Map<String, Object>) areas.get("values")).containsEntry("SAY_GREEN", "{{ green }}");
         assertThat(areas).doesNotContainKeys("network", "workspace_writable");
     }
 

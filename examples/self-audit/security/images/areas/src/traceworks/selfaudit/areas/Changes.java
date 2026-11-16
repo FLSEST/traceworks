@@ -88,10 +88,13 @@ final class Changes {
      * @param baseTree     the files of the base, by their path below the root
      * @param headTree     the files of the workspace commit
      * @param blobs        the bytes of the blobs that were asked for, by their id
+     * @param more         what the step wrote for the report alone: {@code commits} (how many commits the range
+     *                     holds), {@code fullAudit} and {@code fullAuditBehind} (the commit the operator named as the
+     *                     last full audit, and how many commits lie after it); each empty when the step did not say
      */
     record Handed(String base, String head, String from, String since, String previousHead, String baseDate,
                   String skipped, Map<String, Entry> baseTree, Map<String, Entry> headTree,
-                  Map<String, byte[]> blobs) {
+                  Map<String, byte[]> blobs, Map<String, String> more) {
     }
 
     /**
@@ -174,7 +177,13 @@ final class Changes {
         return new Handed(base, head, from, optional(dir, "since"), COMMIT.matcher(previous).matches() ? previous : "",
                 date.matches("[0-9T:+Z-]{1,40}") ? date : "", skipped,
                 tree(Files.readAllBytes(dir.resolve("base-tree"))), tree(Files.readAllBytes(dir.resolve("head-tree"))),
-                blobs);
+                blobs, Map.of("commits", number(optional(dir, "commits")),
+                "fullAudit", COMMIT.matcher(optional(dir, "full-audit")).matches() ? optional(dir, "full-audit") : "",
+                "fullAuditBehind", number(optional(dir, "full-audit-behind"))));
+    }
+
+    private static String number(String text) {
+        return text.matches("\\d{1,9}") ? text : "";
     }
 
     private static String file(Path dir, String name) throws IOException {
