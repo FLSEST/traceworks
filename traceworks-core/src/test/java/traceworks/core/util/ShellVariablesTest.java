@@ -31,10 +31,15 @@ class ShellVariablesTest {
         String marker = ShellVariables.failureMarker(values);
         assertThat(marker).matches("traceworks:[0-9a-f]{32}:");
         assertThat(ShellVariables.preamble(values)).isEqualTo(
-                "TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' \"$3\""
+                "case \"${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}\" in [012].*|3.0) echo \"" + marker
+                        + " this bash is older than 3.1, which a step with values needs\" >&2; exit 74;; esac\n"
+                        + "TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A;"
+                        + " printf -v TRACEWORKS_V '%b' \"$3\""
                         + " && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v \"$1\""
                         + " && printf -v \"$1\" '%s' \"$TRACEWORKS_V\" && export -n \"$1\""
-                        + " && [[ ${!1} == \"$TRACEWORKS_V\" && -z ${!1@a} ]]"
+                        + " && [[ ${!1} == \"$TRACEWORKS_V\" ]]"
+                        + " && IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A < <(declare -p \"$1\")"
+                        + " && [[ $TRACEWORKS_A == \"declare -- $1=\" ]]"
                         + " || { echo \"" + marker + " the value of $1 was not delivered\" >&2; exit 74; }; }\n"
                         + "TRACEWORKS_VALUE REVIEW 15 'it\\x27s\\x20\\x24\\x28not\\x20run\\x29'\n"
                         + "TRACEWORKS_VALUE EMPTY 0 ''\n"
@@ -84,7 +89,21 @@ class ShellVariablesTest {
                 .matches("TRACEWORKS_VALUE V \\d+ '[A-Za-z0-9]*'");
         assertThat(line).startsWith("TRACEWORKS_VALUE V " + every.toString().getBytes(StandardCharsets.UTF_8).length
                 + " '");
-        assertThat(preamble.lines()).hasSize(3);
+        assertThat(preamble.lines()).hasSize(4);
+    }
+
+    /**
+     * The first line checks the bash: a {@code case} over two words of plain parameter expansion, which every bash
+     * reads (no {@code [[ ]]}, no arithmetic, no expansion that came later). Nothing stands before it.
+     */
+    @Test
+    void theFirstLine_isTheVersionCheck_inSyntaxEveryBashReads() {
+        String first = ShellVariables.preamble(Map.of("V", "x")).lines().findFirst().orElseThrow();
+
+        assertThat(first).matches("case \"\\$\\{BASH_VERSINFO\\[0]:-0}\\.\\$\\{BASH_VERSINFO\\[1]:-0}\" in \\[012]\\.\\*\\|3\\.0\\)"
+                + " echo \"traceworks:[0-9a-f]{32}: this bash is older than 3\\.1, which a step with values needs\""
+                + " >&2; exit 74;; esac");
+        assertThat(first).doesNotContain("[[").doesNotContain("((").doesNotContain("@").doesNotContain("$'");
     }
 
     /** A NUL is taken out before the value is encoded, so the length sent is the length that can arrive. */

@@ -17,7 +17,8 @@ import java.util.Map;
  * decodes it into the variable ({@code printf %b}): what a variable holds, bash does not parse.
  *
  * <pre>
- * TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' "$3" &amp;&amp; [[ ${#TRACEWORKS_V} -eq $2 ]] &amp;&amp; unset -v "$1" &amp;&amp; printf -v "$1" '%s' "$TRACEWORKS_V" &amp;&amp; export -n "$1" &amp;&amp; [[ ${!1} == "$TRACEWORKS_V" &amp;&amp; -z ${!1@a} ]] || { echo "traceworks:3f0c…: the value of $1 was not delivered" &gt;&amp;2; exit 74; }; }
+ * case "${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}" in [012].*|3.0) echo "traceworks:3f0c…: this bash is older than 3.1, which a step with values needs" &gt;&amp;2; exit 74;; esac
+ * TRACEWORKS_VALUE() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A; printf -v TRACEWORKS_V '%b' "$3" &amp;&amp; [[ ${#TRACEWORKS_V} -eq $2 ]] &amp;&amp; unset -v "$1" &amp;&amp; printf -v "$1" '%s' "$TRACEWORKS_V" &amp;&amp; export -n "$1" &amp;&amp; [[ ${!1} == "$TRACEWORKS_V" ]] &amp;&amp; IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A &lt; &lt;(declare -p "$1") &amp;&amp; [[ $TRACEWORKS_A == "declare -- $1=" ]] || { echo "traceworks:3f0c…: the value of $1 was not delivered" &gt;&amp;2; exit 74; }; }
  * TRACEWORKS_VALUE REVIEW 17 'it\x27s\x20\x24\x28not\x20run\x29'
  * unset -f TRACEWORKS_VALUE
  * </pre>
@@ -33,14 +34,17 @@ import java.util.Map;
  *       {@value #NOT_DELIVERED_EXIT} before the command's first line.</li>
  *   <li><b>Not exported.</b> The name is unset first, which takes it out of the environment the step started with,
  *       the export attribute is taken off after the assignment (a shell started with {@code allexport} sets it),
- *       and a variable that still has any attribute fails as above. No process the command starts inherits the
+ *       and a variable that still has any attribute fails as above: {@code declare -p} must begin with
+ *       {@code declare -- NAME=}, of which only that beginning is read. No process the command starts inherits the
  *       value unless the command exports it, and no limit of arguments or the environment binds it.</li>
  *   <li><b>A failure the engine knows.</b> The line the failing shell writes holds a token that is the digest of
  *       the lines that carry the values ({@link #failureMarker}). A value cannot write it: it would have to hold
  *       the digest of a text that holds the value. So {@link #notDelivered} tells a failed delivery from a command
  *       that ends with {@value #NOT_DELIVERED_EXIT} by itself, and a condition never reads it as "false".</li>
- *   <li><b>bash only.</b> No program is needed to decode, so it works wherever the command's bash runs (4.4 or
- *       later; an earlier one fails the delivery).</li>
+ *   <li><b>bash only, 3.1 or later.</b> No program is needed to decode, so it works wherever the command's bash
+ *       runs. The first line ends an older bash with the same failure, in syntax every bash reads; the lines after
+ *       it use nothing a bash from 3.1 on misreads, so a part that does not work there fails the delivery and
+ *       never skips a check. Run and tested with bash 5.2.</li>
  * </ul>
  */
 public final class ShellVariables {
@@ -52,9 +56,20 @@ public final class ShellVariables {
 
     private static final String TOKEN = "@TOKEN@";
 
-    private static final String DEFINE = SETTER + "() { local LC_ALL=C TRACEWORKS_V; printf -v TRACEWORKS_V '%b' \"$3\""
-            + " && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v \"$1\" && printf -v \"$1\" '%s' \"$TRACEWORKS_V\""
-            + " && export -n \"$1\" && [[ ${!1} == \"$TRACEWORKS_V\" && -z ${!1@a} ]]"
+    /**
+     * The first line: this bash is one the lines below work in. In syntax every bash reads, and before anything an
+     * older one could misread: {@code printf -v}, which sets the variables, came with bash 3.1.
+     */
+    private static final String VERSION = "case \"${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}\" in [012].*|3.0)"
+            + " echo \"traceworks:" + TOKEN + ": this bash is older than 3.1, which a step with values needs\" >&2;"
+            + " exit " + NOT_DELIVERED_EXIT + ";; esac\n";
+
+    private static final String DEFINE = SETTER + "() { local LC_ALL=C TRACEWORKS_V TRACEWORKS_A;"
+            + " printf -v TRACEWORKS_V '%b' \"$3\" && [[ ${#TRACEWORKS_V} -eq $2 ]] && unset -v \"$1\""
+            + " && printf -v \"$1\" '%s' \"$TRACEWORKS_V\" && export -n \"$1\""
+            + " && [[ ${!1} == \"$TRACEWORKS_V\" ]]"
+            + " && IFS= read -r -n $((12 + ${#1})) TRACEWORKS_A < <(declare -p \"$1\")"
+            + " && [[ $TRACEWORKS_A == \"declare -- $1=\" ]]"
             + " || { echo \"traceworks:" + TOKEN + ": the value of $1 was not delivered\" >&2; exit "
             + NOT_DELIVERED_EXIT + "; }; }\n";
 
@@ -72,7 +87,8 @@ public final class ShellVariables {
             return "";
         }
         String lines = lines(values);
-        return DEFINE.replace(TOKEN, token(lines)) + lines + "unset -f " + SETTER + "\n";
+        String token = token(lines);
+        return VERSION.replace(TOKEN, token) + DEFINE.replace(TOKEN, token) + lines + "unset -f " + SETTER + "\n";
     }
 
     /**

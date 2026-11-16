@@ -179,6 +179,38 @@ class HostCommandRunnerTest {
         assertThat(marker).doesNotExist();
     }
 
+    /**
+     * A bash older than 3.1 ends at the first line, with the marker of a failed delivery, before the command runs.
+     * The version is the shell's own and cannot be set, so the test puts the version an old bash reports in its
+     * place; with this bash's own version the same script runs.
+     */
+    @Test
+    void run_aBashOlderThanTheLinesNeed_endsAtTheFirstLine_withTheMarkerOfAFailedDelivery(@TempDir Path dir) {
+        Path marker = dir.resolve("ran");
+        CommandRequest request = shell("touch '" + marker + "'", null, 30).withValues(Map.of("VALUE", "x"));
+        String version = "\"${BASH_VERSINFO[0]:-0}.${BASH_VERSINFO[1]:-0}\"";
+        assertThat(request.script()).startsWith("case " + version + " in ");
+
+        for (String old : List.of("0.0", "2.05", "3.0", "1.14")) {
+            CommandResult result = run(request.script().replace(version, "\"" + old + "\""), 30);
+
+            assertThat(result.exitCode()).as(old).isEqualTo(74);
+            assertThat(result.stdout() + result.stderr()).as(old).startsWith(
+                    ShellVariables.failureMarker(request.values()) + " this bash is older than 3.1");
+            assertThat(ShellVariables.notDelivered(request.values(), result.exitCode(),
+                    result.stdout() + result.stderr())).as(old).isTrue();
+            assertThat(marker).as(old).doesNotExist();
+        }
+        for (String supported : List.of("3.1", "3.2", "4.2", "4.4", "5.2", "10.0", "30.1")) {
+            java.io.File ran = marker.toFile();
+            ran.delete();
+            CommandResult result = run(request.script().replace(version, "\"" + supported + "\""), 30);
+
+            assertThat(result.exitCode()).as(supported + ": " + result.stdout()).isZero();
+            assertThat(marker).as(supported).exists();
+        }
+    }
+
     /** A readonly variable cannot take the value: the delivery fails closed, before the command's first line. */
     @Test
     void run_aReadonlyName_failsTheDelivery(@TempDir Path dir) {
