@@ -110,7 +110,7 @@ class LedgerStartCommandTest {
 
         Result home = exec("verify");
         assertThat(home.code()).as(home.out() + home.err()).isZero();
-        assertThat(home.out()).contains("ledger    1 run started, 1 ended; 0 run folders of an earlier version",
+        assertThat(home.out()).contains("ledger    1 run started, 1 ended; 0 run folders from before the ledger",
                 "started, not ended (0)", "ended, folder gone (0)", "acknowledged (0)", "problems (0)", "verified");
     }
 
@@ -145,14 +145,14 @@ class LedgerStartCommandTest {
         Result parked = exec("run", asking().toString(), "--allow-host-execution", "--no-input");
         String id = idOf(parked);
         git("rm", "-q", "starts/" + id + ".json");
-        git("commit", "-q", "-m", "tidy");
+        git("commit", "-q", "-m", BY_HAND);
 
         Result verify = exec("verify", id);
         assertThat(verify.code()).as(verify.out()).isEqualTo(8);
         assertThat(verify.out()).contains("start     missing: run.started says the ledger noted the start");
         Result all = exec("verify");
         assertThat(all.code()).isEqualTo(8);
-        assertThat(all.out()).contains("problems (1)").containsPattern("(?m)^  " + id
+        assertThat(all.out()).contains("problems (2)").containsPattern("(?m)^  " + id
                 + "  commit [0-9a-f]{12} \\(\"run " + id + " STARTED sha256:[0-9a-f]{64}\"\\) names starts/" + id
                 + "\\.json, and the ledger does not hold it");
     }
@@ -253,7 +253,7 @@ class LedgerStartCommandTest {
         assertThat(exec("verify", id).code()).isZero();
         Path entry = home.resolve("ledger/starts/" + id + ".json");
         Files.writeString(entry, Files.readString(entry).replace(" : ", ": "));
-        git("commit", "-q", "-m", "tidy", "--", "starts/" + id + ".json");
+        git("commit", "-q", "-m", BY_HAND, "--", "starts/" + id + ".json");
 
         Result one = exec("verify", id);
         assertThat(one.code()).as(one.out()).isEqualTo(8);
@@ -262,7 +262,7 @@ class LedgerStartCommandTest {
                 + " [0-9a-f]{64}, and the ledger holds [0-9a-f]{64}");
         Result all = exec("verify");
         assertThat(all.code()).as(all.out()).isEqualTo(8);
-        assertThat(all.out()).contains("problems (1)", "  " + id + "  starts/" + id + ".json is not what commit ");
+        assertThat(all.out()).contains("problems (2)", "  " + id + "  starts/" + id + ".json is not what commit ");
     }
 
     /** The rule for the ledger's own git settings holds at the start too: no run starts that could not be checked. */
@@ -284,40 +284,82 @@ class LedgerStartCommandTest {
         exec("run", steps().toString(), "--allow-host-execution", "--no-input");
         Files.writeString(home.resolve("ledger/README"), "notes");
         git("add", "README");
-        git("commit", "-q", "-m", "notes");
+        git("commit", "-q", "-m", BY_HAND);
 
         Result run = exec("run", steps().toString(), "--allow-host-execution", "--no-input");
 
         assertThat(run.code()).as(run.out() + run.err()).isEqualTo(6);
-        assertThat(run.err()).contains("README", "rm README", "the run is not started");
+        assertThat(run.err()).contains("README", "reset --hard HEAD~1", "the run is not started");
         assertThat(exec("runs").out().lines().count()).as("no second run folder").isEqualTo(1);
     }
 
     /**
-     * An entry of a version that named no hash is not judged, and verify says so instead of a plain verified; the
-     * next run pins it, and verify names the pin.
+     * A ledger of an earlier version, whose commits name no hash: no command reads or writes it, and each says what
+     * to do. With the folder moved aside the next run starts a new ledger, and the runs stay where they are.
      */
     @Test
-    void anEntryWithoutAHash_isNamedAsNotJudged_untilTheNextRunPinsIt() throws Exception {
-        // The ledger of a version that named no hash: one end entry, by hand
+    void aLedgerOfAnEarlierVersion_isRefusedWithWhatToDo_andANewOneStartsOnceItIsMovedAside() throws Exception {
         Files.createDirectories(home.resolve("ledger/runs"));
         git("init", "-q", "-b", "main");
         Files.writeString(home.resolve("ledger/runs/old.json"), "{\"run_id\":\"old\",\"status\":\"COMPLETED\"}");
         git("add", "runs/old.json");
         git("commit", "-q", "-m", "run old COMPLETED");
 
-        Result before = exec("verify", "--quick");
-        assertThat(before.code()).as(before.out() + before.err()).isZero();
-        assertThat(before.out()).contains("not judged (1): entries no hash covers", "  runs/old.json",
-                "records   not verified (--quick)",
-                "verified, except 1 entry that no hash covers yet and that were not judged");
+        Result run = exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+        assertThat(run.code()).as(run.out() + run.err()).isEqualTo(6);
+        assertThat(run.err()).contains("was written by an earlier version of Traceworks", "Move the folder aside",
+                "the runs and the registers stay where they are", "the run is not started");
+        assertThat(exec("runs").out()).isBlank();
+        Result verify = exec("verify");
+        assertThat(verify.code()).as(verify.out() + verify.err()).isEqualTo(8);
+        assertThat(verify.err()).contains("was written by an earlier version of Traceworks");
 
-        exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+        Files.move(home.resolve("ledger"), home.resolve("ledger-earlier"));
 
-        Result after = exec("verify");
-        assertThat(after.out()).contains("pins (1)", " covers 1 entry").doesNotContain("not judged")
-                .doesNotContain("--quick");
+        Result again = exec("run", steps().toString(), "--allow-host-execution", "--no-input");
+        assertThat(again.code()).as(again.out() + again.err()).isZero();
+        assertThat(exec("verify").code()).isZero();
+        assertThat(exec("verify", idOf(again)).code()).isZero();
     }
+
+    /** verify --json: the classes and the counts for a script, with the same exit codes. */
+    @Test
+    void verifyJson_givesTheClassesAndCounts_andTheSameExitCodes() throws Exception {
+        String finished = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        String lost = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        Result fine = exec("verify", "--json");
+        assertThat(fine.code()).as(fine.out() + fine.err()).isZero();
+        com.fasterxml.jackson.databind.JsonNode home = json.readTree(fine.out());
+        assertThat(home.path("verified").asBoolean()).isTrue();
+        assertThat(home.path("started").asInt()).isEqualTo(2);
+        assertThat(home.path("ended").asInt()).isEqualTo(1);
+        assertThat(home.path("records_verified").asBoolean()).isTrue();
+        assertThat(home.path("open").get(0).path("run").asText()).isEqualTo(lost);
+        assertThat(home.path("open").get(0).path("folder").asText()).isEqualTo("PARKED");
+        assertThat(home.path("problems")).isEmpty();
+
+        delete(folderOf(lost));
+        Result failed = exec("verify", "--json", "--quick");
+        assertThat(failed.code()).isEqualTo(8);
+        com.fasterxml.jackson.databind.JsonNode broken = json.readTree(failed.out());
+        assertThat(broken.path("verified").asBoolean()).isFalse();
+        assertThat(broken.path("records_verified").asBoolean()).isFalse();
+        assertThat(broken.path("problems").get(0).path("run").asText()).isEqualTo(lost);
+        assertThat(broken.path("problems").get(0).path("code").asText()).isEqualTo("lost");
+
+        Result one = exec("verify", finished, "--json");
+        assertThat(one.code()).as(one.out() + one.err()).isZero();
+        com.fasterxml.jackson.databind.JsonNode run = json.readTree(one.out());
+        assertThat(run.path("verified").asBoolean()).isTrue();
+        assertThat(run.path("chain").path("intact").asBoolean()).isTrue();
+        assertThat(run.path("ledger").asText()).isEqualTo("ok");
+        assertThat(run.path("start").asText()).startsWith("ok");
+    }
+
+    /** A subject this version writes, for a commit made by hand: the ledger stays one of this version. */
+    private static final String BY_HAND = "run by-hand ACKNOWLEDGED sha256:" + "0".repeat(64);
 
     private void git(String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of("git", "-C", home.resolve("ledger").toString(),
