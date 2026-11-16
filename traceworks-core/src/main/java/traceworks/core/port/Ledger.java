@@ -71,16 +71,6 @@ public interface Ledger {
     List<String> changes(String runId);
 
     /**
-     * The entries of one run that no hash covers ({@link LedgerRuns#unjudged}): they are not judged, so a check of
-     * the run that holds says nothing of them. Empty for a ledger that judges every entry.
-     *
-     * @throws IllegalStateException with the reason when the ledger exists and cannot be read
-     */
-    default List<String> unjudged(String runId) {
-        return List.of();
-    }
-
-    /**
      * Records that a person acknowledged a run the check of the ledger against the runs folder reports: one more
      * entry of that run, which the ledger keeps for good.
      *
