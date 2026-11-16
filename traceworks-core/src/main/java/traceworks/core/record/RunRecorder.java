@@ -47,6 +47,15 @@ import java.util.function.Consumer;
  */
 public final class RunRecorder implements RunEvents {
 
+    /** In {@link #RECORDS}: the end of a command names a cut of its output ({@code output_cut}). */
+    public static final String OUTPUT_CUT = "output_cut";
+    /**
+     * What this version writes into a record only when it happened, so that its absence says that it did not:
+     * {@code records} in {@code run.started} and {@code run.resumed}. A record of a version that did not write
+     * a fact has no such name, and its silence about that fact means nothing.
+     */
+    public static final List<String> RECORDS = List.of(OUTPUT_CUT);
+
     private static final DateTimeFormatter AT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
@@ -169,6 +178,7 @@ public final class RunRecorder implements RunEvents {
             runtime.put("version", start.containerRuntime().version());
         }
         f.put("output_limit_mib", start.outputLimitMib());
+        f.set("records", Blobs.MAPPER.valueToTree(RECORDS));
         f.put("run_output_budget_mib", start.runOutputBudgetMib());
         ObjectNode aiImages = f.putObject("ai_images");
         new TreeMap<>(start.aiImages()).forEach(aiImages::put);

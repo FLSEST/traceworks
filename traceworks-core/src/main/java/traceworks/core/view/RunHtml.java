@@ -128,7 +128,7 @@ public final class RunHtml {
         if (cuts > 0) {
             out.append("<tr><th>output</th><td><strong class=\"problem\">").append(cuts)
                     .append(cuts == 1 ? " command" : " commands").append(" whose output was cut</strong>")
-                    .append(" at the bound after its end: it may be incomplete</td></tr>\n");
+                    .append(" before the end of its stream: it may be incomplete</td></tr>\n");
         }
     }
 

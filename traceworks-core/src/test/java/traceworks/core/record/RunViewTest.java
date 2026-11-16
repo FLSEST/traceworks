@@ -842,7 +842,28 @@ class RunViewTest {
         assertThat(commands.get(1).outputCut()).as("no field: read to its end").isNull();
         assertThat(commands.get(1).result().exitCode()).isZero();
         assertThat(view.outputCuts()).as("with the earlier attempt").isEqualTo(2);
+        assertThat(view.outputCutsOfLatestAttempts()).as("the ones a step lists").isEqualTo(1);
         assertThat(RunView.of(new RecordFixture().started().events(), false).outputCuts()).isZero();
+    }
+
+    /**
+     * Whether a record can name a cut at all: its start says so ({@code records}), and so does every resume. A
+     * record of an earlier version, or one an earlier version resumed, cannot: no cut in it means nothing.
+     */
+    @Test
+    void aRecordSaysWhetherItNamesOutputCuts_inItsStart_andInEveryResume() {
+        assertThat(fx.events().getFirst().fields().path("records")).extracting(n -> n.asText())
+                .containsExactly("output_cut");
+        assertThat(view(false).recordsOutputCut()).isTrue();
+
+        List<RecordedEvent> ofAnEarlierVersion = fx.events();
+        ofAnEarlierVersion.getFirst().fields().remove("records");
+        assertThat(RunView.of(ofAnEarlierVersion, false).recordsOutputCut()).isFalse();
+
+        fx.recorder.record("run.resumed", Map.of("actor", "flo@box", "records", List.of("output_cut")));
+        assertThat(view(false).recordsOutputCut()).as("resumed by this version").isTrue();
+        fx.recorder.record("run.resumed", Map.of("actor", "flo@box"));
+        assertThat(view(false).recordsOutputCut()).as("resumed by an earlier version").isFalse();
     }
 
     /** The denied connections of a run count those of earlier attempts and of child runs too. */

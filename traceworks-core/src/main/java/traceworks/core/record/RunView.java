@@ -56,7 +56,23 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
-                      List<ModelPick> modelChoices, RegisterHandover register) {
+                      List<ModelPick> modelChoices, RegisterHandover register, boolean recordsOutputCut) {
+
+    /** A view of a run whose record does not say whether it names a cut of an output: an earlier version wrote it. */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices, RegisterHandover register) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, register, false);
+    }
 
     /** A view of a run of a workflow that is no audit. */
     public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
@@ -180,6 +196,18 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
 
     private static int cuts(List<CommandView> commands) {
         return (int) commands.stream().filter(command -> command.outputCut() != null).count();
+    }
+
+    /**
+     * How many of {@link #outputCuts()} are commands of the latest attempt of a step of this run: the ones
+     * {@code show} marks under their step. The others are of earlier attempts and of child runs.
+     */
+    public int outputCutsOfLatestAttempts() {
+        int cuts = 0;
+        for (StepView step : steps) {
+            cuts += cuts(step.commands());
+        }
+        return cuts;
     }
 
     /** The egress of the whole run. */

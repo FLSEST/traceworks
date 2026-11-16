@@ -928,7 +928,7 @@ class RunHtmlTest {
         assertThat(html).contains("<strong class=\"problem\">output cut: stdout after 5000 ms</strong>");
         assertThat(html).contains("<span class=\"badge problem\">output cut</span>");
         assertThat(html).contains("<tr><th>output</th><td><strong class=\"problem\">1 command whose output was cut"
-                + "</strong> at the bound after its end: it may be incomplete</td></tr>");
+                + "</strong> before the end of its stream: it may be incomplete</td></tr>");
         assertThat(html).contains("status <strong>COMPLETED</strong>");
     }
 

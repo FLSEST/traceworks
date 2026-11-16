@@ -119,8 +119,12 @@ public final class ShowCommand implements Command {
         }
         int cuts = view.outputCuts();
         if (cuts > 0) {
+            // The steps below mark the commands of their latest attempt; the line says how many more it counts
+            int elsewhere = cuts - view.outputCutsOfLatestAttempts();
             out.println("Output    " + cuts + (cuts == 1 ? " command" : " commands")
-                    + " whose output was CUT at the bound after its end: it may be incomplete");
+                    + " whose output was CUT before the end of its stream: it may be incomplete"
+                    + (elsewhere == 0 ? "" : " (" + elsewhere + " of them in earlier attempts of a step or in child"
+                    + " runs, which are not marked below)"));
         }
     }
 

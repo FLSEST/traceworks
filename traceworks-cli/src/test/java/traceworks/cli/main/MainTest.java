@@ -915,7 +915,7 @@ class MainTest {
         assertThat(ends.get(1).has("output_cut")).as("an output that ended").isFalse();
         assertThat(run.out()).contains("(output cut: stdout after 5000 ms)");
         assertThat(show.out()).contains("Status    COMPLETED\n",
-                "Output    1 command whose output was CUT at the bound after its end: it may be incomplete\n",
+                "Output    1 command whose output was CUT before the end of its stream: it may be incomplete\n",
                 "      output CUT     stdout after 5000 ms   <== may be incomplete\n");
         assertThat(show.out().split("output CUT", -1)).as("the other step is not marked").hasSize(2);
         assertThat(Files.readString(runFolder(id).resolve("run.html")))
