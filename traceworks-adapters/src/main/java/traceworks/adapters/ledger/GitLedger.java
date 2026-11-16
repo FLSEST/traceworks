@@ -23,9 +23,10 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * The ledger as a git repository: one commit per started run adds {@code starts/<run-id>.json}, the start entry, with
  * the message {@code run <run-id> STARTED}; one commit per finished run adds {@code runs/<run-id>.json}, a
- * byte-identical copy of the manifest, with the message {@code run <run-id> <STATUS>}; and one commit per write of a register adds a line
- * to {@code registers/<key>.jsonl}, the anchor of the register's head, with the message
- * {@code register <key> seq <n>}.
+ * byte-identical copy of the manifest, with the message {@code run <run-id> <STATUS>}; and one commit per write of a
+ * register adds a line to {@code registers/<key>.jsonl}, the anchor of the register's head, with the message
+ * {@code register <key> seq <n>}. Every message ends with {@code  sha256:<hex>}, the SHA-256 of the file after the
+ * commit, which is what a reader later judges the file by ({@link #judge}).
  *
  * <p>Commits are serialised by one in-JVM lock (a {@link FileChannel} lock alone does not exclude threads of the
  * same JVM) and an exclusive lock on the lock file for processes. The lock channel is the only one opened on the lock
@@ -48,24 +49,41 @@ public final class GitLedger implements Ledger {
 
     /** The status a start entry has in its commit message; no run status has this name. */
     static final String STARTED = "STARTED";
-    /** The message of the commit of a run's entry: {@code run <run-id> STARTED} or {@code run <run-id> <STATUS>}. */
-    private static final java.util.regex.Pattern SUBJECT = java.util.regex.Pattern.compile("run (\\S+) ([A-Z_]+)");
-    /** The path of a start entry or an end entry. */
-
-    /** The line of a commit message that names the SHA-256 of the entry the commit adds. */
-    private static final java.util.regex.Pattern PIN = java.util.regex.Pattern.compile("sha256 [0-9a-f]{64}");
-    /** The path of an entry of a run, or of the anchors of a register. */
-    private static final java.util.regex.Pattern ENTRY_PATH =
-            java.util.regex.Pattern.compile("(starts|runs|acks|registers)/([^/]+)\\.jsonl?");
+    private static final String RUN_ID = "[A-Za-z0-9][A-Za-z0-9._-]*";
+    private static final String SHA256 = "[0-9a-f]{64}";
+    /** A record of the log: the full id of a commit, a space, the subject. */
+    private static final java.util.regex.Pattern RECORD =
+            java.util.regex.Pattern.compile("([0-9a-f]{40}|[0-9a-f]{64}) ([^\\p{Cntrl}]*)");
+    /** {@code run <run-id> <WORD>}, since messages hold it with {@code  sha256:<hex>} of the file after the commit. */
+    private static final java.util.regex.Pattern SUBJECT =
+            java.util.regex.Pattern.compile("run (" + RUN_ID + ") ([A-Z_]+)(?: sha256:(" + SHA256 + "))?");
+    private static final java.util.regex.Pattern ANCHOR_SUBJECT = java.util.regex.Pattern.compile(
+            "register (" + AuditConfig.KEY + ") seq \\d{1,9}(?: sha256:(" + SHA256 + "))?");
+    private static final java.util.regex.Pattern PIN_SUBJECT =
+            java.util.regex.Pattern.compile("ledger PINNED sha256:(" + SHA256 + ")");
+    /** A line of a pin: the SHA-256 an entry had, two spaces, its path. */
+    private static final java.util.regex.Pattern PINNED_LINE = java.util.regex.Pattern.compile(
+            "(" + SHA256 + ")  ((?:starts|runs)/" + RUN_ID + "\\.json|acks/" + RUN_ID + "\\.jsonl|registers/"
+                    + AuditConfig.KEY + "\\.jsonl)");
+    /** A record of {@code ls-tree -r -t -z}: mode, type, object id, a tab, the path. */
+    private static final java.util.regex.Pattern LISTED =
+            java.util.regex.Pattern.compile("(\\d{6}) (\\w+) ([0-9a-f]{40}|[0-9a-f]{64})\\t(.+)",
+                    java.util.regex.Pattern.DOTALL);
+    private static final java.util.regex.Pattern FOLDER =
+            java.util.regex.Pattern.compile("starts|runs|acks|registers|pins");
+    /** Every path the ledger holds a file at. */
+    private static final java.util.regex.Pattern ENTRY_PATH = java.util.regex.Pattern.compile(
+            "(?:starts|runs)/" + RUN_ID + "\\.json|acks/" + RUN_ID + "\\.jsonl|registers/" + AuditConfig.KEY
+                    + "\\.jsonl|pins/" + SHA256 + "\\.txt");
+    /** The path of an entry of a run. */
+    private static final java.util.regex.Pattern RUN_PATH =
+            java.util.regex.Pattern.compile("(starts|runs|acks)/(" + RUN_ID + ")\\.jsonl?");
 
     /** How long a writer waits for the ledger's lock before it gives up. */
     static final int LOCK_WAIT_SECONDS = 60;
     /** The status an acknowledgement has in its commit message; no run status has this name. */
     static final String ACKNOWLEDGED = "ACKNOWLEDGED";
     private static final Set<String> FINAL = Set.of("COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED");
-    /** A line of {@code ls-tree -r}: mode, type, object id, a tab, the path. */
-    private static final java.util.regex.Pattern TREE_LINE =
-            java.util.regex.Pattern.compile("\\d+ blob ([0-9a-f]{40,64})\\t((starts|runs|acks)/([^/]+)\\.(json|jsonl))");
     /**
      * The keys the ledger's own git configuration may hold: what {@code git init} writes, and what an operator sets
      * to push the ledger. Any other key could change what git shows of the history, so the check refuses it.
@@ -76,9 +94,13 @@ public final class GitLedger implements Ledger {
                     + "|extensions\\.objectformat"
                     // where and how a push or a fetch connects, and as whom: nothing git reads the history with
                     + "|core\\.sshcommand|(remote|branch|push|fetch|pull|credential|http|url)\\..*"
-                    // the identity of commits the operator makes by hand (Traceworks sets its own), and when git
-                    // packs or prunes objects, which changes how they are stored, not what they are
+                    // the identity of commits the operator makes by hand (Traceworks sets its own), and the
+                    // housekeeping of the operator's own git calls: Traceworks' calls run none (gc.auto=0)
                     + "|(user|gc|maintenance)\\..*");
+
+    /** A remote git may fetch missing objects from by itself: not a setting a push needs. */
+    private static final java.util.regex.Pattern PROMISOR_KEY =
+            java.util.regex.Pattern.compile("remote\\..*\\.(promisor|partialclonefilter)");
 
     private final Path directory;
     private final Path lockFile;
@@ -107,15 +129,21 @@ public final class GitLedger implements Ledger {
         // alter the commit: the ledger's own variables replace them
         // Replace refs would show another history than the one the commits hold, and a commit-graph file is a
         // second, unchecked description of it: neither is read
+        // No housekeeping inside a commit: gc.auto and maintenance.auto are switched off for every call, so no
+        // setting of gc (gc.recentObjectsHook names a command) takes effect in a call Traceworks makes. And no
+        // attributes of the user: HOME and XDG_CONFIG_HOME name no directory
         this.git = new GitProcess("git", List.of("--no-replace-objects", "-c", "commit.gpgsign=false",
-                "-c", "core.commitGraph=false"), environment, Map.of(
-                "GIT_NO_REPLACE_OBJECTS", "1",
-                "GIT_CONFIG_GLOBAL", "/dev/null",
-                "GIT_CONFIG_NOSYSTEM", "1",
-                "GIT_AUTHOR_NAME", IDENTITY_NAME,
-                "GIT_AUTHOR_EMAIL", IDENTITY_EMAIL,
-                "GIT_COMMITTER_NAME", IDENTITY_NAME,
-                "GIT_COMMITTER_EMAIL", IDENTITY_EMAIL), TIMEOUT_SECONDS * 1000L);
+                "-c", "core.commitGraph=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                "-c", "core.attributesFile=/dev/null"), environment, Map.ofEntries(
+                Map.entry("HOME", "/dev/null"),
+                Map.entry("XDG_CONFIG_HOME", "/dev/null"),
+                Map.entry("GIT_NO_REPLACE_OBJECTS", "1"),
+                Map.entry("GIT_CONFIG_GLOBAL", "/dev/null"),
+                Map.entry("GIT_CONFIG_NOSYSTEM", "1"),
+                Map.entry("GIT_AUTHOR_NAME", IDENTITY_NAME),
+                Map.entry("GIT_AUTHOR_EMAIL", IDENTITY_EMAIL),
+                Map.entry("GIT_COMMITTER_NAME", IDENTITY_NAME),
+                Map.entry("GIT_COMMITTER_EMAIL", IDENTITY_EMAIL)), TIMEOUT_SECONDS * 1000L);
     }
 
     /** Creates the repository if needed, under the ledger lock, and checks that git runs in it. */
@@ -128,6 +156,7 @@ public final class GitLedger implements Ledger {
                 git("rev-parse", "--git-dir");
                 // The same rule for a start as for a check: a ledger a check would refuse takes no new run
                 requireOneHistory();
+                pinWhatNoHashCovers();
             }
         } catch (IOException e) {
             throw new IllegalStateException("Cannot create the ledger " + directory + ": " + e, e);
@@ -137,15 +166,15 @@ public final class GitLedger implements Ledger {
     @Override
     public String record(String runId, String status, byte[] manifestJson) {
         requireRunId(runId);
-        return commitNew(Path.of("runs", runId + ".json"), manifestJson, "run " + runId + " " + status,
+        return commit("runs/" + runId + ".json", manifestJson, "run " + runId + " " + status, false,
                 "Run is already recorded: " + runId);
     }
 
-    /** One commit adds {@code starts/<run-id>.json} with the message {@code run <run-id> STARTED}. */
+    /** One commit adds {@code starts/<run-id>.json} with the message {@code run <run-id> STARTED sha256:<hex>}. */
     @Override
     public String recordStart(String runId, byte[] startJson) {
         requireRunId(runId);
-        return commitNew(Path.of("starts", runId + ".json"), startJson, "run " + runId + " " + STARTED,
+        return commit("starts/" + runId + ".json", startJson, "run " + runId + " " + STARTED, false,
                 "The start of the run is already noted: " + runId);
     }
 
@@ -153,227 +182,331 @@ public final class GitLedger implements Ledger {
     public Optional<byte[]> findStart(String runId) {
         requireRunId(runId);
         requireOneHistory();
-        return strictInHead(Path.of("starts", runId + ".json"));
+        return held("starts/" + runId + ".json");
     }
 
-    /** A commit whose message names an entry of a run, with the content it says it adds. */
-    private static final class Naming {
-        final String commit;
-        final String subject;
-        /** Where the commit is in the log, newest first. */
-        final int position;
-        /** The SHA-256 of the entry the message names ({@code sha256 <hex>}); {@code null} for a message without. */
-        String pin;
-
-        Naming(String commit, String subject, int position) {
-            this.commit = commit;
-            this.subject = subject;
-            this.position = position;
+    /** The end entry of a run; empty also for a ledger that cannot be read, so that a reader finds none. */
+    @Override
+    public Optional<byte[]> find(String runId) {
+        requireRunId(runId);
+        try {
+            return held("runs/" + runId + ".json");
+        } catch (IllegalStateException e) {
+            return Optional.empty();
         }
+    }
+
+    /**
+     * What HEAD holds, by path: the object id of every file. This one listing is the only source of what the ledger
+     * holds; every reader takes the content by the id it gives, never by a path, which git resolves its own way. The
+     * ledger holds regular files at the paths of its entries and nothing else: a path listed twice (a tree can be
+     * made to hold a name twice), a link, an executable file, a submodule or any other file fails here, by name.
+     *
+     * @return empty for a ledger that does not exist yet or has no commit
+     * @throws IllegalStateException if the ledger cannot be read, or holds something that is no entry
+     */
+    private Map<String, String> listing() {
+        Map<String, String> files = new java.util.TreeMap<>();
+        if (!hasCommit()) return files;
+        GitProcess.Result tree = run("--git-dir=.git", "--work-tree=.", "ls-tree", "-r", "-t", "-z", "HEAD");
+        requireRead(tree, "the files of its HEAD cannot be listed");
+        Set<String> seen = new java.util.HashSet<>();
+        for (String line : tree.outputText().split("\0")) {
+            if (line.isEmpty()) continue;
+            java.util.regex.Matcher entry = LISTED.matcher(line);
+            if (!entry.matches()) throw tampered("its HEAD lists something that cannot be read as a file");
+            String mode = entry.group(1);
+            String type = entry.group(2);
+            String path = entry.group(4);
+            if (!seen.add(path)) throw tampered("its HEAD lists " + path + " twice");
+            boolean folder = type.equals("tree") && mode.equals("040000") && FOLDER.matcher(path).matches();
+            boolean file = type.equals("blob") && mode.equals("100644") && ENTRY_PATH.matcher(path).matches();
+            if (!folder && !file) {
+                throw tampered("its HEAD holds " + path + " (" + type + ", mode " + mode + "), which is no entry of a"
+                        + " ledger: a regular file under starts/, runs/, acks/, registers/ or pins/");
+            }
+            if (file) files.put(path, entry.group(3));
+        }
+        return files;
+    }
+
+    /** The content HEAD holds at {@code path}; empty when it holds none. */
+    private Optional<byte[]> held(String path) {
+        String id = listing().get(path);
+        return id == null ? Optional.empty() : Optional.of(blob(id, path, false));
+    }
+
+    /**
+     * The content of the object {@code id}, which the listing gives for {@code path}.
+     *
+     * @param fromFile whether the file in the working tree will do when it is this object, by its id: for a reader
+     *                 of every entry, which would else start git once per entry. A reader of one entry asks the
+     *                 object store, so that an object that is gone is found
+     */
+    private byte[] blob(String id, String path, boolean fromFile) {
+        try {
+            Path file = directory.resolve(path);
+            if (fromFile && Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                byte[] content = Files.readAllBytes(file);
+                if (blobId(content, id.length()).equals(id)) return content;
+            }
+        } catch (IOException e) {
+            // the object store has it
+        }
+        GitProcess.Result shown = run("--git-dir=.git", "--work-tree=.", "cat-file", "blob", id);
+        requireRead(shown, path + " of its HEAD cannot be shown");
+        return shown.output();
+    }
+
+    /** The id git gives a file of this content, in a repository whose ids have {@code length} hex digits. */
+    private static String blobId(byte[] content, int length) {
+        return hex(length == 40 ? "SHA-1" : "SHA-256", ("blob " + content.length + "\0")
+                .getBytes(StandardCharsets.US_ASCII), content);
+    }
+
+    private static String sha256(byte[] content) {
+        return hex("SHA-256", new byte[0], content);
+    }
+
+    private static String hex(String algorithm, byte[] head, byte[] content) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance(algorithm);
+            digest.update(head);
+            return java.util.HexFormat.of().formatHex(digest.digest(content));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * A commit whose subject is one Traceworks writes: it names a path and, since messages hold it, the SHA-256 of
+     * what the path held after the commit.
+     *
+     * @param position where the commit is in the history, 0 for the newest
+     * @param path     the path the subject names; for a pin, the pin file
+     * @param word     the word of a run's subject ({@code STARTED}, a status, {@code ACKNOWLEDGED}); {@code null}
+     *                 for an anchor and a pin
+     * @param hash     the SHA-256 the subject names; {@code null} for a subject of a version that named none
+     */
+    private record Message(int position, String commit, String subject, String path, String word, String hash) {
 
         String who() {
-            return "commit " + commit.substring(0, Math.min(12, commit.length())) + " (\"" + subject + "\")";
+            return "commit " + commit.substring(0, 12) + " (\"" + subject + "\")";
         }
     }
 
     /**
-     * Every commit whose subject names a run ({@code run <run-id> <WORD>}), by subject, oldest first: one pass over
-     * the messages, which reads no tree and so stays linear in the length of the history.
+     * The commits of the history whose subject is one Traceworks writes, newest first. One pass over the subjects,
+     * which reads no tree and no body: {@code git log -z} ends every record with a NUL, which no message can hold,
+     * and a record counts only when it is, as a whole, a full commit id, a space and one of the subjects. Text in a
+     * message can therefore not pass for a record, and any other subject names nothing.
      */
-    private Map<String, List<Naming>> namings() {
-        GitProcess.Result log = run("--git-dir=.git", "--work-tree=.", "log", "--encoding=UTF-8",
-                "--format=%x01%H%x09%s%n%b", "HEAD");
+    private List<Message> messages() {
+        GitProcess.Result log = run("--git-dir=.git", "--work-tree=.", "log", "-z", "--encoding=UTF-8",
+                "--format=%H %s", "HEAD");
         requireRead(log, "its history cannot be listed");
-        Map<String, List<Naming>> bySubject = new java.util.LinkedHashMap<>();
-        Naming current = null;
+        List<Message> messages = new java.util.ArrayList<>();
         int position = 0;
-        for (String line : log.outputText().split("\n")) {
-            if (line.startsWith("\u0001")) {
-                int tab = line.indexOf('\t');
-                String subject = tab < 0 ? "" : line.substring(tab + 1);
-                java.util.regex.Matcher entry = SUBJECT.matcher(subject);
-                current = entry.matches() && Ids.isRunId(entry.group(1))
-                        ? new Naming(line.substring(1, tab), subject, position) : null;
-                position++;
-                if (current != null) {
-                    // The log is newest first: each list is turned around by adding at the front
-                    bySubject.computeIfAbsent(subject, key -> new java.util.LinkedList<>()).addFirst(current);
+        for (String record : log.outputText().split("\0")) {
+            java.util.regex.Matcher commit = RECORD.matcher(record);
+            if (commit.matches()) {
+                String subject = commit.group(2);
+                java.util.regex.Matcher run = SUBJECT.matcher(subject);
+                java.util.regex.Matcher anchor = ANCHOR_SUBJECT.matcher(subject);
+                java.util.regex.Matcher pin = PIN_SUBJECT.matcher(subject);
+                if (run.matches()) {
+                    String path = run.group(2).equals(STARTED) ? "starts/" + run.group(1) + ".json"
+                            : FINAL.contains(run.group(2)) ? "runs/" + run.group(1) + ".json"
+                            : run.group(2).equals(ACKNOWLEDGED) ? "acks/" + run.group(1) + ".jsonl" : null;
+                    if (path != null) {
+                        messages.add(new Message(position, commit.group(1), subject, path, run.group(2),
+                                run.group(3)));
+                    }
+                } else if (anchor.matches()) {
+                    messages.add(new Message(position, commit.group(1), subject,
+                            "registers/" + anchor.group(1) + ".jsonl", null, anchor.group(2)));
+                } else if (pin.matches()) {
+                    messages.add(new Message(position, commit.group(1), subject, "pins/" + pin.group(1) + ".txt",
+                            null, pin.group(1)));
                 }
-            } else if (current != null && current.pin == null && PIN.matcher(line).matches()) {
-                current.pin = line.substring("sha256 ".length());
+            }
+            position++;
+        }
+        return messages;
+    }
+
+    /**
+     * What the ledger holds against what its commits say, with no walk over old trees.
+     *
+     * @param files     what HEAD holds ({@link #listing})
+     * @param messages  the commits that name a path, newest first ({@link #messages})
+     * @param contents  the content of every file but the pins
+     * @param problems  by path, what does not hold, one sentence each
+     * @param unpinned  by path, the SHA-256 of an entry no hash covers yet: one of a version whose messages named
+     *                  none, which the next pin takes as it is
+     */
+    private record Judged(Map<String, String> files, List<Message> messages, Map<String, byte[]> contents,
+                          Map<String, List<String>> problems, Map<String, String> unpinned) {
+    }
+
+    /**
+     * Judges every path by a hash: an entry must be what the commit that names it said the path held.
+     * <ul>
+     * <li>A start entry and an end entry are named by one commit, whose subject holds their SHA-256.</li>
+     * <li>The acknowledgements of a run and the anchors of a register are added to; each commit names the SHA-256 of
+     *     the whole file after it, and the file must be what the newest of them left.</li>
+     * <li>An entry of a version whose subjects named no hash is covered by a pin: a commit
+     *     {@code ledger PINNED sha256:<hex>} that adds {@code pins/<hex>.txt}, a list of such paths with the SHA-256
+     *     each had then. The file is named by its own SHA-256, so it cannot be changed, and the oldest pin that
+     *     lists a path counts. Once a hash covers a path, a commit that names it without one is refused: there is no
+     *     way back to a path no hash covers.</li>
+     * </ul>
+     */
+    private Judged judge() {
+        Map<String, String> files = listing();
+        List<Message> messages = files.isEmpty() && !hasCommit() ? List.of() : messages();
+        Map<String, byte[]> contents = new java.util.HashMap<>();
+        Map<String, List<String>> problems = new java.util.TreeMap<>();
+        Map<String, List<Message>> namers = new java.util.TreeMap<>();
+        // The pins, oldest first: what each covers, unless something older covers it
+        Map<String, Message> pinOf = new java.util.HashMap<>();
+        Map<String, String> pinned = new java.util.HashMap<>();
+        Set<String> namedPins = new java.util.HashSet<>();
+        for (Message message : messages) {
+            if (!message.path().startsWith("pins/")) {
+                namers.computeIfAbsent(message.path(), path -> new java.util.ArrayList<>()).add(message);
             }
         }
-        return bySubject;
+        for (Message pin : messages.reversed()) {
+            if (!pin.path().startsWith("pins/")) continue;
+            namedPins.add(pin.path());
+            String id = files.get(pin.path());
+            byte[] list = id == null ? null : blob(id, pin.path(), true);
+            if (list == null || !sha256(list).equals(pin.hash())) {
+                problems.computeIfAbsent(pin.path(), path -> new java.util.ArrayList<>()).add(pin.who()
+                        + " pinned entries in " + pin.path() + ", and the ledger " + (list == null ? "holds it no more"
+                        : "holds another file there (SHA-256 " + sha256(list) + ")"));
+                continue;
+            }
+            for (String line : new String(list, StandardCharsets.UTF_8).split("\n")) {
+                java.util.regex.Matcher entry = PINNED_LINE.matcher(line);
+                if (!entry.matches()) continue;
+                String path = entry.group(2);
+                boolean coveredBefore = pinOf.containsKey(path) || namers.getOrDefault(path, List.of()).stream()
+                        .anyMatch(older -> older.hash() != null && older.position() > pin.position());
+                if (!coveredBefore) {
+                    pinOf.put(path, pin);
+                    pinned.put(path, entry.group(1));
+                }
+            }
+        }
+        Map<String, String> unpinned = new java.util.TreeMap<>();
+        Set<String> paths = new java.util.TreeSet<>(files.keySet());
+        paths.addAll(namers.keySet());
+        paths.addAll(pinOf.keySet());
+        for (String path : paths) {
+            List<String> found = problems.computeIfAbsent(path, key -> new java.util.ArrayList<>());
+            if (path.startsWith("pins/")) {
+                if (!namedPins.contains(path)) found.add("no commit names the pin " + path + ", which the ledger holds");
+                continue;
+            }
+            List<Message> named = namers.getOrDefault(path, List.of());
+            Message pin = pinOf.get(path);
+            byte[] content = files.containsKey(path) ? blob(files.get(path), path, true) : null;
+            if (content != null) contents.put(path, content);
+            String holds = content == null ? null : sha256(content);
+            boolean once = path.startsWith("starts/") || path.startsWith("runs/");
+            if (named.isEmpty() && pin == null) {
+                found.add("no commit names " + path + ", which the ledger holds (SHA-256 " + holds + ")");
+                continue;
+            }
+            if (once && named.size() > 1) {
+                found.add(named.size() + " commits name " + path + " (" + String.join(", ", named.reversed().stream()
+                        .map(Message::who).toList()) + "): an entry is added once");
+            }
+            // What covers the path first: from then on every commit that names it must name a hash
+            int covered = pin != null ? pin.position() : -1;
+            for (Message message : named) {
+                if (message.hash() != null) covered = Math.max(covered, message.position());
+            }
+            for (Message message : named) {
+                if (message.hash() == null && message.position() < covered) {
+                    found.add(message.who() + " names " + path + " without a SHA-256, after a commit that named one:"
+                            + " a version that names none must not write to this ledger");
+                }
+            }
+            // What the path must hold: what the commit that added it said, or for a file that is added to, the
+            // newest one; for an entry of the time before hashes, what the pin took
+            Message says = once ? named.isEmpty() ? null : named.getLast()
+                    : named.stream().filter(message -> message.hash() != null).findFirst().orElse(null);
+            String expected = says != null && says.hash() != null ? says.hash() : pin != null ? pinned.get(path) : null;
+            String by = says != null && says.hash() != null ? says.who() : pin != null ? "the pin of " + pin.who()
+                    : named.getLast().who();
+            if (content == null) {
+                found.add(by + " names " + path + ", and the ledger does not hold it: a later commit removed it, or"
+                        + " the commit added none");
+            } else if (expected == null) {
+                unpinned.put(path, holds);
+            } else if (!expected.equals(holds)) {
+                found.add(path + " is not what " + by + " left: that names the SHA-256 " + expected
+                        + ", and the ledger holds " + holds + " ('git log -- " + path + "' in the ledger shows the"
+                        + " commits that touched it)");
+            }
+        }
+        problems.values().removeIf(List::isEmpty);
+        return new Judged(files, messages, contents, problems, unpinned);
     }
 
     /**
-     * Every run the ledger names. The commit messages say which runs started and ended ({@code run <run-id> STARTED},
-     * {@code run <run-id> <STATUS>}): a later commit can remove a file, not an earlier message. The files of HEAD
-     * are what the ledger holds now: each is read from the working tree when the file there is the object HEAD names,
-     * else from the object store. Nothing for a ledger that does not exist yet or has no commit.
+     * Every run the ledger names. The subjects of the commits say which runs started and ended: a later commit can
+     * remove a file, not an earlier message. The files of HEAD are what the ledger holds now, and each must be what
+     * its commits say ({@link #judge}); what is not is a change of its run ({@link LedgerRuns.Run#changes}), and for
+     * the anchors of a register and the pins a failure of the whole ledger. Nothing for a ledger that does not exist
+     * yet or has no commit.
      *
-     * <p>An entry must be what the commit that names it added ({@link LedgerRuns.Run#changes}). The message of that
-     * commit holds the SHA-256 of the entry, so this is one comparison per entry and no walk over the trees, which
-     * would grow with the square of the ledger (every tree of {@code starts/} and {@code runs/} lists every run).
-     * Only for an entry that does not compare, and for the entries of the time before messages held the hash, the
-     * commits that touched the path are looked up, to name them.
-     *
-     * @throws IllegalStateException if the ledger cannot be read, or holds something that lets git show another
-     *                               history than its commits ({@link #requireOneHistory})
+     * @throws IllegalStateException if the ledger cannot be read, holds something that is no entry, or something
+     *                               that lets git show another history than its commits ({@link #requireOneHistory})
      */
     @Override
     public LedgerRuns runs() {
         requireOneHistory();
-        if (!hasCommit()) return new LedgerRuns(List.of());
-        Map<String, List<Naming>> namings = namings();
-        Map<String, boolean[]> startNamed = new java.util.TreeMap<>();
-        Map<String, String> endNamed = new java.util.HashMap<>();
-        Map<String, List<Naming>> startNamings = new java.util.HashMap<>();
-        Map<String, List<Naming>> endNamings = new java.util.HashMap<>();
-        namings.forEach((subject, commits) -> {
-            java.util.regex.Matcher entry = SUBJECT.matcher(subject);
-            if (!entry.matches()) return;
-            String id = entry.group(1);
-            boolean[] named = startNamed.computeIfAbsent(id, key -> new boolean[1]);
-            if (entry.group(2).equals(STARTED)) {
-                named[0] = true;
-                startNamings.computeIfAbsent(id, key -> new java.util.ArrayList<>()).addAll(commits);
-            } else if (FINAL.contains(entry.group(2))) {
-                endNamings.computeIfAbsent(id, key -> new java.util.ArrayList<>()).addAll(commits);
-            }
-        });
-        // The oldest message of an end is the one that counts
-        endNamings.forEach((id, commits) -> {
-            commits.sort(java.util.Comparator.comparingInt((Naming naming) -> naming.position).reversed());
-            String subject = commits.getFirst().subject;
-            endNamed.put(id, subject.substring(subject.lastIndexOf(' ') + 1));
-        });
-        GitProcess.Result tree = run("--git-dir=.git", "--work-tree=.", "-c", "core.quotePath=false", "ls-tree",
-                "-r", "HEAD", "--", "starts", "runs", "acks");
-        requireRead(tree, "the files of its HEAD cannot be listed");
-        Map<String, byte[]> starts = new java.util.HashMap<>();
-        Map<String, byte[]> ends = new java.util.HashMap<>();
-        Map<String, byte[]> acks = new java.util.HashMap<>();
-        Map<String, String> blobs = new java.util.HashMap<>();
-        for (String line : tree.outputText().split("\n")) {
-            java.util.regex.Matcher file = TREE_LINE.matcher(line);
-            if (!file.matches() || !Ids.isRunId(file.group(4))) continue;
-            boolean lines = file.group(5).equals("jsonl");
-            if (lines != file.group(3).equals("acks")) continue;
-            startNamed.computeIfAbsent(file.group(4), id -> new boolean[1]);
-            blobs.put(file.group(2), file.group(1));
-            (lines ? acks : file.group(3).equals("starts") ? starts : ends)
-                    .put(file.group(4), blob(file.group(1), file.group(2)));
-        }
-
-        // Which entries are not, or cannot be said to be, what the commit that names them added
+        Judged judged = judge();
+        List<String> whole = new java.util.ArrayList<>();
         Map<String, List<String>> changed = new java.util.HashMap<>();
-        java.util.Set<String> suspicious = new java.util.TreeSet<>();
-        Map<String, Naming> legacy = new java.util.HashMap<>();
-        Map<String, String> pinnedOtherwise = new java.util.HashMap<>();
-        for (String id : startNamed.keySet()) {
-            screen("starts/" + id + ".json", starts.get(id), startNamings.getOrDefault(id, List.of()), suspicious,
-                    legacy, pinnedOtherwise);
-            screen("runs/" + id + ".json", ends.get(id), endNamings.getOrDefault(id, List.of()), suspicious, legacy,
-                    pinnedOtherwise);
-        }
-        Map<String, List<Touch>> touched = new java.util.HashMap<>();
-        if (!legacy.isEmpty()) {
-            // The entries of the time before messages held the hash: up to the newest of their commits the history
-            // is walked, which costs what that part of the ledger costs and no more as the ledger grows; since
-            // then, an entry is the same object or it is looked up
-            Naming newest = legacy.values().stream().min(java.util.Comparator.comparingInt(naming -> naming.position))
-                    .orElseThrow();
-            Map<String, List<Touch>> early = touches(newest.commit, "starts", "runs");
-            GitProcess.Result then = run("--git-dir=.git", "--work-tree=.", "-c", "core.quotePath=false", "ls-tree",
-                    "-r", newest.commit, "--", "starts", "runs");
-            requireRead(then, "the files of its commit " + newest.commit + " cannot be listed");
-            Map<String, String> blobsThen = new java.util.HashMap<>();
-            for (String line : then.outputText().split("\n")) {
-                java.util.regex.Matcher file = TREE_LINE.matcher(line);
-                if (file.matches()) blobsThen.put(file.group(2), file.group(1));
-            }
-            for (String path : legacy.keySet()) {
-                if (!java.util.Objects.equals(blobsThen.get(path), blobs.get(path))) {
-                    suspicious.add(path);
-                } else if (early.containsKey(path)) {
-                    touched.put(path, early.get(path));
-                }
-            }
-        }
-        if (!suspicious.isEmpty()) {
-            touched.putAll(suspicious.size() > 100 ? touches("HEAD", "starts", "runs")
-                    : touches("HEAD", suspicious.toArray(String[]::new)));
-        }
-        Set<String> rewrites = rewrites("acks", "registers");
-        touched.putAll(touches("HEAD", "acks", "registers"));
-        List<String> anchors = new java.util.ArrayList<>();
-        java.util.Set<String> paths = new java.util.TreeSet<>(touched.keySet());
-        paths.addAll(suspicious);
-        for (String path : paths) {
-            java.util.regex.Matcher entry = ENTRY_PATH.matcher(path);
-            if (!entry.matches()) continue;
-            List<String> found = touched.containsKey(path) ? changes(path, touched.get(path), rewrites)
-                    : new java.util.ArrayList<>();
-            if (found.isEmpty() && pinnedOtherwise.containsKey(path)) {
-                found.add(pinnedOtherwise.get(path));
-            }
-            if (found.isEmpty()) continue;
-            if (entry.group(1).equals("registers")) {
-                anchors.addAll(found);
-            } else if (Ids.isRunId(entry.group(2))) {
-                startNamed.computeIfAbsent(entry.group(2), id -> new boolean[1]);
+        Set<String> ids = new java.util.TreeSet<>();
+        Map<String, String> endNamed = new java.util.HashMap<>();
+        Set<String> startNamed = new java.util.HashSet<>();
+        judged.problems().forEach((path, found) -> {
+            java.util.regex.Matcher entry = RUN_PATH.matcher(path);
+            if (entry.matches()) {
+                ids.add(entry.group(2));
                 changed.computeIfAbsent(entry.group(2), id -> new java.util.ArrayList<>()).addAll(found);
+            } else {
+                whole.addAll(found);
             }
+        });
+        if (!whole.isEmpty()) {
+            throw tampered(String.join("; ", whole));
         }
-        if (!anchors.isEmpty()) {
-            throw tampered("the anchors of a register were rewritten: " + String.join("; ", anchors));
+        // Newest first: the oldest message of an end is the one that counts, so it is put last
+        for (Message message : judged.messages()) {
+            java.util.regex.Matcher entry = RUN_PATH.matcher(message.path());
+            if (!entry.matches()) continue;
+            ids.add(entry.group(2));
+            if (message.word().equals(STARTED)) startNamed.add(entry.group(2));
+            if (FINAL.contains(message.word())) endNamed.put(entry.group(2), message.word());
+        }
+        for (String path : judged.files().keySet()) {
+            java.util.regex.Matcher entry = RUN_PATH.matcher(path);
+            if (entry.matches()) ids.add(entry.group(2));
         }
         List<LedgerRuns.Run> runs = new java.util.ArrayList<>();
-        startNamed.forEach((id, named) -> runs.add(new LedgerRuns.Run(id, named[0], starts.get(id), endNamed.get(id),
-                ends.get(id), acks.get(id), changed.getOrDefault(id, List.of()))));
+        for (String id : ids) {
+            runs.add(new LedgerRuns.Run(id, startNamed.contains(id), judged.contents().get("starts/" + id + ".json"),
+                    endNamed.get(id), judged.contents().get("runs/" + id + ".json"),
+                    judged.contents().get("acks/" + id + ".jsonl"), changed.getOrDefault(id, List.of())));
+        }
         return new LedgerRuns(runs);
-    }
-
-    /**
-     * Whether an entry is what the one commit that names it says it added, from the messages and the content alone.
-     * An entry that is not, or that only a look at the commits that touched its path can judge, goes to
-     * {@code suspicious}; one of the time before messages held the hash goes to {@code legacy}.
-     *
-     * @param content         what HEAD holds at the path; {@code null} for nothing
-     * @param commits         the commits whose message names the entry
-     * @param pinnedOtherwise what to say of a path whose content is not the one its commit names, when no other
-     *                        commit touched it
-     */
-    private static void screen(String path, byte[] content, List<Naming> commits, java.util.Set<String> suspicious,
-                               Map<String, Naming> legacy, Map<String, String> pinnedOtherwise) {
-        if (content == null && commits.isEmpty()) return;
-        if (content == null || commits.size() != 1) {
-            // named and not there; there and named by none; or named more than once
-            suspicious.add(path);
-            if (commits.size() > 1) {
-                pinnedOtherwise.put(path, commits.size() + " commits name " + path + " ("
-                        + String.join(", ", commits.stream().map(Naming::who).toList()) + "): an entry is added once");
-            }
-            return;
-        }
-        Naming naming = commits.getFirst();
-        if (naming.pin == null) {
-            legacy.put(path, naming);
-        } else if (!naming.pin.equals(sha256(content))) {
-            suspicious.add(path);
-            pinnedOtherwise.put(path, path + " is not the entry " + naming.who() + " added: its message names the"
-                    + " SHA-256 " + naming.pin + ", and the ledger holds " + sha256(content));
-        }
-    }
-
-    private static String sha256(byte[] content) {
-        try {
-            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(content));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 
     /** What the history did to the entries of one run: {@link #runs()} for that run. */
@@ -384,23 +517,112 @@ public final class GitLedger implements Ledger {
                 .map(LedgerRuns.Run::changes).orElse(List.of());
     }
 
-    /** The content of the blob {@code id}, which HEAD holds at {@code path}. */
-    private byte[] blob(String id, String path) {
+    /**
+     * Pins the entries no hash covers yet, under the lock: one commit {@code ledger PINNED sha256:<hex>} adds
+     * {@code pins/<hex>.txt} with the SHA-256 and the path of each, as the ledger holds them now. They are the
+     * entries of a version whose messages named no hash; from here on each is judged by the hash of the pin. Before
+     * a run starts, so a ledger is pinned by the first run of this version, without a command of its own: a pin
+     * says nothing a person decides, only what the ledger holds. Nothing for a ledger without such an entry, and
+     * nothing while the ledger has a problem: what does not hold is not pinned.
+     */
+    private void pinWhatNoHashCovers() throws IOException {
+        if (!hasCommit()) return;
+        // Cheap first: only a commit without a hash that is newer than the newest pin can have left such an entry
+        List<Message> messages = messages();
+        int newestPin = messages.stream().filter(message -> message.path().startsWith("pins/"))
+                .mapToInt(Message::position).min().orElse(Integer.MAX_VALUE);
+        if (messages.stream().noneMatch(message -> message.hash() == null && message.position() < newestPin)) return;
+        Judged judged = judge();
+        if (judged.unpinned().isEmpty() || !judged.problems().isEmpty()) return;
+        StringBuilder list = new StringBuilder();
+        judged.unpinned().forEach((path, hash) -> list.append(hash).append("  ").append(path).append('\n'));
+        byte[] content = list.toString().getBytes(StandardCharsets.UTF_8);
+        String hash = sha256(content);
+        write("pins/" + hash + ".txt", content, "ledger PINNED sha256:" + hash);
+    }
+
+    /**
+     * Writes one file and commits it alone, under the lock the caller holds. The bytes git stored are compared with
+     * the bytes given: a filter or an attribute that changed them on the way in fails the write, loudly, instead of
+     * leaving an entry that does not match its hash.
+     *
+     * @return the commit id
+     */
+    private String write(String path, byte[] content, String subject) throws IOException {
+        Path target = directory.resolve(path);
+        Files.createDirectories(target.getParent());
+        Path temp = Files.createTempFile(directory, ".entry-", ".tmp");
         try {
-            Path file = directory.resolve(path);
-            if (Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                byte[] content = Files.readAllBytes(file);
-                java.security.MessageDigest digest =
-                        java.security.MessageDigest.getInstance(id.length() == 40 ? "SHA-1" : "SHA-256");
-                digest.update(("blob " + content.length + "\0").getBytes(StandardCharsets.US_ASCII));
-                if (java.util.HexFormat.of().formatHex(digest.digest(content)).equals(id)) return content;
+            Files.write(temp, content);
+            Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            git("add", "--", path);
+            // --only: a file staged by an earlier, killed process must not ride along in this commit
+            git("commit", "-q", "-m", subject, "--only", "--", path);
+        } catch (RuntimeException | IOException e) {
+            Files.deleteIfExists(temp);
+            // git may have committed before it failed or timed out: then the entry is in the ledger
+            if (!stored(path, content)) {
+                try {
+                    git("reset", "-q");
+                } catch (RuntimeException suppressed) {
+                    e.addSuppressed(suppressed);
+                }
+                if (e instanceof RuntimeException runtime) throw runtime;
+                throw (IOException) e;
             }
-        } catch (IOException | java.security.NoSuchAlgorithmException e) {
-            // the object store has it
         }
-        GitProcess.Result shown = run("--git-dir=.git", "--work-tree=.", "cat-file", "blob", id);
-        requireRead(shown, path + " of its HEAD cannot be shown");
-        return shown.output();
+        if (!stored(path, content)) {
+            throw new IllegalStateException("The ledger " + directory + " stored other bytes at " + path + " than the"
+                    + " entry it was given: something changes files on their way into the repository");
+        }
+        return git("rev-parse", "HEAD").strip();
+    }
+
+    /** Whether HEAD holds exactly {@code content} at {@code path}, by the id of the object. */
+    private boolean stored(String path, byte[] content) {
+        try {
+            String id = listing().get(path);
+            return id != null && id.equals(blobId(content, id.length()));
+        } catch (IllegalStateException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Adds a file in one commit of its own, whose subject names the SHA-256 of the file.
+     *
+     * @param append whether {@code content} is a line to add to the file as HEAD holds it (a file edited in the
+     *               working tree does not count, and the line the file already ends with is not added again); else
+     *               the whole of a file that HEAD must not hold yet
+     * @param taken  what to say when HEAD holds the file already; unused for a line
+     * @return the commit id; {@code null} when the line was there already
+     */
+    private String commit(String path, byte[] content, String subject, boolean append, String taken) {
+        try {
+            try (Held ignored = hold()) {
+                Files.createDirectories(directory);
+                initOrRequirePlain();
+                // Read strictly: a ledger that fails here must not get a commit that starts a file over
+                Optional<byte[]> before = held(path);
+                byte[] after = content;
+                if (append) {
+                    String text = new String(before.orElse(new byte[0]), StandardCharsets.UTF_8);
+                    String line = new String(content, StandardCharsets.UTF_8);
+                    if (text.equals(line) || text.endsWith("\n" + line)) return null;
+                    after = (text + line).getBytes(StandardCharsets.UTF_8);
+                } else if (before.isPresent()) {
+                    throw new IllegalStateException(taken);
+                }
+                try {
+                    return write(path, after, subject + " sha256:" + sha256(after));
+                } catch (IOException | RuntimeException e) {
+                    if (!append) Files.deleteIfExists(directory.resolve(path));
+                    throw e;
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot write the ledger " + directory, e);
+        }
     }
 
     /**
@@ -414,7 +636,8 @@ public final class GitLedger implements Ledger {
             throw new IllegalArgumentException("An acknowledgement is one line");
         }
         requireOneHistory();
-        append(Path.of("acks", runId + ".jsonl"), text + "\n", "run " + runId + " " + ACKNOWLEDGED);
+        commit("acks/" + runId + ".jsonl", (text + "\n").getBytes(StandardCharsets.UTF_8),
+                "run " + runId + " " + ACKNOWLEDGED, true, null);
     }
 
     /**
@@ -446,7 +669,8 @@ public final class GitLedger implements Ledger {
                 "--list", "--name-only");
         requireRead(config, "its own configuration cannot be listed");
         for (String key : config.outputText().split("\n")) {
-            if (!key.isBlank() && !CONFIG_KEY.matcher(key.strip()).matches()) {
+            if (!key.isBlank() && (!CONFIG_KEY.matcher(key.strip()).matches()
+                    || PROMISOR_KEY.matcher(key.strip()).matches())) {
                 throw tampered("its own git configuration sets " + key.strip() + ", which is not among the settings"
                         + " the ledger may have (those git init writes and those a push needs): it could change what"
                         + " git writes or shows. Remove it with 'git -C " + directory + " config --unset "
@@ -505,119 +729,13 @@ public final class GitLedger implements Ledger {
         if (Files.exists(dotGit.resolve("commondir"), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             throw tampered("it has the file .git/commondir, which names another repository");
         }
-    }
-
-    /** A commit's own change to one path, as {@code git log --raw} lists it. */
-    private record Touch(String commit, String subject, String status, String path) {
-
-        String who() {
-            return "commit " + commit.substring(0, Math.min(12, commit.length())) + " (\"" + subject + "\")";
-        }
-    }
-
-    /**
-     * Every change the commits up to {@code from} made to the paths, oldest first by path, with no content read.
-     * The history has no merge ({@link #requireOneHistory}), so each commit's own change is all there is. A walk
-     * over {@code starts/} or {@code runs/} reads a tree that lists every run for every commit, so it is made for the
-     * few paths that need it, not for the whole ledger.
-     */
-    private Map<String, List<Touch>> touches(String from, String... paths) {
-        List<String> args = new java.util.ArrayList<>(List.of("--git-dir=.git", "--work-tree=.", "-c",
-                "core.quotePath=false", "log", "--no-renames", "--raw", "--no-abbrev", "--encoding=UTF-8",
-                "--format=%x01%H%x09%s", from, "--"));
-        args.addAll(List.of(paths));
-        GitProcess.Result log = run(args.toArray(String[]::new));
-        requireRead(log, "the changes of its history cannot be listed");
-        Map<String, List<Touch>> byPath = new java.util.TreeMap<>();
-        String commit = null;
-        String subject = null;
-        for (String line : log.outputText().split("\n")) {
-            if (line.startsWith("\u0001")) {
-                int tab = line.indexOf('\t');
-                commit = line.substring(1, tab < 0 ? line.length() : tab);
-                subject = tab < 0 ? "" : line.substring(tab + 1);
-            } else if (line.startsWith(":") && commit != null) {
-                int tab = line.indexOf('\t');
-                String[] fields = line.substring(0, tab).split(" ");
-                // The log is newest first: each path's list is turned around by adding at the front
-                byPath.computeIfAbsent(line.substring(tab + 1), path -> new java.util.LinkedList<>())
-                        .addFirst(new Touch(commit, subject, fields[fields.length - 1].substring(0, 1), null));
+        // Attributes can make git store other bytes than it is given, and show others than it stored
+        for (String file : List.of(".git/info/attributes", ".gitattributes", "starts/.gitattributes",
+                "runs/.gitattributes", "acks/.gitattributes", "registers/.gitattributes", "pins/.gitattributes")) {
+            if (Files.exists(directory.resolve(file), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                throw tampered("it has the attributes file " + file);
             }
         }
-        return byPath;
-    }
-
-    /**
-     * The commits that took lines out of a file that is only ever added to, as {@code commit + " " + path}: a second
-     * walk, over the acknowledgements and the anchors only, that counts the lines each commit removed.
-     */
-    private Set<String> rewrites(String... paths) {
-        List<String> args = new java.util.ArrayList<>(List.of("--git-dir=.git", "--work-tree=.", "-c",
-                "core.quotePath=false", "log", "--no-renames", "--numstat", "--format=%x01%H", "HEAD", "--"));
-        args.addAll(List.of(paths));
-        GitProcess.Result log = run(args.toArray(String[]::new));
-        requireRead(log, "the changes of its history cannot be listed");
-        Set<String> found = new java.util.HashSet<>();
-        String commit = null;
-        for (String line : log.outputText().split("\n")) {
-            if (line.startsWith("\u0001")) {
-                commit = line.substring(1);
-            } else if (commit != null && !line.isBlank()) {
-                String[] fields = line.split("\t", 3);
-                // "-" is a file git takes for binary: not a file of lines that was added to
-                if (fields.length == 3 && !fields[1].equals("0")) found.add(commit + " " + fields[2]);
-            }
-        }
-        return found;
-    }
-
-    /** What a later commit did to a path: removed it, added it again, or changed it. */
-    private static String did(Touch touch, String path) {
-        return touch.who() + (touch.status().equals("D") ? " removed " : touch.status().equals("A") ? " added again "
-                : " changed ") + path;
-    }
-
-    /**
-     * What the commits did to an entry that Traceworks never does. A start entry and an end entry are added once,
-     * by the commit whose message names them, and never touched again: so what HEAD holds is what that commit added.
-     * The acknowledgements of a run and the anchors of a register are added to, each time by a commit that says so,
-     * and never removed.
-     *
-     * @return one sentence per such change, oldest first; empty for a path as Traceworks writes it
-     */
-    private static List<String> changes(String path, List<Touch> touches, Set<String> rewrites) {
-        List<String> found = new java.util.ArrayList<>();
-        java.util.regex.Matcher entry = ENTRY_PATH.matcher(path);
-        if (!entry.matches()) return found;
-        String kind = entry.group(1);
-        String name = entry.group(2);
-        Touch first = touches.getFirst();
-        if (kind.equals("starts") || kind.equals("runs")) {
-            boolean named = kind.equals("starts") ? first.subject().equals("run " + name + " " + STARTED)
-                    : first.subject().startsWith("run " + name + " ")
-                    && FINAL.contains(first.subject().substring(("run " + name + " ").length()));
-            if (!named) {
-                found.add(first.who() + " added " + path + " under another message than the one of this entry");
-            }
-            for (Touch later : touches.subList(1, touches.size())) {
-                found.add(did(later, path) + ", which " + first.who() + " added: an entry is never touched again");
-            }
-            return found;
-        }
-        String expected = kind.equals("acks") ? "run " + name + " " + ACKNOWLEDGED : "register " + name + " seq ";
-        for (Touch touch : touches) {
-            boolean named = kind.equals("acks") ? touch.subject().equals(expected)
-                    : touch.subject().startsWith(expected);
-            if (touch.status().equals("D")) {
-                found.add(did(touch, path) + ": it is only ever added to");
-            } else if (rewrites.contains(touch.commit() + " " + path)) {
-                found.add(touch.who() + " took lines out of " + path + ": it is only ever added to");
-            } else if (!named) {
-                found.add(did(touch, path) + " under another message than '" + expected
-                        + (kind.equals("acks") ? "'" : "<n>'"));
-            }
-        }
-        return found;
     }
 
     private IllegalStateException tampered(String what) {
@@ -691,56 +809,6 @@ public final class GitLedger implements Ledger {
     }
 
     /**
-     * Adds a file that HEAD does not hold yet, in one commit of its own.
-     *
-     * @param taken what to say when HEAD holds the file already
-     * @return the commit id
-     */
-    private String commitNew(Path relative, byte[] content, String message, String taken) {
-        try {
-            try (Held ignored = hold()) {
-                Files.createDirectories(directory);
-                initOrRequirePlain();
-                if (inHead(relative).isPresent()) throw new IllegalStateException(taken);
-                Path target = directory.resolve(relative);
-                Files.createDirectories(target.getParent());
-                Path temp = Files.createTempFile(directory, ".record-", ".tmp");
-                try {
-                    Files.write(temp, content);
-                    Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE);
-                    git("add", "--", relative.toString());
-                    // --only: a file staged by an earlier, killed process must not ride along in this commit
-                    // The message names the entry's content, so that it can later be said, without a walk over the
-                    // trees, that the entry is still what this commit added
-                    git("commit", "-q", "-m", message, "-m", "sha256 " + sha256(content), "--only", "--",
-                            relative.toString());
-                } catch (RuntimeException | IOException e) {
-                    Files.deleteIfExists(temp);
-                    // git may have committed before it failed or timed out: then the entry is in the ledger
-                    if (inHead(relative).isPresent()) return git("rev-parse", "HEAD").strip();
-                    Files.deleteIfExists(target);
-                    try {
-                        git("reset", "-q");
-                    } catch (RuntimeException suppressed) {
-                        e.addSuppressed(suppressed);
-                    }
-                    if (e instanceof RuntimeException runtime) throw runtime;
-                    throw (IOException) e;
-                }
-                return git("rev-parse", "HEAD").strip();
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot write the ledger " + directory, e);
-        }
-    }
-
-    @Override
-    public Optional<byte[]> find(String runId) {
-        requireRunId(runId);
-        return inHead(Path.of("runs", runId + ".json"));
-    }
-
-    /**
      * Adds one line to {@code registers/<key>.jsonl} and commits it as {@code register <key> seq <n>}. The file as
      * HEAD holds it is what the line is added to, so a file edited in the working tree does not count. The anchor
      * the file already ends with is not added again.
@@ -751,46 +819,11 @@ public final class GitLedger implements Ledger {
         if (seq < 0 || head == null || !HEAD.matcher(head).matches()) {
             throw new IllegalArgumentException("Invalid anchor of the register " + key + ": seq " + seq);
         }
-        append(relative, "{\"seq\":" + seq + ",\"head\":\"" + head + "\"}\n", "register " + key + " seq " + seq);
-    }
-
-    /**
-     * Adds {@code line} to the file {@code relative} as HEAD holds it, in one commit. A file edited in the working
-     * tree does not count, and the line the file already ends with is not added again.
-     */
-    private void append(Path relative, String line, String message) {
         try {
-            try (Held ignored = hold()) {
-                Files.createDirectories(directory);
-                initOrRequirePlain();
-                // Read strictly: a ledger that fails here must not get a commit that starts the file again with the
-                // one new line, which would take every earlier anchor out of HEAD
-                String before = new String(strictInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
-                if (before.equals(line) || before.endsWith("\n" + line)) return;
-                byte[] after = (before + line).getBytes(StandardCharsets.UTF_8);
-                Path target = directory.resolve(relative);
-                Files.createDirectories(target.getParent());
-                Path temp = Files.createTempFile(directory, ".anchor-", ".tmp");
-                try {
-                    Files.write(temp, after);
-                    Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                    git("add", "--", relative.toString());
-                    git("commit", "-q", "-m", message, "--only", "--", relative.toString());
-                } catch (RuntimeException | IOException e) {
-                    Files.deleteIfExists(temp);
-                    // git may have committed before it failed or timed out: then the line is in the ledger
-                    if (inHead(relative).filter(now -> java.util.Arrays.equals(now, after)).isPresent()) return;
-                    try {
-                        git("reset", "-q");
-                    } catch (RuntimeException suppressed) {
-                        e.addSuppressed(suppressed);
-                    }
-                    if (e instanceof RuntimeException runtime) throw runtime;
-                    throw (IOException) e;
-                }
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException("Cannot write the ledger " + directory + ": " + e, e);
+            commit(relative.toString(), ("{\"seq\":" + seq + ",\"head\":\"" + head + "\"}\n")
+                    .getBytes(StandardCharsets.UTF_8), "register " + key + " seq " + seq, true, null);
+        } catch (UncheckedIOException e) {
+            throw new IllegalStateException("Cannot write the ledger " + directory + ": " + e.getCause(), e);
         }
     }
 
@@ -803,7 +836,7 @@ public final class GitLedger implements Ledger {
     @Override
     public List<RegisterAnchor> registerAnchors(String key) {
         Path relative = anchorFile(key);
-        String text = new String(strictInHead(relative).orElse(new byte[0]), StandardCharsets.UTF_8);
+        String text = new String(held(relative.toString()).orElse(new byte[0]), StandardCharsets.UTF_8);
         List<RegisterAnchor> anchors = new java.util.ArrayList<>();
         int number = 0;
         for (String line : text.split("\n")) {
@@ -817,23 +850,6 @@ public final class GitLedger implements Ledger {
             anchors.add(new RegisterAnchor(Integer.parseInt(anchor.group(1)), anchor.group(2)));
         }
         return List.copyOf(anchors);
-    }
-
-    /**
-     * The content of a file in HEAD, telling "it is not there" from "the ledger cannot be read". Empty when the
-     * ledger does not exist yet, has no commit, or its HEAD does not hold the file.
-     *
-     * @throws IllegalStateException if the ledger exists and git cannot read it: its HEAD names no commit that can be
-     *                               read, the tree cannot be listed, or the file is listed and cannot be shown
-     */
-    private Optional<byte[]> strictInHead(Path relative) {
-        if (!hasCommit()) return Optional.empty();
-        GitProcess.Result listed = run("--git-dir=.git", "--work-tree=.", "ls-tree", "HEAD", "--", relative.toString());
-        requireRead(listed, "the files of its HEAD cannot be listed");
-        if (listed.outputText().isBlank()) return Optional.empty();
-        GitProcess.Result shown = run("--git-dir=.git", "--work-tree=.", "show", "HEAD:" + relative);
-        requireRead(shown, relative + " of its HEAD cannot be shown");
-        return Optional.of(shown.output());
     }
 
     /**
@@ -878,14 +894,22 @@ public final class GitLedger implements Ledger {
         GitProcess.Result objects = run("--git-dir=.git", "--work-tree=.", "count-objects", "-v");
         requireRead(objects, "its objects cannot be counted");
         boolean counted = false;
-        boolean none = refs.outputText().isBlank();
+        boolean none = true;
         for (String line : objects.outputText().split("\n")) {
             if (line.startsWith("count: ") || line.startsWith("in-pack: ")) {
                 counted = true;
                 none &= line.substring(line.indexOf(' ') + 1).strip().equals("0");
             }
         }
-        if (!counted || !none) {
+        boolean commits = false;
+        if (counted && !none) {
+            // Objects without a commit among them are what a writer leaves that was killed before its first commit
+            GitProcess.Result types = run("--git-dir=.git", "--work-tree=.", "cat-file", "--batch-all-objects",
+                    "--batch-check=%(objecttype)");
+            requireRead(types, "its objects cannot be listed");
+            commits = types.outputText().lines().anyMatch("commit"::equals);
+        }
+        if (!counted || !refs.outputText().isBlank() || commits) {
             throw new IllegalStateException("The ledger " + directory + " cannot be read: its HEAD names no commit,"
                     + " but the repository holds history, so the file of its branch was emptied or removed");
         }
@@ -907,13 +931,6 @@ public final class GitLedger implements Ledger {
 
     private static void requireRunId(String runId) {
         if (!Ids.isRunId(runId)) throw new IllegalArgumentException("Invalid run id: " + runId);
-    }
-
-    /** The content of a file in HEAD, or empty when there is no such file or no HEAD yet. */
-    private Optional<byte[]> inHead(Path relative) {
-        if (!Files.isDirectory(directory.resolve(".git"))) return Optional.empty();
-        GitProcess.Result result = run("show", "HEAD:" + relative);
-        return result.exitCode() == 0 ? Optional.of(result.output()) : Optional.empty();
     }
 
     /** Runs git in the ledger directory and returns its output; any failure is an {@link IllegalStateException}. */

@@ -94,7 +94,7 @@ class GitLedgerTest {
     @Test
     void commitMessage_namesRunAndStatus() throws Exception {
         ledger().record("r1", "FAILED", manifest("r1"));
-        assertEquals("run r1 FAILED", git("log", "-1", "--format=%s").strip());
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("run r1 FAILED sha256:[0-9a-f]{64}"));
     }
 
     @Test
@@ -203,7 +203,7 @@ class GitLedgerTest {
         Files.write(home.resolve("ledger/runs/r2.json"), manifest("r2"));
         assertTrue(ledger.find("r2").isEmpty());
         ledger.record("r2", "COMPLETED", manifest("r2"));
-        assertEquals("run r2 COMPLETED", git("log", "-1", "--format=%s").strip());
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("run r2 COMPLETED sha256:[0-9a-f]{64}"));
         // A committed run stays recorded when the working copy is gone
         Files.delete(home.resolve("ledger/runs/r1.json"));
         assertArrayEquals(manifest("r1"), ledger.find("r1").orElseThrow());
@@ -227,7 +227,7 @@ class GitLedgerTest {
         assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), ledger().registerAnchors("security"));
         assertEquals(List.of(anchor(0, HEAD_A)), ledger().registerAnchors("testing"));
         assertEquals("4", git("rev-list", "--count", "HEAD").strip());
-        assertEquals("register testing seq 0", git("log", "-1", "--format=%s").strip());
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("register testing seq 0 sha256:[0-9a-f]{64}"));
         assertEquals("{\"seq\":3,\"head\":\"" + HEAD_A + "\"}\n{\"seq\":5,\"head\":\"" + HEAD_B + "\"}\n",
                 git("show", "HEAD:registers/security.jsonl"));
         assertArrayEquals(manifest("r1"), ledger().find("r1").orElseThrow());
@@ -493,7 +493,7 @@ class GitLedgerTest {
         String commit = ledger.recordStart("r1", start("r1"));
 
         assertEquals(commit, git("rev-parse", "HEAD").strip());
-        assertEquals("run r1 STARTED", git("log", "-1", "--format=%s").strip());
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("run r1 STARTED sha256:[0-9a-f]{64}"));
         assertEquals(new String(start("r1")), git("show", "HEAD:starts/r1.json"));
         assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
         assertTrue(ledger.find("r1").isEmpty(), "a start is no end entry");
@@ -636,7 +636,7 @@ class GitLedgerTest {
         ledger.acknowledge("r1", "{\"note\":\"first\"}".getBytes(StandardCharsets.UTF_8));
         ledger.acknowledge("r1", "{\"note\":\"second\"}".getBytes(StandardCharsets.UTF_8));
 
-        assertEquals("run r1 ACKNOWLEDGED", git("log", "-1", "--format=%s").strip());
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("run r1 ACKNOWLEDGED sha256:[0-9a-f]{64}"));
         assertEquals("3", git("rev-list", "--count", "HEAD").strip());
         assertEquals("{\"note\":\"first\"}\n{\"note\":\"second\"}\n", git("show", "HEAD:acks/r1.jsonl"));
         assertEquals("{\"note\":\"first\"}\n{\"note\":\"second\"}\n",
@@ -729,102 +729,159 @@ class GitLedgerTest {
         return git("rev-parse", "HEAD").strip();
     }
 
+    private static String sha256(byte[] content) throws Exception {
+        return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(content));
+    }
+
     /**
-     * An ordinary commit over an entry, no history rewritten: the entry is no longer what its own commit added, and
-     * the ledger says so with the commit and the path.
+     * An ordinary commit over an entry, no history rewritten: the entry is no longer what the commit that names it
+     * said it added. The subject of that commit holds the SHA-256, so this is one comparison, and the sentence names
+     * the commit, the path and both hashes.
      */
     @Test
-    void anEntryChangedByALaterCommit_isNamedWithTheCommitAndThePath() throws Exception {
+    void anEntryChangedByALaterCommit_isNamedWithItsCommitThePathAndBothHashes() throws Exception {
         GitLedger ledger = ledger();
         ledger.recordStart("r1", start("r1"));
+        String named = head();
         ledger.record("r1", "COMPLETED", manifest("r1"));
         ledger.recordStart("r2", start("r2"));
         assertTrue(ledger.changes("r1").isEmpty() && run("r1").changes().isEmpty(), "as added");
 
-        Files.writeString(home.resolve("ledger/runs/r1.json"), "{\"run\":\"r1\",\"gate\":\"GREEN\"}");
-        git(ME, "commit", "-q", "-m", "run r1 COMPLETED", "--", "runs/r1.json");
-        String endChanged = head();
-        Files.writeString(home.resolve("ledger/starts/r1.json"), new String(start("r1")).strip());
+        byte[] changed = new String(start("r1")).strip().getBytes(StandardCharsets.UTF_8);
+        Files.write(home.resolve("ledger/starts/r1.json"), changed);
         git(ME, "commit", "-q", "-m", "tidy", "--", "starts/r1.json");
-        String startChanged = head();
 
         List<String> changes = ledger.changes("r1");
-        assertEquals(2, changes.size(), changes.toString());
-        assertTrue(changes.stream().anyMatch(change -> change.contains(endChanged.substring(0, 12))
-                && change.contains("runs/r1.json") && change.contains("changed")), changes.toString());
-        assertTrue(changes.stream().anyMatch(change -> change.contains(startChanged.substring(0, 12))
-                && change.contains("starts/r1.json") && change.contains("changed")), changes.toString());
+        assertEquals(1, changes.size(), changes.toString());
+        assertTrue(changes.getFirst().contains("starts/r1.json is not what commit " + named.substring(0, 12))
+                && changes.getFirst().contains(sha256(start("r1"))) && changes.getFirst().contains(sha256(changed)),
+                changes.toString());
         assertEquals(changes, run("r1").changes());
         assertTrue(ledger.changes("r2").isEmpty() && run("r2").changes().isEmpty(), "another run is not touched");
+
+        // The same under the message of the entry: a second commit names it, and one without a hash
+        Files.writeString(home.resolve("ledger/runs/r1.json"), "{\"run\":\"r1\",\"gate\":\"GREEN\"}");
+        git(ME, "commit", "-q", "-m", "run r1 COMPLETED", "--", "runs/r1.json");
+        List<String> end = ledger.changes("r1").stream().filter(change -> change.contains("runs/r1.json")).toList();
+        assertTrue(end.stream().anyMatch(change -> change.contains("2 commits name runs/r1.json")), end.toString());
+        assertTrue(end.stream().anyMatch(change -> change.contains("is not what commit")), end.toString());
+        // And with a hash of its own in the message: the commit that added the entry is the one that counts
+        git(ME, "commit", "-q", "--allow-empty", "-m", "run r2 STARTED sha256:" + sha256(changed));
+        Files.write(home.resolve("ledger/starts/r2.json"), changed);
+        git(ME, "commit", "-q", "-m", "x", "--", "starts/r2.json");
+        assertTrue(ledger.changes("r2").stream().anyMatch(change -> change.contains("2 commits name starts/r2.json")));
+        assertTrue(ledger.changes("r2").stream().anyMatch(change -> change.contains("is not what commit")),
+                ledger.changes("r2").toString());
     }
 
     @Test
-    void anEntryDeletedByALaterCommit_isNamedWithTheCommitAndThePath() throws Exception {
+    void anEntryDeletedByALaterCommit_isNamedWithItsCommitAndThePath() throws Exception {
         GitLedger ledger = ledger();
         ledger.recordStart("r1", start("r1"));
+        String named = head();
         git(ME, "rm", "-q", "starts/r1.json");
         git(ME, "commit", "-q", "-m", "tidy");
-        String removed = head();
 
         assertEquals(1, ledger.changes("r1").size());
-        assertTrue(ledger.changes("r1").getFirst().contains(removed.substring(0, 12))
-                && ledger.changes("r1").getFirst().contains("removed starts/r1.json"), ledger.changes("r1").toString());
+        assertTrue(ledger.changes("r1").getFirst().contains("commit " + named.substring(0, 12))
+                && ledger.changes("r1").getFirst().contains("names starts/r1.json, and the ledger does not hold it"),
+                ledger.changes("r1").toString());
         assertEquals(ledger.changes("r1"), run("r1").changes());
-
-        // Put back by hand, with the same bytes: still not what one commit added and none touched
-        Files.createDirectories(home.resolve("ledger/starts"));
-        Files.write(home.resolve("ledger/starts/r1.json"), start("r1"));
-        git(ME, "add", "starts/r1.json");
-        git(ME, "commit", "-q", "-m", "run r1 STARTED");
-        assertEquals(2, ledger.changes("r1").size(), ledger.changes("r1").toString());
     }
 
-    /** The message of an entry's commit names the SHA-256 of the entry: what is compared instead of walking trees. */
+    /** The subject of an entry's commit names the SHA-256 of the entry: what is compared, with no walk over trees. */
     @Test
     void theCommitOfAnEntry_namesItsSha256() throws Exception {
         ledger().recordStart("r1", start("r1"));
-        String sha = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
-                .digest(start("r1")));
-        assertEquals("run r1 STARTED\n\nsha256 " + sha, git("log", "-1", "--format=%B").strip());
+        assertEquals("run r1 STARTED sha256:" + sha256(start("r1")), git("log", "-1", "--format=%B").strip());
+        ledger().anchorRegister("hello", 0, "a".repeat(64));
+        ledger().anchorRegister("hello", 1, "b".repeat(64));
+        assertEquals("register hello seq 1 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/registers/hello.jsonl"))), git("log", "-1", "--format=%B").strip());
     }
 
-    /** An entry as a commit of the time before the hash added it, by hand here: the subject alone, no hash. */
-    private void legacyEnd(String id) throws Exception {
-        Files.createDirectories(home.resolve("ledger/runs"));
-        Files.write(home.resolve("ledger/runs/" + id + ".json"), manifest(id));
-        git(ME, "add", "runs/" + id + ".json");
-        git(ME, "commit", "-q", "-m", "run " + id + " COMPLETED");
+    /** An entry as a commit of a version before hashes added it, by hand here: the subject alone. */
+    private void legacy(String path, byte[] content, String subject) throws Exception {
+        Files.createDirectories(home.resolve("ledger").resolve(path).getParent());
+        Files.write(home.resolve("ledger").resolve(path), content);
+        git(ME, "add", path);
+        git(ME, "commit", "-q", "-m", subject);
     }
 
     /**
-     * The entries of the time before messages held the hash are judged by the commits that touched them: untouched
-     * they hold, and a change is found whether it came before the last of them or after.
+     * The entries of a version whose messages named no hash are pinned once, by the first run of this version: one
+     * commit lists the SHA-256 each has then. From there on each is judged by that hash. What was done to such an
+     * entry before the pin is not found: it is as trustworthy as the ledger was at the moment of the pin.
      */
     @Test
-    void anEntryOfTheTimeBeforeTheHash_holdsUntouched_andAChangeIsFoundBeforeAndAfterTheLastOfThem() throws Exception {
+    void entriesWithoutAHash_arePinnedOnceByPrepare_andAChangeAfterThePinIsFound() throws Exception {
         ledger().prepare();
-        legacyEnd("old1");
-        legacyEnd("old2");
+        legacy("runs/old1.json", manifest("old1"), "run old1 COMPLETED");
+        legacy("runs/old2.json", manifest("old2"), "run old2 COMPLETED");
+        legacy("registers/hello.jsonl", ("{\"seq\":0,\"head\":\"" + "a".repeat(64) + "\"}\n").getBytes(
+                StandardCharsets.UTF_8), "register hello seq 0");
         Files.writeString(home.resolve("ledger/runs/old1.json"), "{\"run\":\"old1\",\"gate\":\"GREEN\"}");
-        git(ME, "commit", "-q", "-m", "early", "--", "runs/old1.json");
-        String early = head();
-        legacyEnd("old3");
+        git(ME, "commit", "-q", "-m", "before the pin", "--", "runs/old1.json");
+        assertTrue(run("old1").changes().isEmpty() && run("old2").changes().isEmpty(), "not pinned yet: not judged");
+
+        ledger().prepare();
+
+        String subject = git("log", "-1", "--format=%s").strip();
+        assertTrue(subject.matches("ledger PINNED sha256:[0-9a-f]{64}"), subject);
+        String pin = "pins/" + subject.substring("ledger PINNED sha256:".length()) + ".txt";
+        assertEquals(sha256(manifest("old2")) + "  runs/old2.json", Files.readAllLines(home.resolve("ledger").resolve(pin))
+                .stream().filter(line -> line.endsWith("old2.json")).findFirst().orElseThrow());
+        assertEquals(3, Files.readAllLines(home.resolve("ledger").resolve(pin)).size());
+        String pinned = head();
+        ledger().prepare();
         ledger().recordStart("r1", start("r1"));
-        ledger().record("r1", "COMPLETED", manifest("r1"));
+        ledger().prepare();
+        assertEquals("1", git("rev-list", "--count", pinned + "..HEAD").strip(),
+                "one pin, and after it the start of r1 alone");
+        assertTrue(run("old1").changes().isEmpty(), "what was done before the pin is what the pin took");
 
-        assertTrue(run("old2").changes().isEmpty() && run("old3").changes().isEmpty() && run("r1").changes().isEmpty());
+        Files.writeString(home.resolve("ledger/runs/old2.json"), "{\"run\":\"old2\",\"gate\":\"GREEN\"}");
+        git(ME, "commit", "-q", "-m", "after the pin", "--", "runs/old2.json");
+
+        assertEquals(1, run("old2").changes().size(), run("old2").changes().toString());
+        assertTrue(run("old2").changes().getFirst().contains("runs/old2.json is not what the pin of commit "
+                + pinned.substring(0, 12)) && run("old2").changes().getFirst().contains(sha256(manifest("old2"))),
+                run("old2").changes().toString());
+        // The anchors go on with hashes; a commit without one after the pin is refused
+        ledger().anchorRegister("hello", 1, "b".repeat(64));
+        ledger().runs();
+        Files.writeString(home.resolve("ledger/registers/hello.jsonl"), "{\"seq\":0,\"head\":\"" + "c".repeat(64)
+                + "\"}\n");
+        git(ME, "commit", "-q", "-m", "register hello seq 0", "--", "registers/hello.jsonl");
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("registers/hello.jsonl") && e.getMessage().contains("without a SHA-256"),
+                e.getMessage());
+    }
+
+    /** A pin is named by its own SHA-256, and the oldest pin of a path counts: neither can be worked around. */
+    @Test
+    void aPinThatWasChanged_failsTheCheck_andALaterPinDoesNotCoverWhatIsCovered() throws Exception {
+        ledger().prepare();
+        legacy("runs/old1.json", manifest("old1"), "run old1 COMPLETED");
+        ledger().prepare();
+        String first = git("log", "-1", "--format=%s").strip().substring("ledger PINNED sha256:".length());
+        ledger().recordStart("r1", start("r1"));
+
+        // A second pin by hand that names other hashes for an entry the first pin covers and for a hashed entry
+        byte[] forged = "{\"run\":\"old1\",\"gate\":\"GREEN\"}".getBytes(StandardCharsets.UTF_8);
+        byte[] list = (sha256(forged) + "  runs/old1.json\n" + sha256(forged) + "  starts/r1.json\n")
+                .getBytes(StandardCharsets.UTF_8);
+        legacy("pins/" + sha256(list) + ".txt", list, "ledger PINNED sha256:" + sha256(list));
+        Files.write(home.resolve("ledger/runs/old1.json"), forged);
+        Files.write(home.resolve("ledger/starts/r1.json"), forged);
+        git(ME, "commit", "-q", "-m", "x", "--", "runs/old1.json", "starts/r1.json");
         assertEquals(1, run("old1").changes().size(), run("old1").changes().toString());
-        assertTrue(run("old1").changes().getFirst().contains(early.substring(0, 12)), run("old1").changes().toString());
+        assertEquals(1, run("r1").changes().size(), run("r1").changes().toString());
 
-        Files.writeString(home.resolve("ledger/runs/old3.json"), "{\"run\":\"old3\",\"gate\":\"GREEN\"}");
-        git(ME, "commit", "-q", "-m", "late", "--", "runs/old3.json");
-        String late = head();
-
-        assertEquals(1, run("old3").changes().size(), run("old3").changes().toString());
-        assertTrue(run("old3").changes().getFirst().contains(late.substring(0, 12))
-                && run("old3").changes().getFirst().contains("changed runs/old3.json"),
-                run("old3").changes().toString());
-        assertTrue(run("old2").changes().isEmpty());
+        Files.writeString(home.resolve("ledger/pins/" + first + ".txt"), sha256(forged) + "  runs/old1.json\n");
+        git(ME, "commit", "-q", "-m", "y", "--", "pins/" + first + ".txt");
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("pins/" + first + ".txt"), e.getMessage());
     }
 
     /** A second commit under the message of an entry, also one that changes nothing: an entry is added once. */
@@ -833,8 +890,7 @@ class GitLedgerTest {
         ledger().recordStart("r1", start("r1"));
         git(ME, "commit", "-q", "--allow-empty", "-m", "run r1 STARTED");
 
-        assertEquals(1, ledger().changes("r1").size(), ledger().changes("r1").toString());
-        assertTrue(ledger().changes("r1").getFirst().contains("2 commits name starts/r1.json"),
+        assertTrue(ledger().changes("r1").stream().anyMatch(change -> change.contains("2 commits name starts/r1.json")),
                 ledger().changes("r1").toString());
     }
 
@@ -842,14 +898,11 @@ class GitLedgerTest {
     @Test
     void anEntryAddedUnderAnotherMessage_isNamed() throws Exception {
         ledger().recordStart("r0", start("r0"));
-        Files.createDirectories(home.resolve("ledger/runs"));
-        Files.write(home.resolve("ledger/runs/r0.json"), manifest("r0"));
-        git(ME, "add", "runs/r0.json");
-        git(ME, "commit", "-q", "-m", "housekeeping");
+        legacy("runs/r0.json", manifest("r0"), "housekeeping");
 
         assertEquals(1, ledger().changes("r0").size());
-        assertTrue(ledger().changes("r0").getFirst().contains("runs/r0.json")
-                && ledger().changes("r0").getFirst().contains("housekeeping"), ledger().changes("r0").toString());
+        assertTrue(ledger().changes("r0").getFirst().contains("no commit names runs/r0.json"),
+                ledger().changes("r0").toString());
     }
 
     /** The acknowledgements of a run are only added to, each by a commit that says so. */
@@ -956,6 +1009,140 @@ class GitLedgerTest {
             assertTrue(e.getMessage().contains("core.autocrlf") && e.getMessage().contains("config --unset")
                     && e.getMessage().contains("git -c"), e.getMessage());
         }
+    }
+
+    /** git with bytes on its standard input; gives the trimmed output. */
+    private String gitWith(byte[] input, String... args) throws Exception {
+        List<String> command = new ArrayList<>(List.of("git", "-C", home.resolve("ledger").toString()));
+        command.addAll(List.of(args));
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+        builder.environment().putAll(ME);
+        Process process = builder.start();
+        try (var out = process.getOutputStream()) {
+            out.write(input);
+        }
+        String said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), said);
+        return said.strip();
+    }
+
+    private static byte[] treeEntry(String mode, String name, String id) {
+        byte[] head = (mode + " " + name + "\0").getBytes(StandardCharsets.UTF_8);
+        byte[] raw = java.util.HexFormat.of().parseHex(id);
+        byte[] entry = java.util.Arrays.copyOf(head, head.length + raw.length);
+        System.arraycopy(raw, 0, entry, head.length, raw.length);
+        return entry;
+    }
+
+    private static byte[] join(byte[]... parts) {
+        java.io.ByteArrayOutputStream all = new java.io.ByteArrayOutputStream();
+        for (byte[] part : parts) all.writeBytes(part);
+        return all.toByteArray();
+    }
+
+    /**
+     * Text in a commit message cannot make itself a commit: the messages are read as records that no message text
+     * can imitate, so a body that looks like a record of the log names nothing, and neither does a subject with a
+     * control character.
+     */
+    @Test
+    void aMessageThatImitatesARecordOfTheLog_namesNothing() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        String fake = "f".repeat(40);
+        gitWith(("notes\n\n\u0001" + fake + "\trun zz COMPLETED\n\u0001" + fake + "\trun r1 STARTED\nsha256 "
+                + "a".repeat(64) + "\n").getBytes(StandardCharsets.UTF_8), "commit", "-q", "--allow-empty", "-F", "-");
+        git(ME, "commit", "-q", "--allow-empty", "-m", "run\u0001 r1 COMPLETED");
+
+        assertEquals(List.of("r1"), ledger().runs().runs().stream().map(run -> run.runId()).toList());
+        assertEquals(null, run("r1").endNamed());
+        assertTrue(run("r1").changes().isEmpty(), run("r1").changes().toString());
+    }
+
+    /**
+     * A tree with two entries of one name, which git lists both and shows the first of by path: the listing is the
+     * only source, and a path listed twice fails every reader by name.
+     */
+    @Test
+    void aTreeWithTwoEntriesOfOneName_failsEveryReader() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        String real = gitWith(manifest("r1"), "hash-object", "-w", "--stdin");
+        String forged = gitWith("{\"run\":\"r1\",\"gate\":\"GREEN\"}".getBytes(StandardCharsets.UTF_8),
+                "hash-object", "-w", "--stdin");
+        String runsTree = gitWith(join(treeEntry("100644", "r1.json", real), treeEntry("100644", "r1.json", forged)),
+                "hash-object", "-t", "tree", "--literally", "-w", "--stdin");
+        String root = gitWith(join(treeEntry("40000", "runs", runsTree),
+                        treeEntry("40000", "starts", git("rev-parse", "HEAD:starts").strip())),
+                "hash-object", "-t", "tree", "--literally", "-w", "--stdin");
+        String commit = git(ME, "commit-tree", root, "-p", "HEAD", "-m", "run r1 COMPLETED").strip();
+        git(ME, "update-ref", "refs/heads/main", commit);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("runs/r1.json") && e.getMessage().contains("twice"), e.getMessage());
+        assertTrue(ledger().find("r1").isEmpty(), "no reader takes one of the two");
+        assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"));
+        assertThrows(IllegalStateException.class, () -> ledger().prepare());
+    }
+
+    /** Only regular files at the paths the ledger uses: a link, an executable file or any other file fails by name. */
+    @Test
+    void anEntryThatIsALink_orAnExecutable_orAFileThatIsNoEntry_failsTheCheckByName() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        Files.createSymbolicLink(home.resolve("ledger/starts/r2.json"), Path.of("r1.json"));
+        git(ME, "add", "starts/r2.json");
+        git(ME, "commit", "-q", "-m", "run r2 STARTED");
+        IllegalStateException link = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(link.getMessage().contains("starts/r2.json") && link.getMessage().contains("120000"),
+                link.getMessage());
+        git(ME, "rm", "-q", "starts/r2.json");
+        git(ME, "commit", "-q", "-m", "undo");
+
+        git(ME, "update-index", "--chmod=+x", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "mode");
+        IllegalStateException mode = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(mode.getMessage().contains("starts/r1.json") && mode.getMessage().contains("100755"),
+                mode.getMessage());
+        git(ME, "update-index", "--chmod=-x", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "mode back");
+
+        Files.writeString(home.resolve("ledger/README"), "notes");
+        git(ME, "add", "README");
+        git(ME, "commit", "-q", "-m", "notes");
+        IllegalStateException other = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(other.getMessage().contains("README"), other.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"));
+    }
+
+    /** Attributes can make git store other bytes than it was given: none are read, and one in the ledger is refused. */
+    @Test
+    void attributes_areNotRead_andAnAttributesFileInTheLedgerIsRefused() throws Exception {
+        Path config = Files.createDirectories(home.resolve("xdg/git"));
+        Files.writeString(config.resolve("attributes"), "*.json text eol=lf\n");
+        GitLedger ledger = new GitLedger(home.resolve("ledger"), home.resolve("ledger.lock"),
+                Map.of("XDG_CONFIG_HOME", home.resolve("xdg").toString(), "HOME", home.resolve("xdg").toString()));
+        byte[] crlf = "{\"run_id\":\"r1\"}\r\n".getBytes(StandardCharsets.UTF_8);
+        ledger.recordStart("r1", crlf);
+        assertArrayEquals(crlf, ledger.findStart("r1").orElseThrow(), "stored byte for byte");
+
+        Files.writeString(home.resolve("ledger/.gitattributes"), "*.json text eol=lf\n");
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger.recordStart("r2", crlf));
+        assertTrue(e.getMessage().contains(".gitattributes"), e.getMessage());
+        assertThrows(IllegalStateException.class, ledger::prepare);
+        Files.delete(home.resolve("ledger/.gitattributes"));
+        Files.createDirectories(home.resolve("ledger/.git/info"));
+        Files.writeString(home.resolve("ledger/.git/info/attributes"), "*.json text eol=lf\n");
+        IllegalStateException info = assertThrows(IllegalStateException.class, () -> ledger.recordStart("r2", crlf));
+        assertTrue(info.getMessage().contains("info/attributes"), info.getMessage());
+    }
+
+    /** A promisor remote lets git fetch a missing object from elsewhere: not a setting a push needs. */
+    @Test
+    void aPromisorRemote_isRefused() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "config", "remote.origin.url", "/nowhere.git");
+        ledger().runs();
+        git(ME, "config", "remote.origin.promisor", "true");
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("remote.origin.promisor"), e.getMessage());
     }
 
     /** A lock that is never let go must not leave a run waiting for ever: the writer gives up and names the lock. */
