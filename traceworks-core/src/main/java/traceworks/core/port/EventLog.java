@@ -20,6 +20,15 @@ public interface EventLog {
     List<byte[]> readAll();
 
     /**
+     * The first complete line of the log, without its line feed; empty for a log without one. For a reader that
+     * needs {@code run.started} only: an adapter reads no more of the log than that line.
+     */
+    default java.util.Optional<byte[]> first() {
+        List<byte[]> lines = readAll();
+        return lines.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(lines.getFirst());
+    }
+
+    /**
      * The bytes after the last line feed, which a write that was cut off leaves; an empty array when there are none.
      * Reads only: it needs no writer lock.
      */

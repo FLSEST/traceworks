@@ -60,7 +60,7 @@ class ManifestTest {
         it.forEachRemaining(names::add);
 
         assertThat(names).containsExactly("run_id", "workflow", "package_digest", "seal", "inputs_digest",
-                "execution", "images", "models", "tool_versions", "events", "head", "status", "gate", "started_at",
+                "execution", "images", "models", "tool_versions", "events", "head", "run_started", "status", "gate", "started_at",
                 "finished_at", "traceworks_version", "signature");
     }
 

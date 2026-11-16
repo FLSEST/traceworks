@@ -179,7 +179,11 @@ register's folder, and nothing else, can append a line that chains (a forged dec
 leaves that was cut off before its anchor, so `verify` holds, names the lines as unproven, and the next write takes
 them and anchors the head. What shows it: `verify` until then, the note of that next write, and the line
 `register.unanchored` it records in the log with the sequence numbers. A register's folder is therefore still worth
-the protection of the ledger's. Whoever can write the ledger too can rewrite both, as with a run.
+the protection of the ledger's. Whoever can write the ledger too cannot rewrite the register unnoticed: the anchors
+are only added to, and a rewritten anchor file is found. But they can **add** to both: append a forged decision that
+chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace
+(docs/events.md, "What the ledger shows, and what it does not"). Signatures of decisions would close that; they are
+not built.
 
 **The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
@@ -233,7 +237,51 @@ Traceworks reads the commit and the state of a package that has its own `.git`, 
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 
 **The record** is a hash chain: `traceworks verify` finds a changed or removed line, lines copied from another run, a
-changed blob, and a manifest or ledger entry that does not match the log. `run.html` has no scripts and loads
+changed blob, and a manifest or ledger entry that does not match the log.
+
+**A run that began is named outside its folder.** The ledger gets an entry when a run starts, before its first step,
+and no step runs without it, at a start and at a resume (docs/events.md, "The start entry"). What that gives, in
+three groups:
+
+- **What the check finds on this machine** (`traceworks verify` without a run, exit 8): a run that started, never
+  ended, and whose folder is gone, empty or holds another record; an entry that is not what the commit that names
+  it left, by the SHA-256 in that commit's message, because a later, ordinary commit changed or removed it (so a
+  rewritten record with a new manifest committed over the end entry is found, also by `verify <run>`); anything in
+  the ledger that is no regular file at the path of an entry, and a path a tree lists twice; a
+  commit that names a run without its entry; an end entry added by hand that is no manifest of the run or does not
+  agree with its commit and its start entry, and a manifest in the run folder that is not the end entry; a run
+  folder whose record says its start was noted and that has no start entry (a ledger deleted and made again,
+  another `ledger_dir`, a kill between `run.started` and the commit), unless its process is alive and that line
+  is younger than five minutes; and a ledger
+  with replace refs, a shallow or grafts file, alternates, a `.git` that is not a plain directory, a second
+  branch, a merge, a detached HEAD, a commit HEAD does not reach, or a setting of its own that is not allowed
+  there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). An honest
+  cause is acknowledged with a note, which the ledger keeps and the check lists for good; it covers what the check
+  said then and nothing that comes later.
+- **What a ledger that others hold adds:** a rewritten history that no reference names any more is not found on
+  this machine. The ledger is a plain git repository, so the operator can push it to a remote they do not control
+  alone and that refuses a rewritten history (a protected branch without force push, or an append-only mirror).
+  What was pushed can then be changed only by an ordinary commit on top, which the remote takes and the check
+  finds; the remote itself finds nothing, it keeps the commit from being taken out again. Traceworks does not push
+  by itself, has no setting for a remote and writes the ledger without git hooks, so the push is the operator's: a
+  cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are not pushed yet are only as
+  safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
+  The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
+  of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
+  verifies the record of every ended run against its end entry, unless `--quick` is given.
+- **What nothing in this version finds:** what was before a new ledger, and that there was one. A ledger this
+  version does not accept is moved aside and not read, and one hand-made commit forces that; the new ledger says
+  nothing of earlier runs and register lines, and the home does not record the restart. The move itself is the
+  alarm, and a remote that refuses the new history is what shows it (docs/events.md, "A new ledger"); a well-formed entry or line added with write access to the
+  ledger (the ledger is not
+  signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
+  or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
+  started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
+  `ledger_dir`, the ledger folder swapped for the time of the run, a jar of a version that noted no start). Against the last, start audits only from a place that owns
+  the home, such as a CI job with its own account that pushes the ledger after every run, and accept as a result
+  only a run whose start entry is in the pushed ledger.
+
+`run.html` has no scripts and loads
 nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
@@ -529,8 +577,9 @@ content, and no blob is written through one.
   in its own environment. Keep the runtime to yourself.
 - **The record is tamper-evident, not signed.** Manifests carry no signature in this version; only the seal of a
   package is signed ("Seals" below). Whoever can write the
-  Traceworks home can rewrite a run folder and its ledger entry together. Keep a copy of the ledger (a git repository)
-  where your runs cannot write. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
+  Traceworks home can rewrite a run folder and its ledger entries together, the start entry too. Keep a copy of the
+  ledger (a git repository) where your runs cannot write: push it to a remote that refuses a rewritten history
+  ("A run that began is named outside its folder" above). Traceworks does not push it. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
   who can write it: Traceworks writes it as the user who runs it.
 - **The places are the operator's.** `runs_dir`, `ledger_dir` and `registers_dir` are read from `traceworks.json`
   only; no workflow, input or environment variable sets them. The check of the file compares the paths as written.
