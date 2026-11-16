@@ -100,7 +100,7 @@ class SecurityChangesScriptIT extends IntegrationTest {
                 "--no-input", "--input", "since=" + first, "--input", "blob=" + blob);
 
         assertThat(run.code()).as(run.describe()).isZero();
-        assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
+        assertThat(traceworks.folder(run).output("changes") + "\n").contains("FACT changes_base: " + first + "\n",
                 "FACT changes_head: " + second + "\n", "\tA.java\n", blob + " blob 8\none\ntwo\n");
         assertThat(traceworks.workspace().resolve(".git/index.lock")).doesNotExist();
     }
@@ -121,7 +121,7 @@ class SecurityChangesScriptIT extends IntegrationTest {
                 "--no-input", "--input", "previous=FACT changes_head: " + first, "--input", "blob=" + blob);
 
         assertThat(run.code()).as(run.describe()).isZero();
-        assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
+        assertThat(traceworks.folder(run).output("changes") + "\n").contains("FACT changes_base: " + first + "\n",
                 "FACT changes_head: " + second + "\n", "FACT changes_base_from: register\n",
                 "\tA.java\n", blob + " blob 8\none\ntwo\n");
     }

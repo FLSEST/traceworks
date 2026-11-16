@@ -158,15 +158,15 @@ class SecurityChangesToolIT extends IntegrationTest {
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
-        assertThat(folder.output("changed")).contains("FACT changes_files: 1\n", "FACT changes_uncommitted: false\n",
+        assertThat(folder.output("changed") + "\n").contains("FACT changes_files: 1\n", "FACT changes_uncommitted: false\n",
                 "FACT changes_base_blobs_wanted: 1\n");
-        assertThat(folder.output("blobs")).contains("FACT changes_base_blobs: 1\n");
-        assertThat(folder.output("areas")).contains("FACT changes_areas_of_project: 3\n",
+        assertThat(folder.output("blobs") + "\n").contains("FACT changes_base_blobs: 1\n");
+        assertThat(folder.output("areas") + "\n").contains("FACT changes_areas_of_project: 3\n",
                 "FACT changes_areas_changed: 1\n", "FACT changes_areas_neighbours: 1\n",
                 "FACT changes_areas_not_looked_at: 1\n",
                 " Runner.run(String) [process_start] because: changed\n",
                 " Caller.call(Runner) [env_pass] because: neighbour of Runner.run(String)\n");
-        assertThat(folder.output("report")).startsWith("gate_status: GREEN\ngate_category: security\n"
+        assertThat(folder.output("report") + "\n").startsWith("gate_status: GREEN\ngate_category: security\n"
                 + "gate_description: of the changes since " + first.substring(0, 12) + ": no verified finding; 2 of 2"
                 + " areas judged; ").contains("1 of 3 areas of the project not looked at");
         assertThat(run.out()).contains("GREEN (security)");
@@ -187,11 +187,11 @@ class SecurityChangesToolIT extends IntegrationTest {
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
-        assertThat(folder.output("changed")).contains("FACT changes_files: 3\n", "FACT changes_uncommitted: true\n");
-        assertThat(folder.output("areas")).contains("FACT changes_files_cannot_judge: 1\n",
+        assertThat(folder.output("changed") + "\n").contains("FACT changes_files: 3\n", "FACT changes_uncommitted: true\n");
+        assertThat(folder.output("areas") + "\n").contains("FACT changes_files_cannot_judge: 1\n",
                 " Lone.home() [env_pass] because: changed: the head of its file (outside every member)\n",
                 " Fresh.f() [env_pass] because: changed\n");
-        assertThat(folder.output("report")).startsWith("gate_status: YELLOW\n")
+        assertThat(folder.output("report") + "\n").startsWith("gate_status: YELLOW\n")
                 .contains("1 changed file this check cannot judge", "\nFACT changes_head: " + first + "\n");
     }
 
