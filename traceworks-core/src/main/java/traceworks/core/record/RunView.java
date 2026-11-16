@@ -47,6 +47,14 @@ import java.util.Map;
  * @param register        what the register of an audit workflow handed the run at its start, as {@code run.started}
  *                        recorded it: the head of the register's log and the files of the run's register folder;
  *                        {@code null} for a workflow that is no audit and a record of an earlier version
+ * @param ledgerStart     whether {@code run.started} says that the ledger noted the start of the run
+ *                        ({@code ledger_start}); not for a record of a version that noted no start, and not for a
+ *                        child run, which has no entry of its own
+ * @param runStarted      the SHA-256 of the {@code run.started} line, which the start entry of the ledger and the
+ *                        manifest name; {@code null} for a child run
+ * @param recordsOutputCut whether the record can name a cut of an output ({@code output_cut}): its
+ *                        {@code run.started} and every {@code run.resumed} say so in {@code records}. Not for a
+ *                        record an earlier version wrote or resumed, whose silence about a cut says nothing
  */
 public record RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                       String packageCommit, Boolean packageDirty,
@@ -56,9 +64,13 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
-                      List<ModelPick> modelChoices, RegisterHandover register, boolean recordsOutputCut) {
+                      List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                      String runStarted, boolean recordsOutputCut) {
 
-    /** A view of a run whose record does not say whether it names a cut of an output: an earlier version wrote it. */
+    /**
+     * A view of a run whose record does not say that the ledger noted its start, nor whether it names a cut of an
+     * output: an earlier version wrote it.
+     */
     public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                    String packageCommit, Boolean packageDirty,
                    String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
@@ -71,7 +83,13 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
         this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
                 execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
                 lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
-                aiHosts, parkedBy, seal, modelChoices, register, false);
+                aiHosts, parkedBy, seal, modelChoices, register, false, null, false);
+    }
+
+    /** One line about the start entry: whether the record says the ledger noted the start of the run. */
+    public String ledgerStartLine() {
+        return ledgerStart ? "start noted in the ledger: yes (traceworks verify compares the entry)"
+                : "start noted in the ledger: no (recorded by a version that noted no start)";
     }
 
     /** A view of a run of a workflow that is no audit. */

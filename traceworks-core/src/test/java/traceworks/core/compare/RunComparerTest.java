@@ -99,7 +99,7 @@ class RunComparerTest {
             RunView view = new RunView(id, "wf", "Wf", "/pkg", digest, commit, dirty, "flo", "MANUAL", execution, T0,
                     T0.plusSeconds(3), status, null, gate, steps, null, null, null, blob("definition"),
                     blob(inputsDigest), children, 10, "head", List.of(), List.of(), network, aiHosts, null, null,
-                    modelChoices, null, recordsCuts);
+                    modelChoices, null, false, null, recordsCuts);
             Manifest manifest = new Manifest(id, "wf", "Wf", digest, blob(inputsDigest).sha256(), execution, images,
                     models, 10, "head", status, gate, T0, T0.plusSeconds(3), version);
             return new RunFacts(view, manifest, inputs, aiImages);

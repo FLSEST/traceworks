@@ -190,6 +190,7 @@ final class Resuming {
         if (waiting.stream().anyMatch(RunRecords::isCancel)) {
             return cancelling.finish(run, null, waiting);
         }
+        outputs.requireStartNoted(run);
         changedCredentials(runId, view, events, prepared).ifPresent(warnings);
 
         try {
