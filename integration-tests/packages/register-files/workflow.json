@@ -1,0 +1,35 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "5a1c2f7e-8d43-4b9a-a6e0-3f2b7c9d1e58",
+  "name": "IT register files",
+  "description": "An audit without any AI whose steps read the register folder of the run ({{ register_dir }}): the files with what the register knew when the run started. Every file of the workspace is a finding with a long evidence, so the files hold more than a row of audit_findings does. Two steps try to write the folder and must fail.",
+  "metadata": {
+    "audit": {"enabled": true, "key": "register-files", "category": "test", "report_block": "report"}
+  },
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "known",
+      "config": {"command": "bash \"{{ package_dir }}/scripts/known.sh\" \"{{ register_dir }}\""}
+    },
+    {
+      "type": "shell",
+      "name": "add_a_file",
+      "config": {"command": "set -euo pipefail\ntouch \"{{ register_dir }}/probe\"", "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "change_a_file",
+      "config": {
+        "command": "set -euo pipefail\necho forged > \"{{ register_dir }}/findings.jsonl\"",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "report",
+      "config": {"command": "bash \"{{ package_dir }}/scripts/report.sh\" \"{{ project_path }}\""}
+    }
+  ]
+}
