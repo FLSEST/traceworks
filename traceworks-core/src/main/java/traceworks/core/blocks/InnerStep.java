@@ -80,6 +80,11 @@ record InnerStep(BlockDefinition block, boolean shell, boolean escapeVariables, 
 
     /** {@code command} with its placeholders filled in: quoted for a shell step, as prompt text for an AI step. */
     String resolve(ExecutionContext context, String command) {
+        if (shell) {
+            traceworks.core.engine.RegisterFolderUse.inCommand(command, context);
+        } else {
+            traceworks.core.engine.RegisterFolderUse.inPrompt(command);
+        }
         return shell
                 ? context.resolveShellTemplate(command, escapeVariables)
                 : context.resolvePromptTemplate(command);

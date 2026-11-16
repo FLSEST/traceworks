@@ -42,6 +42,7 @@ public class SimpleBlockExecutor implements BlockExecutor {
         Integer timeout = settings.number("timeout_seconds");
         boolean writableWorkspace = settings.flag("workspace_writable");
 
+        traceworks.core.engine.RegisterFolderUse.inPrompt(rawCommand);
         String command = context.resolvePromptTemplate(rawCommand);
         Map<String, Object> config = block.getConfig();
 

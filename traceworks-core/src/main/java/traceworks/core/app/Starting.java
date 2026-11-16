@@ -21,6 +21,7 @@ import traceworks.core.port.RunStore;
 import traceworks.core.port.StoredRun;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
+import traceworks.core.record.RegisterHandover;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunStart;
 import traceworks.core.record.SealView;
@@ -43,6 +44,9 @@ final class Starting {
 
     /** The run variable the engine sets to the package directory as a step sees it; no input may set it. */
     static final String PACKAGE_DIR = "package_dir";
+
+    /** The run variable the engine sets to the register folder of an audit run; no input may set it. */
+    static final String REGISTER_DIR = traceworks.core.engine.RunVariables.REGISTER_DIR;
 
     private final RunStore store;
     private final Ledger ledger;
@@ -94,6 +98,10 @@ final class Starting {
             throw new RunRefusedException("The input " + PACKAGE_DIR + " is reserved: Traceworks sets it to the"
                     + " package directory");
         }
+        if (request.inputs().containsKey(REGISTER_DIR)) {
+            throw new RunRefusedException("The input " + REGISTER_DIR + " is reserved: Traceworks sets it to the"
+                    + " register folder of the run of an audit workflow");
+        }
         // The seal first: a sealed package that changed is refused whatever else this machine has or lacks, before
         // anything of the package is used, cloned or created. The refusal is recorded in the seal log
         SealStatus seal = seals.admit(pkg, request.attended(), "run", null);
@@ -138,15 +146,18 @@ final class Starting {
         StoredRun created = create(runId, checkout);
         try (StoredRun run = created) {
             RunPaths paths = paths(run, workspace, prepared, checkout);
+            RegisterHandover handover = prepared.register() == null ? null
+                    : RegisterFolder.handover(prepared.register());
+            RegisterFolder folder = handover == null ? null : new RegisterFolder(run, handover);
             RunRecorder recorder = RunRecorder.start(run.events(), run.blobs(), clock, runId, definition)
                     .redacting(prepared.redactor()).withScratch(new IdleScratch(run, runtime, runId));
             RunOutcome outcome;
             try (RunSession session = new RunSession(run, recorder, actor, listener, asker)) {
                 recorder.runStarted(runStart(pkg, inputs, target, runtime, workspace, checkout, inputsFrom, seal,
-                        prepared.modelPicks()));
+                        prepared.modelPicks(), handover));
                 RunOptions options = preparation.options(runId, session, recorder, paths, prepared,
                         TriggerSource.MANUAL, !request.interactive(),
-                        checkout == null ? null : checkout.checkout().sha());
+                        checkout == null ? null : checkout.checkout().sha(), folder);
                 outcome = active.execute(session, runId, runtime, () -> engine.run(definition, inputs, options));
             }
             RunResult.KeptCheckout kept = checkout == null ? null : checkouts.afterRun(run, outcome.status());
@@ -200,7 +211,8 @@ final class Starting {
     private RunPaths paths(StoredRun run, String workspace, RunPreparation.Prepared prepared,
                            Checkouts.Started checkout) {
         try {
-            return preparation.paths(run, workspace, prepared);
+            // The register folder first: what the register knew when the run started, before any step
+            return preparation.paths(run, workspace, prepared, preparation.writeRegisterFolder(run, prepared));
         } catch (RunRefusedException e) {
             try {
                 run.discard();   // refused before anything was recorded: no run is left behind
@@ -236,7 +248,8 @@ final class Starting {
 
     private RunStart runStart(LoadedPackage pkg, Map<String, Object> inputs, RunTarget target,
                               ContainerRuntime runtime, String workspace, Checkouts.Started checkout,
-                              String inputsFrom, SealStatus seal, List<ModelPick> modelPicks) {
+                              String inputsFrom, SealStatus seal, List<ModelPick> modelPicks,
+                              RegisterHandover handover) {
         WorkflowDefinition definition = pkg.definition();
         return new RunStart(definition.id(), definition.name(), pkg.directory().toString(), pkg.digest(),
                 pkg.gitCommit(), pkg.gitDirty(), pkg.workflowJson(), inputs, TriggerSource.MANUAL, actor,
@@ -244,7 +257,7 @@ final class Starting {
                 runtime == null ? null : new RunStart.Runtime(runtime.name(), runtime.version()),
                 settings.outputLimitMib(), settings.aiImages(), workspace, checkout == null ? null : checkout.checkout().source(),
                 checkout == null ? null : checkout.checkout().sha(), settings.runOutputBudgetMib(), inputsFrom,
-                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks);
+                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover);
     }
 
     /** The seal as {@code run.started} records it; {@code null} for a package that is not sealed. */

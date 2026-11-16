@@ -221,9 +221,61 @@ class TraceworksRulesTest {
             assertThat(findings("previous-report-outside-audit", workflow(null,
                     audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report,
                     reader))).isEmpty();
+            assertThat(findings("previous-report-outside-audit", workflow(null, audit("enabled", false), null, report,
+                    reader))).as("an audit that is switched off has no register either").hasSize(1);
             assertThat(findings("previous-report-outside-audit", workflow(null,
                     audit("enabled", true, "key", "k", "category", "c"), null, report, reader)))
                     .as("a broken audit block is invalid-audit-config, not this").isEmpty();
+        }
+
+        /** Only the run of an audit workflow has a register folder: anywhere else the placeholder would stay as text. */
+        @Test
+        void registerDir_outsideAnAuditWorkflow_isAnError() {
+            BlockDefinition lister = block("shell", "known",
+                    config("command", "wc -l {{ register_dir }}/findings.jsonl"));
+
+            assertThat(findings("register-dir-outside-audit", workflow(null, null, null, report, lister)))
+                    .singleElement().satisfies(f -> {
+                        assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                        assertThat(f.blockIndex()).isEqualTo(1);
+                        assertThat(f.detail()).contains("register_dir").contains("metadata.audit")
+                                .contains("under another name").doesNotContain("as a context value");
+                    });
+            assertThat(findings("register-dir-outside-audit", workflow(null, audit("enabled", false), null, report,
+                    lister))).as("an audit that is switched off feeds no register and gets no folder").hasSize(1);
+            WorkflowDefinition auditWorkflow = workflow(null,
+                    audit("enabled", true, "key", "k", "category", "c", "report_block", "report"), null, report,
+                    lister);
+            assertThat(findings("register-dir-outside-audit", auditWorkflow)).isEmpty();
+            assertThat(findings("unknown-variable", auditWorkflow)).as("the engine sets it").isEmpty();
+            assertThat(findings("register-dir-outside-audit", workflow(null,
+                    audit("enabled", true, "key", "k", "category", "c"), null, report, lister)))
+                    .as("a broken audit block is invalid-audit-config, not this").isEmpty();
+        }
+
+        /**
+         * The container of an AI call has no register folder, and on a host run the prompt would carry a path of the
+         * run folder: in a prompt the placeholder is an error, in an audit workflow too.
+         */
+        @Test
+        void registerDir_inThePromptOfAnAiCall_isAnError() {
+            Map<String, Object> audit = audit("enabled", true, "key", "k", "category", "c", "report_block", "report");
+            BlockDefinition simple = block("simple", "judge", config("command", "Read {{ register_dir }}/findings.jsonl"));
+            BlockDefinition agentic = block("agentic", "fix", config("goal", "Fix it",
+                    "success_criteria", "nothing in {{ register_dir }}"));
+            BlockDefinition aiLoop = block("retry", "again", config("command", "Look at {{ register_dir }}"));
+            BlockDefinition shellLoop = block("retry", "list", config("command", "ls {{ register_dir }}",
+                    "execution_mode", "shell"));
+            BlockDefinition gated = block("simple", "gated", config("command", "Judge this",
+                    "run_if", "test -s {{ register_dir }}/findings.jsonl"));
+
+            assertThat(findings("register-dir-in-ai-prompt", workflow(null, audit, null, report, simple, agentic,
+                    aiLoop, shellLoop, gated))).extracting(AnalyzerFinding::blockIndex).containsExactly(1, 2, 3);
+            assertThat(findings("register-dir-in-ai-prompt", workflow(null, audit, null, report, simple)))
+                    .singleElement().satisfies(f -> {
+                        assertThat(f.severity()).isEqualTo(Severity.ERROR);
+                        assertThat(f.detail()).contains("register_dir").contains("AI");
+                    });
         }
 
         @Test

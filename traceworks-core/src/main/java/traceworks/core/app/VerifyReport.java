@@ -12,14 +12,24 @@ import traceworks.core.record.ChainReport;
  * @param ledgerReason why the ledger is {@value #NOT_CHECKED}, when it is for a reason other than an unfinished run;
  *                     {@code null} otherwise
  * @param ok           whether nothing is wrong: an intact chain, no manifest or ledger entry missing or
- *                     mismatched, and no recorded seal whose signature does not match
+ *                     mismatched, no recorded seal whose signature does not match, and no file of the register
+ *                     folder that is not the one recorded
  * @param seal         {@value #UNSEALED} for a run of a package that was not sealed; for a sealed one, a text that
  *                     starts with {@value #OK} when the signature the record holds is a valid one over the seal's
  *                     recorded fields, else what is wrong with it; {@value #NOT_CHECKED} when the record could not be
  *                     read
+ * @param register     {@value #NOT_CHECKED} for a run of a workflow that is no audit, which has no register folder;
+ *                     for the run of an audit workflow, a text that starts with {@value #OK} when the files of its
+ *                     register folder are the ones {@code run.started} recorded, else what differs
  */
 public record VerifyReport(ChainReport chain, String manifest, String ledger, String ledgerReason, boolean ok,
-                           String seal) {
+                           String seal, String register) {
+
+    /** A report of a run whose register folder was not looked at. */
+    public VerifyReport(ChainReport chain, String manifest, String ledger, String ledgerReason, boolean ok,
+                        String seal) {
+        this(chain, manifest, ledger, ledgerReason, ok, seal, NOT_CHECKED);
+    }
 
     /** The package of the run was not sealed. */
     public static final String UNSEALED = "unsealed";

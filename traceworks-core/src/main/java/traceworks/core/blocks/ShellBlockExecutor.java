@@ -77,6 +77,7 @@ public class ShellBlockExecutor implements BlockExecutor {
                 context.isContainerRun(), context.getSecrets());
 
         // Untrusted variables (webhook payloads) are always escaped; shell_escape_variables escapes everything.
+        traceworks.core.engine.RegisterFolderUse.inCommand(rawCommand, context);
         String command = context.resolveShellTemplate(rawCommand, escapeVariables);
         if (checked) {
             command = "set -e -o pipefail\n" + command;
@@ -153,6 +154,7 @@ public class ShellBlockExecutor implements BlockExecutor {
      * resolves as a whole, with the step's values.
      */
     static String resolveMount(String entry, ExecutionContext context) {
+        traceworks.core.engine.RegisterFolderUse.inCommand(entry, context);
         List<String> parts = colonParts(entry);
         if (parts.size() < 2 || parts.size() > 3) {
             return context.resolveTemplate(entry);

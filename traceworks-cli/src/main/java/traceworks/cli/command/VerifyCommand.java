@@ -12,8 +12,9 @@ import traceworks.core.record.ChainReport;
 import java.io.PrintStream;
 
 /**
- * {@code traceworks verify <run>}: checks the hash chain, the blobs, the manifest, the ledger entry and, for a run of
- * a sealed package, the signature of the seal the record holds.
+ * {@code traceworks verify <run>}: checks the hash chain, the blobs, the manifest, the ledger entry, for a run of
+ * a sealed package the signature of the seal the record holds, and for the run of an audit workflow the files of its
+ * register folder against the digests the record holds.
  */
 public final class VerifyCommand implements Command {
 
@@ -40,6 +41,10 @@ public final class VerifyCommand implements Command {
         out.println("ledger    " + TerminalFormat.safe(report.ledger())
                 + (report.ledgerReason() == null ? "" : " (" + TerminalFormat.safe(report.ledgerReason()) + ")"));
         out.println("seal      " + TerminalFormat.safe(report.seal()));
+        if (!VerifyReport.NOT_CHECKED.equals(report.register())) {
+            // Only the run of an audit workflow has a register folder
+            out.println("register  " + TerminalFormat.safe(report.register()));
+        }
         out.println(report.ok() ? "verified" : "verification FAILED");
         return report.ok() ? ExitCodes.OK : ExitCodes.VERIFY_FAILED;
     }

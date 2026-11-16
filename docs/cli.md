@@ -110,7 +110,9 @@ is sealed and whose seal does not hold starts no run (exit 6, see "seal, unseal 
 
 **Audit workflows.** A workflow with `metadata.audit` feeds a register at the end of every run: the findings its
 report states are compared with what the register knows, the summary says what changed, and the next run gets
-`{{ audit_findings }}` and `{{ previous_report }}`. docs/registers.md describes it; `traceworks findings` reads it.
+`{{ audit_findings }}` and `{{ previous_report }}`, and the same without their caps as files in `{{ register_dir }}`.
+docs/registers.md describes it; `traceworks findings` reads it. `register_dir`, like `package_dir`, is no input: a
+run started with `--input register_dir=...` is refused.
 
 ### resume
 
@@ -123,6 +125,11 @@ report states are compared with what the register knows, the summary says what c
 | `--allow-unsealed` | resume a run of an unsealed package without a terminal although the operator set `require_seal` to `"unattended"` |
 | `--no-input` | never ask on the terminal; a question parks the run again |
 | `--quiet` | print the summary only |
+
+A resumed run of an audit workflow goes on with the register folder it was started with (docs/registers.md, "The
+register folder of a run"), whatever the register holds by now. When a file of the folder is no longer the one
+`run.started` recorded, the resume is refused before it records anything: `Run <run> cannot resume: the register
+folder of the run changed: findings.jsonl is not the file the run started with (...)`.
 
 A resume runs the package's `workflow.json` as the run started with it: the package digest is unchanged, so it is
 the same definition. The copy of the definition in `run.started` is for the record's readers, with every secret's
@@ -336,8 +343,10 @@ differs: run B did not reproduce run A
 
 **Header.** The workflow's id and name, the package digest and commit, the inputs digest, the Traceworks version, the
 execution (`container` or `host`), each image a container started from with its id, the operator's `ai_images`,
-`ai_network` and `ai_hosts`, the picked option of each model choice (`model choice <name>`), the models, the status
-and the gate. Two runs that picked different options did not reproduce each other: the inputs differ, and a line
+`ai_network` and `ai_hosts`, the picked option of each model choice (`model choice <name>`), for an audit run the
+head of the register's log it started from (`register <key>`: `at seq 17, head 6f48...`, or `before its first
+line`), the models, the status and the gate. The register head is a field and never a difference by itself: the run
+before moved it. It tells two runs that knew the same of earlier runs from two that did not. Two runs that picked different options did not reproduce each other: the inputs differ, and a line
 names the choice and both picks. Only the fields that differ are printed, with both
 values; one line names the fields that are the same, so two equal runs give a short output.
 
@@ -424,7 +433,11 @@ same way", not "the two runs printed the same".
 commit, its description, and one line per block of the recorded definition with the step it became, or `did not
 run`), steps with their files, gate and the question it waits for. For a workflow with a model choice, a line
 `Model` names the option the run picked, whether it is the default, and its provider and model (`Model     judge =
-astra (picked): PI openai/gpt-6-astra`); `run.html` has the same as a row of its Workflow section. It names where the run's AI containers could
+astra (picked): PI openai/gpt-6-astra`); `run.html` has the same as a row of its Workflow section. For the run of
+an audit workflow, a line `Register` names the head of the register's log the run started from and how many files
+its steps were handed (`Register  hello at seq 17 (head 6f486c7c31a3), 4 files handed to the steps`, or `hello before
+its first line` when the register did not exist yet); `run.html` has the row `register` with the whole head
+(docs/registers.md, "The register folder of a run"). It names where the run's AI containers could
 connect (`AI net`), and under each AI step the hosts its container could reach and every connection it asked the
 egress proxy for; a denied one is marked `DENIED`, and the line `Egress` counts them for the whole run ("The network
 of an AI step").
@@ -450,7 +463,7 @@ Text from the run is shown with control characters made harmless, so output cann
 ### verify
 
 `traceworks verify <run>` checks the record of a run: the hash chain, the blobs, the manifest, the ledger
-entry and the seal the run started with (see docs/events.md). It prints one line for each and exits 8 when something does not hold. Bytes after the
+entry, the seal the run started with and, for the run of an audit workflow, its register folder (see docs/events.md). It prints one line for each and exits 8 when something does not hold. Bytes after the
 last line feed of a finished run's `events.jsonl` count as a problem of the chain, since nothing appends after
 `run.finished`. Those of a parked or interrupted run are a line its killed process did not finish; the next
 `resume`, `answer` or `cancel` cuts them off and records them (`run.recovered`).
@@ -478,6 +491,19 @@ ledger    ok
 seal      ok (sealed by anna@example.org, key SHA256:0pVQIJF1..., digest 5f2c...)
 verified
 ```
+
+The run of an audit workflow has one more line, `register`: the files of the run's `register/` folder are compared
+with the name, the SHA-256 and the size `run.started` recorded for each (docs/registers.md, "The register folder of
+a run"). A file that is changed, missing or added fails the verification, on a copied run folder too. A run of any
+other workflow has no such line.
+
+```
+register  ok (4 files of the register hello at seq 17)
+register  the register folder of the run changed: findings.jsonl is not the file the run started with (sha256 4a1f..., recorded 0c1e...)
+```
+
+The line says that the files are the ones the run's steps got. It does not say that the register held the truth,
+and it does not check the register: `traceworks findings <key> verify` does that.
 
 ### render
 
@@ -551,9 +577,12 @@ An audit workflow (`metadata.audit`, docs/registers.md) is understood completely
 `enabled: true` but a missing, blank or non-string `key`, `category` or `report_block`, a `schema_version` other than
 the number 1, or an `enabled` that is no boolean is the error `invalid-audit-config`; a `key` that is no register key
 (`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `report_block` that names no top-level block is
-`report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; and `{{ previous_report }}`
-in a workflow without `metadata.audit` is `previous-report-outside-audit`. Each of them refuses a run at its start:
-a broken audit block is never ignored, and only an audit workflow has a previous report (docs/workflow-format.md).
+`report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
+in a workflow that feeds no register (no `metadata.audit`, or `enabled: false`) is `previous-report-outside-audit`,
+and `{{ register_dir }}` there is `register-dir-outside-audit`; and `{{ register_dir }}` in the prompt of an AI step
+is `register-dir-in-ai-prompt` in every workflow, since the container of an AI call does not get the folder. Each
+of them refuses a run at its start: a broken audit block is never ignored, and only an audit workflow has a previous report
+and a register folder (docs/workflow-format.md).
 
 Every block setting is checked against the type and range the run accepts, at the top level and in nested blocks (a
 `switch` case, `default`), and so are the keys of `validation`. A value of the wrong type or out of range is the error
@@ -628,7 +657,9 @@ Nothing was checked: 'traceworks check <package>' says what a run would refuse.
   unless `--input` sets them. A default that is no text is shown as JSON. `Requires` is the `requires` list. `AI` is
   the workflow's own `provider`, `model` and `effort`, and `Instructions` the first line of its instructions, each
   only when the workflow has it. `Audit` names the register an audit workflow feeds (`metadata.audit`: key, category,
-  report block), or says what is wrong with the audit block.
+  report block), or says what is wrong with the audit block. For a valid one the line ends with what every step of
+  the workflow may read besides what its own block says: `its shell and tool steps read the register's files in
+  {{ register_dir }}, its AI steps do not` (docs/registers.md, "The register folder of a run").
 - **The model choices.** `Model choices` lists each choice the workflow opens ("Model choices"): how a run picks
   (`--input <choice>=<option>`), the default, every option with its provider and model, and the blocks that refer to
   it. A workflow without a choice has no such section.
@@ -890,6 +921,12 @@ counted; `{{ previous_report }}` is the text of the last valid report, its envel
 most 3000 characters; `{{ audit_items }}` is the items of the register, one row each with state, verdict digest and
 name, for the step that chooses what to judge. Before the first report they read `(no known findings)`,
 `(no previous report)` and `(no known items)`. A shell step quotes them as it quotes every untrusted text.
+
+The same reaches the steps without those caps as files: `{{ register_dir }}` is a folder of the run with
+`findings.jsonl` (every listed finding, with its whole evidence and its description), `resolved.jsonl`,
+`items.jsonl` and `previous-report.md` (the whole report). A container mounts it read-only at `/register`; the
+container of an AI step does not get it. docs/registers.md, "The register folder of a run", has the formats and
+what the run records of the folder.
 
 **Hooks.** With `hooks.register_changed` in `traceworks.json`, the program runs on the host after every audit run
 whose report changed the register (something new, resolved, reopened or due for review) or was rejected, with the
@@ -2135,7 +2172,9 @@ A run is a **container run** wherever `podman` or `docker` works. Every command 
 without `container_image`, and `run_if`, a shell condition or `items_command`, run in the built-in `shell` image. The
 workspace is mounted read-only at `/workspace` (writable with `workspace_writable: true`), the package read-only at
 `/package` and the run's scratch directory writable at `/scratch`; the command starts in `/workspace`. Steps hand
-files to each other through the scratch directory, which the run variable `{{ scratch_dir }}` names.
+files to each other through the scratch directory, which the run variable `{{ scratch_dir }}` names. The run of an
+audit workflow has one more mount, read-only at `/register`, for every container but that of an AI step: the files
+with what its register knew (`{{ register_dir }}`; docs/registers.md, "The register folder of a run").
 
 The package stays read-only also where a writable workspace holds it: the container then sees the package once more,
 read-only, at its place in `/workspace`. A writable workspace that is the package or lies inside it is refused.

@@ -275,6 +275,8 @@ public class ForEachBlockExecutor implements BlockExecutor {
     private List<String> collectItems(Map<String, Object> config, Settings settings, ExecutionContext context,
                                       StringBuilder failure) {
         if (!settings.itemsFromCommand()) return ForEachItems.staticItems(config.get("items"));
+        traceworks.core.engine.RegisterFolderUse.inCommand(BlockSettings.of("foreach", config).text("items_command"),
+                context);
         String itemsCommand = context.resolveShellTemplate(
                 BlockSettings.of("foreach", config).text("items_command"), settings.itemStep().escapeVariables());
         // items_command always runs as a shell command: it collects the iteration targets, it is no AI work

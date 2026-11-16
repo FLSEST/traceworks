@@ -178,6 +178,14 @@ class AnalyzerFindingLanguagesTest {
                 block("simple", "prev", Map.of("command", "Compare with {{ previous_report }}"))), null, null, null,
                 null, Map.of("audit", Map.of("enabled", true, "key", "k", "category", "c", "report_block", "summary")),
                 null, null, null, null), null));
+        // The register folder outside an audit workflow: register-dir-outside-audit
+        out.addAll(analyzer.analyze(new WorkflowDefinition("id", "no audit", null, List.of(
+                block("shell", "known", Map.of("command", "set -euo pipefail\nwc -l {{ register_dir }}/findings.jsonl"))),
+                null, null, null, null, null, null, null, null, null), null));
+        // The register folder in a prompt: register-dir-in-ai-prompt
+        out.addAll(analyzer.analyze(new WorkflowDefinition("id", "prompt", null, List.of(
+                block("simple", "judge", Map.of("command", "Read {{ register_dir }}/findings.jsonl"))),
+                null, null, null, null, null, null, null, null, null), null));
         // An image directory whose name is not valid: invalid-image-name
         out.addAll(analyzer.analyze(new WorkflowDefinition("id", "images", null, List.of(), null, null, null, null,
                 null, null, null, null, null), null, List.of(), List.of("MyTool")));

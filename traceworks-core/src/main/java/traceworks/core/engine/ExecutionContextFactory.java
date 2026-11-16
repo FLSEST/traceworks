@@ -252,6 +252,7 @@ final class ExecutionContextFactory {
      */
     static boolean setByAStep(String name, Object value, Map<String, Object> inputContext) {
         return !StepOutputs.isStepOutput(name) && !RUN_VARIABLES.contains(name) && !PACKAGE_DIR.equals(name)
+                && !RunVariables.REGISTER_DIR.equals(name)
                 && !(inputContext.containsKey(name) && Objects.equals(inputContext.get(name), value));
     }
 
@@ -291,6 +292,10 @@ final class ExecutionContextFactory {
         context.setVariable("workspace_source_sha", orEmpty(seed.workspaceSourceSha()));
         if (paths != null && paths.packageInContainer() != null) {
             context.setVariable(PACKAGE_DIR, paths.packageInContainer());
+        }
+        // The register folder of an audit run; no other run has the variable, whatever an input named
+        if (paths != null && paths.registerInContainer() != null) {
+            context.setVariable(RunVariables.REGISTER_DIR, paths.registerInContainer());
         }
         context.setVariable("model", seed.model() != null ? seed.model() : "");
         context.setVariable("provider", seed.provider() != null ? seed.provider() : "");
@@ -376,7 +381,7 @@ final class ExecutionContextFactory {
      * variable, unquoted in shell blocks: platform data is untrusted and quoted.
      */
     static boolean readsFromInput(String name) {
-        return !PlatformVariables.contains(name);
+        return !PlatformVariables.contains(name) && !RunVariables.REGISTER_DIR.equals(name);
     }
 
     /**

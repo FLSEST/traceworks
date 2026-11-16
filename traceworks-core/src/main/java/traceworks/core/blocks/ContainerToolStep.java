@@ -115,6 +115,7 @@ class ContainerToolStep {
                 throw new WorkflowExecutionException("container_args must not contain untrusted values (untrusted "
                         + "input, tainted block output, platform data): " + arg);
             }
+            traceworks.core.engine.RegisterFolderUse.inCommand(arg, context);
             resolved.add(context.resolveTemplate(arg));
         }
         return resolved;

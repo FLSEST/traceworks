@@ -44,6 +44,9 @@ import java.util.Map;
  * @param modelChoices    the option the run picked of each model choice its workflow declares, as
  *                        {@code run.started} recorded it; empty for a workflow without one and for a child run,
  *                        whose calls name their provider and model
+ * @param register        what the register of an audit workflow handed the run at its start, as {@code run.started}
+ *                        recorded it: the head of the register's log and the files of the run's register folder;
+ *                        {@code null} for a workflow that is no audit and a record of an earlier version
  */
 public record RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                       String packageCommit, Boolean packageDirty,
@@ -53,7 +56,23 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
-                      List<ModelPick> modelChoices) {
+                      List<ModelPick> modelChoices, RegisterHandover register) {
+
+    /** A view of a run of a workflow that is no audit. */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, null);
+    }
 
     /** A view of a run whose workflow declares no model choice. */
     public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,

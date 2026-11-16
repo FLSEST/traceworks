@@ -11,13 +11,25 @@ import java.util.List;
  * {@value #SCRATCH}), so a command reads the same on every machine; a host run mounts each one at its own host path, so
  * a path means the same on the host and in a container step.
  *
+ * <p>A run of an audit workflow has a fourth directory, the register folder: the files its register handed it at its
+ * start (docs/registers.md, "The register folder of a run"). Every container but that of an AI call mounts it,
+ * read-only, at {@value #REGISTER}.
+ *
  * @param workspace           the host path of the workspace; {@code null} for none
  * @param packageDirectory    the host path of the package; {@code null} for none
  * @param scratch             the host path of the run's scratch directory; {@code null} for none
+ * @param register            the host path of the run's register folder; {@code null} for a run of a workflow that
+ *                            is no audit
  * @param fixedContainerPaths whether containers see the directories at the fixed paths (a container run) or at their
  *                            host paths (a host run)
  */
-public record RunPaths(String workspace, String packageDirectory, String scratch, boolean fixedContainerPaths) {
+public record RunPaths(String workspace, String packageDirectory, String scratch, String register,
+                       boolean fixedContainerPaths) {
+
+    /** The paths of a run without a register folder. */
+    public RunPaths(String workspace, String packageDirectory, String scratch, boolean fixedContainerPaths) {
+        this(workspace, packageDirectory, scratch, null, fixedContainerPaths);
+    }
 
     /** Where a container run's containers see the workspace, and where their commands start. */
     public static final String WORKSPACE = "/workspace";
@@ -25,6 +37,8 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
     public static final String PACKAGE = "/package";
     /** Where a container run's containers see the scratch directory. */
     public static final String SCRATCH = "/scratch";
+    /** Where a container run's containers see the register folder of an audit run. */
+    public static final String REGISTER = "/register";
 
     /**
      * Where a container sees {@code hostPath}: below the deepest standard directory that holds it, at that
@@ -36,7 +50,8 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
         }
         String best = null;
         String fixed = null;
-        for (String[] dir : new String[][] {{workspace, WORKSPACE}, {packageDirectory, PACKAGE}, {scratch, SCRATCH}}) {
+        for (String[] dir : new String[][] {{workspace, WORKSPACE}, {packageDirectory, PACKAGE}, {scratch, SCRATCH},
+                {register, REGISTER}}) {
             String host = trimmed(dir[0]);
             if (host != null && within(hostPath, host) && (best == null || host.length() > best.length())) {
                 best = host;
@@ -52,7 +67,7 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
 
     /** Whether {@code hostPath} is one of the run's directories or lies below one. */
     public boolean holds(String hostPath) {
-        for (String dir : new String[] {workspace, packageDirectory, scratch}) {
+        for (String dir : new String[] {workspace, packageDirectory, scratch, register}) {
             if (within(hostPath, trimmed(dir))) return true;
         }
         return false;
@@ -71,6 +86,36 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
     /** Where a container sees the scratch directory; {@code null} without one. */
     public String scratchInContainer() {
         return seen(scratch, SCRATCH);
+    }
+
+    /** Where a container sees the register folder; {@code null} for a run without one. */
+    public String registerInContainer() {
+        return seen(register, REGISTER);
+    }
+
+    /**
+     * {@link #standardMounts(boolean)}, and with {@code withRegister} the register folder of an audit run, always
+     * read-only, after the scratch directory: what a container gets that is not that of an AI call.
+     */
+    public List<Mount> standardMounts(boolean writableWorkspace, boolean withRegister) {
+        List<Mount> mounts = new ArrayList<>(standardMounts(writableWorkspace));
+        if (withRegister && present(register)) {
+            // After the mounts of the run's three directories, and before the package's second mount, which is not
+            // one of them
+            int at = 0;
+            while (at < mounts.size() && !isSecondPackageMount(mounts, at)) {
+                at++;
+            }
+            mounts.add(at, new Mount(register, registerInContainer(), true));
+        }
+        return List.copyOf(mounts);
+    }
+
+    /** Whether the mount at {@code index} is the package once more, inside a writable workspace. */
+    private boolean isSecondPackageMount(List<Mount> mounts, int index) {
+        Mount mount = mounts.get(index);
+        return index > 0 && fixedContainerPaths && mount.hostPath().equals(packageDirectory)
+                && !PACKAGE.equals(mount.containerPath());
     }
 
     /**
@@ -116,15 +161,17 @@ public record RunPaths(String workspace, String packageDirectory, String scratch
 
     /**
      * Where the standard mounts lie in a container, on or below which a declared mount would cover one: the fixed paths
-     * in a container run, whether the run has the directory or not; the host paths of the directories it has in a
-     * host run.
+     * in a container run, whether the run has the directory or not, and {@value #REGISTER} only for a run that has
+     * a register folder; the host paths of the directories it has in a host run.
      */
     public List<String> standardMountPoints() {
         if (fixedContainerPaths) {
-            return List.of(WORKSPACE, PACKAGE, SCRATCH);
+            // The register folder only for a run that has one: no other run's steps lose a path they may mount at
+            return present(register) ? List.of(WORKSPACE, PACKAGE, SCRATCH, REGISTER)
+                    : List.of(WORKSPACE, PACKAGE, SCRATCH);
         }
         List<String> points = new ArrayList<>();
-        for (String dir : new String[] {workspace, packageDirectory, scratch}) {
+        for (String dir : new String[] {workspace, packageDirectory, scratch, register}) {
             String host = trimmed(dir);
             if (host != null) points.add(host);
         }

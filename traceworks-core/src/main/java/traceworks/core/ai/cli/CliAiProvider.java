@@ -158,7 +158,9 @@ public final class CliAiProvider implements AiProvider {
                         call.timeoutSeconds(), environment, List.of(), false)
                 .withNetwork(egress)
                 .withStdin(invocation.stdin())
-                .withWritableWorkspace(writableWorkspace);
+                .withWritableWorkspace(writableWorkspace)
+                // What a model reads of the register is what a step put into its prompt, not the folder
+                .withoutRegisterFolder();
         CommandResult result = runner.run(request);
         AiOutcome outcome = cli.parse(endedLines(result), call);
         if (result.timedOut()) {
