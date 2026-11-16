@@ -153,7 +153,8 @@ class LedgerStartCommandTest {
         Result all = exec("verify");
         assertThat(all.code()).isEqualTo(8);
         assertThat(all.out()).contains("problems (1)").containsPattern("(?m)^  " + id
-                + "  commit [0-9a-f]{12} \\(\"tidy\"\\) removed starts/" + id + "\\.json, which commit ");
+                + "  commit [0-9a-f]{12} \\(\"run " + id + " STARTED sha256:[0-9a-f]{64}\"\\) names starts/" + id
+                + "\\.json, and the ledger does not hold it");
     }
 
     /** Fail closed: a ledger that takes no start entry lets no step run. The run ends FAILED and the start is refused. */
@@ -244,7 +245,7 @@ class LedgerStartCommandTest {
 
     /**
      * No history is rewritten: a later, ordinary commit writes the start entry again, with the same fields. The
-     * entry is no longer what the commit that names it added, and both checks name the commit and the path.
+     * entry is no longer what the commit that names it added, and both checks name its commit, the path and both hashes.
      */
     @Test
     void anEntryChangedByALaterOrdinaryCommit_failsBothChecks() throws Exception {
@@ -252,15 +253,16 @@ class LedgerStartCommandTest {
         assertThat(exec("verify", id).code()).isZero();
         Path entry = home.resolve("ledger/starts/" + id + ".json");
         Files.writeString(entry, Files.readString(entry).replace(" : ", ": "));
-        git("commit", "-q", "-m", "run " + id + " STARTED", "--", "starts/" + id + ".json");
+        git("commit", "-q", "-m", "tidy", "--", "starts/" + id + ".json");
 
         Result one = exec("verify", id);
         assertThat(one.code()).as(one.out()).isEqualTo(8);
-        assertThat(one.out()).containsPattern("(?m)^ledger +changed: commit [0-9a-f]{12} \\(\"run " + id
-                + " STARTED\"\\) changed starts/" + id + "\\.json");
+        assertThat(one.out()).containsPattern("(?m)^ledger +changed: starts/" + id + "\\.json is not what commit"
+                + " [0-9a-f]{12} \\(\"run " + id + " STARTED sha256:[0-9a-f]{64}\"\\) left: that names the SHA-256"
+                + " [0-9a-f]{64}, and the ledger holds [0-9a-f]{64}");
         Result all = exec("verify");
         assertThat(all.code()).as(all.out()).isEqualTo(8);
-        assertThat(all.out()).contains("problems (1)", " changed starts/" + id + ".json, which commit ");
+        assertThat(all.out()).contains("problems (1)", "  " + id + "  starts/" + id + ".json is not what commit ");
     }
 
     /** The rule for the ledger's own git settings holds at the start too: no run starts that could not be checked. */
