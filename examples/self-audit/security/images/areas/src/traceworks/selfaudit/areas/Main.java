@@ -132,9 +132,10 @@ public final class Main {
             throw new Usage("--items and --items-file do not go together");
         }
         // The check of the changes: what git said changed since the base, as a step before wrote it down
-        Changes.Base base = options.containsKey("changes") ? Changes.read(Path.of(required(options, "changes"))) : null;
         RuleFile rules = RuleFile.parse(Files.readString(rulesFile));
         if (!Files.isDirectory(root)) throw new IllegalArgumentException(root + " is no directory");
+        Changes.Base base = options.containsKey("changes")
+                ? Changes.read(Path.of(required(options, "changes")), root) : null;
 
         List<Path> sourceRoots = new ArrayList<>();
         for (String given : options.getOrDefault("source-root", List.of())) {
@@ -326,7 +327,14 @@ public final class Main {
             changes.put("since", base.since());
             changes.put("previousHead", base.previousHead());
             changes.put("dirty", base.dirty());
-            changes.put("changedFiles", (long) base.lines().size());
+            changes.put("changedFiles", (long) base.files());
+            changes.put("baseDate", base.baseDate());
+            changes.put("skipped", base.skipped());
+            changes.put("removedFiles", (long) base.removed().size());
+            changes.put("unmappable", base.unmappable());
+            List<String> outside = Changes.outsideMembers(result, base.lines());
+            changes.put("outsideMembers", (long) outside.size());
+            changes.put("outside", outside.subList(0, Math.min(outside.size(), MAX_UNMAPPED_NAMED)));
             changes.put("unmappedFiles", (long) unmapped.size());
             changes.put("unmapped", unmapped.subList(0, Math.min(unmapped.size(), MAX_UNMAPPED_NAMED)));
             changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
@@ -346,7 +354,10 @@ public final class Main {
             out.println("FACT changes_base_from: " + (base.from().equals("input") ? "the input since"
                     : "the last run of this audit"));
             out.println("FACT changes_uncommitted: " + base.dirty());
-            out.println("FACT changes_files: " + base.lines().size());
+            out.println("FACT changes_files: " + base.files());
+            out.println("FACT changes_files_not_compared: " + base.unmappable().size());
+            out.println("FACT changes_commits_skipped: " + (base.skipped().isEmpty() ? "0" : base.skipped()));
+            for (String file : base.unmappable()) out.println("NOT MEASURED: changes_file " + safe(file));
             out.println("FACT changes_files_not_mapped: " + unmapped.size());
             out.println("FACT changes_areas_of_project: " + all.size());
             out.println("FACT changes_areas_changed: " + changedAreas);

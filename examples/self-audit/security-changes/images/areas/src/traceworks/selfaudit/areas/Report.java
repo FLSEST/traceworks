@@ -492,7 +492,7 @@ final class Report {
      */
     private static String gate(States.Counts states, Map<String, Object> summary) {
         if (states.highStands()) return "RED";
-        if (!states.allSettled() || !list(summary.get("knownUnowned")).isEmpty()
+        if (!states.allSettled() || !changesDoubt(summary).isEmpty() || !list(summary.get("knownUnowned")).isEmpty()
                 || number(summary.get("knownMissing")) > 0
                 || !list(summary.get("notRead")).isEmpty() || number(summary.get("javaFiles")) == 0) {
             return "YELLOW";
@@ -505,10 +505,36 @@ final class Report {
         return summary.get("changes") instanceof Map<?, ?> ? object(summary.get("changes")) : null;
     }
 
-    /** How the gate of a check of the changes begins: it speaks about the changes since the base, and says so. */
+    /**
+     * How the gate of a check of the changes begins: it speaks about the changes since the base, and says so. A run
+     * that found no changed file says that first, in plain words: its gate is about what earlier runs left, if
+     * anything.
+     */
     private static String sinceBase(Map<String, Object> summary) {
         Map<String, Object> changes = changes(summary);
-        return changes == null ? "" : "of the changes since " + shortId(text(changes.get("base"))) + ": ";
+        if (changes == null) return "";
+        String doubt = changesDoubt(summary);
+        return (number(changes.get("changedFiles")) == 0 ? "nothing changed since " : "of the changes since ")
+                + shortId(text(changes.get("base"))) + ": " + (doubt.isEmpty() ? "" : doubt + "; ");
+    }
+
+    /**
+     * Why a check of the changes cannot be GREEN whatever its verdicts say, or nothing: a file that differs and
+     * could not be compared, or commits after the last run's commit that this run's base left out.
+     */
+    private static String changesDoubt(Map<String, Object> summary) {
+        Map<String, Object> changes = changes(summary);
+        if (changes == null) return "";
+        List<String> doubts = new ArrayList<>();
+        int unmappable = list(changes.get("unmappable")).size();
+        if (unmappable > 0) doubts.add(count(unmappable, "changed file") + " could not be compared");
+        String skipped = text(changes.get("skipped"));
+        if (skipped.equals("unknown")) {
+            doubts.add("the commit of the last run is not in this checkout, so commits may have been skipped");
+        } else if (skipped.matches("[1-9][0-9]{0,8}")) {
+            doubts.add(count(Integer.parseInt(skipped), "commit") + " after the last run skipped and not judged");
+        }
+        return String.join("; ", doubts);
     }
 
     /** How the gate of a check of the changes ends: how much of the project it does not speak about. */
@@ -539,17 +565,32 @@ final class Report {
                 .append(count(number(changes.get("areasOfProject")), "area"))
                 .append(" of the project that this run did not look at; the long audit judges every area.\n\n");
         md.append("## What was looked at\n\n| | |\n|---|---|\n");
-        row(md, "Base: the commit the changes are measured from", fullId(base));
+        String date = text(changes.get("baseDate"));
+        row(md, "Base: the commit the changes are measured from", fullId(base)
+                + (date.matches("[0-9T:+Z-]{1,40}") ? ", committed " + date : ""));
         row(md, "Where the base is from", input ? "the input `since`: " + code(text(changes.get("since")))
                 : "the workspace commit of the last run of this audit, as its report names it");
         row(md, "Workspace commit", fullId(head) + (dirty ? ", with changes that are in no commit; they count as changed"
                 : ", with nothing uncommitted"));
+        String skipped = text(changes.get("skipped"));
         if (input && !previous.isEmpty() && !previous.equals(base)) {
-            row(md, "Workspace commit of the last run of this audit", fullId(previous) + ": not the base of this run."
-                    + " What changed between the two was looked at only where this run's changes reach");
+            row(md, "Workspace commit of the last run of this audit", fullId(previous) + ": not the base of this run");
         }
-        row(md, "Changed files", number(changes.get("changedFiles")) + ", " + number(changes.get("unmappedFiles"))
-                + " of them no Java source the tool read (not mapped to an area)");
+        if (skipped.equals("unknown")) {
+            row(md, "**Commits skipped**", "unknown: the commit of the last run is not in this checkout. The run was"
+                    + " started with `skip=yes`. The gate is not GREEN over that");
+        } else if (skipped.matches("[1-9][0-9]{0,8}")) {
+            row(md, "**Commits skipped**", "**" + skipped + "**: the commits after " + fullId(previous) + " up to "
+                    + fullId(base) + " (`git log " + shortId(previous) + ".." + shortId(base) + "`) are judged by no"
+                    + " run of this check. The run was started with `skip=yes`. The gate is not GREEN over that, and"
+                    + " the next run goes on from this run's workspace commit");
+        }
+        row(md, "Files that differ from the base", number(changes.get("changedFiles")) + " ("
+                + number(changes.get("removedFiles")) + " removed; " + number(changes.get("unmappedFiles"))
+                + " changed or new that are no Java source the tool read, not mapped to an area)");
+        row(md, "Changed files that could not be compared", String.valueOf(list(changes.get("unmappable")).size()));
+        row(md, "Changed places in no member (an import, the head of a class): no area comes from them",
+                String.valueOf(number(changes.get("outsideMembers"))));
         row(md, "Changed members", String.valueOf(number(changes.get("changedMembers"))));
         row(md, "Areas of the project", String.valueOf(number(changes.get("areasOfProject"))));
         row(md, "Areas with a changed line", String.valueOf(number(changes.get("changedAreas"))));
@@ -565,6 +606,15 @@ final class Report {
             md.append(": ").append(String.join(", ", unmapped.stream().map(f -> code(String.valueOf(f))).toList()))
                     .append("\n");
         }
+        named(md, "Changed files that could not be compared. Nothing mapped them to an area, so the gate is not"
+                + " GREEN", list(changes.get("unmappable")), list(changes.get("unmappable")).size());
+        named(md, "Changed places that lie in no member", list(changes.get("outside")),
+                number(changes.get("outsideMembers")));
+        if (number(changes.get("changedFiles")) == 0) {
+            md.append("\n**Nothing changed.** No file of the workspace differs from the base")
+                    .append(input ? "" : ", the workspace commit of the last run")
+                    .append(". What this run judged, if anything, is what earlier runs left open or without a verdict.\n");
+        }
         md.append("\n## Why each area was in\n\n");
         if (areas.isEmpty()) md.append("No area: nothing changed in an area or next to one, and nothing was left open.\n");
         for (Map<String, Object> area : areas) {
@@ -572,6 +622,15 @@ final class Report {
                     .append(": ").append(plain(text(area.get("reason")))).append("\n");
         }
         md.append("\n");
+    }
+
+    /** A line that names files or places of the workspace, the first of them when there are more; nothing for none. */
+    private static void named(StringBuilder md, String what, List<?> names, int all) {
+        if (names.isEmpty()) return;
+        md.append("\n").append(what);
+        if (all > names.size()) md.append(", the first ").append(names.size()).append(" of ").append(all);
+        md.append(": ").append(String.join(", ", names.stream().map(n -> code(String.valueOf(n))).toList()))
+                .append("\n");
     }
 
     private static String description(List<Finding> verified, List<Finding> unverified, List<String> notAnswered,

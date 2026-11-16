@@ -92,54 +92,25 @@ class ChangesTest {
         return reasons;
     }
 
+    private static List<Range> changed(String before, String now) {
+        return Changes.changedLines(before.isEmpty() ? List.of() : List.of(before.split(" ")),
+                now.isEmpty() ? List.of() : List.of(now.split(" ")));
+    }
+
     @Test
-    void theLinesOfADiff_areTheAddedAndRewrittenLinesOfEachFile_andTheLinesAroundARemoval() {
-        String diff = """
-                diff --git a/p/A.java b/p/A.java
-                index 1111111..2222222 100644
-                --- a/p/A.java
-                +++ b/p/A.java
-                @@ -3 +3,2 @@ class A {
-                -old
-                +new
-                +++ b/p/Fake.java
-                @@ -10,2 +10,0 @@
-                -gone
-                -gone too
-                @@ -20,0 +19 @@
-                +added
-                \\ No newline at end of file
-                diff --git a/p/Removed.java b/p/Removed.java
-                deleted file mode 100644
-                --- a/p/Removed.java
-                +++ /dev/null
-                @@ -1,3 +0,0 @@
-                -a
-                -b
-                -c
-                diff --git a/p/New File.java b/p/New File.java
-                new file mode 100644
-                --- /dev/null
-                +++ b/p/New File.java\t
-                @@ -0,0 +1,2 @@
-                +x
-                +y
-                diff --git "a/p/Um\\303\\244.java" "b/p/Um\\303\\244.java"
-                --- "a/p/Um\\303\\244.java"
-                +++ "b/p/Um\\303\\244.java"
-                @@ -1 +1 @@
-                -a
-                +b
-                """;
-
-        Map<String, List<Range>> lines = Changes.lines(diff, "p/Untracked.java\0notes.txt\0");
-
-        assertThat(lines).containsOnlyKeys("p/A.java", "p/New File.java", "p/Umä.java", "p/Untracked.java", "notes.txt");
-        assertThat(lines.get("p/A.java")).as("a line of code that looks like a file header is code")
-                .containsExactly(new Range(3, 4), new Range(10, 11), new Range(19, 19));
-        assertThat(lines.get("p/New File.java")).containsExactly(new Range(1, 2));
-        assertThat(lines.get("p/Umä.java")).containsExactly(new Range(1, 1));
-        assertThat(lines.get("p/Untracked.java")).containsExactly(new Range(1, Integer.MAX_VALUE));
+    void theChangedLines_areTheLinesTheBaseDoesNotHaveInTheirPlace_andTheLinesAroundARemoval() {
+        assertThat(changed("a b c", "a b c")).isEmpty();
+        assertThat(changed("a b c", "a X c")).as("rewritten").containsExactly(new Range(2, 2));
+        assertThat(changed("a b c", "a b n1 n2 c")).as("added").containsExactly(new Range(3, 4));
+        assertThat(changed("a b c d", "a d")).as("removed: the lines around the gap").containsExactly(new Range(1, 2));
+        assertThat(changed("a b c", "b c")).as("removed at the start").containsExactly(new Range(1, 1));
+        assertThat(changed("a b c", "a b")).as("removed at the end").containsExactly(new Range(2, 3));
+        assertThat(changed("a b c d e", "a X c e n")).as("several places")
+                .containsExactly(new Range(2, 2), new Range(3, 4), new Range(5, 5));
+        assertThat(changed("", "a b")).as("a file that was empty").containsExactly(new Range(1, 2));
+        assertThat(changed("a b", "")).as("a file that is empty now").containsExactly(new Range(1, 1));
+        assertThat(changed("a b a b", "b a b a")).as("moved lines are a removal and an addition")
+                .containsExactly(new Range(1, 1), new Range(4, 4));
     }
 
     @Test
@@ -228,19 +199,34 @@ class ChangesTest {
         assertThat(pick.connected()).extracting(m -> m.member().label()).containsExactly("Helper.help(String)");
     }
 
-    @Test
-    void theFolderOfTheStepBefore_givesTheBaseTheHeadAndTheLines_andARefIsNoCommitId() throws IOException {
-        Path dir = Files.createDirectories(root.resolve("changes"));
-        Files.writeString(dir.resolve("base"), "a".repeat(40) + "\n");
+    /** A folder as the step before writes it, with the given manifest. */
+    private Path folder(String manifest) throws IOException {
+        Path dir = Files.createDirectories(root.resolve("changes/base")).getParent();
+        Files.writeString(dir.resolve("base-commit"), "a".repeat(40) + "\n");
         Files.writeString(dir.resolve("head"), "b".repeat(40) + "\n");
         Files.writeString(dir.resolve("from"), "input\n");
         Files.writeString(dir.resolve("since"), "v1.0\n");
         Files.writeString(dir.resolve("previous-head"), "\n");
         Files.writeString(dir.resolve("dirty"), "true\n");
-        Files.writeString(dir.resolve("diff"), "+++ b/A.java\n@@ -1 +1 @@\n-a\n+b\n");
-        Files.writeString(dir.resolve("untracked"), "");
+        Files.writeString(dir.resolve("base-date"), "2026-11-10T09:00:00+01:00\n");
+        Files.writeString(dir.resolve("skipped"), "3\n");
+        Files.writeString(dir.resolve("manifest"), manifest);
+        return dir;
+    }
 
-        Changes.Base base = Changes.read(dir);
+    @Test
+    void theFolderOfTheStepBefore_givesTheBaseAndEveryFileThatDiffers_withTheLinesOfAChangedJavaFile()
+            throws IOException {
+        Path work = Files.createDirectories(root.resolve("work/src"));
+        Files.writeString(work.resolve("A.java"), "one\r\nTWO\r\nthree\r\n");
+        Files.write(work.resolve("Latin.java"), new byte[] {'a', '\n', (byte) 0xE4, '\n'});
+        Path dir = folder("M\0src/A.java\0" + "1\0" + "M\0src/Latin.java\0" + "2\0" + "M\0pom.xml\0\0"
+                + "A\0src/New.java\0\0" + "D\0src/Gone.java\0\0" + "U\0src/Odd.java\0\0" + "M\0src/Lost.java\0" + "3\0");
+        Files.writeString(dir.resolve("base/1"), "one\ntwo\nthree\n");
+        Files.write(dir.resolve("base/2"), new byte[] {'a', '\n', (byte) 0xF6, '\n'});
+        Files.writeString(dir.resolve("base/3"), "x\n");
+
+        Changes.Base base = Changes.read(dir, root.resolve("work"));
 
         assertThat(base.base()).isEqualTo("a".repeat(40));
         assertThat(base.head()).isEqualTo("b".repeat(40));
@@ -248,10 +234,42 @@ class ChangesTest {
         assertThat(base.since()).isEqualTo("v1.0");
         assertThat(base.previousHead()).isEmpty();
         assertThat(base.dirty()).isTrue();
-        assertThat(base.lines()).containsOnlyKeys("A.java");
+        assertThat(base.baseDate()).isEqualTo("2026-11-10T09:00:00+01:00");
+        assertThat(base.skipped()).isEqualTo("3");
+        assertThat(base.lines()).as("line ends alone are no change; bytes that are no UTF-8 are compared all the same")
+                .containsOnly(Map.entry("src/A.java", List.of(new Range(2, 2))),
+                        Map.entry("src/Latin.java", List.of(new Range(2, 2))), Map.entry("pom.xml", List.of()),
+                        Map.entry("src/New.java", List.of(new Range(1, Integer.MAX_VALUE))),
+                        Map.entry("src/Lost.java", List.of(new Range(1, Integer.MAX_VALUE))));
+        assertThat(base.removed()).containsExactly("src/Gone.java");
+        assertThat(base.unmappable()).as("a changed file is never dropped: what could not be compared is named")
+                .containsExactly("src/Odd.java (not a readable regular file)",
+                        "src/Lost.java (it differs from the base, and its lines could not be compared)");
+        assertThat(base.files()).isEqualTo(7);
+    }
 
-        Files.writeString(dir.resolve("base"), "main\n");
-        assertThatThrownBy(() -> Changes.read(dir)).isInstanceOf(IllegalArgumentException.class)
+    @Test
+    void aFolderThatDoesNotHold_isRefused() throws IOException {
+        Path work = Files.createDirectories(root.resolve("work"));
+        Path dir = folder("M\0pom.xml\0");
+        assertThatThrownBy(() -> Changes.read(dir, work)).hasMessageContaining("the manifest").hasMessageContaining("is cut");
+        Files.writeString(dir.resolve("manifest"), "X\0pom.xml\0\0");
+        assertThatThrownBy(() -> Changes.read(dir, work)).hasMessageContaining("an unknown status");
+        Files.writeString(dir.resolve("manifest"), "");
+        Files.writeString(dir.resolve("base-commit"), "main\n");
+        assertThatThrownBy(() -> Changes.read(dir, work)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("is no commit id");
+    }
+
+    @Test
+    void aChangedLineOutsideEveryMember_isNamed_andPicksNoArea() throws IOException {
+        project();
+        Map<String, List<Range>> lines = Map.of(SRC + "p/Runner.java", List.of(new Range(1, 2)));
+
+        assertThat(reasons(lines)).isEmpty();
+        Result result = Finder.find(root, List.of(root.resolve(SRC)), RuleFile.parse(RULES));
+        assertThat(Changes.outsideMembers(result, lines)).containsExactly(SRC + "p/Runner.java:1-2");
+        assertThat(Changes.outsideMembers(result, Map.of(SRC + "p/Runner.java",
+                List.of(new Range(1, Integer.MAX_VALUE))))).as("a new file has members").isEmpty();
     }
 }

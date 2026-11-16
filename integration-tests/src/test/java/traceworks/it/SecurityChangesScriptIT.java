@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * The script of the short security check ({@code examples/self-audit/security-changes/scripts/changes.sh}) as it
  * ships, in the built-in shell image: git reads the history of the workspace through the read-only mount, without
- * network, as the person who runs Traceworks; and the checkout of a run started with {@code --source} carries the
+ * network, as the person who runs Traceworks, with plumbing commands only; and the checkout of a run started with {@code --source} carries the
  * history the script needs. The package here is the script's step alone: the area finder and the verdicts are
  * tested without a container (examples/self-audit/tests). The workspace is made a git repository with the git of
  * the machine that runs the suite.
@@ -37,7 +37,7 @@ class SecurityChangesScriptIT extends IntegrationTest {
                   "name": "changes",
                   "config": {
                     "values": {"SINCE": "{{ since }}", "PREVIOUS_REPORT": "{{ previous }}"},
-                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \\"$SINCE\\" \\"$PREVIOUS_REPORT\\"; cat {{ scratch_dir }}/changes/diff",
+                    "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \\"$SINCE\\" \\"$PREVIOUS_REPORT\\"; tr '\\\\0' ' ' < {{ scratch_dir }}/changes/manifest; cat {{ scratch_dir }}/changes/base/1",
                     "shell_escape_variables": true
                   }
                 }
@@ -98,8 +98,8 @@ class SecurityChangesScriptIT extends IntegrationTest {
 
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
-                "FACT changes_head: " + second + "\n", "FACT changes_uncommitted: true\n", "+++ b/A.java\n",
-                "+TWO\n", "+three\n");
+                "FACT changes_head: " + second + "\n", "FACT changes_uncommitted: true\n", "M A.java 1 ",
+                "one\ntwo\n");
         assertThat(traceworks.workspace().resolve(".git/index.lock")).doesNotExist();
     }
 
@@ -121,6 +121,6 @@ class SecurityChangesScriptIT extends IntegrationTest {
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(traceworks.folder(run).output("changes")).contains("FACT changes_base: " + first + "\n",
                 "FACT changes_head: " + second + "\n", "FACT changes_base_from: register\n",
-                "FACT changes_uncommitted: false\n", "+TWO\n");
+                "FACT changes_uncommitted: false\n", "M A.java 1 ", "one\ntwo\n");
     }
 }

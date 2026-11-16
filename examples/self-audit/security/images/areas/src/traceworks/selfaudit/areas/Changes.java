@@ -19,17 +19,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * Which areas a check of the changes looks at: the ones whose lines changed since a base commit, and the ones one
  * call away from a member that changed, in either direction ({@link Finder.Result#calls}).
  *
- * <p>What changed is git's word, read from a folder a step before wrote ({@link #read}): the base and the head
- * commit, and the unified diff between the base and the files as they are, with the files git does not track. The
- * tool starts no git itself. A line counts as changed when the diff adds or rewrites it; where lines were only
- * removed, the two lines around the gap count. A file git does not track is changed as a whole.
+ * <p>Which files differ from the base is the word of a step before, read from the folder it wrote ({@link #read}):
+ * the base and the head commit, and a manifest of the files whose content differs, with the bytes the base has of
+ * each changed Java file. That step compares content; no diff of git, no index and no ignore rule had a say, so the
+ * workspace cannot hide a file from it. Which <em>lines</em> changed is decided here, by comparing the two versions
+ * line by line ({@link #changedLines}). The tool starts no git. A line counts as changed when the workspace has it
+ * and the base does not have it there; where lines were only removed, the two lines around the gap count. A file
+ * the base does not have is changed as a whole. A file that could not be compared is named
+ * ({@link Base#unmappable}), and the report does not go GREEN over it.
  *
  * <p>An area is <em>changed</em> when a changed line lies in it, or when a member it shows a part of changed outside
  * that part. It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
@@ -42,8 +45,10 @@ final class Changes {
     static final int MAX_CONNECTED = 4;
     static final int MAX_CONNECTED_LINES = 60;
     private static final int MAX_NAMED = 5;
+    /** Above this many pairs of lines, the part of a file between its common start and end counts as rewritten. */
+    private static final long MAX_COMPARED = 4_000_000;
 
-    private static final Pattern HUNK = Pattern.compile("@@ -\\d+(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
+    private static final String NOT_REGULAR = " (not a readable regular file)";
     private static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
 
     private Changes() {
@@ -58,7 +63,7 @@ final class Changes {
     }
 
     /**
-     * What the step before found out about the base.
+     * What the step before found out about the base, and what differs from it.
      *
      * @param base         the commit the changes are measured from
      * @param head         the commit the workspace is at
@@ -66,11 +71,25 @@ final class Changes {
      *                     workspace commit of the last run of this audit)
      * @param since        the input as it was given; empty without one
      * @param previousHead the workspace commit of the last run of this audit; empty when no report names one
-     * @param dirty        whether the workspace holds changes that are in no commit
-     * @param lines        the changed lines of each file, by its path below the root
+     * @param dirty        whether the workspace differs from its own commit
+     * @param lines        the changed lines of each file that differs and is still there, by its path below the
+     *                     root; no range for a file whose lines were not compared (no Java file)
+     * @param baseDate     when the base was committed, as git writes it; empty when the step did not say
+     * @param skipped      how many commits lie after the last run's commit and before the base, which this run
+     *                     leaves unjudged: a number, {@code unknown} when the last run's commit is not in the
+     *                     checkout, or empty when no earlier run is known
+     * @param removed      the files the base has and the workspace does not
+     * @param unmappable   the files that differ or may differ and could not be compared, each with the reason
      */
     record Base(String base, String head, String from, String since, String previousHead, boolean dirty,
-                Map<String, List<Range>> lines) {
+                Map<String, List<Range>> lines, String baseDate, String skipped, List<String> removed,
+                List<String> unmappable) {
+
+        /** Every file the step named: changed, new, removed or not compared. */
+        int files() {
+            return lines.size() + removed.size()
+                    + (int) unmappable.stream().filter(u -> u.endsWith(NOT_REGULAR)).count();
+        }
     }
 
     /** Why an area is looked at, and the changed members it is connected with outside its own lines. */
@@ -83,11 +102,17 @@ final class Changes {
     }
 
     /**
-     * Reads the folder the step before wrote: {@code base}, {@code head}, {@code from}, {@code since},
-     * {@code previous-head}, {@code dirty}, {@code diff} and {@code untracked} (names ended by a NUL).
+     * Reads the folder the step before wrote: {@code base-commit}, {@code head}, {@code from}, {@code since},
+     * {@code previous-head}, {@code dirty}, {@code base-date}, {@code skipped}, {@code manifest} and {@code base/}.
+     * The manifest holds three fields per file, each ended by a NUL: the status ({@code M} differs, {@code A} new,
+     * {@code D} removed, {@code U} not compared), the path below the root, and the name of the file under
+     * {@code base/} with the bytes the base has, or nothing. Anything else in the manifest is refused: half a list
+     * must not pass for a whole one.
+     *
+     * @param root the workspace, where the files are as they are now
      */
-    static Base read(Path dir) throws IOException {
-        String base = file(dir, "base").strip();
+    static Base read(Path dir, Path root) throws IOException {
+        String base = file(dir, "base-commit").strip();
         String head = file(dir, "head").strip();
         String from = file(dir, "from").strip();
         if (!COMMIT.matcher(base).matches()) throw new IllegalArgumentException("the base in " + dir + " is no commit id");
@@ -95,98 +120,152 @@ final class Changes {
         if (!from.equals("input") && !from.equals("register")) {
             throw new IllegalArgumentException("the base in " + dir + " does not say where it is from");
         }
-        String previous = Files.exists(dir.resolve("previous-head")) ? file(dir, "previous-head").strip() : "";
-        return new Base(base, head, from, Files.exists(dir.resolve("since")) ? file(dir, "since").strip() : "",
-                COMMIT.matcher(previous).matches() ? previous : "", file(dir, "dirty").strip().equals("true"),
-                lines(file(dir, "diff"), file(dir, "untracked")));
+        String previous = optional(dir, "previous-head");
+        String skipped = optional(dir, "skipped");
+        if (!skipped.matches("\\d{0,9}|unknown")) throw new IllegalArgumentException("the skipped commits in " + dir + " are no number");
+        String date = optional(dir, "base-date");
+        Map<String, List<Range>> lines = new TreeMap<>();
+        List<String> removed = new ArrayList<>();
+        List<String> unmappable = new ArrayList<>();
+        String[] fields = file(dir, "manifest").split("\0", -1);
+        if (fields.length % 3 != 1 || !fields[fields.length - 1].isEmpty()) {
+            throw new IllegalArgumentException("the manifest in " + dir + " is cut");
+        }
+        for (int i = 0; i + 2 < fields.length; i += 3) {
+            String status = fields[i];
+            String path = fields[i + 1];
+            String kept = fields[i + 2];
+            if (path.isEmpty() || !kept.matches("\\d{0,9}")) {
+                throw new IllegalArgumentException("the manifest in " + dir + " holds a record that is none");
+            }
+            switch (status) {
+                case "A" -> lines.put(path, List.of(new Range(1, Integer.MAX_VALUE)));
+                case "D" -> removed.add(path);
+                case "U" -> unmappable.add(path + NOT_REGULAR);
+                case "M" -> {
+                    if (kept.isEmpty()) {
+                        lines.put(path, List.of());
+                        break;
+                    }
+                    Path now = root.resolve(path);
+                    try {
+                        lines.put(path, changedLines(textLines(Files.readAllBytes(dir.resolve("base").resolve(kept))),
+                                textLines(Files.readAllBytes(now))));
+                    } catch (IOException e) {
+                        // It differs, and nothing can say where: the whole file counts, and the report names it
+                        lines.put(path, List.of(new Range(1, Integer.MAX_VALUE)));
+                        unmappable.add(path + " (it differs from the base, and its lines could not be compared)");
+                    }
+                }
+                default -> throw new IllegalArgumentException("the manifest in " + dir + " holds an unknown status");
+            }
+        }
+        return new Base(base, head, from, optional(dir, "since"), COMMIT.matcher(previous).matches() ? previous : "",
+                file(dir, "dirty").strip().equals("true"), lines, date.matches("[0-9T:+Z-]{1,40}") ? date : "",
+                skipped, List.copyOf(removed), List.copyOf(unmappable));
     }
 
     private static String file(Path dir, String name) throws IOException {
         return Files.readString(dir.resolve(name), StandardCharsets.UTF_8);
     }
 
-    /**
-     * The changed lines of each file, from a unified diff ({@code git diff -U0}, with the prefixes {@code a/} and
-     * {@code b/}) and the names of the files git does not track, each ended by a NUL. A removed file has no lines and
-     * is not in the map. A hunk is read by the line counts of its header, so a line of code that looks like a header
-     * is code.
-     */
-    static Map<String, List<Range>> lines(String diff, String untracked) {
-        Map<String, List<Range>> lines = new TreeMap<>();
-        String file = null;
-        int oldLeft = 0;
-        int newLeft = 0;
-        for (String line : diff.split("\n", -1)) {
-            if (line.startsWith("\\")) continue;
-            if (oldLeft > 0 || newLeft > 0) {
-                if (line.startsWith("-") && oldLeft > 0) {
-                    oldLeft--;
-                    continue;
-                }
-                if (line.startsWith("+") && newLeft > 0) {
-                    newLeft--;
-                    continue;
-                }
-                // Not what the header announced: the hunk is over, and the line is read like any other
-                oldLeft = 0;
-                newLeft = 0;
-            }
-            if (line.startsWith("+++ ")) {
-                file = path(line.substring(4));
-                continue;
-            }
-            Matcher hunk = HUNK.matcher(line);
-            if (!hunk.matches() || file == null) continue;
-            oldLeft = hunk.group(1) == null ? 1 : number(hunk.group(1));
-            int start = number(hunk.group(2));
-            newLeft = hunk.group(3) == null ? 1 : number(hunk.group(3));
-            // Lines were only removed: the lines on both sides of the gap are what changed here
-            Range range = newLeft == 0 ? new Range(Math.max(1, start), start + 1) : new Range(start, start + newLeft - 1);
-            lines.computeIfAbsent(file, k -> new ArrayList<>()).add(range);
-        }
-        for (String name : untracked.split("\0")) {
-            if (!name.isEmpty()) lines.put(name, List.of(new Range(1, Integer.MAX_VALUE)));
-        }
+    private static String optional(Path dir, String name) throws IOException {
+        return Files.exists(dir.resolve(name)) ? file(dir, name).strip() : "";
+    }
+
+    /** The lines of a file, whatever its encoding: each byte a character, a carriage return before a line end dropped. */
+    private static List<String> textLines(byte[] bytes) {
+        String text = new String(bytes, StandardCharsets.ISO_8859_1);
+        List<String> lines = new ArrayList<>();
+        for (String line : text.split("\n", -1)) lines.add(line.endsWith("\r") ? line.substring(0, line.length() - 1) : line);
+        if (!lines.isEmpty() && lines.getLast().isEmpty()) lines.removeLast();
         return lines;
     }
 
-    private static int number(String digits) {
-        return digits.length() > 9 ? Integer.MAX_VALUE / 2 : Integer.parseInt(digits);
-    }
-
-    /** The file a {@code +++} line names, without its prefix; {@code null} for a removed file. */
-    private static String path(String written) {
-        String name = written.endsWith("\t") ? written.substring(0, written.length() - 1) : written;
-        if (name.startsWith("\"") && name.endsWith("\"") && name.length() >= 2) name = unquoted(name);
-        if (name.equals("/dev/null")) return null;
-        return name.startsWith("b/") ? name.substring(2) : name;
-    }
-
-    /** A name git wrote in quotes: {@code \\}, {@code \"}, {@code \t}, {@code \n} and bytes as three octal digits. */
-    private static String unquoted(String quoted) {
-        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
-        String inner = quoted.substring(1, quoted.length() - 1);
-        for (int i = 0; i < inner.length(); i++) {
-            char c = inner.charAt(i);
-            if (c != '\\' || i + 1 >= inner.length()) {
-                bytes.writeBytes(String.valueOf(c).getBytes(StandardCharsets.UTF_8));
-                continue;
+    /**
+     * The lines of {@code now} that {@code before} does not have in their place, as ranges of line numbers of
+     * {@code now}: a longest common subsequence of the two decides which lines stayed. Where lines of
+     * {@code before} are gone and none came, the line before the gap and the line after it are the range. Two
+     * versions that hold the same lines give none (they differed in their line ends only).
+     */
+    static List<Range> changedLines(List<String> before, List<String> now) {
+        int start = 0;
+        while (start < before.size() && start < now.size() && before.get(start).equals(now.get(start))) start++;
+        int endBefore = before.size();
+        int endNow = now.size();
+        while (endBefore > start && endNow > start && before.get(endBefore - 1).equals(now.get(endNow - 1))) {
+            endBefore--;
+            endNow--;
+        }
+        int n = endBefore - start;
+        int m = endNow - start;
+        // kept[j]: line start + j of now stayed
+        boolean[] kept = new boolean[m];
+        // gapBefore[j]: lines of before are gone right before line start + j of now (j == m: before the common end)
+        boolean[] gapBefore = new boolean[m + 1];
+        if (n > 0 && m > 0 && (long) n * m <= MAX_COMPARED) {
+            int[][] common = new int[n + 1][m + 1];
+            for (int i = n - 1; i >= 0; i--) {
+                for (int j = m - 1; j >= 0; j--) {
+                    common[i][j] = before.get(start + i).equals(now.get(start + j)) ? common[i + 1][j + 1] + 1
+                            : Math.max(common[i + 1][j], common[i][j + 1]);
+                }
             }
-            char next = inner.charAt(++i);
-            if (next >= '0' && next <= '3' && i + 2 < inner.length()
-                    && inner.substring(i, i + 3).matches("[0-7]{3}")) {
-                bytes.write(Integer.parseInt(inner.substring(i, i + 3), 8));
-                i += 2;
-            } else {
-                bytes.write(switch (next) {
-                    case 't' -> '\t';
-                    case 'n' -> '\n';
-                    case 'r' -> '\r';
-                    default -> next;
-                });
+            int i = 0;
+            int j = 0;
+            while (i < n && j < m) {
+                if (before.get(start + i).equals(now.get(start + j))) {
+                    kept[j] = true;
+                    i++;
+                    j++;
+                } else if (common[i + 1][j] >= common[i][j + 1]) {
+                    gapBefore[j] = true;
+                    i++;
+                } else {
+                    j++;
+                }
+            }
+            if (i < n) gapBefore[j] = true;
+        } else if (n > 0) {
+            gapBefore[0] = true;
+        }
+        List<Range> ranges = new ArrayList<>();
+        int from = -1;
+        for (int j = 0; j <= m; j++) {
+            boolean changed = j < m && !kept[j];
+            if (changed && from < 0) from = j;
+            if (!changed && from >= 0) {
+                ranges.add(new Range(start + from + 1, start + j));
+                from = -1;
+            }
+            // Only removed here: no changed line of now touches the gap
+            if (gapBefore[j] && !changed && (j == 0 || kept[j - 1])) {
+                int line = start + j;
+                ranges.add(new Range(Math.max(1, line), line + 1));
             }
         }
-        return bytes.toString(StandardCharsets.UTF_8);
+        return List.copyOf(ranges);
+    }
+
+    /**
+     * The changed lines of the Java files the finder read that lie in no member: an import, the head of a class, an
+     * annotation of a type. No area and no neighbour comes from them, so they are counted and named. Each as
+     * {@code <file>:<from>-<to>}.
+     */
+    static List<String> outsideMembers(Result result, Map<String, List<Range>> lines) {
+        Map<String, List<Declared>> byFile = new HashMap<>();
+        for (Declared member : result.members()) byFile.computeIfAbsent(member.file(), k -> new ArrayList<>()).add(member);
+        List<String> outside = new ArrayList<>();
+        for (SourceFile file : result.files()) {
+            for (Range range : lines.getOrDefault(file.path(), List.of())) {
+                int to = Math.min(range.to(), Math.max(file.lines().size(), 1));
+                if (range.from() > to) continue;
+                boolean inMember = byFile.getOrDefault(file.path(), List.of()).stream()
+                        .anyMatch(m -> m.member().start() <= to && m.member().end() >= range.from());
+                if (!inMember) outside.add(file.path() + ":" + range.from() + "-" + to);
+            }
+        }
+        return outside;
     }
 
     /** The members with a changed line, in the order the finder lists them. */

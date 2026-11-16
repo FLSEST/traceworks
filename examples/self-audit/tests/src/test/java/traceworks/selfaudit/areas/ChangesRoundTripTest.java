@@ -21,12 +21,11 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The package {@code security-changes} through the real engine and into its register, across runs with different
  * bases: a host run on a git repository, the package's own workflow and script, and a shell loop in the model's
- * place. No AI and no container. It needs {@code bash} and {@code git}; without them the test is skipped.
+ * place. No AI and no container. It needs {@code bash} and {@code git}; without them the tests fail.
  */
 class ChangesRoundTripTest {
 
@@ -73,14 +72,6 @@ class ChangesRoundTripTest {
 
     @BeforeEach
     void repositoryAndPackage() throws IOException {
-        boolean git;
-        try {
-            git = new ProcessBuilder("git", "--version").redirectErrorStream(true)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start().waitFor() == 0;
-        } catch (IOException | InterruptedException e) {
-            git = false;
-        }
-        assumeTrue(git, "git is needed");
         repo = Files.createDirectories(temp.resolve("work"));
         Files.createDirectories(repo.resolve(SRC));
         git("init", "--quiet", "--initial-branch=main");
@@ -217,7 +208,7 @@ class ChangesRoundTripTest {
                         + first.substring(0, 12) + ": 1 verified finding (0 high, 1 medium, 0 low); 2 of 2 areas judged;"
                         + " 1 of 2 items settled (1 clean, 0 decided; 1 open, 0 not judged); 2 of 4 areas of the"
                         + " project not looked at\n")
-                .contains("| Base: the commit the changes are measured from | `" + first + "` |",
+                .contains("| Base: the commit the changes are measured from | `" + first + "`, committed ",
                         "| Where the base is from | the input `since`: `" + first + "` |",
                         "| Workspace commit | `" + second + "`, with nothing uncommitted |");
         assertThat(items()).as("the two areas nothing looked at are no items")
@@ -236,7 +227,7 @@ class ChangesRoundTripTest {
         assertThat(askedAndForgotten()).containsExactly(LONE + ": changed",
                 RUNNER + ": an open finding of an earlier run");
         assertThat(newest("security-changes-report.md"))
-                .contains("| Base: the commit the changes are measured from | `" + second + "` |",
+                .contains("| Base: the commit the changes are measured from | `" + second + "`, committed ",
                         "| Where the base is from | the workspace commit of the last run of this audit, as its report"
                                 + " names it |",
                         "| Workspace commit | `" + third + "`, with nothing uncommitted |",
@@ -255,7 +246,7 @@ class ChangesRoundTripTest {
         assertThat(three).as(two).contains("register security-changes: 0 new, 1 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).containsExactly(RUNNER + ": an open finding of an earlier run");
         assertThat(newest("security-changes-report.md")).startsWith("# Security check of the changes\n\n**Gate:**"
-                + " GREEN: of the changes since " + third.substring(0, 12) + ": no verified finding; 1 of 1 areas"
+                + " GREEN: nothing changed since " + third.substring(0, 12) + ": no verified finding; 1 of 1 areas"
                 + " judged; 3 of 3 items settled (2 clean, 1 decided; 0 open, 0 not judged); 3 of 4 areas of the"
                 + " project not looked at\n");
         assertThat(items()).doesNotContain("open ", "not judged");
@@ -265,7 +256,9 @@ class ChangesRoundTripTest {
 
         assertThat(four).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).isEmpty();
-        assertThat(newest("security-changes-report.md")).contains("**Gate:** GREEN: ", "3 of 3 items settled");
+        assertThat(newest("security-changes-report.md")).contains("**Gate:** GREEN: nothing changed since ",
+                "3 of 3 items settled", "**Nothing changed.** No file of the workspace differs from the base, the"
+                        + " workspace commit of the last run.");
     }
 
     @Test

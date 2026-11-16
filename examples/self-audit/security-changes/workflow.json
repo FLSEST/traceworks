@@ -10,7 +10,8 @@
     "package.images"
   ],
   "default_context": {
-    "since": ""
+    "since": "",
+    "skip": ""
   },
   "model_choices": {
     "judge": {
@@ -50,9 +51,10 @@
       "config": {
         "values": {
           "SINCE": "{{ since }}",
-          "PREVIOUS_REPORT": "{{ previous_report }}"
+          "PREVIOUS_REPORT": "{{ previous_report }}",
+          "SKIP_COMMITS": "{{ skip }}"
         },
-        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\"",
+        "command": "set -euo pipefail; bash {{ package_dir }}/scripts/changes.sh {{ scratch_dir }}/changes \"$SINCE\" \"$PREVIOUS_REPORT\" \"$SKIP_COMMITS\"",
         "timeout_seconds": 300,
         "shell_escape_variables": true
       }

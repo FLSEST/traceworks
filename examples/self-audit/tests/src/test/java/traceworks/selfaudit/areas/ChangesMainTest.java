@@ -89,21 +89,35 @@ class ChangesMainTest {
     private static final String CALLER = SRC + "Caller.java#Caller.call(Runner)";
     private static final String FAR = SRC + "Far.java#Far.far(Caller)";
 
-    /** The folder the step before writes: the diff rewrites line 4 of each named file. */
+    /**
+     * The folder the step before writes: each named file differs from the base, a Java file of the project in its
+     * line 4.
+     */
     private Path changes(String... changedFiles) throws IOException {
-        Path dir = Files.createDirectories(work.resolve("changes"));
-        Files.writeString(dir.resolve("base"), BASE + "\n");
+        Path dir = Files.createDirectories(work.resolve("changes/base")).getParent();
+        Files.writeString(dir.resolve("base-commit"), BASE + "\n");
         Files.writeString(dir.resolve("head"), HEAD + "\n");
         Files.writeString(dir.resolve("from"), "input\n");
         Files.writeString(dir.resolve("since"), "v1\n");
         Files.writeString(dir.resolve("previous-head"), "\n");
         Files.writeString(dir.resolve("dirty"), "false\n");
-        StringBuilder diff = new StringBuilder();
+        Files.writeString(dir.resolve("base-date"), "2026-11-10T09:00:00Z\n");
+        Files.writeString(dir.resolve("skipped"), "\n");
+        StringBuilder manifest = new StringBuilder();
+        int n = 0;
         for (String file : changedFiles) {
-            diff.append("--- a/").append(file).append("\n+++ b/").append(file).append("\n@@ -4 +4 @@\n-old\n+new\n");
+            if (!file.endsWith(".java") || !Files.exists(root.resolve(file))) {
+                manifest.append(file.startsWith("-") ? "D\0" + file.substring(1) : file.startsWith("?")
+                        ? "U\0" + file.substring(1) : "M\0" + file).append("\0\0");
+                continue;
+            }
+            n++;
+            List<String> lines = new ArrayList<>(Files.readAllLines(root.resolve(file)));
+            lines.set(3, "old");
+            Files.writeString(dir.resolve("base/" + n), String.join("\n", lines) + "\n");
+            manifest.append("M\0").append(file).append("\0").append(n).append("\0");
         }
-        Files.writeString(dir.resolve("diff"), diff.toString());
-        Files.writeString(dir.resolve("untracked"), "");
+        Files.writeString(dir.resolve("manifest"), manifest.toString());
         return dir;
     }
 
@@ -151,6 +165,9 @@ class ChangesMainTest {
         assertThat(summary().get("changes")).isEqualTo(Map.ofEntries(Map.entry("base", BASE), Map.entry("head", HEAD),
                 Map.entry("from", "input"), Map.entry("since", "v1"), Map.entry("previousHead", ""),
                 Map.entry("dirty", false), Map.entry("changedFiles", 2L), Map.entry("unmappedFiles", 1L),
+                Map.entry("baseDate", "2026-11-10T09:00:00Z"), Map.entry("skipped", ""),
+                Map.entry("removedFiles", 0L), Map.entry("unmappable", List.of()),
+                Map.entry("outsideMembers", 0L), Map.entry("outside", List.of()),
                 Map.entry("unmapped", List.of("pom.xml")), Map.entry("changedMembers", 1L),
                 Map.entry("areasOfProject", 3L), Map.entry("changedAreas", 1L), Map.entry("neighbourAreas", 1L),
                 Map.entry("carriedAreas", 0L), Map.entry("judgedAsTheyAre", 0L), Map.entry("notLookedAt", 1L)));
@@ -244,10 +261,13 @@ class ChangesMainTest {
                         + "**Gate:** GREEN: " + described + "\n\n**This gate speaks about the changes only.** It says"
                         + " nothing about the 1 of 3 areas of the project that this run did not look at; the long"
                         + " audit judges every area.\n\n## What was looked at\n")
-                .contains("| Base: the commit the changes are measured from | `" + BASE + "` |\n",
+                .contains("| Base: the commit the changes are measured from | `" + BASE
+                                + "`, committed 2026-11-10T09:00:00Z |\n",
                         "| Where the base is from | the input `since`: `v1` |\n",
                         "| Workspace commit | `" + HEAD + "`, with nothing uncommitted |\n",
-                        "| Changed files | 2, 1 of them no Java source the tool read (not mapped to an area) |\n",
+                        "| Files that differ from the base | 2 (0 removed; 1 changed or new that are no Java"
+                                + " source the tool read, not mapped to an area) |\n",
+                        "| Changed files that could not be compared | 0 |\n",
                         "| Areas of the project | 3 |\n", "| Areas with a changed line | 1 |\n",
                         "| Neighbours: areas one call from a changed member | 1 |\n",
                         "| Areas an earlier run left open or without a verdict | 0 |\n",
@@ -267,10 +287,12 @@ class ChangesMainTest {
                 work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
                 work.resolve("report.md").toString())).isZero();
 
-        assertThat(out()).startsWith("gate_status: GREEN\n").contains("\nFACT changes_head: " + HEAD + "\n",
+        assertThat(out()).startsWith("gate_status: GREEN\ngate_category: security\ngate_description: nothing"
+                + " changed since aaaaaaaaaaaa: ").contains("\nFACT changes_head: " + HEAD + "\n",
                 "3 of 3 areas of the project not looked at");
         assertThat(Files.readString(work.resolve("report.md"))).contains("No area: nothing changed in an area or next"
-                + " to one, and nothing was left open.");
+                + " to one, and nothing was left open.", "**Nothing changed.** No file of the workspace differs from"
+                + " the base.");
     }
 
     @Test
@@ -285,5 +307,75 @@ class ChangesMainTest {
 
         assertThat(run("", find("--items-file", items.toString()))).isEqualTo(1);
         assertThat(err.toString()).contains("a line of the register's items is no item");
+    }
+
+    private int report() {
+        return run("", "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString());
+    }
+
+    @Test
+    void aChangedFileThatCouldNotBeCompared_isNamed_andTheGateIsNotGreen() throws IOException {
+        changes("?" + SRC + "Odd.java", "-" + SRC + "Gone.java");
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(out()).contains("FACT changes_files: 2\n", "FACT changes_files_not_compared: 1\n",
+                "NOT MEASURED: changes_file " + SRC + "Odd.java (not a readable regular file)\n");
+
+        assertThat(report()).isZero();
+
+        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
+                + " since aaaaaaaaaaaa: 1 changed file could not be compared; no verified finding; ");
+        assertThat(Files.readString(work.resolve("report.md")))
+                .contains("| Files that differ from the base | 2 (1 removed; 0 changed or new",
+                        "| Changed files that could not be compared | 1 |",
+                        "Changed files that could not be compared. Nothing mapped them to an area, so the gate is not"
+                                + " GREEN: `" + SRC + "Odd.java (not a readable regular file)`");
+    }
+
+    @Test
+    void commitsTheBaseSkipped_areSaidWithTheirRange_andTheGateIsNotGreen() throws IOException {
+        Path dir = changes(SRC + "Runner.java");
+        String previous = "c".repeat(40);
+        Files.writeString(dir.resolve("previous-head"), previous + "\n");
+        Files.writeString(dir.resolve("skipped"), "4\n");
+        run("", find());
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        String verdicts = "[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[]}\n"
+                + "[" + lines.get(1) + "]: {\"area\":\"A003\",\"findings\":[]}\n";
+
+        assertThat(run(verdicts, "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).isZero();
+
+        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: security\ngate_description: of the changes"
+                + " since aaaaaaaaaaaa: 4 commits after the last run skipped and not judged; no verified finding; 2 of"
+                + " 2 areas judged; 2 of 2 items settled");
+        assertThat(Files.readString(work.resolve("report.md"))).contains("| **Commits skipped** | **4**: the commits"
+                + " after `" + previous + "` up to `" + BASE + "` (`git log cccccccccccc..aaaaaaaaaaaa`) are judged by"
+                + " no run of this check. The run was started with `skip=yes`.");
+
+        Files.writeString(dir.resolve("skipped"), "unknown\n");
+        run("", find());
+        assertThat(report()).isZero();
+        assertThat(out()).startsWith("gate_status: YELLOW\n").contains("the commit of the last run is not in this"
+                + " checkout, so commits may have been skipped");
+    }
+
+    @Test
+    void aChangedImport_isCountedAndNamed_andNoAreaComesFromIt() throws IOException {
+        Path dir = changes(SRC + "Runner.java");
+        // The base differs in line 1, not in line 4
+        List<String> now = Files.readAllLines(root.resolve(SRC + "Runner.java"));
+        now.set(0, "package q;");
+        Files.writeString(dir.resolve("base/1"), String.join("\n", now) + "\n");
+
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(areas()).isEmpty();
+        assertThat(report()).isZero();
+
+        assertThat(Files.readString(work.resolve("report.md")))
+                .contains("| Changed places in no member (an import, the head of a class): no area comes from them | 1 |",
+                        "Changed places that lie in no member: `" + SRC + "Runner.java:1-1`");
     }
 }
