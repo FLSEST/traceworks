@@ -218,14 +218,19 @@ Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), 
 and Pi behind the allowlist proxy, model choices, named values for shell steps, seals, registers with
 `traceworks findings`, the five self-audit packages and the two testing audits.
 
-**Not built:**
+**Not built yet:**
 
-- Signatures of the record. A manifest, an approval in a run and a person's decision in a register are not signed.
-  The record is tamper-evident, not signed; only a package can be signed, by its seal.
+- Signatures of the record. A manifest, an approval in a run and a decision in a register are not signed. The
+  record is tamper-evident, not signed; only a package can be signed, by its seal.
 - A server for MCP clients, and MCP servers for AI steps.
 - An export of a workflow to BPMN.
-- A scheduler, and a web page to click in. A run starts when a person, a cron entry or a CI job starts it, and
-  `traceworks watch` follows it in the terminal.
+
+**Left out on purpose:**
+
+- A service and a database. The tool runs a workflow, writes plain files and exits.
+- A scheduler and triggers. A run starts when a person, a cron entry or a CI job starts it.
+- A web page to click in, and dashboards. `traceworks watch` follows a run in the terminal, and `run.html` and a
+  register's `report.html` are static files.
 
 **Verified with:**
 
