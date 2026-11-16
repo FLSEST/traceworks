@@ -129,6 +129,27 @@ final class RunOutputs {
         return completed;
     }
 
+    /**
+     * Before a resume goes on: the ledger must hold the start entry of the run, as before its first step. A run that
+     * lost its entry, never got it (its process was killed between {@code run.started} and the commit) or is of a
+     * version that noted no start gets it now, from the first line of its record; a resume adds none to a run that
+     * has one. So no step of this version runs in a run the ledger does not name.
+     *
+     * @throws RunRefusedException if the ledger cannot be read or cannot take the entry: the resume does not go on
+     */
+    void requireStartNoted(StoredRun run) {
+        String id = run.runId();
+        try {
+            if (ledger.findStart(id).isEmpty()) {
+                ledger.recordStart(id, StartEntry.of(run.events().readAll().getFirst()).toJson());
+            }
+        } catch (RuntimeException e) {
+            throw new RunRefusedException("Run " + id + " cannot resume: the ledger holds no start entry of it and"
+                    + " could not take one now, and no step runs in a run the ledger does not name: "
+                    + e.getMessage());
+        }
+    }
+
     /** Renders the record as it is now into {@code run.html}. */
     static void writeView(StoredRun run, RunView view, List<byte[]> lines) {
         writeView(run, view, ChainVerifier.verify(run.runId(), lines, run.blobs()));

@@ -53,11 +53,23 @@ public interface Ledger {
     Optional<byte[]> findStart(String runId);
 
     /**
-     * Every run the ledger names, from its whole history, so an entry that a later commit removed still counts.
+     * Every run the ledger names, by the messages of its whole history and by the entries it holds now, so an entry
+     * that a later commit removed still counts.
      *
-     * @throws IllegalStateException with the reason when the ledger exists and cannot be read
+     * @throws IllegalStateException with the reason when the ledger exists and cannot be read, or holds something
+     *                               that shows another history than the one its commits hold
      */
     LedgerRuns runs();
+
+    /**
+     * Records that a person acknowledged a run the check of the ledger against the runs folder reports: one more
+     * entry of that run, which the ledger keeps for good.
+     *
+     * @param runId the run
+     * @param line  the acknowledgement, one JSON line (who, when, what was reported, the note)
+     * @throws IllegalStateException with the reason when the ledger cannot take it
+     */
+    void acknowledge(String runId, byte[] line);
 
     /**
      * Anchors the head of a register after a write: the ledger keeps every anchor it was given, in order. The same

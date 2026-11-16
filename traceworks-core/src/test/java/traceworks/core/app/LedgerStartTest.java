@@ -196,17 +196,45 @@ class LedgerStartTest {
         assertThat(services.verify(id).ok()).isTrue();
     }
 
-    /** A run of an earlier version that is resumed now stays one without a start entry, and still verifies. */
+    /**
+     * No step of this version runs in a run the ledger does not name: a run of an earlier version that is resumed
+     * now gets its start entry at the resume, from the first line of its record, and verifies with it.
+     */
     @Test
-    void aResumedRunOfAnEarlierVersion_getsNoStartEntry_andHolds() throws Exception {
+    void aResumedRunOfAnEarlierVersion_getsItsStartEntryAtTheResume() throws Exception {
         String earlier = loadEarlier();
         services.answer(earlier, new AnswerRequest("approval", 1, "Yes", null, null));
 
         assertThat(services.resume(resumeOf(earlier), null, null).status()).isEqualTo(RunStatus.COMPLETED);
 
-        assertThat(fx.ledger.findStart(earlier)).isEmpty();
-        assertThat(services.verify(earlier).start()).startsWith(VerifyReport.NONE);
+        assertThat(StartEntry.parse(fx.ledger.findStart(earlier).orElseThrow()).orElseThrow().runStarted())
+                .isEqualTo(EventChain.sha256Hex(fx.events(earlier).getFirst().raw()));
+        assertThat(services.verify(earlier).start()).startsWith(VerifyReport.OK);
         assertThat(services.verify(earlier).ok()).isTrue();
+    }
+
+    /**
+     * A run whose process was killed between run.started and the commit, or whose entry was taken out: the resume
+     * writes the entry before it goes on, and does not go on when the ledger cannot take it.
+     */
+    @Test
+    void aResumeOfARunWithoutItsStartEntry_writesItFirst_orDoesNotGoOn() {
+        String id = services.start(request(DEPLOY), null, null).runId();
+        services.answer(id, new AnswerRequest("approval", 1, "Yes", null, null));
+        fx.ledger.startOver();
+        int lines = fx.events(id).size();
+        fx.ledger.failStarts(new IllegalStateException("no git"));
+
+        assertThatThrownBy(() -> services.resume(resumeOf(id), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("holds no start entry").hasMessageContaining("no git");
+        assertThat(fx.events(id)).as("nothing was recorded").hasSize(lines);
+        assertThat(fx.commands.commands()).doesNotContain("./done");
+
+        fx.ledger.failStarts(null);
+        assertThat(services.resume(resumeOf(id), null, null).status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.ledger.findStart(id)).isPresent();
+        assertThat(services.verify(id).ok()).isTrue();
     }
 
     /** A child run lives in its parent's record: it has no folder, no end entry and no start entry of its own. */
@@ -225,8 +253,8 @@ class LedgerStartTest {
         String id = services.start(request(parent), null, null).runId();
 
         assertThat(services.view(id).children()).isNotEmpty();
-        assertThat(fx.ledger.runs().started()).containsExactly(id);
-        assertThat(fx.ledger.runs().ended()).containsExactly(id);
+        assertThat(fx.ledger.runs().runs()).extracting(traceworks.core.port.LedgerRuns.Run::runId)
+                .containsExactly(id);
     }
 
     @Test
@@ -253,7 +281,8 @@ class LedgerStartTest {
             assertThat(run.workflowId()).startsWith("wf-");
         });
         assertThat(report.endedGone()).isEmpty();
-        assertThat(report.lost()).extracting(LedgerReport.Open::runId).containsExactly(gone);
+        assertThat(report.problems()).extracting(LedgerReport.Problem::runId, LedgerReport.Problem::code)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(gone, "lost"));
         assertThat(report.ok()).as("a run began, and nothing says what became of it").isFalse();
         assertThat(finished).isNotIn(report.open().stream().map(LedgerReport.Open::runId).toList());
     }
@@ -267,13 +296,16 @@ class LedgerStartTest {
         LedgerReport report = services.ledgerReport();
 
         assertThat(report.open()).isEmpty();
-        assertThat(report.endedGone()).containsExactly(gone);
+        assertThat(report.endedGone()).containsExactly(new LedgerReport.Named(gone, "COMPLETED"));
         assertThat(report.ok()).isTrue();
 
         fx.ledger.removeStart(kept);
 
         LedgerReport after = services.ledgerReport();
-        assertThat(after.removed()).containsExactly("starts/" + kept + ".json");
+        assertThat(after.problems()).singleElement().satisfies(problem -> {
+            assertThat(problem.runId()).isEqualTo(kept);
+            assertThat(problem.code()).isEqualTo("entry-removed");
+        });
         assertThat(after.started()).as("the history still names the start").isEqualTo(2);
         assertThat(after.ok()).isFalse();
     }

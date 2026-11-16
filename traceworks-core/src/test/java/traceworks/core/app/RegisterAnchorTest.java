@@ -213,6 +213,11 @@ class RegisterAnchorTest {
             }
 
             @Override
+            public void acknowledge(String runId, byte[] line) {
+                fixture.ledger.acknowledge(runId, line);
+            }
+
+            @Override
             public List<RegisterAnchor> registerAnchors(String key) {
                 throw new IllegalStateException("git show failed: no git");
             }
@@ -254,6 +259,11 @@ class RegisterAnchorTest {
             @Override
             public traceworks.core.port.LedgerRuns runs() {
                 return fixture.ledger.runs();
+            }
+
+            @Override
+            public void acknowledge(String runId, byte[] line) {
+                fixture.ledger.acknowledge(runId, line);
             }
 
             @Override

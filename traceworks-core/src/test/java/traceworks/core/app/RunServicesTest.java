@@ -314,6 +314,11 @@ class RunServicesTest {
             public traceworks.core.port.LedgerRuns runs() {
                 return fx.ledger.runs();
             }
+
+            @Override
+            public void acknowledge(String runId, byte[] line) {
+                fx.ledger.acknowledge(runId, line);
+            }
         };
     }
 

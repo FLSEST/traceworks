@@ -552,34 +552,43 @@ class GitLedgerTest {
             pool.shutdownNow();
         }
         assertEquals("16", git("rev-list", "--count", "HEAD").strip());
-        var runs = ledger().runs();
-        assertEquals(12, runs.started().size());
-        assertEquals(java.util.Set.of("t2-0", "t2-1", "t2-2", "t2-3"), runs.ended());
-        assertTrue(runs.removed().isEmpty());
+        var runs = ledger().runs().runs();
+        assertEquals(12, runs.size());
+        assertTrue(runs.stream().allMatch(run -> run.startNamed() && run.start() != null));
+        assertEquals(List.of("t2-0", "t2-1", "t2-2", "t2-3"),
+                runs.stream().filter(run -> run.end() != null).map(run -> run.runId()).toList());
     }
 
-    /** The runs are read from the history: an entry that a later commit removed is still a run the ledger saw. */
+    private static final Map<String, String> ME = Map.of("GIT_AUTHOR_NAME", "x", "GIT_AUTHOR_EMAIL", "x@x",
+            "GIT_COMMITTER_NAME", "x", "GIT_COMMITTER_EMAIL", "x@x");
+
+    private traceworks.core.port.LedgerRuns.Run run(String id) {
+        return ledger().runs().runs().stream().filter(run -> run.runId().equals(id)).findFirst().orElseThrow();
+    }
+
+    /** The runs are named by the messages of the commits: an entry that a later commit removed is still named. */
     @Test
     void runs_namesEveryStartAndEnd_alsoOneALaterCommitRemoved() throws Exception {
         GitLedger ledger = ledger();
-        assertTrue(ledger.runs().started().isEmpty(), "no ledger yet");
+        assertTrue(ledger.runs().runs().isEmpty(), "no ledger yet");
         ledger.prepare();
-        assertTrue(ledger.runs().started().isEmpty(), "no commit yet");
+        assertTrue(ledger.runs().runs().isEmpty(), "no commit yet");
         ledger.recordStart("r1", start("r1"));
         ledger.recordStart("r2", start("r2"));
         ledger.record("r2", "FAILED", manifest("r2"));
         ledger.record("old", "COMPLETED", manifest("old"));
         ledger.anchorRegister("hello", 0, "a".repeat(64));
-        Map<String, String> me = Map.of("GIT_AUTHOR_NAME", "x", "GIT_AUTHOR_EMAIL", "x@x", "GIT_COMMITTER_NAME", "x",
-                "GIT_COMMITTER_EMAIL", "x@x");
-        git(me, "rm", "-q", "starts/r1.json");
-        git(me, "commit", "-q", "-m", "tidy up");
+        git(ME, "rm", "-q", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "tidy up");
 
-        var runs = ledger.runs();
-
-        assertEquals(java.util.Set.of("r1", "r2"), runs.started());
-        assertEquals(java.util.Set.of("r2", "old"), runs.ended());
-        assertEquals(List.of("starts/r1.json"), runs.removed());
+        assertEquals(List.of("old", "r1", "r2"), ledger.runs().runs().stream().map(run -> run.runId()).toList());
+        assertTrue(run("r1").startNamed());
+        assertEquals(null, run("r1").start(), "HEAD holds it no more");
+        assertArrayEquals(start("r2"), run("r2").start());
+        assertEquals("FAILED", run("r2").endNamed());
+        assertArrayEquals(manifest("r2"), run("r2").end());
+        assertTrue(!run("old").startNamed() && run("old").start() == null);
+        assertEquals("COMPLETED", run("old").endNamed());
         assertTrue(ledger.findStart("r1").isEmpty(), "HEAD holds it no more");
     }
 
@@ -590,6 +599,149 @@ class GitLedgerTest {
 
         assertThrows(IllegalStateException.class, () -> ledger().runs());
         assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"));
+    }
+
+    /** One added commit with runs/<id>.json and any content: the content is handed on, with the message's status. */
+    @Test
+    void anEndEntryAddedByHand_isReadWithItsContent_andACommitWithoutItsEntryIsNamed() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        Files.createDirectories(home.resolve("ledger/runs"));
+        Files.writeString(home.resolve("ledger/runs/r1.json"), "anything");
+        git(ME, "add", "runs/r1.json");
+        git(ME, "commit", "-q", "-m", "run r1 COMPLETED");
+        git(ME, "commit", "-q", "--allow-empty", "-m", "run 11111111-2222-3333-4444-555555555555 STARTED");
+
+        assertEquals("anything", new String(run("r1").end(), StandardCharsets.UTF_8));
+        assertEquals("COMPLETED", run("r1").endNamed());
+        var empty = run("11111111-2222-3333-4444-555555555555");
+        assertTrue(empty.startNamed());
+        assertEquals(null, empty.start(), "the commit added no entry");
+    }
+
+    /** What HEAD holds counts, not the file in the working tree. */
+    @Test
+    void runs_readsWhatHeadHolds_notAnEditedWorkingFile() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        Files.writeString(home.resolve("ledger/starts/r1.json"), "edited in place");
+        assertArrayEquals(start("r1"), run("r1").start());
+        Files.delete(home.resolve("ledger/starts/r1.json"));
+        assertArrayEquals(start("r1"), run("r1").start());
+    }
+
+    @Test
+    void anAcknowledgement_isOneCommit_andTheLedgerKeepsEveryOne() throws Exception {
+        GitLedger ledger = ledger();
+        ledger.recordStart("r1", start("r1"));
+
+        ledger.acknowledge("r1", "{\"note\":\"first\"}".getBytes(StandardCharsets.UTF_8));
+        ledger.acknowledge("r1", "{\"note\":\"second\"}".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals("run r1 ACKNOWLEDGED", git("log", "-1", "--format=%s").strip());
+        assertEquals("3", git("rev-list", "--count", "HEAD").strip());
+        assertEquals("{\"note\":\"first\"}\n{\"note\":\"second\"}\n", git("show", "HEAD:acks/r1.jsonl"));
+        assertEquals("{\"note\":\"first\"}\n{\"note\":\"second\"}\n",
+                new String(run("r1").acks(), StandardCharsets.UTF_8));
+        assertEquals(null, run("r1").endNamed(), "an acknowledgement is no end");
+        assertThrows(IllegalArgumentException.class,
+                () -> ledger.acknowledge("r1", "two\nlines".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private void assertNotOneHistory(String what) {
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("not one history") && e.getMessage().contains(what), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().findStart("r1"));
+    }
+
+    /** git replace <HEAD> <older>: every reader that honours it sees the older commit in HEAD's place. */
+    @Test
+    void aReplaceRef_isNotHonoured_andFailsTheCheck() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        String older = git("rev-parse", "HEAD").strip();
+        ledger().recordStart("r1", start("r1"));
+        assertArrayEquals(start("r1"), ledger().findStart("r1").orElseThrow());
+        git(ME, "replace", git("rev-parse", "HEAD").strip(), older);
+        assertTrue(git("log", "--format=%s").lines().noneMatch(line -> line.contains("r1")), "git itself is fooled");
+
+        assertNotOneHistory("replace ref");
+        assertArrayEquals(start("r1"), ledger().find("r1").or(() -> java.util.Optional.of(start("r1"))).get());
+    }
+
+    /** A removal commit and its id in .git/shallow: the history ends there, and the start is named no more. */
+    @Test
+    void aShallowFile_failsTheCheck() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "rm", "-q", "starts/r1.json");
+        git(ME, "commit", "-q", "-m", "tidy");
+        Files.writeString(home.resolve("ledger/.git/shallow"), git("rev-parse", "HEAD"));
+        assertTrue(git("log", "--format=%s").lines().noneMatch(line -> line.contains("STARTED")), "git is fooled");
+
+        assertNotOneHistory(".git/shallow");
+    }
+
+    @Test
+    void aGraftsFile_orAlternates_failTheCheck() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        Files.createDirectories(home.resolve("ledger/.git/info"));
+        Files.writeString(home.resolve("ledger/.git/info/grafts"), git("rev-parse", "HEAD"));
+        assertNotOneHistory(".git/info/grafts");
+        Files.delete(home.resolve("ledger/.git/info/grafts"));
+
+        Files.writeString(home.resolve("ledger/.git/objects/info/alternates"), "/nowhere\n");
+        assertNotOneHistory("alternates");
+    }
+
+    /** HEAD moved back, with the newer commits on a branch, under a tag, or HEAD on no branch at all. */
+    @Test
+    void aSecondBranch_aDetachedHead_orACommitHeadDoesNotReach_failTheCheck() throws Exception {
+        ledger().recordStart("r0", start("r0"));
+        String older = git("rev-parse", "HEAD").strip();
+        ledger().recordStart("r1", start("r1"));
+        String newer = git("rev-parse", "HEAD").strip();
+
+        git(ME, "branch", "aside", older);
+        assertNotOneHistory("branches");
+        git(ME, "branch", "-q", "-D", "aside");
+
+        git(ME, "checkout", "-q", "--detach", older);
+        assertNotOneHistory("names no branch");
+        git(ME, "checkout", "-q", "main");
+
+        git(ME, "tag", "keep", newer);
+        git(ME, "reset", "-q", "--hard", older);
+        assertNotOneHistory("does not reach");
+        git(ME, "tag", "-d", "keep");
+        ledger().runs();   // nothing names the newer commit any more: this is a rewritten history, which nothing here finds
+    }
+
+    /** A setting in the ledger's own config can change what git shows; only what init and a push need is there. */
+    @Test
+    void aSettingInTheLedgersOwnConfig_failsTheCheck_andARemoteDoesNot() throws Exception {
+        ledger().recordStart("r1", start("r1"));
+        git(ME, "remote", "add", "origin", "/nowhere.git");
+        ledger().runs();
+
+        git(ME, "config", "core.worktree", "/elsewhere");
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().runs());
+        assertTrue(e.getMessage().contains("core.worktree"), e.getMessage());
+    }
+
+    /** A lock that is never let go must not leave a run waiting for ever: the writer gives up and names the lock. */
+    @Test
+    void aLockThatIsHeld_isWaitedForABoundedTime_thenTheWriteIsRefused() throws Exception {
+        Path lock = home.resolve("ledger.lock");
+        GitLedger ledger = new GitLedger(home.resolve("ledger"), lock, 300L);
+        ledger.prepare();
+        try (var channel = java.nio.channels.FileChannel.open(lock, java.nio.file.StandardOpenOption.WRITE);
+                var held = channel.lock()) {
+            long before = System.nanoTime();
+            IllegalStateException e = assertThrows(IllegalStateException.class,
+                    () -> ledger.recordStart("r1", start("r1")));
+            assertTrue(e.getMessage().contains(lock.toString()) && e.getMessage().contains("held"), e.getMessage());
+            assertTrue(System.nanoTime() - before < 10_000_000_000L, "it did not wait for ever");
+            assertThrows(IllegalStateException.class, ledger::prepare);
+        }
+        ledger.recordStart("r1", start("r1"));
+        assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
     }
 
     /** A run id is a name, never a path: one that would lead out of {@code runs/} is refused, and nothing is written. */

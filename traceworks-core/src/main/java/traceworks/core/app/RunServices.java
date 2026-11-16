@@ -317,6 +317,22 @@ public final class RunServices {
     }
 
     /**
+     * Acknowledges the problem {@link #ledgerReport} names of one run, on the record: one more entry of that run in
+     * the ledger with this process's actor, the time, what the check said and the note. The check then lists the
+     * run as acknowledged, for good, and no longer fails for that problem; a problem of another kind fails again.
+     *
+     * @param runRef the run id, or a prefix of at least four characters that one reported run has
+     * @param note   why this is no lost run; required
+     * @return the report after it
+     * @throws RunRefusedException    if the note is empty, the check reports nothing of that run, or the ledger
+     *                                cannot take the entry
+     * @throws RecordDamagedException if the ledger cannot be read
+     */
+    public LedgerReport acknowledge(String runRef, String note) {
+        return LedgerReport.acknowledge(ledger, store, clock, actor, runRef, note);
+    }
+
+    /**
      * Compares two finished runs from their records, read-only: header, inputs, steps and AI calls, and for two audit
      * runs the findings of their register between them ({@link traceworks.core.compare.RunComparer}
      * says what is matched and what counts).

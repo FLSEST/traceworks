@@ -1,22 +1,31 @@
 package traceworks.core.port;
 
 import java.util.List;
-import java.util.Set;
 
 /**
- * The runs a ledger names, read from its whole history.
+ * The runs a ledger names, each with what the ledger says and holds of it. A run is named by the message of a commit
+ * ({@code run <run-id> STARTED}, {@code run <run-id> <STATUS>}), which a later commit cannot take back, and by the
+ * entries the ledger holds now.
  *
- * @param started the runs whose start the ledger noted, in the order of their ids
- * @param ended   the runs whose end the ledger recorded, in the order of their ids
- * @param removed the entries the history names and the ledger holds no more, because a later commit took them out,
- *                as their paths ({@code starts/<run-id>.json}, {@code runs/<run-id>.json}); Traceworks never
- *                removes an entry
+ * @param runs every run the ledger names, in the order of their ids
  */
-public record LedgerRuns(Set<String> started, Set<String> ended, List<String> removed) {
+public record LedgerRuns(List<Run> runs) {
 
     public LedgerRuns {
-        started = java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(started));
-        ended = java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(ended));
-        removed = List.copyOf(removed);
+        runs = List.copyOf(runs);
+    }
+
+    /**
+     * What the ledger says and holds of one run.
+     *
+     * @param startNamed whether a commit message says that the run started
+     * @param start      the start entry the ledger holds now; {@code null} when it holds none
+     * @param endNamed   the status a commit message says the run ended with; {@code null} when none says so
+     * @param end        the end entry the ledger holds now, a copy of the run's manifest; {@code null} when it holds
+     *                   none
+     * @param acks       the acknowledgements of the run the ledger holds now, one JSON line each, oldest first;
+     *                   {@code null} when it holds none
+     */
+    public record Run(String runId, boolean startNamed, byte[] start, String endNamed, byte[] end, byte[] acks) {
     }
 }
