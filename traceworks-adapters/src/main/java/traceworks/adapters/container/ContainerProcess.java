@@ -142,8 +142,11 @@ final class ContainerProcess {
             stop = ProcessTree.stopHandle(process);
             tracker.started(stop);
             BashScript.supply(process, stdin);
-            Thread out = stdout.drain(process.getInputStream(), "container-client-output");
-            Thread err = stderr.drain(process.getErrorStream(), "container-client-output");
+            // The client is not held back until the readers hold its streams: one that ended within the instant of
+            // its start would be read to its own end only (BoundedOutput#drain). A real client ends after the
+            // container's streams, and no process outlives it with its pipes
+            stdout.drain(process.getInputStream(), "container-client-output");
+            stderr.drain(process.getErrorStream(), "container-client-output");
 
             boolean timedOut = false;
             long deadline = started + TimeUnit.SECONDS.toNanos(timeoutSeconds);
@@ -160,8 +163,8 @@ final class ContainerProcess {
                 ProcessTree.terminate(process);
                 process.waitFor(ProcessTree.GRACE.toSeconds() + 2, TimeUnit.SECONDS);
             }
-            out.join(2000);
-            err.join(2000);
+            stdout.end(2000);
+            stderr.end(2000);
             if (timedOut) {
                 return result(TIMEOUT_EXIT_CODE, stdout, stderr, "", started, true);
             }
