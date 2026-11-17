@@ -1,5 +1,7 @@
 package traceworks.core.app;
 
+import traceworks.core.engine.EventLogException;
+import traceworks.core.port.BlobStore;
 import traceworks.core.record.RecordTypes;
 import org.junit.jupiter.api.Test;
 
@@ -98,18 +100,73 @@ class ResumeRecordedFormTest {
     @Test
     void theRecordedFormOfAnException_namesTheCheckoutItKept_asTheRecordDoes() {
         RecordedForm form = new RecordedForm(Map.of("PROJECT", PROJECT));
-        IllegalStateException failure = new IllegalStateException("The record cannot be written");
+        RecordDamagedException failure = new RecordDamagedException("The record cannot be written");
         failure.addSuppressed(new KeptCheckoutNotice("/home/" + PROJECT + "/checkouts/run-1"));
 
         RuntimeException recorded = form.of(failure);
 
-        assertThat(recorded).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("The record cannot be written");
+        assertThat(recorded).isExactlyInstanceOf(RecordDamagedException.class)
+                .hasMessage("The record cannot be written");
         assertThat(recorded.getSuppressed()).singleElement().isInstanceOfSatisfying(KeptCheckoutNotice.class, kept -> {
             assertThat(kept.path()).isEqualTo("/home/[redacted:PROJECT]/checkouts/run-1");
             assertThat(kept).hasMessageContaining("the checkout /home/[redacted:PROJECT]/checkouts/run-1 ");
         });
         assertThat(everyText(recorded)).doesNotContain(PROJECT);
+    }
+
+    /**
+     * The command line picks its exit code by the kind of the failure. A failure of a kind that cannot be made again,
+     * here a changed blob (exit 8), whose own text names no value stays the one it is, and the checkout it kept is
+     * named as the record does from the start.
+     */
+    @Test
+    void aFailureOfAKindThatCannotBeMadeAgain_staysTheOneItIs_andNamesTheCheckoutItKept_asTheRecordDoes() {
+        RecordedForm form = new RecordedForm(Map.of("PROJECT", PROJECT));
+        fx.sources.root = Path.of("/home/" + PROJECT + "/checkouts");
+        fx.sources.present.add(fx.sources.directoryOf("run-1"));
+        BlobStore.ChangedBlobException changed = new BlobStore.ChangedBlobException("ab12", "cd34");
+
+        new Checkouts(fx.sources, fx.directories).noteKept("run-1", changed, form);
+        RuntimeException recorded = form.of(changed);
+
+        assertThat(recorded).isSameAs(changed);
+        assertThat(recorded.getSuppressed()).singleElement().isInstanceOfSatisfying(KeptCheckoutNotice.class,
+                kept -> assertThat(kept.path()).isEqualTo("/home/[redacted:PROJECT]/checkouts/run-1"));
+        assertThat(everyText(recorded)).doesNotContain(PROJECT);
+    }
+
+    /**
+     * Also when something else it suppressed names a value: that is shown nowhere, and the kind decides the exit code.
+     * A failure whose own text names a value has no such choice, and one of a kind that can be made again needs none.
+     */
+    @Test
+    void aFailureOfAKindThatCannotBeMadeAgain_staysTheOneItIs_whenOnlyWhatItSuppressedNamesAValue() {
+        RecordedForm form = new RecordedForm(Map.of("PROJECT", PROJECT));
+        BlobStore.ChangedBlobException changed = new BlobStore.ChangedBlobException("ab12", "cd34");
+        changed.addSuppressed(new java.io.UncheckedIOException("Cannot write /home/" + PROJECT + "/runs/run-1/run.html",
+                new java.io.IOException("the disk is full")));
+
+        assertThat(form.of(changed)).isSameAs(changed);
+    }
+
+    /** The same through a resume: the record cannot be written, which ends the command as an internal error. */
+    @Test
+    void aResumeThatFailsAndKeepsItsCheckout_failsWithTheSameKind_andNamesTheCheckoutAsTheRecordDoes() {
+        fx.sources.root = Path.of("/home/" + PROJECT + "/checkouts");
+        String id = services.start(new StartRequest(PKG, Map.of(), null, false, false,
+                "https://git.example.org/org/repo", null), null, null).runId();
+        services.answer(id, new AnswerRequest("approval", 0, "Yes", null, null));
+        String recordedCheckout = "/home/[redacted:PROJECT]/checkouts/" + id;
+        assertThat(fx.events(id).getFirst().fields().path("workspace").asText()).isEqualTo(recordedCheckout);
+        fx.run(id).log().failAfter(fx.events(id).size() + 2);
+
+        Throwable failed = org.assertj.core.api.Assertions.catchThrowable(() ->
+                services.resume(resumeOf(id), null, null));
+
+        assertThat(failed).isInstanceOf(EventLogException.class);
+        assertThat(failed.getSuppressed()).singleElement().isInstanceOfSatisfying(KeptCheckoutNotice.class,
+                kept -> assertThat(kept.path()).isEqualTo(recordedCheckout));
+        assertThat(everyText(failed)).doesNotContain(PROJECT);
     }
 
     /** Whatever else a failure carries as suppressed, with its causes and its own suppressed ones. */

@@ -57,11 +57,30 @@ final class RecordedForm {
      * its recorded form: of the same kind, so the command ends with the same exit code (a damaged record stays a
      * damaged record), with its suppressed exceptions in their recorded form (the checkouts a failure kept stay
      * {@link KeptCheckoutNotice}s, which the command line names), and without its cause, whose text would name the
-     * real path. An exception of another kind becomes an {@link IllegalStateException}, which ends the command as an
-     * internal error as before.
+     * real path. An exception of another kind whose own message or a cause names a value becomes an
+     * {@link IllegalStateException}, which ends the command as an internal error. One of another kind that names a
+     * value only in what it suppressed stays {@code e}: the command line picks its exit code by the kind (a changed
+     * blob ends it as a damaged record does), and shows of the suppressed exceptions only the checkouts a failure
+     * kept, which a resume notes in recorded form from the start ({@link Checkouts#noteKept}).
      */
     RuntimeException of(RuntimeException e) {
-        return values.isEmpty() || !namesAValue(e, identitySet()) ? e : recorded(e, identitySet());
+        if (values.isEmpty() || !namesAValue(e, identitySet())) {
+            return e;
+        }
+        boolean madeAgain = e instanceof RecordDamagedException || e instanceof RunRefusedException;
+        return madeAgain || textNamesAValue(e) ? recorded(e, identitySet()) : e;
+    }
+
+    /** Whether the message of {@code e} or of a cause of it names a value. */
+    private boolean textNamesAValue(Throwable e) {
+        Set<Throwable> seen = identitySet();
+        for (Throwable at = e; at != null && seen.add(at); at = at.getCause()) {
+            String message = at.getMessage();
+            if (message != null && !of(message).equals(message)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param above the exceptions this one is suppressed under: one that comes back to itself is left out */
