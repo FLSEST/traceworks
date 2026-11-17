@@ -57,10 +57,15 @@ import java.util.regex.Pattern;
  *   <li><b>SIGTERM</b> on a timeout or cancel: the client hands it to the container's init ({@code --init}, tini),
  *       which sends it to the whole process group of the command with {@code TINI_KILL_PROCESS_GROUP=1}, so the
  *       running command gets it and its own TERM trap runs ({@link BashScript}).</li>
+ *   <li><b>The {@code .git} of a writable workspace:</b> after the mount of a workspace that the step may write
+ *       come the mounts that hold the hooks and the config of its top-level {@code .git} read-only
+ *       ({@link WorkspaceGit#holds}), at the places they have in the workspace.</li>
  *   <li><b>Refused</b> with an {@link IllegalArgumentException}, before anything starts: a value that would reach the
  *       client as an option (an image, name, working directory, entrypoint or user that starts with {@code -}), an
  *       image that is not a local image ID, a mount path that is not absolute or holds a comma, a quote or a line
- *       break ({@code --mount} would split or misread it), and an environment name that is no variable name.</li>
+ *       break ({@code --mount} would split or misread it), an environment name that is no variable name, and a
+ *       writable workspace whose {@code .git} cannot be held (no hooks folder or no config file, or a symbolic
+ *       link at one of the places).</li>
  * </ul>
  */
 final class ContainerArguments {
