@@ -490,7 +490,8 @@ Steps
 - **A step with more than 10 child runs** lists only those that did not end `COMPLETED`, at most 10, and counts the
   others by status. `--children` lists every child run of every step.
 - **A `switch`** names the case that ran, as its `value` is written, and the blocks of that case with their types,
-  from the definition the record holds; `case default` for the default blocks, `no case matched` when none ran. The
+  from the definition the record holds; `case default` for the default blocks, `no case matched` when none ran
+  (a case whose value is `none` is named as a case: the step's metadata says whether one ran, `caseMatched`). The
   blocks of a case are no steps of their own: their commands and AI calls are those of the switch's step. Under a
   switch of a child run only the case is named, since the record holds the definition of the run itself.
 
@@ -798,7 +799,9 @@ An audit workflow (`metadata.audit`, docs/registers.md) is understood completely
 `enabled: true` but a missing, blank or non-string `key`, `category` or `report_block`, a `schema_version` other than
 the number 1, or an `enabled` that is no boolean is the error `invalid-audit-config`; a `key` that is no register key
 (`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `report_block` that names no top-level block is
-`report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
+`report-block-missing`; a `report_block` that runs a child workflow (`sub-workflow`, a `foreach` with
+`workflow_id`) is the info `report-from-child-sets-no-gate`, since a gate marker in the child's output sets no gate
+of the run ("When a step fails"); a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
 in a workflow that feeds no register (no `metadata.audit`, or `enabled: false`) is `previous-report-outside-audit`,
 and `{{ register_dir }}` there is `register-dir-outside-audit`; and `{{ register_dir }}` in the prompt of an AI step
 is `register-dir-in-ai-prompt` in every workflow, since the container of an AI call does not get the folder. Each
@@ -1400,10 +1403,27 @@ What fails a block that holds a command or blocks:
 | `conditional` | a failed branch fails the step |
 | `sub-workflow`, a `foreach` item with `workflow_id` | the child run ends as a run of its own does (`FAILED` at its first failed step without `on_failure: continue`), and a child that ended `FAILED` fails the step or the item, with the child's last output and its error |
 
-A child run's gate is its own: a `gate_status` marker one of its steps printed, and the RED of its failed
-`checked_command`, stand in the record under the child's run id (`gate.reported`, and the `gate` of its
-`run.finished`). The step that ran the child copies the child's output, marker included, and that copy sets no gate
-of the run above it.
+**A child run's gate and its errors stay in the child.** A workflow whose checks live in child workflows ends
+`COMPLETED`, exit 0, with no gate, while a child of it is RED or ended `COMPLETED_WITH_ERRORS`: `--fail-on-gate`
+does not fire, and a caller that reads the exit code or the gate sees a pass. The child's `gate_status` marker and
+the RED of its failed `checked_command` stand in the record under the child's run id (`gate.reported`, and the
+`gate` of its `run.finished`; `show` names the gate on the child run's line), and the step that ran the child
+copies the child's output, marker included: a copy sets no gate, and a child that completed with errors leaves
+that step `COMPLETED`. Only a child that ended `FAILED` fails the step.
+
+A parent carries a child's verdict up with a step of its own after the child, which prints the marker lines it
+finds in the child's output (the output of the child's last step, so let that step state the verdict):
+
+```json
+{"type": "shell", "name": "carry_gate", "config": {
+  "values": {"CHILD": "{{ block.checks.output }}"},
+  "command": "printf '%s\\n' \"$CHILD\" | grep -E '^gate_(status|category|description):' || true"}}
+```
+
+That step's output is its own, so its marker sets the run's gate. With `checked_command: true` and a command that
+ends non-zero for a RED child (`... ; ! printf '%s\\n' \"$CHILD\" | grep -q '^gate_status: RED'`), the run also ends
+`COMPLETED_WITH_ERRORS`, exit 1. For an audit whose `report_block` is itself a step that runs a child, `check` says
+so (`report-from-child-sets-no-gate`).
 
 A step that is refused before it runs anything ends its run whatever its `on_failure` says, like a setting of the
 wrong type: a shell line, the host path of a mount or a tool's `container_args` that names a protected value
