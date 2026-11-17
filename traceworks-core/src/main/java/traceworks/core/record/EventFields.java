@@ -87,6 +87,10 @@ final class EventFields {
                 f.put("kind", e.type());
                 f.set("answer", blobs.of(e.answer()));
                 f.put("actor", who.actor());
+                if (who.agent() != null) {
+                    // Only when an agent said so: a record that names answer_agent means "none" by leaving it out
+                    f.put("agent", who.agent());
+                }
                 f.put("source", who.source());
                 f.put("request", who.requestId());
                 f.set("comment", blobs.of(who.comment()));
@@ -209,7 +213,7 @@ final class EventFields {
     }
 
     /** Who answered, as set by {@code attributeNextAnswer}. */
-    record Answer(String actor, String source, String requestId, String comment) {
-        static final Answer NONE = new Answer(null, null, null, null);
+    record Answer(String actor, String source, String requestId, String comment, String agent) {
+        static final Answer NONE = new Answer(null, null, null, null, null);
     }
 }

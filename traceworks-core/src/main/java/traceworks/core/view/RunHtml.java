@@ -7,6 +7,7 @@ import traceworks.core.container.ImageFacts;
 import traceworks.core.record.RunView;
 import traceworks.core.record.StepView;
 import traceworks.core.record.WorkflowOutline;
+import traceworks.core.register.DecisionAgent;
 import traceworks.core.util.ShellQuoting;
 
 import java.util.List;
@@ -218,7 +219,8 @@ public final class RunHtml {
         for (RunView.Intervention intervention : view.interventions()) {
             out.append("<tr><td>").append(Html.line(intervention.at().toString())).append("</td><td>")
                     .append(Html.line(intervention.actor() == null ? "" : intervention.actor())).append("</td><td>")
-                    .append(Html.line(intervention.description()));
+                    .append(Html.line(intervention.description()
+                            + DecisionAgent.through(intervention.agent())));
             if (intervention.content() != null) {
                 out.append(": ").append(content.inline(intervention.content()));
             }
