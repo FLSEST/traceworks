@@ -30,9 +30,10 @@ import java.util.stream.Stream;
  * The area finder's command line.
  *
  * <pre>
- * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY [--known FILE] [--items FILE]
+ * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY
+ *        [--known FILE | --known-file FILE] [--items FILE | --items-file FILE]
  *        [--verdict-version 1] [--max-areas 200] [--max-lines 160] [--context 15] [--judge NAME --judge-provider ID --judge-model MODEL]
- *        [--changes DIR] [--items-file FILE] [--register KEY] [--green yes|no]
+ *        [--changes DIR] [--register KEY] [--green yes|no]
  * changed --changes DIR --root DIR                                         (writes DIR/wanted)
  * report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT   (and findings.jsonl next to REPORT)
  * </pre>
@@ -53,7 +54,9 @@ import java.util.stream.Stream;
  * trees of the base and the workspace commit, and the base blobs that {@code changed} asked for; what changed is
  * decided here, from content ({@link Changes}). An area the register does not know and the changes do not pick is no item of such a run: nothing
  * looked at it. {@code --items-file} takes the items as the register folder of a run holds them
- * ({@code items.jsonl}), which no cap cuts, in place of {@code --items}. {@code --register} is the key of the
+ * ({@code items.jsonl}), which no cap cuts, in place of {@code --items}, and {@code --known-file} the findings the
+ * same way ({@code findings.jsonl}) in place of {@code --known}, the text of {@code {{ audit_findings }}}: every
+ * finding with its whole subject, so that one whose file or member is gone is found and named gone. {@code --register} is the key of the
  * audit's register, for the commands the report names. {@code --green no} makes a check of the changes say YELLOW
  * where it would say GREEN: its best word is then "nothing found in what changed". Every name from the workspace is escaped on
  * standard output, and no text of a model reaches it, so neither can add a line of its own. Exit codes: 0 done, 1 the
@@ -63,10 +66,10 @@ public final class Main {
 
     private static final String USAGE = """
             usage: areas find --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY
-                              [--known FILE] [--items FILE] [--verdict-version N]
-                              [--max-areas N] [--max-lines N] [--context N]
+                              [--known FILE | --known-file FILE] [--items FILE | --items-file FILE]
+                              [--verdict-version N] [--max-areas N] [--max-lines N] [--context N]
                               [--judge NAME --judge-provider ID --judge-model MODEL]
-                              [--changes DIR] [--items-file FILE] [--register KEY] [--green yes|no]
+                              [--changes DIR] [--register KEY] [--green yes|no]
                    areas changed --changes DIR --root DIR
                    areas report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT""";
 
@@ -141,6 +144,9 @@ public final class Main {
         if (options.containsKey("items") && options.containsKey("items-file")) {
             throw new Usage("--items and --items-file do not go together");
         }
+        if (options.containsKey("known") && options.containsKey("known-file")) {
+            throw new Usage("--known and --known-file do not go together");
+        }
         // The check of the changes: what git said changed since the base, as a step before wrote it down
         RuleFile rules = RuleFile.parse(Files.readString(rulesFile));
         if (!Files.isDirectory(root)) throw new IllegalArgumentException(root + " is no directory");
@@ -176,10 +182,14 @@ public final class Main {
         String fence = HexFormat.of().formatHex(bytes(random));
         List<Area> all = Areas.of(result, rules, maxLines, context);
 
-        // What the register knows (the text of {{ audit_findings }}): each area gets the findings of its subject
+        // What the register knows: each area gets the findings of its subject. The file of the register folder
+        // (findings.jsonl) holds every finding whole; the text of {{ audit_findings }} holds 250 rows at most and
+        // cuts a long subject, which then equals no area's
         String knownText = options.containsKey("known")
                 ? Files.readString(Path.of(required(options, "known")), StandardCharsets.UTF_8) : "";
-        List<Known.Row> known = Known.parse(knownText);
+        List<Known.Row> known = options.containsKey("known-file")
+                ? Known.parseJsonl(Files.readString(Path.of(required(options, "known-file")), StandardCharsets.UTF_8))
+                : Known.parse(knownText);
         // Every area is an item of the audit. The register says which items are settled ({{ audit_items }}): an
         // area it calls clean or decided, with the digest it has now, is not judged again. The places, at most
         // --max-areas, go first to the areas that changed or were never judged, then to the open ones
@@ -339,6 +349,13 @@ public final class Main {
             }
             orphans = List.of();
         }
+        // Why each is gone, measured: no source file has its path any more, or the file has no such area
+        List<String> filesRead = result.files().stream().map(Finder.SourceFile::path).toList();
+        orphans = orphans.stream().map(orphan -> {
+            Map<String, Object> entry = new LinkedHashMap<>(orphan);
+            entry.put("reason", Known.goneReason(String.valueOf(orphan.get("subject")), filesRead));
+            return entry;
+        }).toList();
         summary.put("knownGone", orphans);
         // Open findings that no area carries and that are not gone either: for a person, and for the gate
         summary.put("knownUnowned", unowned);
@@ -488,6 +505,10 @@ public final class Main {
         out.println("FACT report_findings_verified: " + outcome.verified().size());
         out.println("FACT report_findings_unverified: " + outcome.unverified().size());
         out.println("FACT report_known_gone: " + outcome.gone().size());
+        // Why they are gone: two measured reasons, and the judge's answer
+        out.println("FACT report_known_gone_file: " + Report.goneFor(outcome.gone(), Known.FILE_GONE));
+        out.println("FACT report_known_gone_member: " + Report.goneFor(outcome.gone(), Known.MEMBER_GONE));
+        out.println("FACT report_known_gone_answered: " + Report.goneFor(outcome.gone(), null));
         out.println("FACT report_known_not_answered: " + outcome.notAnswered().size());
         for (Finding f : outcome.verified()) {
             // The rule is a rule id of the file or "other", the severity one of three words: no model text
@@ -505,7 +526,7 @@ public final class Main {
         Set<String> known = switch (args[0]) {
             case "find" -> Set.of("rules", "root", "source-root", "out", "summary", "max-areas", "max-lines",
                     "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model",
-                    "changes", "items-file", "register", "green");
+                    "changes", "items-file", "known-file", "register", "green");
             case "report" -> Set.of("areas", "summary", "verdicts", "out");
             case "changed" -> Set.of("changes", "root");
             default -> throw new IllegalArgumentException("unknown command '" + args[0] + "'");

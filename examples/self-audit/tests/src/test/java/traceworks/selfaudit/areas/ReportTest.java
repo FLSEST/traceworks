@@ -759,12 +759,35 @@ class ReportTest {
     @Test
     void aKnownFindingWhoseAreaIsNoMore_isNamedAsGoneByTheTool() {
         Map<String, Object> summary = new LinkedHashMap<>(SUMMARY);
-        summary.put("knownGone", List.of(Map.of("ruleKey", "redos", "subject", "a/Gone.java#Gone.m()")));
+        summary.put("knownGone", List.of(
+                Map.of("ruleKey", "redos", "subject", "a/Gone.java#Gone.m()", "reason", "the file is gone"),
+                Map.of("ruleKey", "redos", "subject", "a/Run.java#Run.old()", "reason", "the member is gone"),
+                Map.of("ruleKey", "parser", "subject", "a/Run.java#Run.older()", "reason", "gate_status: GREEN")));
 
         Outcome outcome = Report.of(AREAS, summary, verdicts("{\"area\":\"A001\",\"findings\":[]}", FINE_A002));
 
-        assertThat(gone(outcome)).containsExactly(Map.of("ruleKey", "redos", "subject", "a/Gone.java#Gone.m()"));
-        assertThat(outcome.markdown()).contains("a/Gone.java#Gone.m()").contains("no area has this subject any more");
+        assertThat(gone(outcome)).as("the rule and the subject only").containsExactly(
+                Map.of("ruleKey", "redos", "subject", "a/Gone.java#Gone.m()"),
+                Map.of("ruleKey", "redos", "subject", "a/Run.java#Run.old()"),
+                Map.of("ruleKey", "parser", "subject", "a/Run.java#Run.older()"));
+        assertThat(outcome.markdown()).contains("## Earlier findings that are gone (3)", "| The file is gone | 1 |",
+                "| The member is gone | 2 |", "| The judge answered that it is gone | 0 |",
+                "- redos `a/Gone.java#Gone.m()`: the file is gone\n",
+                "- redos `a/Run.java#Run.old()`: the member is gone\n")
+                .as("a reason that is none of the two measured ones is not printed").doesNotContain("gate_status: GREEN");
+        assertThat(Report.goneFor(outcome.gone(), Known.FILE_GONE)).isEqualTo(1);
+        assertThat(Report.goneFor(outcome.gone(), null)).isZero();
+    }
+
+    /** The judge's "gone" is counted as the judge's, also when its reason reads like a measured one. */
+    @Test
+    void aGoneTheJudgeAnswered_isCountedAsTheJudges_whateverItsReasonSays() {
+        Outcome outcome = withKnown("{\"area\":\"A001\",\"findings\":[],\"known\":[{\"id\":\"K1\",\"status\":\"gone\","
+                + "\"reason\":\"the file is gone\"}]}");
+
+        assertThat(outcome.markdown()).contains("## Earlier findings that are gone (1)", "| The file is gone | 0 |",
+                "| The judge answered that it is gone | 1 |");
+        assertThat(Report.goneFor(outcome.gone(), null)).isEqualTo(1);
     }
 
     // ---- findings.jsonl: the findings as data, with the model's words (docs/registers.md, "The detail of a finding") ----

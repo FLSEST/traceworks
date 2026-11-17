@@ -13,7 +13,13 @@ import java.util.Set;
  * <p>A model's finding is not resolved by silence: the register keeps it open until a run says that it is gone. So
  * each verdict call gets the open findings of its own item, each with an id ({@code K1}, {@code K2}), and has to
  * answer for each: it still holds, or it is gone. A finding a person accepted or dismissed is decided: the call gets
- * it as something not to report again. A finding whose subject is no item any more is gone without a model.
+ * it as something not to report again. A finding whose subject is no item any more is gone without a model, with
+ * the reason that was measured: its file is gone, or its member is ({@link #goneReason}).
+ *
+ * <p>The register hands a run what it knows in two forms. The block of {@code {{ audit_findings }}} ({@link #parse})
+ * holds at most 250 rows and cuts a subject after 300 characters; a cut subject equals no area's, so such a finding
+ * was never asked about and never named gone. The file {@code findings.jsonl} of the register folder
+ * ({@link #parseJsonl}) holds every finding whole, and is what the packages read.
  *
  * <p>A row is {@code STATUS | SEVERITY | ruleKey | subject | title | Evidence: ... [| Disposition: ...] [| Decided
  * on: ...]}. The severity of a row is that of the last report; a decision covers the severity it was made on, and
@@ -42,9 +48,10 @@ final class Known {
      * @param note      the note of the decision; empty for an open finding or without a note
      * @param decidedOn the severity the decision on a decided finding was made on: what the row's last cell names,
      *                  else the severity the row shows
+     * @param whole     whether the subject is the finding's whole subject: {@code false} for one the block cut
      */
     record Row(String status, String severity, String ruleKey, String subject, String title, String evidence,
-               String note, String decidedOn) {
+               String note, String decidedOn, boolean whole) {
 
         /** Whether the next run is asked about it: it is open, or a fix waits to be verified. */
         boolean asked() {
@@ -77,9 +84,40 @@ final class Known {
                 }
             }
             rows.add(new Row(cells[0], cells[1], cells[2], cells[3], cells[4], evidence.equals("(none)") ? "" : evidence,
-                    note.equals("(no note)") ? "" : note, decidedOn));
+                    note.equals("(no note)") ? "" : note, decidedOn, !cells[3].endsWith(CUT)));
         }
         return rows;
+    }
+
+    /**
+     * The rows of {@code findings.jsonl} in the register folder of a run (docs/registers.md, "The register folder of
+     * a run"): one JSON object a line, with {@code status}, {@code severity}, {@code rule_key}, {@code subject},
+     * {@code evidence} and {@code disposition}. The file holds every finding the block of {@link #parse} lists, and
+     * none of them cut: a subject is the whole subject, whatever its length. An empty file is a register that knows
+     * no finding. A line that is no such object is refused: the file is the register's own, and half a list must not
+     * pass for a whole one. The evidence and the note become one line each, as the prompt lists them.
+     */
+    static List<Row> parseJsonl(String findingsJsonl) {
+        List<Row> rows = new ArrayList<>();
+        for (String line : findingsJsonl.split("\n")) {
+            if (line.isBlank()) continue;
+            if (!(Json.parse(line) instanceof Map<?, ?> finding) || !(finding.get("status") instanceof String status)
+                    || !(ASKED.contains(status) || DECIDED.contains(status))
+                    || !(finding.get("rule_key") instanceof String rule)
+                    || !(finding.get("subject") instanceof String subject)) {
+                throw new IllegalArgumentException("a line of the register's findings is no finding");
+            }
+            String severity = finding.get("severity") instanceof String text ? text : "";
+            Map<?, ?> disposition = finding.get("disposition") instanceof Map<?, ?> map ? map : Map.of();
+            rows.add(new Row(status, severity, rule, subject, oneLine(finding.get("title")),
+                    oneLine(finding.get("evidence")), oneLine(disposition.get("note")),
+                    disposition.get("severity") instanceof String decidedOn ? decidedOn : severity, true));
+        }
+        return rows;
+    }
+
+    private static String oneLine(Object value) {
+        return value instanceof String text ? text.strip().replaceAll("\\s+", " ") : "";
     }
 
     private static final java.util.regex.Pattern MISSING = java.util.regex.Pattern.compile("^\\(\\+(\\d{1,9}) more:");
@@ -154,7 +192,8 @@ final class Known {
         if (item == null || !(item.get("decided_known") instanceof List<?> list)) return null;
         String shown = shown(subject);
         for (Object entry : list) {
-            if (entry instanceof Map<?, ?> row && rule.equals(row.get("rule")) && shown.equals(row.get("subject"))) {
+            if (entry instanceof Map<?, ?> row && rule.equals(row.get("rule"))
+                    && shown.equals(shown(String.valueOf(row.get("subject"))))) {
                 return row;
             }
         }
@@ -179,7 +218,11 @@ final class Known {
                 : "not above it: the register keeps the decision");
     }
 
-    /** A subject as the register shows it in a row: blanks collapsed, and {@code |} as the masked {@code ¦}. */
+    /**
+     * A subject as the register shows it in a row: blanks collapsed, and {@code |} as the masked {@code ¦}. Two
+     * subjects are compared in this form, whichever of the two forms a row came from: applied twice it changes
+     * nothing.
+     */
     static String shown(String subject) {
         return subject.strip().replaceAll("\\s+", " ").replace('|', '¦');
     }
@@ -201,7 +244,7 @@ final class Known {
         List<Map<String, Object>> decidedKnown = new ArrayList<>();
         String shown = shown(subject);
         for (Row row : rows) {
-            if (!row.subject().equals(shown) || rules != null && !rules.contains(row.ruleKey())) continue;
+            if (!shown(row.subject()).equals(shown) || rules != null && !rules.contains(row.ruleKey())) continue;
             if (row.asked()) {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("id", "K" + (known.size() + 1));
@@ -251,7 +294,8 @@ final class Known {
     /**
      * The open findings of {@code rules} whose subject is none of {@code subjects}, each as {@code ruleKey} and
      * {@code subject}: what they were about is no more, so they cannot hold as they were stated. A subject the
-     * register cut is left out, since no subject could equal it. A decided finding is left out too: a person
+     * block cut is left out, since no subject could equal it; the file of the register folder cuts none. The subject
+     * is given as the row has it, so the register finds the finding it names. A decided finding is left out too: a person
      * accepted or dismissed it, and it stays so until its review date brings it back as one that is asked about.
      *
      * @param rules    the rule keys a model judges; {@code null} when it judges every rule
@@ -262,8 +306,8 @@ final class Known {
         for (String subject : subjects) shown.add(shown(subject));
         List<Map<String, Object>> orphans = new ArrayList<>();
         for (Row row : rows) {
-            if (!row.asked() || rules != null && !rules.contains(row.ruleKey()) || shown.contains(row.subject())
-                    || row.subject().endsWith(CUT)) {
+            if (!row.asked() || rules != null && !rules.contains(row.ruleKey())
+                    || shown.contains(shown(row.subject())) || !row.whole()) {
                 continue;
             }
             Map<String, Object> entry = new LinkedHashMap<>();
@@ -274,8 +318,29 @@ final class Known {
         return orphans;
     }
 
+    /** Why a finding is gone whose file is no source file the audit reads any more. */
+    static final String FILE_GONE = "the file is gone";
+    /** Why a finding is gone whose file is still read, and has no area with the finding's members. */
+    static final String MEMBER_GONE = "the member is gone";
+
     /**
-     * The open findings of {@code rules} that no item carries and that are no orphans either: the register cut their
+     * Why an orphan is gone, measured: a subject is {@code <file>#<members>}, so the file of {@code subject} is
+     * still read when the subject starts with one of {@code files} and a {@code #}. Then the file has no area with
+     * these members any more ({@link #MEMBER_GONE}): a member was removed or renamed, or lost what a rule points at.
+     * Otherwise no source file has that path ({@link #FILE_GONE}): it was removed, renamed or moved.
+     *
+     * @param files the paths of the source files the finder read, relative to the root
+     */
+    static String goneReason(String subject, java.util.Collection<String> files) {
+        String shown = shown(subject);
+        for (String file : files) {
+            if (shown.startsWith(shown(file) + "#")) return MEMBER_GONE;
+        }
+        return FILE_GONE;
+    }
+
+    /**
+     * The open findings of {@code rules} that no item carries and that are no orphans either: the block cut their
      * subject, so no subject could equal it and nothing can tell whether what they were about is still there. No run
      * asks about them and none names them as gone: the report lists them for a person, and the gate does not go
      * green over them. Each as {@code ruleKey}, {@code subject} and {@code severity}.
@@ -288,8 +353,8 @@ final class Known {
         for (String subject : subjects) shown.add(shown(subject));
         List<Map<String, Object>> unowned = new ArrayList<>();
         for (Row row : rows) {
-            if (!row.asked() || rules != null && !rules.contains(row.ruleKey()) || shown.contains(row.subject())
-                    || !row.subject().endsWith(CUT)) {
+            if (!row.asked() || rules != null && !rules.contains(row.ruleKey())
+                    || shown.contains(shown(row.subject())) || row.whole()) {
                 continue;
             }
             Map<String, Object> entry = new LinkedHashMap<>();

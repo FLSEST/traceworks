@@ -469,7 +469,8 @@ class ChangesMainTest {
         Map<String, String> asTest = Handover.files(root);
         Handover.write(work.resolve("changes"), base, asTest);
         assertThat(run("", find("--known", known.toString()))).isZero();
-        assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER)));
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER,
+                "reason", "the file is gone")));
         Files.move(test.resolve("RunnerTest.java"), moved.resolve("Runner.java"));
 
         // Without such a file, a member that is gone takes its finding with it
@@ -477,7 +478,8 @@ class ChangesMainTest {
         Map<String, String> without = Handover.files(root);
         Handover.write(work.resolve("changes"), base, without);
         assertThat(run("", find("--known", known.toString()))).isZero();
-        assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER)));
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER,
+                "reason", "the file is gone")));
         assertThat(report()).isZero();
         assertThat(details()).as("its file is removed, and that is said").startsWith("gate_status: YELLOW\ngate_category:"
                 + " changes\ngate_description: of the changes since aaaaaaaaaaaa: 1 removed Java file; ");

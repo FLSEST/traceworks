@@ -87,6 +87,16 @@ final class Report {
     record Gone(String rule, String subject, String area, String reason) {
     }
 
+    /**
+     * How many of {@code gone} are gone for {@code measured}, one of the two reasons {@code find} measures
+     * ({@link Known#FILE_GONE}, {@link Known#MEMBER_GONE}); with {@code null}, how many the judge answered as gone.
+     * A measured one names no area: a model's reason in the same words is still the model's.
+     */
+    static long goneFor(List<Gone> gone, String measured) {
+        return gone.stream().filter(g -> measured == null ? !g.area().isEmpty()
+                : g.area().isEmpty() && g.reason().equals(measured)).count();
+    }
+
     /** An answer that calls an open finding gone, before it is known whether the answer can be taken. */
     private record SaidGone(Gone gone, String knownId, boolean high) {
     }
@@ -235,8 +245,11 @@ final class Report {
         }
         for (Object entry : list(summary.get("knownGone"))) {
             Map<String, Object> orphan = object(entry);
+            // The reason is one of the two find measured; anything else in its place is not printed
+            String measured = text(orphan.get("reason"));
             calledGone.add(new Gone(text(orphan.get("ruleKey")), text(orphan.get("subject")), "",
-                    "no area has this subject any more"));
+                    measured.equals(Known.FILE_GONE) || measured.equals(Known.MEMBER_GONE) ? measured
+                            : Known.MEMBER_GONE));
         }
         // What the report states is not gone: a new finding of the same rule in the area is the register's finding
         Set<String> stated = new HashSet<>();
@@ -885,8 +898,16 @@ final class Report {
             md.append("\n");
         }
         if (!gone.isEmpty()) {
-            md.append("## Earlier findings that are gone\n\nOpen in the register, checked in this run and no longer ")
-                    .append("there. The register resolves them. The reason is the model's, not checked.\n\n");
+            md.append("## Earlier findings that are gone (").append(gone.size()).append(")\n\nOpen in the register ")
+                    .append("and dropped by this run: the register resolves them. Two reasons are measured, without ")
+                    .append("a model: no source file has the finding's path any more, or the file has no area with ")
+                    .append("its members. Where a member only moved or was renamed, its code is in an area that this ")
+                    .append("run judges, and a defect that is still there is reported under the new name. The third ")
+                    .append("reason is the judge's word, not checked.\n\n| Why | Findings |\n|---|---|\n");
+            row(md, "The file is gone", String.valueOf(goneFor(gone, Known.FILE_GONE)));
+            row(md, "The member is gone", String.valueOf(goneFor(gone, Known.MEMBER_GONE)));
+            row(md, "The judge answered that it is gone", String.valueOf(goneFor(gone, null)));
+            md.append("\n");
             for (Gone g : gone) {
                 md.append("- ").append(ruleId(g.rule())).append(" ").append(code(g.subject())).append(": ")
                         .append(plain(g.reason())).append("\n");
