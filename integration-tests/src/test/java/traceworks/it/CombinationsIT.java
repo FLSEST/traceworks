@@ -104,7 +104,7 @@ class CombinationsIT extends IntegrationTest {
         assertThat(verify.code()).as(verify.describe()).isZero();
         assertThat(verify.out()).contains("verified");
 
-        // show: one line per step of the run, and one line for the child run with its status
+        // show: one line per step of the run ...
         Result show = traceworks.exec("show", folder.id());
         assertThat(show.code()).as(show.describe()).isZero();
         for (String step : List.of("seed +\\[shell\\]", "gather +\\[foreach\\]", "route +\\[switch\\]",
@@ -112,29 +112,17 @@ class CombinationsIT extends IntegrationTest {
                 "final +\\[shell\\]")) {
             assertThat(show.out()).containsPattern("(?m)^  \\d+ +" + step + " +COMPLETED ");
         }
-        assertThat(show.out()).contains("Child     " + child.substring(0, 8) + " COMPLETED");
+        // ... and names what ran inside a step: the case of the switch with its block, and under the step that
+        // started it the child run with its steps, further in. A show that listed the run's own steps only would
+        // name neither case_fast nor a step of the child
+        assertThat(show.out()).as(show.describe())
+                .containsPattern("(?m)^      case fast: case_fast \\[shell\\]$")
+                .containsPattern("(?m)^      child run " + child.substring(0, 8) + " COMPLETED$")
+                .containsPattern("(?m)^        \\d+ +count_up +\\[while\\] +COMPLETED ")
+                .containsPattern("(?m)^        \\d+ +flaky +\\[retry\\] +COMPLETED ")
+                .containsPattern("(?m)^        \\d+ +read_trail +\\[shell\\] +COMPLETED ");
         // run.html draws the child's steps under the step that started them
         assertThat(folder.html()).contains("count_up", "flaky", "read_trail");
-    }
-
-    /**
-     * What the owner asked of {@code show}: that it names every nested step. <b>It does not today</b>, and this test
-     * is kept failing to say so: {@code show} lists the steps of the run itself and one line
-     * {@code Child <id> <status>} per child run, so neither the steps of a child workflow ({@code count_up},
-     * {@code flaky}, {@code read_trail}) nor the block of a switch case that ran ({@code case_fast}) appear by name.
-     * {@code run.html} does draw the child's steps (the test above). Either {@code show} learns to print them, or
-     * this test goes.
-     */
-    @Test
-    void show_namesTheStepsOfAChildRun_andTheBlockOfTheSwitchCaseThatRan() {
-        Result run = traceworks.run("combo-pipeline");
-        assertThat(run.code()).as(run.describe()).isZero();
-
-        Result show = traceworks.exec("show", run.runId());
-
-        assertThat(show.code()).as(show.describe()).isZero();
-        assertThat(show.out()).as("the steps of the child run and the case block, by name:\n" + show.out())
-                .contains("count_up", "flaky", "read_trail", "case_fast");
     }
 
     private static Path scratchMount(JsonNode command) throws IOException {
@@ -295,8 +283,16 @@ class CombinationsIT extends IntegrationTest {
                 "the_end +\\[shell\\] +COMPLETED")) {
             assertThat(show.out()).as(show.describe()).containsPattern("(?m)^  \\d+ +" + step + " ");
         }
-        assertThat(show.out()).contains("Child     " + late.substring(0, 8) + " FAILED",
-                "Child     " + red.substring(0, 8) + " COMPLETED_WITH_ERRORS");
+        // ... under each step the child run it started, with the child's own status, its gate and its steps
+        assertThat(show.out()).as(show.describe())
+                .containsPattern("(?m)^      child run " + late.substring(0, 8) + " FAILED$")
+                .containsPattern("(?m)^        \\d+ +good +\\[shell\\] +COMPLETED ")
+                .containsPattern("(?m)^        \\d+ +bad +\\[shell\\] +FAILED ")
+                .containsPattern("(?m)^      item 2/3  child run [0-9a-f]{8} FAILED$")
+                .containsPattern("(?m)^        \\d+ +work +\\[shell\\] +FAILED ")
+                .containsPattern("(?m)^      child run " + red.substring(0, 8)
+                        + " COMPLETED_WITH_ERRORS  gate RED \\(build\\)$")
+                .containsPattern("(?m)^      case fast: sw_fails \\[shell\\], sw_never \\[shell\\]$");
         assertThat(show.out()).doesNotContainPattern("(?m)^Gate ");
     }
 }

@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,7 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Stopping a run from its terminal with real signals (docs/cli.md, "run"; package {@code pause-loop}): Ctrl-C once
  * pauses, Ctrl-C twice cancels, and SIGTERM leaves the run interrupted. A paused or interrupted run goes on with
  * {@code resume}, and its loop runs only the items that did not finish: every item of the loop notes its start in
- * {@code ran.txt} in the workspace, so the file says how often each one ran. The Ctrl-C of these tests goes to the
+ * {@code ran.txt} in the workspace, so the file says how often each one ran, and then waits until the test lets it
+ * go ({@link #let}): no item ends before the test has done what it does while the item runs, and none takes longer
+ * than that. The Ctrl-C of these tests goes to the
  * whole process group of the command, as a terminal sends it. A child workflow does not park in the middle (package
  * {@code pause-child}): it ends, and its parent parks.
  */
@@ -46,6 +47,13 @@ class PauseIT extends IntegrationTest {
         }
     }
 
+    /** Lets the items {@code names} end: each waits for its file {@code go-<item>} in the workspace. */
+    private void let(String... names) throws IOException {
+        for (String name : names) {
+            Files.createFile(traceworks.workspace().resolve("go-" + name));
+        }
+    }
+
     /** The folder of the one run in the home. */
     private RunFolder theRun() {
         assertThat(traceworks.folders()).hasSize(1);
@@ -54,10 +62,13 @@ class PauseIT extends IntegrationTest {
 
     @Test
     void ctrlCOnce_pausesAfterTheItemInFlight_andTheResumeRunsEveryItemOnce() throws Exception {
+        let("one");
         Traceworks.Running running = traceworks.startRun("pause-loop");
         await(() -> ranItems().size() == 2, "the second item to start");
 
         running.ctrlC();
+        await(() -> running.errSoFar().contains("Ctrl-C again cancels"), "the pause to be announced");
+        let("two");   // only now: the pause came while the item ran
         Result run = running.await(120);
 
         assertThat(run.code()).as(run.describe()).isEqualTo(5);
@@ -76,6 +87,7 @@ class PauseIT extends IntegrationTest {
         assertThat(finished).extracting(item -> item.path("status").asText()).containsExactly("COMPLETED", "COMPLETED");
         assertThat(folder.ownEvents("step.finished")).as("the loop's step is not finished").isEmpty();
 
+        let("three", "four");
         Result resumed = traceworks.exec("resume", run.runId());
 
         assertThat(resumed.code()).as(resumed.describe()).isZero();
@@ -114,6 +126,7 @@ class PauseIT extends IntegrationTest {
     /** The end of the process cannot wait for a step: the run stays resumable, and costs only the item in flight. */
     @Test
     void sigterm_leavesTheRunInterrupted_andTheResumeGoesOn() throws Exception {
+        let("one");
         Traceworks.Running running = traceworks.startRun("pause-loop");
         await(() -> ranItems().size() == 2, "the second item to start");
 
@@ -132,6 +145,7 @@ class PauseIT extends IntegrationTest {
         assertThat(show.out()).contains("INTERRUPTED");
         Containers.assertNoneLeft(traceworks.environment().runtime(), java.util.Set.of(folder.id()));
 
+        let("two", "three", "four");
         Result resumed = traceworks.exec("resume", folder.id());
 
         assertThat(resumed.code()).as(resumed.describe()).isZero();
@@ -150,7 +164,8 @@ class PauseIT extends IntegrationTest {
         Traceworks.Running running = traceworks.startRun("pause-loop");
         await(() -> ranItems().size() == 1, "the first item to start");
 
-        Result pause = traceworks.exec("pause");
+        Result pause = traceworks.exec("pause");   // returns once the run recorded the request
+        let("one");
         Result run = running.await(120);
 
         assertThat(pause.code()).as(pause.describe()).isZero();
@@ -159,24 +174,6 @@ class PauseIT extends IntegrationTest {
         assertThat(ranItems()).containsExactly("one");
         Result cancel = traceworks.exec("cancel", run.runId());
         assertThat(cancel.code()).as(cancel.describe()).isZero();
-    }
-
-    /** Counts the lines of {@code type} in the events of the one run in the home; 0 before the run exists. */
-    static long recorded(Traceworks traceworks, String type) {
-        Path runs = traceworks.home().resolve("runs");
-        if (!Files.isDirectory(runs)) {
-            return 0;
-        }
-        try (Stream<Path> found = Files.walk(runs, 2)) {
-            long count = 0;
-            for (Path dir : found.filter(path -> Files.isRegularFile(path.resolve("events.jsonl"))).toList()) {
-                count += Files.readAllLines(dir.resolve("events.jsonl")).stream()
-                        .filter(line -> line.contains("\"type\":\"" + type + "\"")).count();
-            }
-            return count;
-        } catch (IOException e) {
-            return 0;
-        }
     }
 
     private List<String> counted() {

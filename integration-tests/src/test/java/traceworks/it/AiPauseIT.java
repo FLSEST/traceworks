@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Test;
 import java.nio.file.Files;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -19,14 +18,13 @@ class AiPauseIT extends AiIntegrationTest {
 
     @Test
     void ctrlCOnce_inALoopOfAiCalls_costsNoCallASecondTime() throws Exception {
+        Files.createFile(traceworks.workspace().resolve("go-one"));
         Traceworks.Running running = traceworks.startRun("ai-pause-loop");
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120);
-        while (PauseIT.recorded(traceworks, "ai.request") < 2) {
-            assertThat(System.nanoTime()).as("waited 120 s for the second AI call").isLessThan(deadline);
-            Thread.sleep(100);
-        }
+        PauseIT.await(() -> waits("go-two"), "the second AI call to wait in its container");
 
         running.ctrlC();
+        PauseIT.await(() -> running.errSoFar().contains("Ctrl-C again cancels"), "the pause to be announced");
+        Files.createFile(traceworks.workspace().resolve("go-two"));   // only now: the pause came during the call
         Result run = running.await(180);
 
         assertThat(run.code()).as(run.describe()).isEqualTo(5);
@@ -38,6 +36,7 @@ class AiPauseIT extends AiIntegrationTest {
         assertThat(folder.ofStep("foreach.item.finished", 0)).extracting(item -> item.path("status").asText())
                 .as("the items so far: " + run.describe()).containsExactly("COMPLETED", "COMPLETED");
 
+        Files.createFile(traceworks.workspace().resolve("go-three"));
         Result resumed = traceworks.exec("resume", run.runId());
 
         assertThat(resumed.code()).as(resumed.describe()).isZero();
