@@ -64,6 +64,18 @@ public final class RunDirectoryGuard implements HostDirectories {
     /** By the home's {@code writable_mounts} and the real path, as the mount check asks it when the step runs. */
     @Override
     public java.util.Optional<String> writableMountRefusal(String hostPath) {
-        return MountGuard.writableMountRefusal(hostPath, home, layout);
+        return MountGuard.writableMountRefusal(hostPath, home, layout, null);
+    }
+
+    /** The home's {@code workspace_git_writable}. */
+    @Override
+    public boolean workspaceGitWritable() {
+        return layout.workspaceGitWritable();
+    }
+
+    /** The same, and nothing asked of a mount in the workspace that its step may write, by the real path. */
+    @Override
+    public java.util.Optional<String> writableMountRefusal(String hostPath, String writableWorkspace) {
+        return MountGuard.writableMountRefusal(hostPath, home, layout, writableWorkspace);
     }
 }

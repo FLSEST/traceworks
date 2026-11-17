@@ -56,6 +56,30 @@ public interface HostDirectories {
     }
 
     /**
+     * {@link #writableMountRefusal(String)} for the mount of a step that may write its workspace
+     * ({@code workspace_writable: true}): empty as well when the real path of the host side is the workspace or
+     * lies in it, since such a step writes that folder anyway and the mount shows it nothing more. A folder that
+     * holds the workspace still needs a listed folder. By default nothing is refused.
+     *
+     * @param writableWorkspace the real path of the run's workspace, as the start check judged it, when the step
+     *                          that declares the mount may write it; {@code null} for a step that only reads its
+     *                          workspace and for a run without one, which is the question without a workspace
+     */
+    default java.util.Optional<String> writableMountRefusal(String hostPath, String writableWorkspace) {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * Whether the operator lets a step that may write its workspace ({@code workspace_writable: true}) write the
+     * workspace's own {@code .git} as well ({@code workspace_git_writable} in {@code traceworks.json}). Without it
+     * the container of such a step gets that {@code .git} read-only. What decides is the adapter that starts the
+     * container; this is its word for a description of a workflow. {@code false} by default.
+     */
+    default boolean workspaceGitWritable() {
+        return false;
+    }
+
+    /**
      * What {@link #check} found: a refusal, or the real path it judged.
      *
      * @param refusal  why the directory must not be mounted; {@code null} when it may

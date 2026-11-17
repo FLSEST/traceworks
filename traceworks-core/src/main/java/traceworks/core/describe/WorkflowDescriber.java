@@ -83,11 +83,16 @@ public final class WorkflowDescriber {
     /** Tells whether a writable mount lies in no folder the operator listed. */
     private final java.util.function.Predicate<String> unlistedWritableMount;
 
+    /** Whether the operator lets a step that may write its workspace write the workspace's {@code .git} too. */
+    private final boolean workspaceGitWritable;
+
     private WorkflowDescriber(Map<String, PackageImage> images, LocalServers local,
-                              java.util.function.Predicate<String> unlistedWritableMount) {
+                              java.util.function.Predicate<String> unlistedWritableMount,
+                              boolean workspaceGitWritable) {
         this.images = images;
         this.local = local == null ? LocalServers.NONE : local;
         this.unlistedWritableMount = unlistedWritableMount == null ? host -> false : unlistedWritableMount;
+        this.workspaceGitWritable = workspaceGitWritable;
     }
 
     /**
@@ -120,8 +125,23 @@ public final class WorkflowDescriber {
      */
     public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children, LocalServers local,
                                                java.util.function.Predicate<String> unlistedWritableMount) {
+        return describe(pkg, children, local, unlistedWritableMount, false);
+    }
+
+    /**
+     * {@link #describe(LoadedPackage, WorkflowResolver, LocalServers, java.util.function.Predicate)} in a home
+     * whose operator said whether a step that may write its workspace may write the workspace's {@code .git} too
+     * ({@code workspace_git_writable}): a writable workspace says which holds.
+     *
+     * @param workspaceGitWritable the operator's setting; {@code false} is its default, a {@code .git} that such a
+     *                             step only reads
+     */
+    public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children, LocalServers local,
+                                               java.util.function.Predicate<String> unlistedWritableMount,
+                                               boolean workspaceGitWritable) {
         WorkflowDefinition definition = pkg.definition();
-        WorkflowDescriber describer = new WorkflowDescriber(pkg.images(), local, unlistedWritableMount);
+        WorkflowDescriber describer = new WorkflowDescriber(pkg.images(), local, unlistedWritableMount,
+                workspaceGitWritable);
         List<Block> blocks = describer.workflow(definition, children, List.of(definition));
         Map<String, String> inputs = new LinkedHashMap<>();
         definition.defaultContext().forEach((key, value) -> inputs.put(key, shown(value)));
@@ -276,7 +296,9 @@ public final class WorkflowDescriber {
             if (mounts == null) {
                 facts.add("mounts" + INVALID);
             } else if (!mounts.isEmpty()) {
-                facts.add("mounts " + String.join(", ", mounts.stream().map(this::mount).toList()));
+                boolean writesTheWorkspace = Boolean.TRUE.equals(config.get("workspace_writable"));
+                facts.add("mounts " + String.join(", ", mounts.stream()
+                        .map(entry -> mount(entry, writesTheWorkspace)).toList()));
             }
         }
         timeout(facts, settings, config);
@@ -304,17 +326,35 @@ public final class WorkflowDescriber {
 
     /**
      * A {@code mounts} entry as written; a writable one whose literal host side lies in no folder the operator
-     * listed says so, since a run is refused for it before its first step.
+     * listed says so, since a run is refused for it before its first step. A step that may write its workspace
+     * needs no listed folder for a mount in the workspace, which no description knows: its mark says so.
+     *
+     * @param writesTheWorkspace whether the step that declares the mount sets {@code workspace_writable: true}
      */
-    private String mount(String entry) {
+    private String mount(String entry, boolean writesTheWorkspace) {
         String host = traceworks.core.engine.WritableMounts.literalHostOfAWritableEntry(entry);
-        return host != null && unlistedWritableMount.test(host)
-                ? entry + " (writable, in no folder of writable_mounts: a run is refused)" : entry;
+        if (host == null || !unlistedWritableMount.test(host)) {
+            return entry;
+        }
+        return entry + " (writable, in no folder of writable_mounts: a run is refused"
+                + (writesTheWorkspace ? " unless the folder lies in its workspace)" : ")");
     }
 
-    private static String workspace(BlockSettings settings) {
+    /**
+     * Whether the step may write its workspace; a writable one says whether its top-level {@code .git} is writable
+     * too, as the operator set it. That is the {@code .git} of a workspace of the operator's in a container: the
+     * run's own checkout ({@code run --source}) is writable with its {@code .git}, and a host run has no mounts.
+     */
+    private String workspace(BlockSettings settings) {
         Boolean writable = read(() -> settings.flag("workspace_writable"));
-        return writable == null ? "workspace" + INVALID : writable ? "workspace writable" : "workspace read-only";
+        if (writable == null) {
+            return "workspace" + INVALID;
+        }
+        if (!writable) {
+            return "workspace read-only";
+        }
+        return workspaceGitWritable ? "workspace writable, with its .git (workspace_git_writable)"
+                : "workspace writable, its .git read-only";
     }
 
     /** What a block that refers to a model choice runs with: the default, and what a run may pick instead. */

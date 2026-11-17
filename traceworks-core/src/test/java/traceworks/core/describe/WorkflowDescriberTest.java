@@ -97,8 +97,8 @@ class WorkflowDescriberTest {
         assertThat(facts(plain, "shell")).containsExactly("network none", "workspace read-only",
                 "image: the run's shell image");
 
-        assertThat(facts(described.blocks().get(1), "shell")).containsExactly("network open", "workspace writable",
-                "secrets DEPLOY_TOKEN, OTHER", "values REVIEW, TITLE", "image ./images/tools", "mounts /data:/data:ro",
+        assertThat(facts(described.blocks().get(1), "shell")).containsExactly("network open",
+                "workspace writable, its .git read-only", "secrets DEPLOY_TOKEN, OTHER", "values REVIEW, TITLE", "image ./images/tools", "mounts /data:/data:ro",
                 "timeout 600 s");
     }
 
@@ -122,6 +122,47 @@ class WorkflowDescriberTest {
                 + " {{ scratch_dir }}/x:/x:rw");
         assertThat(asked).containsExactly("~/out", "/srv/listed");
         assertThat(String.join("\n", DescriptionText.lines(described))).contains("in no folder of writable_mounts");
+    }
+
+    /**
+     * A step that may write its workspace needs no listed folder for a writable mount in the workspace, and
+     * {@code describe} knows no workspace: the mark of such a step's mount says when the run is not refused.
+     */
+    @Test
+    void aWritableMountInNoListedFolder_ofAStepThatMayWriteItsWorkspace_saysWhereItNeedsNone() {
+        WorkflowDescription described = WorkflowDescriber.describe(Described.pkg("""
+                {"id":"wf","blocks":[
+                 {"type":"shell","name":"fix","config":{"command":"x","workspace_writable":true,
+                  "mounts":["/work/project/out:/out:rw","/data:/data:ro"]}}]}"""), null, null, host -> true);
+
+        assertThat(facts(described.blocks().get(0), "shell")).contains("mounts /work/project/out:/out:rw"
+                + " (writable, in no folder of writable_mounts: a run is refused unless the folder lies in its"
+                + " workspace), /data:/data:ro");
+    }
+
+    /**
+     * Whether a step that may write its workspace may write the workspace's {@code .git} is the operator's word
+     * ({@code workspace_git_writable}): the description of a writable workspace says which holds in this home.
+     */
+    @Test
+    void aWritableWorkspace_saysWhetherItsGitIsWritable_asTheOperatorSetIt() {
+        String json = """
+                {"id":"wf","blocks":[
+                 {"type":"shell","name":"fix","config":{"command":"x","workspace_writable":true}},
+                 {"type":"shell","name":"read","config":{"command":"x"}},
+                 {"type":"agentic","name":"ask","config":{"goal":"Fix it.","tools":"shell",
+                  "workspace_writable":true}}]}""";
+
+        WorkflowDescription closed = WorkflowDescriber.describe(Described.pkg(json), null, null, null, false);
+        WorkflowDescription opened = WorkflowDescriber.describe(Described.pkg(json), null, null, null, true);
+
+        assertThat(facts(closed.blocks().get(0), "shell")).contains("workspace writable, its .git read-only");
+        assertThat(facts(closed.blocks().get(2), "ai")).contains("workspace writable, its .git read-only");
+        assertThat(facts(opened.blocks().get(0), "shell"))
+                .contains("workspace writable, with its .git (workspace_git_writable)");
+        assertThat(facts(opened.blocks().get(2), "ai"))
+                .contains("workspace writable, with its .git (workspace_git_writable)");
+        assertThat(facts(opened.blocks().get(1), "shell")).contains("workspace read-only");
     }
 
     /** Only the names of secrets exist in a package; no value is ever looked up. */
@@ -153,7 +194,7 @@ class WorkflowDescriberTest {
         // a model of the workflow is never carried to another provider
         assertThat(facts(described.blocks().get(2), "ai")).containsExactly("provider claude",
                 "model: the provider's default", "effort high", "tools shell", "web none", "untrusted input",
-                "workspace writable");
+                "workspace writable, its .git read-only");
         assertThat(facts(described.blocks().get(2), "person")).containsExactly(
                 "a person is asked before each action (require_approval)");
     }

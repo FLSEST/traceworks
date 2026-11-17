@@ -432,6 +432,33 @@ class RunServicesContainerTest {
         assertThat(fx.store.runIds()).as("the run was not refused").hasSize(1);
     }
 
+    /**
+     * A step that may write its workspace writes a folder in it anyway: the start check asks about its writable
+     * mount with the workspace the run mounts, and the mount there needs no listed folder. Of the mount of a step
+     * that only reads its workspace it asks without one, and of a mount outside the workspace a listed folder as
+     * ever.
+     */
+    @Test
+    void aWritableMountInTheWorkspace_needsNoListedFolder_whereItsStepMayWriteTheWorkspace() {
+        fx.withRuntime();
+        Path fixes = Path.of("/pkg/fixes");
+        String inside = WORKSPACE + "/out";
+        fx.packages.put(fixes, """
+                {"id": "wf-fixes", "name": "Fixes", "blocks": [
+                  {"type": "shell", "name": "fix", "config": {"command": "./fix", "workspace_writable": true,
+                    "mounts": ["%s:/out:rw"]}},
+                  {"type": "shell", "name": "read", "config": {"command": "./read",
+                    "mounts": ["%s:/out:rw"]}}
+                ]}""".formatted(inside, inside));
+        fx.unlistedWritableMounts.put(inside, "it lies in no folder that writable_mounts lists");
+
+        assertThatThrownBy(() -> fx.services().start(request(fixes), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .message().contains("Block 2 \"read\": the mount " + inside + ":/out:rw is refused")
+                .doesNotContain("Block 1");
+        assertThat(fx.askedWritableMounts).containsExactly(inside + " in " + WORKSPACE, inside + " in null");
+    }
+
     @Test
     void workspaceThatIsOrContainsTheHome_isRefused() {
         fx.withRuntime();

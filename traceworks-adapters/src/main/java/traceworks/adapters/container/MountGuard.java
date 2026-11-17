@@ -787,12 +787,29 @@ public final class MountGuard {
      * ({@link #judge}).
      */
     public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout) {
+        return writableMountRefusal(hostPath, home, layout, null);
+    }
+
+    /**
+     * {@link #writableMountRefusal(String, Path, HomeLayout)} for the mount of a step that may write its workspace:
+     * empty as well when the real path of the host side is {@code writableWorkspace} or lies in it, as the step's
+     * own check has it ({@link #writtenAnyway}).
+     *
+     * @param writableWorkspace the run's workspace when the step that declares the mount may write it;
+     *                          {@code null} or blank otherwise
+     */
+    public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout,
+                                                        String writableWorkspace) {
         String host = expandHome(hostPath.strip(), home);
         if (!host.startsWith("/")) {
             return Optional.empty();
         }
         try {
-            return unlistedRefusal(real(Path.of(host)), home, layout);
+            Path real = real(Path.of(host));
+            if (present(writableWorkspace) && real.startsWith(real(Path.of(writableWorkspace)))) {
+                return Optional.empty();
+            }
+            return unlistedRefusal(real, home, layout);
         } catch (InvalidPathException e) {
             return Optional.empty();
         }

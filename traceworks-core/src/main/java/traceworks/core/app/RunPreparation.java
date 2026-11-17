@@ -506,10 +506,13 @@ final class RunPreparation {
         if (checkedPackage.isRefused()) {
             preflight.refuse("the package " + pkg.directory() + " cannot be mounted: " + checkedPackage.refusal());
         }
-        // A writable mount the workflow writes out: asked here, so that no step runs before the one it refuses
+        // A writable mount the workflow writes out: asked here, so that no step runs before the one it refuses. A
+        // step that may write its workspace is asked with the workspace, where its mount needs no listed folder
+        String judgedWorkspace = checkedWorkspace == null ? null : checkedWorkspace.realPath();
         for (WritableMounts.Written mount : WritableMounts.writtenOut(pkg.definition(), children,
                 target == RunTarget.CONTAINER)) {
-            containers.directories().writableMountRefusal(mount.hostPath()).ifPresent(reason -> preflight.refuse(
+            containers.directories().writableMountRefusal(mount.hostPath(),
+                    mount.workspaceWritable() ? judgedWorkspace : null).ifPresent(reason -> preflight.refuse(
                     mount.where() + ": the mount " + mount.entry() + " is refused: " + reason));
         }
         Mounted mounted = new Mounted(checkedWorkspace == null ? null : checkedWorkspace.realPath(),

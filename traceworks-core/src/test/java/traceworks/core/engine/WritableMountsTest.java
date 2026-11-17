@@ -28,8 +28,38 @@ class WritableMountsTest {
                   "mounts":["/data/in:/in:ro"," ~/out :/out:rw","/srv/reports:/reports:rw"]}}]}""", true);
 
         assertThat(found).containsExactly(
-                new Written("Block 2 \"export\"", "~/out :/out:rw", "~/out"),
-                new Written("Block 2 \"export\"", "/srv/reports:/reports:rw", "/srv/reports"));
+                new Written("Block 2 \"export\"", "~/out :/out:rw", "~/out", false),
+                new Written("Block 2 \"export\"", "/srv/reports:/reports:rw", "/srv/reports", false));
+    }
+
+    /**
+     * A step that may write its workspace writes a folder in it anyway, so the start check asks no listed folder of
+     * a writable mount there: each mount says whether its own step, a nested one too, sets
+     * {@code workspace_writable: true}. Only the boolean counts, as for the step itself.
+     */
+    @Test
+    void aWritableEntry_saysWhetherItsStepMayWriteTheWorkspace() {
+        List<Written> found = writtenOut("""
+                {"id":"wf","blocks":[
+                 {"type":"shell","name":"fix","config":{"command":"true","workspace_writable":true,
+                  "mounts":["/work/project/out:/out:rw"]}},
+                 {"type":"shell","name":"read","config":{"command":"true","workspace_writable":false,
+                  "mounts":["/work/project/out:/out:rw"]}},
+                 {"type":"shell","name":"text","config":{"command":"true","workspace_writable":"true",
+                  "mounts":["/work/project/out:/out:rw"]}},
+                 {"type":"switch","name":"route","workspace_writable":true,"config":{"expression":"a",
+                  "workspace_writable":true,"cases":[
+                   {"value":"a","blocks":[
+                    {"type":"shell","name":"inner","config":{"command":"true","mounts":["/work/project/a:/a:rw"]}},
+                    {"type":"shell","name":"writer","config":{"command":"true","workspace_writable":true,
+                     "mounts":["/work/project/b:/b:rw"]}}]}]}}]}""", true);
+
+        assertThat(found).extracting(Written::hostPath, Written::workspaceWritable).containsExactly(
+                org.assertj.core.groups.Tuple.tuple("/work/project/out", true),
+                org.assertj.core.groups.Tuple.tuple("/work/project/out", false),
+                org.assertj.core.groups.Tuple.tuple("/work/project/out", false),
+                org.assertj.core.groups.Tuple.tuple("/work/project/a", false),
+                org.assertj.core.groups.Tuple.tuple("/work/project/b", true));
     }
 
     /** What a placeholder names is known when the step runs, and the step's own check judges it there. */
