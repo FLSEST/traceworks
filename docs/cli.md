@@ -1503,7 +1503,9 @@ The running process looks into the inbox every 200 ms, carries the request out a
 `approval.answered` (with the request id), `request.refused`, `run.pause_requested` or `run.cancel_requested`. The
 command waits up to 10 seconds for that record (`cancel` waits up to 30 seconds for the run to end) and prints it. When nothing is
 recorded within the wait, the command exits 10: the request is queued, not yet recorded, and `traceworks show`
-tells later what became of it. Handled requests move to `inbox/done/`.
+tells later what became of it. Handled requests move to `inbox/done/`. A request file is at most 8 MiB: a larger
+answer is refused by the command that would post it, and a larger file found in the inbox is not read: it moves to
+`inbox/done/` with `.invalid` at its name, as a file that is no request does.
 
 A request still in the inbox when a `resume` or a `cancel` takes over a run nobody ran is handled by its kind. An
 answer was bound to a question of a run that went on without it: it is refused with `request.refused` and the reason
