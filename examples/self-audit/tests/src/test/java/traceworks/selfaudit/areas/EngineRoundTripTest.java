@@ -425,6 +425,7 @@ class EngineRoundTripTest {
         Path pkg = Files.createDirectories(temp.resolve("pkg-judges"));
         Files.createDirectories(pkg.resolve("rules"));
         Files.copy(Path.of("../security/rules/security.rules"), pkg.resolve("rules/security.rules"));
+        Files.copy(Path.of("../security/rules/security.limits"), pkg.resolve("rules/security.limits"));
         Files.copy(Path.of("../security/catalog.json"), pkg.resolve("catalog.json"));
         String jvm = ProcessHandle.current().info().command().orElse("java");
         String tool = "'" + jvm + "' -cp '" + Path.of("target/classes").toAbsolutePath() + "' " + Main.class.getName();
@@ -606,8 +607,8 @@ class EngineRoundTripTest {
                                 + "(String, String)");
         String report = Files.readString(newest(home, "security-report.md"));
         assertThat(report).contains("## Earlier findings that are gone (2)", "| The file is gone | 1 |",
-                "| The member is gone | 1 |", "| The judge answered that it is gone | 0 |",
-                "- process_start `app/src/main/java/p/C.java#C.old(String)`: the member is gone\n")
+                "| No area has this subject any more | 1 |", "| The judge answered that it is gone | 0 |",
+                "- process_start `app/src/main/java/p/C.java#C.old(String)`: no area has this subject any more\n")
                 .containsPattern("- process_start `" + java.util.regex.Pattern.quote(stale) + ",[^`]*`: the file is gone\n")
                 .doesNotContain("## Open findings that no item carries", "## Open findings without an answer");
         List<String> list = cli(env, "findings", "security", "list", "--all", "--home", home.toString()).lines().toList();
@@ -626,13 +627,18 @@ class EngineRoundTripTest {
      * hold is no judged rule, so the register takes the finding as a measurement, and the next applied report, a
      * full snapshot that does not state it, resolves it. No report can state it either: one that names a rule
      * outside the catalog is rejected whole. The defect, if it is still there, is found again under the new rule,
-     * whose area the register does not know and the same run judges.
+     * whose area the register does not know and the same run judges. The report of the run that applies the change
+     * names the rules that left, from the rules the previous report printed; it cannot name their findings, since
+     * the register folder lists those of catalogued rules only, resolved ones too.
      */
     @Test
-    void aFindingWhoseRuleLeftTheCatalog_isShownToNoRun_andIsResolvedByTheNextAppliedReport() throws IOException {
+    void aFindingWhoseRuleLeftTheCatalog_isShownToNoRun_isResolvedByTheNextAppliedReport_andTheReportsNameIt()
+            throws IOException {
         Path work = Files.createDirectories(temp.resolve("work/app/src/main/java/p"));
-        Files.writeString(work.resolve("A.java"), "package p;\nclass A {\n"
-                + "    void run(String c) throws Exception { new ProcessBuilder(c).start(); }\n}\n");
+        for (String name : List.of("A", "C")) {
+            Files.writeString(work.resolve(name + ".java"), "package p;\nclass " + name + " {\n"
+                    + "    void run(String c) throws Exception { new ProcessBuilder(c).start(); }\n}\n");
+        }
         Path asked = temp.resolve("asked-rule.txt");
         Path pkg = standInForThePackage(asked);
         Path home = Files.createDirectories(temp.resolve("home-rule"));
@@ -643,7 +649,13 @@ class EngineRoundTripTest {
         Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[{\"rule\":\"process_start\","
                 + "\"severity\":\"high\",\"line\":3,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\","
                 + "\"fix\":\"f\"}]}");
-        assertThat(cli(env, run)).contains("register security: 1 new, 0 resolved, 0 reopened, 1 open now");
+        Files.writeString(pkg.resolve("answer-A002.json"), Files.readString(pkg.resolve("answer-A001.json"))
+                .replace("A001", "A002"));
+        assertThat(cli(env, run)).contains("register security: 2 new, 0 resolved, 0 reopened, 2 open now");
+        String listedFirst = cli(env, "findings", "security", "list", "--home", home.toString());
+        String idOfC = listedFirst.lines().filter(l -> l.contains("C.java")).findFirst().orElseThrow().substring(0, 8);
+        assertThat(cli(env, "findings", "security", "dismiss", idOfC, "--note", "not ours", "--home", home.toString()))
+                .doesNotContain("rror");
 
         // The rule gets another name, in the rule file and in the catalog
         for (String file : List.of("rules/security.rules", "catalog.json")) {
@@ -652,14 +664,26 @@ class EngineRoundTripTest {
             Files.writeString(pkg.resolve(file), text.replace("process_start", "process_begin"));
         }
         Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[]}");
+        Files.writeString(pkg.resolve("answer-A002.json"), "{\"area\":\"A002\",\"findings\":[]}");
         String second = cli(env, run);
 
         assertThat(Files.readString(newest(home, "areas.jsonl"))).as("the run was not shown the finding")
                 .contains("\"known\":[]").doesNotContain("process_start");
-        assertThat(second).contains("register security: 0 new, 1 resolved, 0 reopened, 0 open now")
+        assertThat(second).contains("register security: 0 new, 2 resolved, 0 reopened, 0 open now")
                 .doesNotContain("not mentioned by this report");
         assertThat(cli(env, "findings", "security", "list", "--all", "--home", home.toString()).lines().toList())
-                .singleElement().satisfies(line -> assertThat(line).contains("RESOLVED", "process_start"));
+                .hasSize(2).allSatisfy(line -> assertThat(line).contains("RESOLVED", "process_start"));
+        assertThat(cli(env, "findings", "security", "show", idOfC, "--home", home.toString()))
+                .as("the decided one too").contains("RESOLVED");
+        assertThat(Files.readString(newest(home, "security-report.md"))).contains("## Rules that left the catalog (1)",
+                "- process_start: the register resolves every finding of it when it applies this report, a decided"
+                        + " one too. `traceworks findings security list --all` shows them as RESOLVED.");
+
+        // The run after it names no rule again: the previous report holds the new rules
+        cli(env, run);
+        assertThat(Files.readString(newest(home, "security-report.md"))).doesNotContain("Rules that left the catalog");
+        // What no run can name: the register folder lists no finding of a rule outside the catalog, resolved or not
+        assertThat(walk(home)).doesNotContain("\"rule_key\":\"process_start\"");
     }
 
     /** A pick the package does not declare starts no run: no step runs, nobody is asked, nothing is reported. */
@@ -682,6 +706,17 @@ class EngineRoundTripTest {
         assertThat(asked).doesNotExist();
         assertThat(home.resolve("runs")).as("no run exists").doesNotExist();
         assertThat(home.resolve("registers")).as("no register was fed").doesNotExist();
+    }
+
+    private static String walk(Path home) throws IOException {
+        StringBuilder out = new StringBuilder();
+        try (Stream<Path> files = Files.walk(home.resolve("runs"))) {
+            for (Path p : files.filter(f -> f.toString().contains("/register/")).sorted().toList()) {
+                out.append("\n== ").append(p).append('\n');
+                if (Files.isRegularFile(p)) out.append(Files.readString(p));
+            }
+        }
+        return out.toString();
     }
 
     private String cli(Map<String, String> env, String... args) {

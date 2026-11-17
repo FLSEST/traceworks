@@ -52,41 +52,62 @@ class LimitsTest {
                 .map(Limits.Section::heading).filter(heading -> !heading.equals(GUARANTEES_HEADING)).toList())
                 .as("the headings below \"" + LIMITS_HEADING + "\" of " + LIMITS_DOCUMENT + ": a new one needs a"
                         + " section in rules/security.limits")
-                .isEqualTo(Limits.subsections(document, LIMITS_HEADING));
-        for (String heading : Limits.subsections(document, LIMITS_HEADING)) {
+                .isEqualTo(LimitDocs.subsections(document, LIMITS_HEADING));
+        for (String heading : LimitDocs.subsections(document, LIMITS_HEADING)) {
             assertThat(limits.entries().stream().filter(e -> e.source().equals(LIMITS_DOCUMENT)
                     && e.section().equals(heading)).map(Limits.Entry::lead).toList())
                     .as("the bullets of \"" + heading + "\" in " + LIMITS_DOCUMENT + ": name a new one in"
                             + " rules/security.limits as a limit (with a quote and a says line, and the list in the"
                             + " instructions of both workflow.json made anew) or as an aside")
-                    .isEqualTo(List.copyOf(Limits.bullets(Limits.section(document, heading)).keySet()));
+                    .isEqualTo(List.copyOf(LimitDocs.bullets(LimitDocs.section(document, heading)).keySet()));
         }
     }
 
-    /** A limit whose sentence changed in the documents fails here: the line the judge gets may no longer be true. */
+    /**
+     * A bullet whose text changed in the documents fails here, a limit or an aside, also by a sentence outside the
+     * quotes: the line the judge gets may no longer be true. The file names a digest of each bullet's whole text (of
+     * the whole passage, for a limit that stands among the guarantees), and the failure shows the line the judge
+     * gets next to the bullet, so that whoever brings them in step sees both. A line may narrow the bullet, never
+     * widen it: it keeps every bound the bullet sets. The digests as the documents have them now are written to
+     * target/security-limits-digests.txt.
+     */
     @Test
-    void everyEntry_isABulletOfItsSection_andEveryQuoteIsStillInThatBullet() throws IOException {
+    void everyEntry_isABulletOfItsSection_whoseWholeTextHasTheDigestOfTheFile_andEveryQuoteIsInIt() throws IOException {
         Limits limits = limits();
+        StringBuilder digests = new StringBuilder();
+        List<String> changed = new java.util.ArrayList<>();
 
-        assertThat(limits.entries().stream().filter(Limits.Entry::limit)).hasSizeGreaterThan(40);
+        assertThat(limits.entries().stream().filter(Limits.Entry::limit)).hasSizeGreaterThan(55);
         for (Limits.Entry entry : limits.entries()) {
             String document = document(entry.source());
             // A list of limits is read bullet by bullet; a limit inside a section of guarantees by its passage
             boolean listOfLimits = entry.source().equals(LIMITS_DOCUMENT)
-                    && Limits.subsections(document, LIMITS_HEADING).contains(entry.section());
-            Map<String, String> bullets = listOfLimits ? Limits.bullets(Limits.section(document, entry.section()))
-                    : Limits.passages(Limits.section(document, entry.section()));
+                    && LimitDocs.subsections(document, LIMITS_HEADING).contains(entry.section());
+            Map<String, String> bullets = listOfLimits ? LimitDocs.bullets(LimitDocs.section(document, entry.section()))
+                    : LimitDocs.passages(LimitDocs.section(document, entry.section()));
             assertThat(bullets).as(entry.source() + ", \"" + entry.section() + "\"").containsKey(entry.lead());
+            String bullet = bullets.get(entry.lead());
+            String digest = LimitDocs.digest(bullet);
+            digests.append(entry.lead()).append('\t').append(digest).append('\n');
+            String both = "\n  the " + (entry.limit() ? "limit" : "aside") + " \"" + entry.lead() + "\" of "
+                    + entry.source() + ", \"" + entry.section() + "\"\n  says:   "
+                    + (entry.limit() ? entry.says() : "(an aside: not sent)") + "\n  bullet: " + bullet
+                    + "\n  digest now: " + digest + "\n";
+            if (!digest.equals(entry.digest())) changed.add(both);
             for (String quote : entry.quotes()) {
-                assertThat(bullets.get(entry.lead())).as("the limit \"" + entry.lead() + "\" of " + entry.source()
-                        + " rests on this sentence: read the bullet again and bring the quote and the says line in"
-                        + " rules/security.limits in step with it").contains(quote);
+                assertThat(bullet).as("this limit rests on the quote: bring the quote and the says line in"
+                        + " rules/security.limits in step with the bullet" + both).contains(quote);
             }
             if (entry.limit()) {
-                assertThat(entry.says()).as("one line for the judge, in plain text").doesNotContain("\"", "\\", "`")
-                        .hasSizeLessThan(330).endsWith(".");
+                assertThat(entry.says()).as("one line for the judge, in plain text" + both)
+                        .doesNotContain("\"", "\\", "`").hasSizeLessThan(450).endsWith(".");
             }
         }
+        Files.createDirectories(Path.of("target"));
+        Files.writeString(Path.of("target/security-limits-digests.txt"), digests);
+        assertThat(changed).as("bullets whose text is not the one rules/security.limits was checked against: read each"
+                + " again, bring the says line in step (it may narrow the bullet, never widen it), put the digest now"
+                + " into the file, and the list into both workflow.json").isEmpty();
     }
 
     /**
@@ -113,7 +134,9 @@ class LimitsTest {
             assertThat(instructions).contains(
                     "What Traceworks states as a limit.",
                     "- A behaviour that a limit states is not a finding.",
-                    "is answered \"gone\", with the number of the limit in the reason.",
+                    "is answered \"gone\" with \"limit\": \"L<number>\".",
+                    "A medium or high finding stays open with your answer as its note, for a person to decide; a low one"
+                            + " is closed.",
                     "- It is a finding when the code does more than the limit says. Then report it, name the limit by"
                             + " its number in the issue and say what goes beyond it.",
                     "- When you cannot tell whether a limit covers what you see, report the finding and quote the"
@@ -142,12 +165,16 @@ class LimitsTest {
                 .hasMessageContaining("line 4: not a line of a limits file");
         assertThatThrownBy(() -> Limits.parse("source docs/a.md\nsection S\nwhatever x\n")).hasMessageContaining("line 3");
 
-        Limits limits = Limits.parse("# c\nsource docs/a.md\nsection S\nlimit L one.\n  quote q\n  says One.\naside A\n"
+        Limits limits = Limits.parse("# c\nsource docs/a.md\nsection S\nlimit L one.\n  quote q\n  says One.\n"
+                + "  digest 0123456789abcdef\naside A\n  digest fedcba9876543210\n"
                 + "section Empty\nsource docs/b.md\nsection T\nlimit M\n  quote r\n  quote s\n  says Two.\n");
         assertThat(limits.rendered()).isEqualTo("From docs/a.md, \"S\":\nL1. One.\nFrom docs/b.md, \"T\":\nL2. Two.");
+        assertThat(limits.numbered()).as("the line of each limit by its number").containsExactly("One.", "Two.");
         List<String> leads = new ArrayList<>();
-        limits.entries().forEach(e -> leads.add(e.lead()));
-        assertThat(leads).containsExactly("L one.", "A", "M");
+        limits.entries().forEach(e -> leads.add(e.lead() + "=" + e.digest()));
+        assertThat(leads).containsExactly("L one.=0123456789abcdef", "A=fedcba9876543210", "M=");
+        assertThatThrownBy(() -> Limits.parse("source docs/a.md\nsection S\naside A\n  digest XYZ\n"))
+                .as("a digest is 16 hex digits").hasMessageContaining("line 4");
     }
 
     /** What the pin reads of a document: the bullets with a bold lead, without the guarantees of a mixed section. */
@@ -157,15 +184,15 @@ class LimitsTest {
                 + "What a seal does not protect:\n\n- **First.** a\n  b\n  - *nested* c\n- **Second** (d). e\n\nAfter.\n"
                 + "### Two\nProse only.\n## Next\n- **Not** here\n";
 
-        assertThat(Limits.subsections(document, "Limits")).containsExactly("One", "Two");
-        assertThat(Limits.bullets(Limits.section(document, "One"))).containsExactly(
+        assertThat(LimitDocs.subsections(document, "Limits")).containsExactly("One", "Two");
+        assertThat(LimitDocs.bullets(LimitDocs.section(document, "One"))).containsExactly(
                 Map.entry("First.", "- **First.** a b - *nested* c"), Map.entry("Second", "- **Second** (d). e After."));
-        assertThat(Limits.bullets(Limits.section(document, "Two"))).isEmpty();
-        assertThatThrownBy(() -> Limits.bullets(List.of("- no lead"))).hasMessageContaining("without a bold lead");
-        assertThat(Limits.passages(List.of("**Registers** (x). A.", "B. **Bold inside.** C.", "", "- no lead", "  more",
+        assertThat(LimitDocs.bullets(LimitDocs.section(document, "Two"))).isEmpty();
+        assertThatThrownBy(() -> LimitDocs.bullets(List.of("- no lead"))).hasMessageContaining("without a bold lead");
+        assertThat(LimitDocs.passages(List.of("**Registers** (x). A.", "B. **Bold inside.** C.", "", "- no lead", "  more",
                 "- **What nothing finds:** d", "### H", "lost"))).containsExactly(
                 Map.entry("Registers", "**Registers** (x). A. B. **Bold inside.** C. - no lead more"),
                 Map.entry("What nothing finds:", "- **What nothing finds:** d"));
-        assertThatThrownBy(() -> Limits.section(document, "Three")).hasMessageContaining("no heading 'Three'");
+        assertThatThrownBy(() -> LimitDocs.section(document, "Three")).hasMessageContaining("no heading 'Three'");
     }
 }

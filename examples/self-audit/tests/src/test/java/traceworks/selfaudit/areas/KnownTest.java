@@ -106,7 +106,7 @@ class KnownTest {
     void goneReason_isTheFile_whenNoFileThatWasReadStartsTheSubject_andTheMemberOtherwise() {
         List<String> files = List.of("a/Mount.java", "a/Run.java");
 
-        assertThat(Known.goneReason("a/Mount.java#Mount.old()", files)).isEqualTo("the member is gone");
+        assertThat(Known.goneReason("a/Mount.java#Mount.old()", files)).isEqualTo("no area has this subject any more");
         assertThat(Known.goneReason("old/a/Mount.java#Mount.check(Path)", files)).isEqualTo("the file is gone");
         assertThat(Known.goneReason("a/Mount.javax#M.m()", files)).isEqualTo("the file is gone");
         assertThat(Known.goneReason("a/Mount.java", files)).as("no subject of an area").isEqualTo("the file is gone");

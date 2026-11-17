@@ -33,7 +33,7 @@ import java.util.stream.Stream;
  * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY
  *        [--known FILE | --known-file FILE] [--items FILE | --items-file FILE]
  *        [--verdict-version 1] [--max-areas 200] [--max-lines 160] [--context 15] [--judge NAME --judge-provider ID --judge-model MODEL]
- *        [--changes DIR] [--register KEY] [--green yes|no]
+ *        [--changes DIR] [--register KEY] [--green yes|no] [--limits FILE] [--previous-report FILE]
  * changed --changes DIR --root DIR                                         (writes DIR/wanted)
  * report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT   (and findings.jsonl next to REPORT)
  * </pre>
@@ -59,7 +59,10 @@ import java.util.stream.Stream;
  * finding with its whole subject, so that one whose file or member is gone is found and named gone. {@code --register} is the key of the
  * audit's register, for the commands the report names. {@code --green no} makes a check of the changes say YELLOW
  * where it would say GREEN: its best word is then "nothing found in what changed". Every name from the workspace is escaped on
- * standard output, and no text of a model reaches it, so neither can add a line of its own. Exit codes: 0 done, 1 the
+ * standard output, and no text of a model reaches it, so neither can add a line of its own. {@code --limits} is the limits file
+ * ({@link Limits}): the report checks against it a verdict that calls a finding covered by a stated limit.
+ * {@code --previous-report} is the last report the register kept: the rules it printed tell which rules left the
+ * rule file since. Exit codes: 0 done, 1 the
  * input does not hold, 2 a usage error.
  */
 public final class Main {
@@ -70,6 +73,7 @@ public final class Main {
                               [--verdict-version N] [--max-areas N] [--max-lines N] [--context N]
                               [--judge NAME --judge-provider ID --judge-model MODEL]
                               [--changes DIR] [--register KEY] [--green yes|no]
+                              [--limits FILE] [--previous-report FILE]
                    areas changed --changes DIR --root DIR
                    areas report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT""";
 
@@ -199,6 +203,13 @@ public final class Main {
                 ? Items.parseJsonl(Files.readString(Path.of(required(options, "items-file")), StandardCharsets.UTF_8))
                 : Map.of();
         Map<String, Changes.Pick> picks = base == null ? Map.of() : Changes.picks(all, result, base.lines());
+        // An open finding whose subject is no area's any more is asked about in every area of its file that has one
+        // of its members: the area regrouped, or a member beside it was renamed, and the defect may still be there
+        Set<String> areaSubjects = new java.util.HashSet<>();
+        for (Area area : all) areaSubjects.add(Known.shown(area.subject()));
+        List<Known.Row> strays = known.stream().filter(row -> row.asked() && row.whole()
+                && !areaSubjects.contains(Known.shown(row.subject()))).toList();
+        Set<Known.Row> adoptedAny = new java.util.HashSet<>();
         int changedAreas = 0;
         int neighbourAreas = 0;
         int carriedAreas = 0;
@@ -227,7 +238,10 @@ public final class Main {
             Map<String, Object> json = new LinkedHashMap<>(area.toJson(token, fence));
             json.put("item", names.get(i));
             json.put("digest", digest);
-            Known.attach(json, area.subject(), known, null);
+            List<Known.Row> adopted = strays.stream().filter(stray -> Known.overlaps(stray.subject(), area.subject()))
+                    .toList();
+            adoptedAny.addAll(adopted);
+            Known.attach(json, area.subject(), known, null, adopted);
             // A finding of a run before items existed names no item, so its area may read clean: the finding decides
             boolean hasOpen = !((List<?>) json.get("known")).isEmpty();
             boolean same = row != null && row.digest().equals(digest);
@@ -334,8 +348,11 @@ public final class Main {
         summary.put("items", items);
         summary.put("rules", rules.rules().stream().map(Rule::id).toList());
         summary.put("unresolvedTargets", result.unresolvedTargets());
-        // Known findings whose member is no area any more: the report names them as gone
-        List<Map<String, Object>> orphans = Known.orphans(known, null, subjects);
+        // Known findings whose subject is no area's and whose members no area of their file has: the report names
+        // them as gone. One that an area took in above is asked about there instead
+        List<Map<String, Object>> orphans = Known.orphans(known, null, subjects).stream()
+                .filter(orphan -> adoptedAny.stream().noneMatch(row -> row.ruleKey().equals(orphan.get("ruleKey"))
+                        && row.subject().equals(orphan.get("subject")))).toList();
         List<Map<String, Object>> unowned = new ArrayList<>(Known.unowned(known, null, subjects));
         if (kinds != null && !kinds.uncompiled().isEmpty() && !orphans.isEmpty()) {
             // Java code changed or came where the finder does not read (tests aside: they change with nearly every
@@ -367,6 +384,21 @@ public final class Main {
         if (judge != null) summary.put("judge", judge.toJson());
         // The key of the audit's register, for the commands the report names
         summary.put("register", register);
+        // The stated limits by their numbers, so that the report can check a verdict that cites one
+        if (options.containsKey("limits")) {
+            summary.put("limits", Limits.parse(Files.readString(Path.of(required(options, "limits")),
+                    StandardCharsets.UTF_8)).numbered());
+        }
+        // Rules that left the rule file (and so the catalog) since the previous report: the register resolves every
+        // finding of them when it applies this report. It lists no finding of a rule outside the catalog, resolved
+        // or not, so no run can name the findings; the report names the rules
+        List<String> ruleIds = new ArrayList<>(rules.rules().stream().map(Rule::id).toList());
+        ruleIds.add("other");
+        String previous = options.containsKey("previous-report")
+                ? Files.readString(Path.of(required(options, "previous-report")), StandardCharsets.UTF_8) : "";
+        List<String> left = new ArrayList<>(factRules(previous, "report_rules"));
+        left.removeAll(ruleIds);
+        summary.put("rulesLeft", left);
         if (base != null) {
             Map<String, Object> changes = new LinkedHashMap<>();
             changes.put("base", base.base());
@@ -507,8 +539,17 @@ public final class Main {
         out.println("FACT report_known_gone: " + outcome.gone().size());
         // Why they are gone: two measured reasons, and the judge's answer
         out.println("FACT report_known_gone_file: " + Report.goneFor(outcome.gone(), Known.FILE_GONE));
-        out.println("FACT report_known_gone_member: " + Report.goneFor(outcome.gone(), Known.MEMBER_GONE));
+        out.println("FACT report_known_gone_subject: " + Report.goneFor(outcome.gone(), Known.MEMBER_GONE));
         out.println("FACT report_known_gone_answered: " + Report.goneFor(outcome.gone(), null));
+        out.println("FACT report_known_gone_by_limit: " + Report.goneOfKind(outcome.gone(), Report.BY_LIMIT));
+        out.println("FACT report_known_gone_restated: " + Report.goneOfKind(outcome.gone(), Report.RESTATED));
+        out.println("FACT report_known_covered_by_limit: " + outcome.covered().size());
+        // The rules of this run, and the ones that left since the last report: the next run reads both from
+        // this output, which the register keeps as the previous report. Rule ids only, no text of a model
+        List<String> rules = new ArrayList<>(ruleIdsOf(summary.get("rules")));
+        if (!rules.isEmpty()) rules.add("other");
+        out.println("FACT report_rules: " + String.join(", ", rules));
+        out.println("FACT report_rules_left: " + String.join(", ", ruleIdsOf(summary.get("rulesLeft"))));
         out.println("FACT report_known_not_answered: " + outcome.notAnswered().size());
         for (Finding f : outcome.verified()) {
             // The rule is a rule id of the file or "other", the severity one of three words: no model text
@@ -526,7 +567,7 @@ public final class Main {
         Set<String> known = switch (args[0]) {
             case "find" -> Set.of("rules", "root", "source-root", "out", "summary", "max-areas", "max-lines",
                     "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model",
-                    "changes", "items-file", "known-file", "register", "green");
+                    "changes", "items-file", "known-file", "register", "green", "limits", "previous-report");
             case "report" -> Set.of("areas", "summary", "verdicts", "out");
             case "changed" -> Set.of("changes", "root");
             default -> throw new IllegalArgumentException("unknown command '" + args[0] + "'");
@@ -596,6 +637,35 @@ public final class Main {
         linked.sort(null);
         return new Discovery(List.copyOf(roots), List.copyOf(linked));
     }
+
+    private static final java.util.regex.Pattern RULE_ID = java.util.regex.Pattern.compile("[a-z][a-z0-9_]{0,63}");
+
+    /**
+     * The rule ids a {@code FACT <name>: a, b} line of a previous report names, from its first such line; empty
+     * without one. Only what reads as a rule id is taken: the report is a step's output the register kept.
+     */
+    static List<String> factRules(String report, String name) {
+        for (String line : report.split("\n")) {
+            if (!line.startsWith("FACT " + name + ": ")) continue;
+            List<String> ids = new ArrayList<>();
+            for (String id : line.substring(("FACT " + name + ": ").length()).split(",")) {
+                if (RULE_ID.matcher(id.strip()).matches() && !ids.contains(id.strip())) ids.add(id.strip());
+            }
+            return ids;
+        }
+        return List.of();
+    }
+
+    /** The entries of a list of the summary that read as rule ids, each once. */
+    private static List<String> ruleIdsOf(Object list) {
+        List<String> ids = new ArrayList<>();
+        for (Object id : list instanceof List<?> entries ? entries : List.of()) {
+            String text = String.valueOf(id);
+            if (RULE_ID.matcher(text).matches() && !ids.contains(text)) ids.add(text);
+        }
+        return ids;
+    }
+
 
     private static List<String> named(List<String> files) {
         return files.subList(0, Math.min(files.size(), MAX_UNMAPPED_NAMED));

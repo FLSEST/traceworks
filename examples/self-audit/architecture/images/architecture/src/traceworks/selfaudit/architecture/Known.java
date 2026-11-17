@@ -238,13 +238,27 @@ final class Known {
      * @param rules the rule keys a model judges; {@code null} when it judges every rule
      */
     static void attach(Map<String, Object> item, String subject, List<Row> rows, Set<String> rules) {
+        attach(item, subject, rows, rules, List.of());
+    }
+
+    /**
+     * As {@link #attach(Map, String, List, Set)}, and the open findings of {@code adopted} too (rows of
+     * {@code rows}), whose subject is no
+     * area's any more but whose members overlap this area's ({@link #overlaps}): the area regrouped, or a member of
+     * it was renamed beside one that stayed, and the defect may still be here. Each is asked about under its old
+     * subject; the report states one that holds under this area's subject and names the old one gone.
+     */
+    static void attach(Map<String, Object> item, String subject, List<Row> rows, Set<String> rules,
+                       List<Row> adopted) {
         List<Map<String, Object>> known = new ArrayList<>();
         List<String> asked = new ArrayList<>();
         List<String> decided = new ArrayList<>();
         List<Map<String, Object>> decidedKnown = new ArrayList<>();
         String shown = shown(subject);
         for (Row row : rows) {
-            if (!shown(row.subject()).equals(shown) || rules != null && !rules.contains(row.ruleKey())) continue;
+            boolean own = shown(row.subject()).equals(shown);
+            boolean taken = !own && row.asked() && adopted.contains(row);
+            if (!own && !taken || rules != null && !rules.contains(row.ruleKey())) continue;
             if (row.asked()) {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("id", "K" + (known.size() + 1));
@@ -320,14 +334,54 @@ final class Known {
 
     /** Why a finding is gone whose file is no source file the audit reads any more. */
     static final String FILE_GONE = "the file is gone";
-    /** Why a finding is gone whose file is still read, and has no area with the finding's members. */
-    static final String MEMBER_GONE = "the member is gone";
+    /**
+     * Why a finding is gone whose file is still read and has no area with any of the finding's members. It says
+     * what was measured, not that the member is gone: a member renamed alone is not told from one removed.
+     */
+    static final String MEMBER_GONE = "no area has this subject any more";
+
+    /**
+     * The members of a subject {@code <file>#<member>, <member>}, as the register shows them: split at a
+     * {@code ", "} outside brackets, since a parameter list holds the same. Empty for a subject without {@code #}.
+     */
+    static List<String> members(String subject) {
+        String shown = shown(subject);
+        int hash = shown.indexOf('#');
+        List<String> members = new ArrayList<>();
+        if (hash < 0) return members;
+        int depth = 0;
+        int start = hash + 1;
+        for (int i = start; i < shown.length(); i++) {
+            char c = shown.charAt(i);
+            if (c == '(' || c == '<' || c == '[') depth++;
+            else if ((c == ')' || c == '>' || c == ']') && depth > 0) depth--;
+            else if (depth == 0 && c == ',' && i + 1 < shown.length() && shown.charAt(i + 1) == ' ') {
+                members.add(shown.substring(start, i).strip());
+                start = i + 2;
+            }
+        }
+        members.add(shown.substring(start).strip());
+        members.removeIf(String::isEmpty);
+        return members;
+    }
+
+    /** Whether two subjects name the same file and have a member in common. */
+    static boolean overlaps(String subject, String other) {
+        String a = shown(subject);
+        String b = shown(other);
+        if (a.indexOf('#') < 0 || b.indexOf('#') < 0
+                || !a.substring(0, a.indexOf('#')).equals(b.substring(0, b.indexOf('#')))) {
+            return false;
+        }
+        List<String> theirs = members(other);
+        return members(subject).stream().anyMatch(theirs::contains);
+    }
 
     /**
      * Why an orphan is gone, measured: a subject is {@code <file>#<members>}, so the file of {@code subject} is
-     * still read when the subject starts with one of {@code files} and a {@code #}. Then the file has no area with
-     * these members any more ({@link #MEMBER_GONE}): a member was removed or renamed, or lost what a rule points at.
-     * Otherwise no source file has that path ({@link #FILE_GONE}): it was removed, renamed or moved.
+     * still read when the subject starts with one of {@code files} and a {@code #}. Then no area of the file has
+     * any of these members ({@link #MEMBER_GONE}; an orphan whose members overlap an area is asked about there and
+     * is no orphan). Otherwise no source file has that path ({@link #FILE_GONE}): it was removed, renamed or moved.
      *
      * @param files the paths of the source files the finder read, relative to the root
      */

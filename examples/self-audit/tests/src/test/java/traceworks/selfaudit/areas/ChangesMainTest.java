@@ -455,11 +455,11 @@ class ChangesMainTest {
         assertThat(summary().get("knownGone")).isEqualTo(List.of(
                 Map.of("ruleKey", "process_start", "subject", stale, "reason", "the file is gone"),
                 Map.of("ruleKey", "env_pass", "subject", SRC + "Caller.java#Caller.old()", "reason",
-                        "the member is gone")));
+                        "no area has this subject any more")));
         assertThat(summary().get("knownUnowned")).isEqualTo(List.of());
         assertThat(report()).isZero();
         assertThat(out()).contains("FACT report_known_gone: 2\n", "FACT report_known_gone_file: 1\n",
-                "FACT report_known_gone_member: 1\n", "FACT report_known_gone_answered: 0\n");
+                "FACT report_known_gone_subject: 1\n", "FACT report_known_gone_answered: 0\n");
 
         // Java changed where the finder does not read: the absence of the member says nothing
         Files.createDirectories(root.resolve("extra/src/p"));

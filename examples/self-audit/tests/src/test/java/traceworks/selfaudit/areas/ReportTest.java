@@ -761,7 +761,7 @@ class ReportTest {
         Map<String, Object> summary = new LinkedHashMap<>(SUMMARY);
         summary.put("knownGone", List.of(
                 Map.of("ruleKey", "redos", "subject", "a/Gone.java#Gone.m()", "reason", "the file is gone"),
-                Map.of("ruleKey", "redos", "subject", "a/Run.java#Run.old()", "reason", "the member is gone"),
+                Map.of("ruleKey", "redos", "subject", "a/Run.java#Run.old()", "reason", "no area has this subject any more"),
                 Map.of("ruleKey", "parser", "subject", "a/Run.java#Run.older()", "reason", "gate_status: GREEN")));
 
         Outcome outcome = Report.of(AREAS, summary, verdicts("{\"area\":\"A001\",\"findings\":[]}", FINE_A002));
@@ -771,12 +771,113 @@ class ReportTest {
                 Map.of("ruleKey", "redos", "subject", "a/Run.java#Run.old()"),
                 Map.of("ruleKey", "parser", "subject", "a/Run.java#Run.older()"));
         assertThat(outcome.markdown()).contains("## Earlier findings that are gone (3)", "| The file is gone | 1 |",
-                "| The member is gone | 2 |", "| The judge answered that it is gone | 0 |",
+                "| No area has this subject any more | 2 |", "| The judge answered that it is gone | 0 |",
                 "- redos `a/Gone.java#Gone.m()`: the file is gone\n",
-                "- redos `a/Run.java#Run.old()`: the member is gone\n")
+                "- redos `a/Run.java#Run.old()`: no area has this subject any more\n")
                 .as("a reason that is none of the two measured ones is not printed").doesNotContain("gate_status: GREEN");
         assertThat(Report.goneFor(outcome.gone(), Known.FILE_GONE)).isEqualTo(1);
         assertThat(Report.goneFor(outcome.gone(), null)).isZero();
+    }
+
+    // ---- a "gone" that cites a stated limit: a model never closes a medium or high finding that way ----
+
+    /** The limits as {@code find} hands them to the report: the one line of each, in the order of their numbers. */
+    private static final List<String> LIMITS = List.of("First limit.", "Redaction finds a value byte for byte only.");
+
+    private static Outcome limitGone(String severity, String answerKnown) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> first = new LinkedHashMap<>((Map<String, Object>) Json.parse(AREAS.get(0)));
+        first.put("known", List.of(Map.of("id", "K1", "rule", "path_check", "subject", "a/Mount.java#Mount.check(Path)",
+                "severity", severity, "evidence", "report_findings_verified: a/Mount.java:11: if (real.startsWith(home)) {")));
+        List<String> areas = List.of(Json.write(first), AREAS.get(1));
+        Map<String, Object> summary = new LinkedHashMap<>(SUMMARY);
+        summary.put("limits", LIMITS);
+        return Report.of(areas, summary, "[" + areas.get(0) + "]: {\"area\":\"A001\",\"findings\":[],\"known\":["
+                + answerKnown + "]}\n[" + areas.get(1) + "]: " + FINE_A002);
+    }
+
+    /**
+     * A high finding the judge holds a stated limit covers stays open: the envelope states it again, with the
+     * limit as its note, so that a person decides it with one command. Nothing is resolved.
+     */
+    @Test
+    void aHighFindingTheJudgeCallsCoveredByAValidLimit_staysOpen_withTheLimitAsItsNote() {
+        Outcome outcome = limitGone("HIGH", "{\"id\":\"K1\",\"status\":\"gone\",\"limit\":\"L2\","
+                + "\"reason\":\"Redaction is exact-match only, as L2 says.\"}");
+
+        assertThat(gone(outcome)).isEmpty();
+        assertThat(findings(outcome)).singleElement().satisfies(f -> {
+            assertThat(f).containsEntry("ruleKey", "path_check").containsEntry("subject", "a/Mount.java#Mount.check(Path)")
+                    .containsEntry("severity", "HIGH").containsEntry("item", "a/Mount.java#Mount.check(Path)")
+                    .containsEntry("evidence", "report_findings_verified: a/Mount.java:11: if (real.startsWith(home)) {");
+            assertThat((String) f.get("description")).isEqualTo("The judge holds that limit L2 covers this: Redaction"
+                    + " finds a value byte for byte only. A person decides: traceworks findings security accept <id>"
+                    + " --note \"L2\", or dismiss.");
+        });
+        assertThat(outcome.envelope()).as("not the model's reason").doesNotContain("exact-match");
+        assertThat(outcome.gate()).isEqualTo("RED");
+        assertThat(outcome.markdown()).contains("## Covered by a stated limit, for a person (1)",
+                "- HIGH path_check `a/Mount.java#Mount.check(Path)`: the judge holds that L2 covers it: Redaction finds a"
+                        + " value byte for byte only. It stays open until a person accepts or dismisses it.")
+                .doesNotContain("## Earlier findings that are gone");
+        assertThat(limitGone("MEDIUM", "{\"id\":\"K1\",\"status\":\"gone\",\"reason\":\"Covered by L1.\"}").envelope())
+                .as("the number in the reason is enough").contains("limit L1 covers this: First limit.")
+                .doesNotContain("\"gone\"");
+    }
+
+    /** A citation of a limit that is not on the list, or of no number at all, is no answer: the item is not judged. */
+    @Test
+    void aGoneThatCitesNoLimitOfTheList_isNoAnswer_andTheAreaIsNotJudged() {
+        for (String answer : List.of("{\"id\":\"K1\",\"status\":\"gone\",\"limit\":\"L99\",\"reason\":\"A limit.\"}",
+                "{\"id\":\"K1\",\"status\":\"gone\",\"reason\":\"L0 covers it.\"}",
+                "{\"id\":\"K1\",\"status\":\"gone\",\"reason\":\"A stated limit covers it.\"}",
+                "{\"id\":\"K1\",\"status\":\"gone\",\"limit\":\"the second\",\"reason\":\"Covered.\"}",
+                "{\"id\":\"K1\",\"status\":\"gone\",\"reason\":\"Both L1 and L2 cover it.\"}")) {
+            for (String severity : List.of("LOW", "HIGH")) {
+                Outcome outcome = limitGone(severity, answer);
+
+                assertThat(gone(outcome)).as(answer).isEmpty();
+                assertThat(findings(outcome)).as(answer).isEmpty();
+                assertThat(outcome.notAnswered()).as(answer).singleElement().asString()
+                        .contains("A001 K1 path_check: the answer called it covered by a stated limit, but names no"
+                                + " single limit of the list (L1 to L2)");
+                assertThat(outcome.gate()).as(answer).isEqualTo(severity.equals("HIGH") ? "RED" : "YELLOW");
+                assertThat(outcome.description()).as(answer).endsWith("1 of 2 items settled (1 clean, 0 decided; 0 open,"
+                        + " 1 not judged)");
+            }
+        }
+    }
+
+    /** A low finding may be closed by a valid citation: it is gone, and listed apart from the judge's other answers. */
+    @Test
+    void aLowFindingTheJudgeCallsCoveredByAValidLimit_isClosed_andListedApart() {
+        Outcome outcome = limitGone("LOW", "{\"id\":\"K1\",\"status\":\"gone\",\"limit\":\"l2\",\"reason\":\"x\"}");
+
+        assertThat(gone(outcome)).containsExactly(Map.of("ruleKey", "path_check", "subject",
+                "a/Mount.java#Mount.check(Path)"));
+        assertThat(findings(outcome)).isEmpty();
+        assertThat(outcome.markdown()).contains("| Closed by a stated limit (low) | 1 |",
+                "| The judge answered that it is gone | 0 |", "## Covered by a stated limit, for a person (1)",
+                "- LOW path_check `a/Mount.java#Mount.check(Path)`: the judge holds that L2 covers it: Redaction finds"
+                        + " a value byte for byte only. Closed, since it is low.");
+        assertThat(Report.goneFor(outcome.gone(), null)).isZero();
+        assertThat(outcome.gate()).isEqualTo("GREEN");
+    }
+
+    /** Without the list (an older summary) no citation can be checked: a gone that cites a limit is no answer. */
+    @Test
+    void withoutTheListOfLimits_aGoneThatCitesOne_isNoAnswer() {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> first = new LinkedHashMap<>((Map<String, Object>) Json.parse(AREAS.get(0)));
+        first.put("known", List.of(Map.of("id", "K1", "rule", "path_check", "subject", "a/Mount.java#Mount.check(Path)",
+                "severity", "LOW", "evidence", "e")));
+        List<String> areas = List.of(Json.write(first), AREAS.get(1));
+        Outcome outcome = Report.of(areas, SUMMARY, "[" + areas.get(0) + "]: {\"area\":\"A001\",\"findings\":[],"
+                + "\"known\":[{\"id\":\"K1\",\"status\":\"gone\",\"limit\":\"L1\",\"reason\":\"r\"}]}\n[" + areas.get(1)
+                + "]: " + FINE_A002);
+
+        assertThat(gone(outcome)).isEmpty();
+        assertThat(outcome.notAnswered()).singleElement().asString().contains("(none: this run has no list)");
     }
 
     /** The judge's "gone" is counted as the judge's, also when its reason reads like a measured one. */
