@@ -60,9 +60,8 @@ container code does not need the full run on your machine.
 
 ### Trailer lines in commit messages
 
-Many commits in the history end with two trailer lines. `Todo:` names the id and the title of an internal work
-item the commit belongs to; the tracker is not public, and a contribution needs no such line. `Co-Authored-By:`
-with the name of an AI model says that the commit was written with that model.
+A commit that was written with an AI model ends with a `Co-Authored-By:` line that names the model. A
+contribution needs no other trailer line.
 
 ## Hooks and the secret scan
 
