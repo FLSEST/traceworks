@@ -23,8 +23,9 @@ pass.
   the root `pom.xml`. The project is not changed.
 - A `<pluginManagement><plugins>` element in the root `pom.xml`, which is where the plugin goes. Without one the
   `fetch` step stops with exit code 2 and says so.
-- A module named as `mvn -pl` takes it, and in a form that is also a file name: the folder of a module directly below
-  the root (`core`), or `:<artifactId>`. For a project of one module, or a module deeper down, use `:<artifactId>`.
+- A module named as `mvn -pl` takes it: its folder (`core`, `services/billing`, or `.` for a project of one module) or
+  `:<artifactId>`. The files of a module are named after it with every other character than letters, digits, `.`, `_`
+  and `-` replaced by `_` (`.` is `root`); two modules that give the same name are refused, so name each once.
 
 **How Traceworks runs it on itself,** from the root of its repository:
 
