@@ -152,6 +152,7 @@ class CheckIT extends IntegrationTest {
         Path readOnly = Files.createDirectories(sandbox.resolve("ro-data"));
         Files.writeString(readOnly.resolve("given.txt"), "given-content\n");
         Path writable = Files.createDirectories(sandbox.resolve("rw-data"));
+        traceworks.configure(java.util.Map.of("writable_mounts", java.util.List.of(writable.toString())));
         Result check = traceworks.exec("check", traceworks.packageDir("mounts").toString());
         Result run = traceworks.run("mounts", "--input", "ro_dir=" + readOnly, "--input", "rw_dir=" + writable);
 

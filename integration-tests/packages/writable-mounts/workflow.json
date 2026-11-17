@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "5c0e6d0a-3b1f-4c53-9a50-0d7f1a2b6c01",
+  "name": "IT writable mounts",
+  "description": "A writable mount that the workflow writes out: a run is refused before its first step unless the operator's writable_mounts lists a folder that holds it.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "first",
+      "config": {"command": "echo first"}
+    },
+    {
+      "type": "shell",
+      "name": "export",
+      "config": {"command": "echo from-the-container > /out/report.txt && cat /out/report.txt", "mounts": ["~/exports/reports:/out:rw"]}
+    }
+  ]
+}

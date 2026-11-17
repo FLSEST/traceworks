@@ -129,7 +129,26 @@ final class AppFixture {
             checkedAs.put(directory, role);
             return check(directory);
         }
+
+        @Override
+        public java.util.Optional<String> writableMountRefusal(String hostPath) {
+            return java.util.Optional.ofNullable(unlistedWritableMounts.get(hostPath));
+        }
+
+        @Override
+        public java.util.Optional<String> writableMountRefusal(String hostPath, String writableWorkspace) {
+            askedWritableMounts.add(hostPath + " in " + writableWorkspace);
+            boolean inside = writableWorkspace != null && Path.of(hostPath).startsWith(writableWorkspace);
+            return inside ? java.util.Optional.empty() : writableMountRefusal(hostPath);
+        }
     };
+    /** What the start check asked of each writable mount: {@code <host side> in <the writable workspace or null>}. */
+    final List<String> askedWritableMounts = new java.util.ArrayList<>();
+    /**
+     * The host sides of writable mounts that lie in no folder the operator listed, each with the refusal; any other
+     * host side lies in one.
+     */
+    final Map<String, String> unlistedWritableMounts = new LinkedHashMap<>();
     /** What the start check asked each directory as: the role it named with the check. */
     final Map<Path, HostDirectories.Role> checkedAs = new LinkedHashMap<>();
 

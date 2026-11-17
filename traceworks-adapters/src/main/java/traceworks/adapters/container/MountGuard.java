@@ -54,6 +54,17 @@ import java.util.Optional;
  *   <li>a writable mount in or around the run's package, and in or around its workspace while the workspace is
  *       mounted read-only (without {@code workspace_writable}): it would undo their read-only mounts. A read-only
  *       one shows what the step sees anyway;</li>
+ *   <li>a writable mount that is, lies in or holds the {@code .git} of a workspace that is mounted writable: the
+ *       run mounts that {@code .git} read-only ({@link WorkspaceGit}), and the mount would show it writable at
+ *       another place. Not where a step may write that {@code .git}
+ *       ({@link Context#workspaceGitWritable()}: the operator's {@code workspace_git_writable}, or the run's own
+ *       checkout of its source);</li>
+ *   <li>every other writable mount that lies in no folder the operator listed ({@code writable_mounts} in
+ *       {@code traceworks.json}), wherever it lies: what a step writes on the host can be a file the host runs
+ *       later. Without the setting no package mounts a host path writable. What the step writes anyway needs
+ *       no entry: the run's scratch directory, the cache folder and the output folder of a tool step, and the
+ *       workspace or a folder in it while the step may write its workspace (a folder that holds the workspace
+ *       does need one). A listed folder lifts no other refusal of this list;</li>
  *   <li>a path that cannot be resolved, for any reason (it does not exist, a directory on the way cannot be read):
  *       the check fails closed, since a rootful runtime mounts it anyway and in the container the host's parent
  *       directories no longer guard it;</li>
@@ -156,6 +167,18 @@ public final class MountGuard {
         /** The Traceworks home. */
         public Path traceworksHome() {
             return layout.home();
+        }
+
+        /**
+         * Whether a step that may write the workspace may write its top-level {@code .git} as well; otherwise the
+         * container gets that {@code .git} read-only ({@link WorkspaceGit}). It may where the operator said so
+         * ({@code workspace_git_writable}), and in the run's own checkout of its source: a checkout is a run's
+         * data and no repository of the operator's, and Traceworks points no git at one that exists (it is cloned
+         * into a folder that must not exist, removed file by file, and neither a package nor a source is read
+         * from the checkouts: {@code adapters.pkg.CheckoutsDirectory}).
+         */
+        public boolean workspaceGitWritable() {
+            return layout.workspaceGitWritable() || present(checkout);
         }
 
         /** {@link #of(Path, HomeLayout, ContainerRun, List)} for a home whose places are its fixed folders. */
@@ -279,7 +302,7 @@ public final class MountGuard {
                 // rule of the Traceworks home lets through (its tool cache, the run's scratch) is still asked here
                 .or(() -> sealFilesRefusal(real, context.layout()))
                 .or(() -> uncoveredGitRefusal(real, context))
-                .or(() -> mount.readOnly() ? Optional.empty() : writableRefusal(real, context))
+                .or(() -> mount.readOnly() ? Optional.empty() : writableRefusal(mount, real, context))
                 .or(() -> mounted == null ? Optional.of(unresolvedRefusal(why)) : socketRefusal(mounted));
         return new Judged(refusal, refusal.isPresent() ? null : mounted.toString());
     }
@@ -658,8 +681,14 @@ public final class MountGuard {
                 + " step gets the cache folder of its image with cache_dir");
     }
 
-    /** A writable mount in or around the package, or the read-only workspace, would undo its read-only mount. */
-    private static Optional<String> writableRefusal(Path real, Context context) {
+    /**
+     * Why a writable mount is refused: one in or around the package, or the read-only workspace, would undo its
+     * read-only mount, whatever the operator listed; one in or around the {@code .git} of a writable workspace
+     * would undo the read-only mount of that {@code .git} ({@link WorkspaceGit}), unless a step may write it
+     * ({@link Context#workspaceGitWritable()}); and any other needs a folder the operator listed
+     * ({@link #unlistedRefusal}), unless the step writes the folder anyway ({@link #writtenAnyway}).
+     */
+    private static Optional<String> writableRefusal(Mount mount, Path real, Context context) {
         if (!context.writableWorkspace() && overlaps(real, context.workspace())) {
             return Optional.of("a writable mount of the workspace would get around its read-only mount; set"
                     + " workspace_writable: true or mount it :ro");
@@ -667,7 +696,123 @@ public final class MountGuard {
         if (overlaps(real, context.packageDirectory())) {
             return Optional.of("a writable mount of the package would get around its read-only mount; mount it :ro");
         }
-        return Optional.empty();
+        if (context.writableWorkspace() && !context.workspaceGitWritable() && present(context.workspace())
+                && WorkspaceGit.isInOrHolds(real, real(Path.of(context.workspace())))) {
+            return Optional.of("it is, lies in or holds the .git of the workspace, which a step sees read-only: a"
+                    + " writable mount would show it writable at another place; mount a folder of the workspace"
+                    + " beside it or mount it :ro, or, if every package you run may write that repository, set \""
+                    + HomeLayout.WORKSPACE_GIT_WRITABLE + "\": true in "
+                    + context.layout().home().resolve("traceworks.json"));
+        }
+        return writtenAnyway(mount, real, context) ? Optional.empty()
+                : unlistedRefusal(real, context.home(), context.layout());
+    }
+
+    /**
+     * Whether the step writes the folder of a writable mount anyway, so that no listed folder is asked of it. What
+     * Traceworks manages itself: the folder the engine made for a tool step's output ({@link Mount#toolOutput()}),
+     * the cache folder of a tool step's image ({@link Mount#toolCache()}, below the tool caches) and the run's own
+     * scratch directory. And the workspace, or a folder in it by its real path, while the step may write its
+     * workspace: the mount shows the step nothing that its workspace mount does not let it write, and the run's
+     * own checkout of its source is such a workspace. A folder that holds the workspace is more than the workspace
+     * and needs a listed folder. Every other rule of the guard was asked of the mount before this one: the
+     * package and the {@code .git} of the workspace, where a step only reads them, are refused there.
+     */
+    private static boolean writtenAnyway(Mount mount, Path real, Context context) {
+        if (mount.toolOutput()) {
+            return true;
+        }
+        Path caches = real(context.layout().toolCache());
+        if (mount.toolCache() && real.startsWith(caches) && !real.equals(caches)) {
+            return true;
+        }
+        if (present(context.scratch()) && real.startsWith(real(Path.of(context.scratch())))) {
+            return true;
+        }
+        return context.writableWorkspace() && present(context.workspace())
+                && real.startsWith(real(Path.of(context.workspace())));
+    }
+
+    /**
+     * Why a writable mount of {@code real} is refused for lying in no folder the operator listed
+     * ({@code writable_mounts}, {@link HomeLayout#writableMounts()}); empty when it is one of them or lies below
+     * one. A step runs as the operator, so what it writes on the host can be a file the host runs later, outside
+     * every container (a shell's startup file, a folder on the {@code PATH}, the hooks of a repository), and no
+     * list of such files could be complete: the operator says where packages may write. Both sides are compared by
+     * their real paths. A listed folder that is {@code /}, the operator's home directory or a folder that holds it
+     * counts for nothing, whoever built the layout; the setting refuses it when the file is read.
+     *
+     * <p>The refusal names the line that would allow the mount: the list with the folder of the mount added.
+     */
+    private static Optional<String> unlistedRefusal(Path real, Path home, HomeLayout layout) {
+        Path realHome = real(home);
+        for (Path listed : layout.writableMounts()) {
+            if (!listed.isAbsolute()) {
+                continue;
+            }
+            Path folder = real(listed);
+            if (folder.getNameCount() > 0 && !realHome.startsWith(folder) && real.startsWith(folder)) {
+                return Optional.empty();
+            }
+        }
+        Path file = layout.home().resolve("traceworks.json");
+        String why = "a package may mount a host path writable only in or below a folder that writable_mounts in "
+                + file + " lists, and " + real + " lies in none";
+        // The folder of a file; a path that does not exist yet is taken for the folder it is meant to become
+        boolean aFile = Files.exists(real, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(real);
+        Path folder = aFile && real.getParent() != null ? real.getParent() : real;
+        if (folder.getNameCount() == 0 || realHome.startsWith(folder)) {
+            return Optional.of(why + "; its folder " + folder + " is your home directory or holds it, which"
+                    + " writable_mounts cannot list: move it into a folder of its own, or mount it :ro");
+        }
+        List<String> entries = new ArrayList<>();
+        layout.writableMounts().forEach(listed -> entries.add(quoted(listed.toString())));
+        entries.add(quoted(folder.toString()));
+        return Optional.of(why + "; mount it :ro, or, if every package you run may write that folder, allow it"
+                + " with this line in " + file + ": \"" + HomeLayout.WRITABLE_MOUNTS + "\": ["
+                + String.join(", ", entries) + "]");
+    }
+
+    /** {@code text} as a JSON string. */
+    private static String quoted(String text) {
+        return '"' + text.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
+    }
+
+    /**
+     * Why a mount that a workflow writes out as writable, with the host side {@code hostPath}, would be refused for
+     * lying in no folder the operator listed; empty when a listed folder holds it, and for a host side that is no
+     * absolute path after {@code ~} is expanded, which the step refuses for that. The question the start check of
+     * a run asks before any step runs: only the rule of the listed folders, of which a workflow's own text can
+     * name nothing that Traceworks manages. Every rule is asked again, of the real path, when the step runs
+     * ({@link #judge}).
+     */
+    public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout) {
+        return writableMountRefusal(hostPath, home, layout, null);
+    }
+
+    /**
+     * {@link #writableMountRefusal(String, Path, HomeLayout)} for the mount of a step that may write its workspace:
+     * empty as well when the real path of the host side is {@code writableWorkspace} or lies in it, as the step's
+     * own check has it ({@link #writtenAnyway}).
+     *
+     * @param writableWorkspace the run's workspace when the step that declares the mount may write it;
+     *                          {@code null} or blank otherwise
+     */
+    public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout,
+                                                        String writableWorkspace) {
+        String host = expandHome(hostPath.strip(), home);
+        if (!host.startsWith("/")) {
+            return Optional.empty();
+        }
+        try {
+            Path real = real(Path.of(host));
+            if (present(writableWorkspace) && real.startsWith(real(Path.of(writableWorkspace)))) {
+                return Optional.empty();
+            }
+            return unlistedRefusal(real, home, layout);
+        } catch (InvalidPathException e) {
+            return Optional.empty();
+        }
     }
 
     private static boolean overlaps(Path real, String directory) {

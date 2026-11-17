@@ -1,0 +1,14 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "5c0e6d0a-3b1f-4c53-9a50-0d7f1a2b6c03",
+  "name": "IT writable workspace commit",
+  "description": "A step that may write the workspace commits there: possible only where the operator opened the workspace's .git with workspace_git_writable.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "commit",
+      "config": {"command": "echo changed > tracked.txt && git add tracked.txt && git -c user.name=IT -c user.email=it@example.invalid commit --quiet -m 'from the container' && git log -1 --format=%s", "workspace_writable": true}
+    }
+  ]
+}

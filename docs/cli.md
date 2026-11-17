@@ -935,9 +935,14 @@ Nothing was checked: 'traceworks check <package>' says what a run would refuse.
   claude-fable-5-2) unless the run picks opus or astra`. Then what the block may touch, each line only when it applies:
   - `shell:` for a block whose command runs as a shell step (a `shell` block, a wrapper with `execution_mode: shell`,
     a `simple` block of a switch case in shell mode): `network none` or `network open` (`network: true`),
-    `workspace read-only` or `workspace writable`, the names of its `secrets` (a name, never a value: `describe` reads
+    `workspace read-only`, or for a writable one whether its `.git` is writable too in this home
+    (`workspace writable, its .git read-only` or `workspace writable, with its .git (workspace_git_writable)`;
+    "The `.git` of a writable workspace"), the names of its `secrets` (a name, never a value: `describe` reads
     no credential), its image (`container_image`, else the run's shell image), its `mounts` and its
-    `timeout_seconds` when the block sets them. An image of the package itself is followed by what its Dockerfile
+    `timeout_seconds` when the block sets them. A writable mount that the block writes out and that lies in no
+    folder of your `writable_mounts` is followed by `(writable, in no folder of writable_mounts: a run is
+    refused)`, and for a block with `workspace_writable: true` by `... a run is refused unless the folder lies in
+    its workspace)`; `describe` reads the home's `traceworks.json` for both ("Writable mounts"). An image of the package itself is followed by what its Dockerfile
     says it holds, as in `image ./images/areas — eclipse-temurin:21-jdk-noble: the area finder on JDK 21` (see
     "images"); a child workflow of another package gets no such text, since a run refuses a `./images/` there.
   - `ai:` for a block that calls an AI: the provider, model and effort the call runs with (the block's own, else the
@@ -1591,6 +1596,8 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `container_runtime` | `"podman"`, `"docker"` or `null` | the container runtime; `null` (the default) takes the first of `docker` and `podman` on `PATH` that answers `version`. Docker comes first because this release is tested with it (29.1.3); Podman is supported by the code but untested |
 | `hooks` | object or `null` | the operator's hooks: `register_changed`, the program and its arguments as a list (never a shell line) that gets the diff of a register after an audit run on its standard input, and `timeout_seconds` (default 60), after which the hook is ended. See "Hooks" and `examples/hooks/` |
 | `secret_names` | list of names or `null` | the secrets a run may take from the environment of Traceworks. `null` or missing (the default) and `[]` allow none; a list allows those names. Values from `credentials.json` and the AI providers' credentials are not affected. Each name must match `[A-Z_][A-Z0-9_]*`, else the file is refused (see "Secrets") |
+| `writable_mounts` | list of directories or `null` | the folders in or below which a package may mount a host path writable (`:rw` in `mounts`). `null` or missing (the default) and `[]` allow none: every writable mount is refused. Each entry is an absolute path, or starts with `~/` for a folder below your home directory; `/`, your home directory, a folder that holds it and a relative path are refused. No workflow can set it (see "Writable mounts") |
+| `workspace_git_writable` | boolean or `null` | whether a container step that may write its workspace (`workspace_writable: true`) may write the workspace's own top-level `.git` too. `false`, `null` or missing (the default): the container gets that `.git` read-only as a whole, so a step reads the repository and cannot commit. `true`: the `.git` is writable like the rest of the workspace, in every run of this home. The checkout of `run --source` is writable with its `.git` either way. No workflow can set it (see "The `.git` of a writable workspace") |
 | `container_limits` | object | the limits of every container: `memory` (a string such as `"4g"`), `pids` (an integer) and `cpus` (a string or a number, such as `"2"` or `0.5`); a missing one keeps its default, `"4g"`, `1024` and `"2"` |
 | `output_limit_mib` | integer or `null` | how much Traceworks keeps of each stream of every command, in MiB: from `1` to `1024`; `null` (the default) is `16`. A string such as `"16"` or a number such as `1.5` is refused. No workflow can set it (see "Output limit") |
 | `run_output_budget_mib` | integer or `null` | how much memory the output text a run holds may take, in MiB: from `1` to `65536`, and at least twice `output_limit_mib`; `null` (the default) is `128`, or eight times `output_limit_mib` when that is more. A smaller value, a string or a fraction is refused. No workflow can set it (see "Output budget") |
@@ -1689,6 +1696,88 @@ on another disk, or beside a project. Without them nothing changes: each lies in
   home that uses a ledger without the setting takes `<home>/ledger.lock` instead: do not name the fixed
   `<home>/ledger` of one home as the `ledger_dir` of another, since the two would not exclude each other. A shared
   runs or registers folder would mix the runs and the audits of both.
+
+### Writable mounts
+
+A block may ask for more mounts than the run's own (`mounts`, each `host:container:ro` or `host:container:rw`). A
+read-only one is checked as before. A writable one is refused unless you listed a folder that holds it:
+
+```json
+{
+  "writable_mounts": ["~/traceworks-out", "/srv/reports"]
+}
+```
+
+- **What an entry is.** A directory: an absolute path, or one that starts with `~/`, which is your home directory as
+  on the host side of a mount. It need not exist. The file is refused (exit 6, by every command that reads the home)
+  for an entry that is no string, begins or ends with white space, is not absolute, is `/`, or is your home
+  directory or a folder that holds it, as written or behind a symbolic link.
+- **What it allows.** A writable mount whose real path (`..` and symbolic links resolved) is a listed folder or lies
+  below one, with the listed folder resolved the same way: a link inside a listed folder that leads out of it allows
+  nothing. Without the setting, and with `[]`, no package mounts a host path of yours writable.
+- **What it does not allow.** Anything the mount check refuses anyway (docs/workflow-format.md, the row on declared
+  mounts): a login, a folder with a credential store of its own, a socket, the Traceworks home, the package, the
+  workspace of a step without `workspace_writable: true`, the `.git` of a writable workspace (unless you opened it:
+  "The `.git` of a writable workspace"). A file directly in
+  your home directory (`~/.bashrc`) can never be mounted writable, since its folder cannot be listed.
+- **What needs no entry.** What the step writes anyway: the run's scratch directory (`{{ scratch_dir }}`), the
+  cache folder (`cache_dir`) and the output folder (`output_dir`) of a tool step, and the workspace or a folder in
+  it while the step has `workspace_writable: true`, your own workspace as well as the checkout of `run --source`:
+  the step writes it at `/workspace` anyway, and a second, writable mount of a folder in it shows the step nothing
+  more. That is judged by the real path, so a link in the workspace that leads out of it needs an entry for where
+  it leads, and so does a folder that holds the workspace. `describe` knows no workspace: it marks such a mount with
+  `a run is refused unless the folder lies in its workspace`.
+- **When it is refused.** A mount that the workflow writes out (`"~/out:/out:rw"`) is refused by the start check,
+  before the run is created and before a resume records anything (exit 6), with every such mount in one message. A
+  mount that a placeholder names (`"{{ out_dir }}:/out:rw"`) is known when its step runs: the step is refused with
+  exit code 125, and nothing starts. Both name the mount and the line to add:
+
+```
+The run is refused: Block 2 "export": the mount ~/out:/out:rw is refused: a package may mount a host path writable
+only in or below a folder that writable_mounts in /home/anna/.traceworks/traceworks.json lists, and /home/anna/out
+lies in none; mount it :ro, or, if every package you run may write that folder, allow it with this line in
+/home/anna/.traceworks/traceworks.json: "writable_mounts": ["/home/anna/out"]
+```
+
+The list is a grant to every package you run in this home, not to one. List folders that hold results, and none
+that holds what the host runs later: a repository (its `.git/hooks`), a folder on your `PATH`, a folder of startup
+files (docs/security.md, "A listed folder is open to every package"). `traceworks describe <package>` shows the
+mounts of every block, and marks a writable one that no listed folder holds.
+
+### The `.git` of a writable workspace
+
+A step with `workspace_writable: true` writes the workspace. In a container it does not write the workspace's own
+top-level `.git`: the container gets that `.git`, a directory or the file of a linked worktree, read-only as a
+whole. The step reads the repository (`git log`, `git diff`, `git status`) and can leave nothing in it that your
+next git command there would run on the host: no hook, no config, no `commondir`. So it cannot commit, stage or
+stash either. You open it with one setting:
+
+```json
+{
+  "workspace_git_writable": true
+}
+```
+
+- **What it allows.** In every run of this home, a container step with `workspace_writable: true` writes the
+  workspace's `.git` like the rest of the workspace: it commits. A writable mount (`:rw`) of that `.git` or of a
+  folder in it is then a mount in the workspace and needs no entry in `writable_mounts`.
+- **What it means.** Every package you run with a writable workspace can leave hooks, a config, a `commondir` or
+  the state of a rebase in that repository, and the next git command you run there runs them, on the host and as
+  you (docs/security.md, "A writable workspace beyond its top-level `.git`"). Set it in a home where you wrote the
+  packages that write a workspace. The value is `true` or `false`; anything else refuses the file (exit 6).
+- **Without it.** `false`, `null` or missing (the default): the `.git` is read-only. A package that commits in your
+  workspace fails at that step with git's `Read-only file system`. A `.git` that is a symbolic link cannot be
+  mounted read-only in its place: the step is refused when it runs (exit code 125, nothing started). A writable
+  mount that is that `.git`, lies in it or holds it is refused, in a folder you listed too.
+- **What needs neither.** The checkout of `run --source` ("Isolated workspace"): its `.git` is writable with the
+  checkout, since it is the run's data and Traceworks runs no git in it after a step ran in it. A package that
+  commits works there without the setting.
+- **What it does not reach.** A host run has no mounts: a command on the host writes all of `.git`, with or without
+  the setting. Only the workspace's own top-level `.git` is read-only: a repository deeper in the workspace, and a
+  workspace without a `.git`, where a step can make one, are not covered.
+
+`traceworks describe <package>` says which holds in this home for every block with a writable workspace:
+`workspace writable, its .git read-only` or `workspace writable, with its .git (workspace_git_writable)`.
 
 ## AI images
 
@@ -1969,9 +2058,9 @@ A block takes `command` or `container_args`, not both. A block with `container_a
 | `output_dir` | where the tool writes its SARIF files in its container (default `/out`); read only with `output_format: sarif` |
 | `fact_prefix` | the prefix of the fact sheet; default the block's name. It is lower-cased, every run of characters other than `a-z`, `0-9` and `_` becomes one `_`, and `_` at its ends is dropped (`Scan-Tree` gives `scan_tree`); a prefix with nothing left is `tool` |
 | `cache_dir` | where the tool's persistent cache folder appears in its container (see "The cache folder") |
-| `mounts` | more mounts, as for a command, each with `:ro` or `:rw` |
+| `mounts` | more mounts, as for a command, each with `:ro` or `:rw`; a writable one must lie in a folder of the operator's `writable_mounts` ("Writable mounts") |
 | `network` | `true` gives the tool network access; by default it has none |
-| `workspace_writable` | `true` mounts the workspace writable; by default the tool sees it read-only |
+| `workspace_writable` | `true` mounts the workspace writable, with its top-level `.git` read-only unless the operator set `workspace_git_writable` ("The `.git` of a writable workspace"); by default the tool sees the workspace read-only |
 | `timeout_seconds` | how long the tool may run (default 300); a tool that is stopped for it has exit code 124 |
 | `secrets` | the names of secrets that reach the tool as environment variables (see "Secrets") |
 | `mount_docker_socket` | refused: with `true` the step fails, and `traceworks check` reports `docker-socket-refused` |
@@ -2621,7 +2710,9 @@ read-only, at its place in `/workspace`. A writable workspace that is the packag
 
 `workspace_writable: true` works on a `shell` block (its tool mode included), on `simple` and `agentic`, on
 `conditional`, `retry`, `while` and `foreach` for their inner shell or AI steps, and on the shell and `simple`
-blocks of a `switch` case. Every other container sees the workspace read-only.
+blocks of a `switch` case. Every other container sees the workspace read-only. A container that may write the
+workspace still sees the workspace's own top-level `.git` read-only, unless you set `workspace_git_writable` in
+`traceworks.json` or the workspace is the checkout of `--source` ("The `.git` of a writable workspace").
 
 A **host run** is the fallback for a machine where no container runtime works, and it needs your consent, with
 `--allow-host-execution` or with `allow_host_execution: true` in `traceworks.json`. The consent only allows a host run:
@@ -2715,8 +2806,12 @@ Before the run is created, and after the start check, the source is cloned into 
 commit, detached (`git checkout --detach <sha>`); each git call may take ten minutes. That checkout is the run's
 workspace: a container sees it at `/workspace`, read-only unless a block sets `workspace_writable: true`, and then
 the step's writes stay in the checkout, never in the source. A step's own `mounts` entry inside the checkout follows
-the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`. Another run's
-checkout cannot be mounted.
+the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`, and then without
+an entry in `writable_mounts`, as in any workspace the step may write. The `.git` of the checkout is writable with
+the rest of it, without `workspace_git_writable` ("The `.git` of a writable workspace"): a step commits there. The
+checkout is a run's data and no repository of yours, and Traceworks runs no git in it after a step ran in it; a
+checkout that is kept after the run holds what its steps left, so read it with care before you run git in it.
+Another run's checkout cannot be mounted.
 
 `run.started` records the source as `workspace_source` and the full commit as `workspace_source_sha` (see
 docs/events.md). The steps see the commit as the run variable `{{ workspace_source_sha }}`, which is empty in a run

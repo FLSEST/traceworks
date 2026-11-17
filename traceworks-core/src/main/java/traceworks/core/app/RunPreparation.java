@@ -18,6 +18,7 @@ import traceworks.core.port.AiCli;
 import traceworks.core.port.Clock;
 import traceworks.core.port.CommandRunner;
 import traceworks.core.port.ContainerRuntime;
+import traceworks.core.engine.WritableMounts;
 import traceworks.core.port.HostDirectories;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.RegisterStore;
@@ -476,8 +477,9 @@ final class RunPreparation {
      * What the run needs of this machine: a container run needs a container runtime; with one, every image the run
      * needs must be there (the AI providers' of the workflows it reaches by a literal {@code workflow_id} too) (a host
      * run needs no {@code shell} image, and without a runtime its container steps fail when they run); and the
-     * workspace and the package must be directories a container may mount, and a workspace that a step writes
-     * ({@code workspace_writable: true}) must not lie inside the package, which every step only reads.
+     * workspace and the package must be directories a container may mount, a workspace that a step writes
+     * ({@code workspace_writable: true}) must not lie inside the package, which every step only reads, and a
+     * writable mount that a step writes out ({@link WritableMounts}) must lie in a folder the operator listed.
      *
      * @return the real paths the check judged, which are the ones the run mounts; of a refused directory {@code null}
      */
@@ -503,6 +505,15 @@ final class RunPreparation {
                 HostDirectories.Role.PACKAGE);
         if (checkedPackage.isRefused()) {
             preflight.refuse("the package " + pkg.directory() + " cannot be mounted: " + checkedPackage.refusal());
+        }
+        // A writable mount the workflow writes out: asked here, so that no step runs before the one it refuses. A
+        // step that may write its workspace is asked with the workspace, where its mount needs no listed folder
+        String judgedWorkspace = checkedWorkspace == null ? null : checkedWorkspace.realPath();
+        for (WritableMounts.Written mount : WritableMounts.writtenOut(pkg.definition(), children,
+                target == RunTarget.CONTAINER)) {
+            containers.directories().writableMountRefusal(mount.hostPath(),
+                    mount.workspaceWritable() ? judgedWorkspace : null).ifPresent(reason -> preflight.refuse(
+                    mount.where() + ": the mount " + mount.entry() + " is refused: " + reason));
         }
         Mounted mounted = new Mounted(checkedWorkspace == null ? null : checkedWorkspace.realPath(),
                 checkedPackage.realPath());
