@@ -114,7 +114,9 @@ a run's checkout may lie elsewhere in it), a folder that holds one of the places
 it is, and a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused. Each of
 them, and the checkout of a `--source`, is resolved once: the real path the check judged is the path the run mounts,
 so a directory that something replaces by a link after the check is not what the containers get, and every container
-start refuses a run directory that no longer resolves to that path. The full list
+start refuses a run directory that no longer resolves to that path, or that cannot be resolved at all any more (a
+link planted at its place to where you may not look, to nothing or to itself): the refusal names the directory and
+why, and the run goes on once the directory is back. The full list
 is in the row on declared mounts of [docs/workflow-format.md](workflow-format.md).
 
 **Writable mounts.** A block's own mount that is writable (`:rw`) is refused unless its real path lies in or below a

@@ -21,7 +21,7 @@ section What the defaults protect
 limit Mounts.
   quote a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused
   says  A workspace or a package is refused when it is, or holds, the runs, ledger, registers, seals or cache folder (also where a setting puts them), but may lie elsewhere in the Traceworks home or in a folder of /dev/shm, and is not refused for holding a credential store of its own (.ssh, .aws); a block's own mount stays under the whole mount check.
-  digest e2ee679333d09bc2
+  digest d2f716d51235e4b3
 
 limit Hooks
   quote with the operator's whole environment

@@ -512,7 +512,8 @@ public final class CliContainerRuntime implements ContainerRuntime {
      * path means something was replaced since: between the check and the first container, or by a step that may
      * write the workspace and renamed a folder above the package, leaving a link at its place. The container would
      * get whatever the link names, unchecked. They are resolved as they are mounted
-     * ({@link MountGuard#realRunDirectory}).
+     * ({@link MountGuard#realRunDirectory}), and one that cannot be resolved at all is listed too: the start check
+     * resolved it.
      */
     private static List<String> movedRunDirectories(ContainerRun run) {
         List<String> moved = new ArrayList<>();
@@ -527,7 +528,17 @@ public final class CliContainerRuntime implements ContainerRuntime {
             if (directory[1] == null || directory[1].isBlank()) {
                 continue;
             }
-            String now = MountGuard.realRunDirectory(directory[1]);
+            String now;
+            try {
+                now = MountGuard.realRunDirectory(directory[1]);
+            } catch (MountGuard.RunDirectoryUnresolved e) {
+                // Never taken at its word: a link to where the operator cannot look would pass as itself
+                moved.add(directory[0] + " " + directory[1] + " can no longer be resolved, as it was when the run's"
+                        + " start checked it: " + e.getMessage() + ". Something replaced or removed it or a folder"
+                        + " above it: look at what lies at that path now, put the directory back, and resume the run"
+                        + " or start it again");
+                continue;
+            }
             if (!directory[1].equals(now)) {
                 moved.add(directory[0] + " " + directory[1] + " now resolves to " + now + ", not to itself as when"
                         + " the run's start checked it: something replaced it or a folder above it");
