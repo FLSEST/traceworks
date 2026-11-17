@@ -35,14 +35,22 @@ class FindingsCommandTest {
     }
 
     private Result exec(String... args) {
+        return execWith(Map.of("TRACEWORKS_ACTOR", "tester"), args);
+    }
+
+    /** As {@link #exec}, in the environment of a harness that names its agent. */
+    private Result execAs(String agentVariable, String... args) {
+        return execWith(Map.of("TRACEWORKS_ACTOR", "tester", "TRACEWORKS_AGENT", agentVariable), args);
+    }
+
+    private Result execWith(Map<String, String> env, String... args) {
         List<String> all = new ArrayList<>(List.of(args));
         all.add("--home");
         all.add(home.toString());
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         int code = Main.run(all.toArray(String[]::new), new PrintStream(out, true, StandardCharsets.UTF_8),
-                new PrintStream(err, true, StandardCharsets.UTF_8), Map.of("TRACEWORKS_ACTOR", "tester"), work, null,
-                RuntimeSource.NONE);
+                new PrintStream(err, true, StandardCharsets.UTF_8), env, work, null, RuntimeSource.NONE);
         return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
     }
 
@@ -540,6 +548,177 @@ class FindingsCommandTest {
                 .contains(", made on severity LOW, not on the CRITICAL the finding has now: false positive");
         assertThat(Files.readString(home.resolve("registers/hello/state.json")))
                 .contains("\"note\":\"false positive\",\"severity\":\"LOW\"");
+        assertThat(exec("findings", "hello", "verify").code()).isZero();
+    }
+
+    // ---- who decided: the actor, and the agent that acted under the actor (docs/registers.md, "Who decided")
+
+    private List<String> logLines() throws IOException {
+        return Files.readAllLines(home.resolve("registers").resolve("hello").resolve("events.jsonl"));
+    }
+
+    /** The findings the runs of this home got of their register: the lines of every run's register folder. */
+    private String findingsHandedToRuns() throws IOException {
+        StringBuilder all = new StringBuilder();
+        try (java.util.stream.Stream<Path> files = Files.walk(home.resolve("runs"))) {
+            for (Path file : files.filter(p -> p.endsWith(Path.of("register", "findings.jsonl"))).toList()) {
+                all.append(Files.readString(file));
+            }
+        }
+        return all.toString();
+    }
+
+    @Test
+    void aDecisionOfAnAgent_isSaidByEveryView_andOneOfAPersonReadsAsItAlwaysDid() throws IOException {
+        run(auditPackage("A.java", "B.java"));
+        List<String> ids = exec("findings", "hello", "list").out().lines().map(l -> l.substring(0, 8)).toList();
+
+        Result dismiss = exec("findings", "hello", "dismiss", ids.get(0), "--note", "not ours", "--agent",
+                "claude-code");
+        Result accept = exec("findings", "hello", "accept", ids.get(1), "--note", "bounded", "--until", "2027-01-31");
+
+        assertThat(dismiss.code()).as(dismiss.err()).isZero();
+        assertThat(dismiss.out()).isEqualTo("dismissed " + ids.get(0) + " through the agent claude-code\n");
+        assertThat(accept.out()).isEqualTo("accepted " + ids.get(1) + " as a risk, review by 2027-01-31\n");
+        // list: the row of the agent's decision says so, the row of the person's is the row it always was
+        List<String> rows = exec("findings", "hello", "list").out().lines().toList();
+        assertThat(rows).filteredOn(r -> r.startsWith(ids.get(0))).singleElement().asString()
+                .startsWith(ids.get(0) + "  DISMISSED  MEDIUM").endsWith("  (through the agent claude-code)");
+        assertThat(rows).filteredOn(r -> r.startsWith(ids.get(1))).singleElement().asString()
+                .doesNotContain("(").doesNotContain("agent");
+        // show: the actor, then that it was through the agent
+        assertThat(exec("findings", "hello", "show", ids.get(0)).out())
+                .contains("Decision  DISMISSED by tester through the agent claude-code at ");
+        assertThat(exec("findings", "hello", "show", ids.get(1)).out()).contains("Decision  ACCEPTED_RISK by tester at ")
+                .doesNotContain("agent");
+        // list --json, state.json and report.html
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (String json : List.of(exec("findings", "hello", "list", "--json").out(), mapper.readTree(
+                Files.readString(home.resolve("registers/hello/state.json"))).get("findings").toString())) {
+            for (var finding : mapper.readTree(json)) {
+                var disposition = finding.get("disposition");
+                assertThat(disposition.get("actor").asText()).isEqualTo("tester");
+                if (finding.get("id").asText().startsWith(ids.get(0))) {
+                    assertThat(disposition.get("agent").asText()).isEqualTo("claude-code");
+                } else {
+                    assertThat(disposition.has("agent")).as("no key for a decision without an agent").isFalse();
+                }
+            }
+        }
+        assertThat(Files.readString(home.resolve("registers/hello/report.html")))
+                .contains("dismissed by tester through the agent claude-code at ")
+                .contains("accepted by tester at ");
+        // the log: the agent beside the actor, after the one line that says the register holds such a decision
+        List<String> log = logLines();
+        assertThat(log.get(log.size() - 3)).contains("\"type\":\"register.requires\"")
+                .contains("\"feature\":\"decision_agent\"");
+        assertThat(log.get(log.size() - 2)).contains("\"type\":\"finding.dismissed\"")
+                .contains("\"actor\":\"tester\",\"agent\":\"claude-code\"");
+        assertThat(log.getLast()).contains("\"type\":\"finding.accepted\"").contains("\"actor\":\"tester\"")
+                .doesNotContain("agent");
+        assertThat(exec("findings", "hello", "verify").code()).isZero();
+        // the register folder of the next run: the first run got an empty file, the second the two decisions
+        assertThat(findingsHandedToRuns()).isEmpty();
+        run(auditPackage("A.java", "B.java"));
+        assertThat(findingsHandedToRuns()).contains("\"actor\":\"tester\",\"agent\":\"claude-code\"")
+                .containsOnlyOnce("\"agent\"").contains("\"kind\":\"ACCEPTED_RISK\"");
+    }
+
+    /** A harness sets the variable once; what the command line says wins. */
+    @Test
+    void theVariableNamesTheAgent_theOptionWins_andAReopeningNamesItInItsLine() throws IOException {
+        run(auditPackage("A.java", "B.java"));
+        List<String> ids = exec("findings", "hello", "list").out().lines().map(l -> l.substring(0, 8)).toList();
+
+        Result byVariable = execAs("harness 2.1", "findings", "hello", "dismiss", ids.get(0), "--note", "not ours");
+        Result byOption = execAs("harness 2.1", "findings", "hello", "dismiss", ids.get(1), "--note", "not ours",
+                "--agent", "claude-code");
+
+        assertThat(byVariable.code()).as(byVariable.err()).isZero();
+        assertThat(byVariable.out()).isEqualTo("dismissed " + ids.get(0) + " through the agent harness 2.1\n");
+        assertThat(byOption.out()).isEqualTo("dismissed " + ids.get(1) + " through the agent claude-code\n");
+        assertThat(exec("findings", "hello", "show", ids.get(0)).out())
+                .contains("Decision  DISMISSED by tester through the agent harness 2.1 at ");
+        assertThat(exec("findings", "hello", "show", ids.get(1)).out())
+                .contains("Decision  DISMISSED by tester through the agent claude-code at ");
+        assertThat(logLines()).filteredOn(l -> l.contains("\"type\":\"register.requires\"")
+                && l.contains("decision_agent")).as("one line says it for the register").hasSize(1);
+
+        Result reopen = execAs("harness 2.1", "findings", "hello", "reopen", ids.get(0));
+
+        assertThat(reopen.out()).isEqualTo("reopened " + ids.get(0) + " through the agent harness 2.1\n");
+        assertThat(logLines().getLast()).contains("\"type\":\"finding.reopened\"")
+                .contains("\"actor\":\"tester\",\"agent\":\"harness 2.1\"").contains("\"reason\":\"manual\"");
+        Result accept = execAs("harness 2.1", "findings", "hello", "accept", ids.get(0), "--note", "bounded",
+                "--until", "2027-01-31");
+        assertThat(accept.out()).isEqualTo("accepted " + ids.get(0) + " as a risk through the agent harness 2.1,"
+                + " review by 2027-01-31\n");
+        assertThat(exec("findings", "hello", "verify").code()).isZero();
+    }
+
+    /** Who sets the option or the variable means to name an agent: nothing is recorded as a person's instead. */
+    @Test
+    void aBlankOrBadNameOfAnAgent_exits2_andRecordsNothing_andReadingNeedsNoName() throws IOException {
+        run(auditPackage("A.java"));
+        String id = exec("findings", "hello", "list").out().substring(0, 8);
+        int lines = logLines().size();
+
+        Result emptyOption = exec("findings", "hello", "dismiss", id, "--note", "n", "--agent", "");
+        Result blankOption = execAs("harness", "findings", "hello", "dismiss", id, "--note", "n", "--agent=  ");
+        Result emptyVariable = execAs("", "findings", "hello", "dismiss", id, "--note", "n");
+        Result blankVariable = execAs(" \t", "findings", "hello", "accept", id, "--note", "n");
+        Result control = exec("findings", "hello", "dismiss", id, "--note", "n", "--agent", "claude\u001b[2Jcode");
+        Result twoLines = execAs("claude\ncode", "findings", "hello", "reopen", id);
+        Result tooLong = exec("findings", "hello", "dismiss", id, "--note", "n", "--agent", "a".repeat(65));
+
+        for (Result refused : List.of(emptyOption, blankOption, emptyVariable, blankVariable, control, twoLines,
+                tooLong)) {
+            assertThat(refused.code()).as(refused.err()).isEqualTo(2);
+            assertThat(refused.out()).isEmpty();
+        }
+        assertThat(emptyOption.err()).contains("--agent is blank: name the agent, or leave it out for a decision a"
+                + " person makes");
+        assertThat(blankOption.err()).contains("--agent is blank");
+        assertThat(emptyVariable.err()).contains("TRACEWORKS_AGENT is blank");
+        assertThat(blankVariable.err()).contains("TRACEWORKS_AGENT is blank");
+        assertThat(control.err()).contains("--agent takes a name of letters, digits, the characters . _ - : / @ +"
+                + " and single spaces, all ASCII; got U+001B at 7").doesNotContain("\u001b");
+        assertThat(twoLines.err()).contains("TRACEWORKS_AGENT takes a name of").contains("got U+000A at 7");
+        assertThat(tooLong.err()).contains("--agent takes a name of at most 64 characters, got 65");
+        assertThat(logLines()).as("nothing was decided").hasSize(lines);
+        assertThat(exec("findings", "hello", "list").out()).contains(id + "  OPEN");
+        // Reading decides nothing: a list, a show and a verify do not look at the variable
+        assertThat(execAs("", "findings", "hello", "list").code()).isZero();
+        assertThat(execAs("", "findings", "hello", "show", id).code()).isZero();
+        assertThat(execAs("", "findings", "hello", "verify").code()).isZero();
+        Result elsewhere = exec("findings", "hello", "list", "--agent", "claude-code");
+        assertThat(elsewhere.code()).isEqualTo(2);
+        assertThat(elsewhere.err()).contains("--agent belongs to accept, dismiss and reopen");
+    }
+
+    /** The row of a decision that is not in force, or was made on another severity, names the agent in its note. */
+    @Test
+    void theListNamesTheAgent_alsoOfADecisionNotInForce_andOfOneMadeOnAnotherSeverity() throws IOException {
+        run(sized("LOW", "310 lines"));
+        String id = exec("findings", "hello", "list").out().substring(0, 8);
+        exec("findings", "hello", "dismiss", id, "--note", "false positive", "--agent", "claude-code");
+
+        run(sized("CRITICAL", "900 lines"));
+
+        assertThat(exec("findings", "hello", "list").out()).contains(id + "  OPEN       CRITICAL")
+                .contains("  (dismissed on LOW through the agent claude-code before, not in force)\n");
+        assertThat(exec("findings", "hello", "show", id).out()).contains("Decision  DISMISSED by tester through the"
+                + " agent claude-code at ").contains("; not in force: the finding is OPEN");
+        assertThat(exec("findings", "hello", "list", "--json").out()).contains("\"agent\":\"claude-code\"")
+                .contains("\"in_force\":false");
+
+        Files.writeString(home.resolve("traceworks.json"), "{\"decision_on_higher_severity\": \"keep\"}");
+        run(sized("LOW", "310 lines"));
+        exec("findings", "hello", "dismiss", id, "--note", "still not", "--agent", "claude-code");
+        run(sized("HIGH", "700 lines"));
+
+        assertThat(exec("findings", "hello", "list").out()).contains(id + "  DISMISSED  HIGH")
+                .contains("  (decided on LOW through the agent claude-code)\n");
         assertThat(exec("findings", "hello", "verify").code()).isZero();
     }
 
