@@ -1,0 +1,237 @@
+# The stated limits of Traceworks, as the judge of the security self-audit gets them: what the documentation says
+# the defaults do not protect. A behaviour a limit states is not a finding; code that does more than the limit says is.
+# The format is described in the package's README.md ("The stated limits"). A test pins this file to the documents:
+# every heading and every bullet of "What they do not protect" in docs/security.md is named here, in the documents'
+# order, as a limit or as an aside (a point that says nothing about what the code does), and every quote is still in
+# its bullet. The numbered list in the instructions of workflow.json is made from the "says" lines, and a test
+# holds the two together.
+
+source docs/security.md
+
+section AI steps
+
+limit Who chooses the model of an AI step.
+  quote without `allowed_models`, any package may name any model of a provider you hold a credential for
+  says  The workflow names the model of an AI step; without allowed_models a package may name any model of a provider the operator holds a credential for, and a step without a model runs the provider's default.
+
+limit A local model
+  quote "Local" is what you declared, not what Traceworks verified.
+  says  A local model server is what the operator declared in local_models, not verified: Traceworks sees only its host:port, plain HTTP to it is not encrypted, and on an older Docker or on Podman every AI container reaches a server on the host past the proxy.
+
+limit `ai_images` replaces the built-in image.
+  quote Traceworks never builds, pulls or inspects it
+  says  An image the operator sets in ai_images gets the credentials, the workspace, the prompt and the network of the built-in image, and is never built, pulled or inspected.
+
+limit An AI container reaches its provider, and everything a model reads goes there.
+  quote The allowlist limits where a container can connect, not what the model sends to the host it may reach
+  says  The prompt, the files a model's tools read and their output go to the provider.
+
+limit What the allowlist closes, and what it leaves.
+  quote The proxy sees only `host:port`, never which account a connection serves.
+  says  The egress proxy judges host:port only and inspects no TLS: the provider's host under another account and every host of ai_hosts stay reachable, a denied connection fails no step, and with ai_network open nothing is refused or recorded.
+
+limit Web tools
+  quote The proxy sees and records only `host:port`, never the URL
+  says  With web tools a fetched URL or a search query can carry what the model read to a host of web_hosts or to the provider; the injection check is a tripwire, and a host listed by name gets no address check.
+
+limit A model with tools can read its own credential.
+  quote The record redacts the key, but the model can put it into its answer, which later steps of the run see as it is.
+  says  A model with tools can read its own API key in its container and put it into its answer, which later steps see unredacted; only the record redacts it.
+
+limit A model's answer in a shell command.
+  quote Traceworks guarantees that the value is in the variable and nowhere in the code.
+  says  A protected value reaches a shell step as a variable (values); what the author's command does with it is the author's: unquoted, evaluated (eval, bash -c, arithmetic) or exported, it can run or leak a model's text.
+
+limit A gate from an AI step.
+  quote a model steered by what it reads can therefore set a gate too
+  says  A simple or agentic step can set the run's gate with a gate_status line, so a model can.
+
+aside Claude as root.
+aside A prompt that starts with `/`.
+aside Pi as root.
+aside Pi with a Claude subscription token
+aside Pi and a writable workspace.
+aside Codex is not supported.
+
+section Secrets and the record
+
+limit Redaction is exact-match only.
+  quote Redaction keeps accidents out of the record; it does not stop a step that means to leak.
+  says  Redaction finds a secret byte for byte only: a value written encoded, split, escaped or reversed is recorded readably.
+
+limit A step can do anything with its secret.
+  quote with `network: true` the command can send it anywhere
+  says  A step that declares a secret holds it as an environment variable and can do anything with it, also send it out with network: true.
+
+limit The scratch directory keeps what steps wrote, in plain text.
+  quote a file there that holds a secret is listed without its content, but the file stays
+  says  The scratch directory of a run folder is not part of the record and keeps what steps wrote, secrets included, in plain text.
+
+limit The inbox keeps what you sent a running run, in plain text.
+  quote `inbox/done/` is not part of the record and is not redacted
+  says  The inbox of a run folder (inbox/, inbox/done/) keeps answers and comments as they were typed, unredacted.
+
+limit Later steps read what a step wrote.
+  quote is there for every later container of the run
+  says  What a step writes into /scratch or a writable workspace is readable by every later step of the run, AI steps and host commands included.
+
+limit An answer to a parked run is redacted like the rest of the record.
+  quote a secret you typed that is not one of the run's is recorded as typed
+  says  An answer to a parked run is redacted with the run's declared secrets and AI credentials as they are then; any other secret typed into it is recorded as typed.
+
+limit A resume redacts with the values it has at the resume.
+  quote the resumed run knows only the new one
+  says  A resume reads the secret values again and knows only the new ones: an old value a later step prints is recorded in clear, and the warning compares only the modification time of credentials.json.
+
+limit The runtime shows a container's environment.
+  quote the `docker` or `podman` client process holds them in its own environment
+  says  Secret values are in the environment of the container and of the docker or podman client process, visible to whoever may use the runtime or read that process.
+
+limit The record is tamper-evident, not signed.
+  quote Whoever can write the Traceworks home can rewrite a run folder and its ledger entries together, the start entry too.
+  says  The record is not signed: whoever can write the Traceworks home can rewrite a run folder and its ledger entries together.
+
+limit The places are the operator's.
+  quote It does not know a folder that an earlier value of a setting named
+  says  The check of runs_dir, ledger_dir and registers_dir compares the paths as written, and the mount check does not know a folder that an earlier value of a setting named.
+
+section Seals
+
+limit An unsealed package runs, unless you say otherwise.
+  quote Only `require_seal: "always"` stops that.
+  says  An unsealed package runs unless require_seal is always, and a sealed one becomes unsealed by deleting traceworks.seal and changing the workflow id.
+
+limit `require_seal: "unattended"` guards against accidents, not against a caller.
+  quote Whoever starts the run can pass the flag or give the command a terminal.
+  says  require_seal unattended is passed by whoever starts the run, with --allow-unsealed or a terminal.
+
+limit The `signer` of a seal is a declared name.
+  quote nobody checks who that is
+  says  The signer of a seal is a declared name nobody checks; only the key is checked.
+
+limit What the digest does not see.
+  quote A change there breaks no seal.
+  says  The seal digest does not see an empty directory, a file that is not a regular file, permission bits other than the owner's execute bit, or the top-level .git/.
+
+limit A called package is loaded again when its block runs.
+  quote A called package changed in between runs changed.
+  says  A called package is checked when the run starts and resumes, and is loaded from disk again when its block runs, without a comparison: changed in between, it runs changed. A workflow an unsealed package names through a placeholder is not checked at all.
+
+limit Whoever writes the home is the operator.
+  quote What is not guarded is what the settings do not name
+  says  Whoever can write the home (traceworks.json, allowed_signers, the seal log) is the operator and can allow a key or switch seals off; the public half of the signing key and a key passed with seal --key are not guarded from mounts.
+
+limit The end of the seal log is not anchored.
+  quote It does not show lines cut from the end.
+  says  The seal log shows a changed or removed line in the middle, not lines cut from its end.
+
+limit An allowed signer can seal anything.
+  quote A package sealed again by any key in `allowed_signers` runs
+  says  A package sealed again by any key of allowed_signers runs, also when this home sealed another digest before.
+
+limit An earlier seal put back is refused, as far as the log remembers.
+  quote a home that never saw the workflow takes any valid seal
+  says  An earlier seal put back is refused only as far as the seal log remembers; the rule compares the signer's own signed time with this home's clock.
+
+limit `unseal` is not signed.
+  quote Anyone who may run `traceworks unseal` in the home removes a seal
+  says  unseal is not signed: anyone who may run it in the home removes a seal.
+
+aside The private key is yours to keep.
+
+limit Images are fixed as far as their names go.
+  quote The built image is not sealed
+  says  A seal fixes images by the names the package writes: the built image, the built-in images, ai_images and what a Dockerfile reaches through a build argument or a download are not sealed.
+
+limit The workspace and the source are not sealed.
+  quote The seal says which package runs, not what it works on.
+  says  The workspace and a --source are not sealed.
+
+limit A file changed after the start is not seen.
+  quote a file changed while the run is going reaches the later steps
+  says  The seal digest is taken at the start and at a resume: a package file changed while the run is going reaches the later steps.
+
+aside A seal says who signed, not that the package is good.
+aside A seal holds where its signer is allowed.
+
+section Child workflows
+
+limit A child workflow is not a boundary.
+  quote Nothing a parent does keeps a child from a file
+  says  A child workflow is part of the run that started it: the same workspace, scratch directory, networks, credentials and variables.
+
+limit The parent's package decides which workflows run.
+  quote whoever writes the package, or picks such an input, picks the code that runs with the run's secrets and workspace
+  says  A workflow_id is a path or an id from the package or from a trusted variable, an input of the run included: whoever writes the package or picks that input picks the code that runs.
+
+limit A child's gate does not reach the run.
+  quote leaves its parent `COMPLETED` without a gate unless a step of the parent states the verdict
+  says  A child's gate or errors do not reach the parent run unless a step of the parent states the verdict.
+
+section Images and containers
+
+limit A package image's `RUN` steps run at build time.
+  quote with network and without the flags a run's containers get
+  says  traceworks images build runs a package's Dockerfile RUN steps with network and without the flags of a run's containers, and pulls the registry images the package names.
+
+limit A tag names the Dockerfile's directory, not the image's bytes.
+  quote A rebuild on another day can differ under the same tag.
+  says  An image tag names the Dockerfile's directory, not the image's bytes: a rebuild can differ under the same tag.
+
+limit The budget counts what a run holds, not each copy of it.
+  quote Checkpoints are not bounded by the budget
+  says  The output budget does not count the short-lived copies of an output, and checkpoints are not bounded by it: a run needs a heap of about three times its budget.
+
+limit The check of a mount's container side is textual.
+  quote is refused by its path as written
+  says  The container side of a declared mount is checked as written: a symbolic link inside the image can land it on /workspace, /package or /scratch.
+
+limit A mount is checked, then mounted.
+  quote a process that can write one of its parent directories could still swap a part of it in between
+  says  The host side of a mount is resolved once and the runtime gets the checked real path; a process that can write a parent directory of it can still swap a part before the runtime opens it.
+
+limit Sockets deeper down.
+  quote a folder with a socket two or more levels down is not
+  says  A socket file and a folder that directly holds one are refused as a mount; a folder with a socket two or more levels down is not.
+
+limit Runtime storage elsewhere.
+  quote is not refused as a mount
+  says  Only the default storage directories of the runtimes are refused as a mount, not storage moved elsewhere.
+
+aside The container is as strong as the runtime and the kernel.
+
+section Many containers on a desktop machine
+
+section The host and `--source`
+
+limit A host run's commands run as you.
+  quote they can read and change everything you can
+  says  The commands of a host run (allow_host_execution) run as the operator, with a reduced environment and no other barrier.
+
+limit git on the host gets a reduced environment.
+  quote Your SSH agent and your credential helper stay reachable
+  says  git runs on the host against files nobody checked, with a reduced environment; the operator's SSH agent and credential helper stay reachable to it.
+
+limit Patterns and reports are read under a time limit.
+  quote the thread is left behind, busy until the Traceworks process ends
+  says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends.
+
+limit A token in a `--source` URL
+  quote every process on the machine can read it in the process list while the clone runs
+  says  A token in a --source URL is an argument of git clone and readable in the process list.
+
+limit A gitfile that points into a checkout.
+  quote do not use a directory that steps could write as a `--source`
+  says  A local --source whose .git is a file that points into a run's checkout is not refused.
+
+limit Paths in a package.
+  quote may name its workflow by any path on the machine
+  says  A sub-workflow or foreach block may name its workflow by any path on the machine.
+
+source docs/events.md
+
+section Redaction
+
+limit Lines:
+  quote which must keep naming their blob
+  says  Numbers, booleans and blob references (sha256 and size) in a line of the record are not redacted.

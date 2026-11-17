@@ -544,6 +544,81 @@ class EngineRoundTripTest {
                         + "clean       [0-9a-f]{16}  " + java.util.regex.Pattern.quote(itemB) + "\n");
     }
 
+    /**
+     * A finding whose code is gone leaves the register by measurement, through the package's own workflow, the engine
+     * and the register, over two runs. The first run reports two findings. Then a package is renamed, so the file of
+     * the first has another path, and the method of the second gets another name. The second run names both gone
+     * without asking anybody (the file is gone, the member is gone), and the register resolves them. The subject of
+     * the first is longer than the 300 characters the block of {@code {{ audit_findings }}} shows of one: read from
+     * that block, the finding stayed open in every later run, and no run asked about it. The renamed method is not
+     * lost: its code is an area of the same run, the judge sees the defect there and reports it under the new name.
+     */
+    @Test
+    void aFindingWhoseFileOrMemberIsGone_isResolvedByTheNextRun_andARenamedMembersDefectIsReportedUnderItsNewName()
+            throws IOException {
+        Path sources = Files.createDirectories(temp.resolve("work/app/src/main/java"));
+        Path before = Files.createDirectories(sources.resolve("io/github/old/traceworks/p"));
+        StringBuilder longClass = new StringBuilder("package p;\nclass A {\n");
+        for (int i = 1; i <= 8; i++) {
+            longClass.append("    void aMethodWithAVeryLongNameNumber").append(i)
+                    .append("(String c, String d) throws Exception { new ProcessBuilder(c).start(); }\n");
+        }
+        Files.writeString(before.resolve("A.java"), longClass + "}\n");
+        Path p = Files.createDirectories(sources.resolve("p"));
+        Files.writeString(p.resolve("B.java"), "package p;\nclass B { String f() { return System.getenv(\"HOME\"); } }\n");
+        Files.writeString(p.resolve("C.java"), "package p;\nclass C {\n"
+                + "    void old(String c) throws Exception { new ProcessBuilder(c).start(); }\n}\n");
+        Path asked = temp.resolve("asked-gone.txt");
+        Path pkg = standInForThePackage(asked);
+        Path home = Files.createDirectories(temp.resolve("home-gone"));
+        Map<String, String> env = new HashMap<>(System.getenv());
+        env.put("TRACEWORKS_ACTOR", "tester");
+        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+                home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
+        String found = "{\"rule\":\"process_start\",\"severity\":\"medium\",\"line\":3,"
+                + "\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"The model's words.\",\"fix\":\"More.\"}";
+
+        // The first run: a finding in the long class and one in C.old
+        Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[" + found + "]}");
+        Files.writeString(pkg.resolve("answer-A002.json"), "{\"area\":\"A002\",\"findings\":[]}");
+        Files.writeString(pkg.resolve("answer-A003.json"), "{\"area\":\"A003\",\"findings\":[" + found + "]}");
+        String first = cli(env, run);
+        assertThat(first).contains("register security: 2 new, 0 resolved, 0 reopened, 2 open now");
+        String subjects = cli(env, "findings", "security", "list", "--json", "--home", home.toString());
+        String stale = "app/src/main/java/io/github/old/traceworks/p/A.java#A.aMethodWithAVeryLongNameNumber1(String, String)";
+        assertThat(subjects).contains(stale + ", A.aMethodWithAVeryLongNameNumber2(String, String)",
+                "app/src/main/java/p/C.java#C.old(String)");
+        Files.delete(asked);
+
+        // The package is renamed, and so is the method. B is settled; C and the moved class are judged
+        Files.move(before.resolve("A.java"), p.resolve("Moved.java"));
+        Files.writeString(p.resolve("C.java"), Files.readString(p.resolve("C.java")).replace("void old(", "void renamed("));
+        Files.writeString(pkg.resolve("answer-A002.json"), "{\"area\":\"A002\",\"findings\":[" + found + "]}");
+        Files.writeString(pkg.resolve("answer-A003.json"), "{\"area\":\"A003\",\"findings\":[]}");
+        Files.delete(pkg.resolve("answer-A001.json"));
+        String second = cli(env, run);
+
+        assertThat(second).as(first).contains("register security: 1 new, 2 resolved, 0 reopened, 1 open now")
+                .doesNotContain("not mentioned by this report");
+        assertThat(Files.readAllLines(asked)).as("the renamed method and the moved class are judged in the same run")
+                .containsExactly("fable CLAUDE claude-fable-5-2 app/src/main/java/p/C.java#C.renamed(String)",
+                        "fable CLAUDE claude-fable-5-2 app/src/main/java/p/Moved.java#A.aMethodWithAVeryLongNameNumber1"
+                                + "(String, String)");
+        String report = Files.readString(newest(home, "security-report.md"));
+        assertThat(report).contains("## Earlier findings that are gone (2)", "| The file is gone | 1 |",
+                "| The member is gone | 1 |", "| The judge answered that it is gone | 0 |",
+                "- process_start `app/src/main/java/p/C.java#C.old(String)`: the member is gone\n")
+                .containsPattern("- process_start `" + java.util.regex.Pattern.quote(stale) + ",[^`]*`: the file is gone\n")
+                .doesNotContain("## Open findings that no item carries", "## Open findings without an answer");
+        List<String> list = cli(env, "findings", "security", "list", "--all", "--home", home.toString()).lines().toList();
+        assertThat(list).hasSize(3)
+                .anySatisfy(l -> assertThat(l).contains("RESOLVED").contains("io/github/old/traceworks/p/A.java#"))
+                .anySatisfy(l -> assertThat(l).contains("RESOLVED").contains("C.java#C.old(String)"))
+                .anySatisfy(l -> assertThat(l).contains("OPEN").contains("C.java#C.renamed(String)"));
+        assertThat(cli(env, "findings", "security", "verify", "--home", home.toString())).contains("verified")
+                .doesNotContain("NOT intact");
+    }
+
     /** A pick the package does not declare starts no run: no step runs, nobody is asked, nothing is reported. */
     @Test
     void aPickThePackageDoesNotDeclare_startsNoRun_andNoVerdictIsAskedFor() throws IOException {

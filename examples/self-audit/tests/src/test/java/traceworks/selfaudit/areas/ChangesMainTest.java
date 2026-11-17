@@ -430,6 +430,53 @@ class ChangesMainTest {
         assertThat(details()).startsWith("gate_status: GREEN\n");
     }
 
+    /**
+     * The check of the changes reads the register's findings as the file of the register folder, like the full
+     * audit: a finding of a path that no source file has any more is named gone with that reason, whatever the
+     * length of its subject. Its own rule stands above that: when Java outside the compiled roots changed in the
+     * run, no finding is named gone, since its member may have moved there.
+     */
+    @Test
+    void aKnownFindingOfTheRegistersFile_whoseFileIsGone_isNamedGone_butNotWhenJavaOutsideTheRootsChanged()
+            throws IOException {
+        String stale = "app/src/main/java/io/github/old/p/Runner.java#" + "Runner.aLongMember(String, String), ".repeat(9)
+                + "Runner.run(String)";
+        assertThat(stale.length()).isGreaterThan(300);
+        // Not under the name findings.jsonl: report writes its own file of that name beside the report
+        Path known = Files.writeString(work.resolve("register-findings.jsonl"), "{\"status\":\"OPEN\",\"severity\":\"HIGH\","
+                + "\"rule_key\":\"process_start\",\"subject\":\"" + stale + "\",\"title\":\"t\",\"evidence\":\"e\","
+                + "\"disposition\":null}\n{\"status\":\"OPEN\",\"severity\":\"MEDIUM\",\"rule_key\":\"env_pass\","
+                + "\"subject\":\"" + SRC + "Caller.java#Caller.old()\",\"title\":\"t\",\"evidence\":\"e\","
+                + "\"disposition\":null}\n");
+        changes("README.md");
+
+        assertThat(run("", find("--known-file", known.toString()))).as(err.toString()).isZero();
+
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(
+                Map.of("ruleKey", "process_start", "subject", stale, "reason", "the file is gone"),
+                Map.of("ruleKey", "env_pass", "subject", SRC + "Caller.java#Caller.old()", "reason",
+                        "the member is gone")));
+        assertThat(summary().get("knownUnowned")).isEqualTo(List.of());
+        assertThat(report()).isZero();
+        assertThat(out()).contains("FACT report_known_gone: 2\n", "FACT report_known_gone_file: 1\n",
+                "FACT report_known_gone_member: 1\n", "FACT report_known_gone_answered: 0\n");
+
+        // Java changed where the finder does not read: the absence of the member says nothing
+        Files.createDirectories(root.resolve("extra/src/p"));
+        Files.writeString(root.resolve("extra/src/p/Moved.java"), "package p;\nclass Moved {}\n");
+        Map<String, String> head = Handover.files(root);
+        Map<String, String> base = new java.util.TreeMap<>(head);
+        base.remove("extra/src/p/Moved.java");
+        Handover.write(work.resolve("changes"), base, head);
+
+        assertThat(run("", find("--known-file", known.toString()))).as(err.toString()).isZero();
+
+        assertThat(summary().get("knownGone")).isEqualTo(List.of());
+        assertThat(summary().get("knownUnowned")).isEqualTo(List.of(
+                Map.of("ruleKey", "process_start", "subject", stale, "severity", "HIGH"),
+                Map.of("ruleKey", "env_pass", "subject", SRC + "Caller.java#Caller.old()", "severity", "MEDIUM")));
+    }
+
     @Test
     void aClassMovedWhereTheFinderDoesNotRead_isNamed_theGateIsNotGreen_andItsOpenFindingIsNotCalledGone()
             throws IOException {
