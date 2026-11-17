@@ -867,7 +867,8 @@ class CliContainerRuntimeTest {
     /**
      * The run's own directories are not checked (the run checks the workspace once at start): the scratch directory
      * lies in the Traceworks home. A declared writable mount of the workspace is checked: refused while the
-     * workspace's own mount is read-only, allowed with {@code workspace_writable}.
+     * workspace's own mount is read-only, and with {@code workspace_writable} allowed where the operator listed the
+     * folder in {@code writable_mounts}, which the runtime takes from the home's layout.
      */
     @Test
     void run_checksOnlyTheDeclaredMounts_andWritableTheWorkspaceOnlyWhileItIsReadOnly() throws IOException {
@@ -883,12 +884,19 @@ class CliContainerRuntimeTest {
         CommandResult standardOnly = runtime(docker).run(run(List.of(readOnly, scratchMount), directories, Map.of()));
         CommandResult refused = runtime(docker).run(run(List.of(readOnly, scratchMount, again), directories,
                 Map.of()));
-        CommandResult allowed = runtime(docker).run(run(List.of(writable, scratchMount, again), directories,
+        CommandResult unlisted = runtime(docker).run(run(List.of(writable, scratchMount, again), directories,
                 Map.of()));
+        CliContainerRuntime listing = new CliContainerRuntime(docker.toString(),
+                traceworks.adapters.config.HomeLayout.of(traceworksHome).withWritableMounts(List.of(workspace)),
+                home, INHERITED, traceworks.adapters.host.ProcessEncoding.ofTheJvm(), 1024 * 1024);
+        CommandResult allowed = listing.run(run(List.of(writable, scratchMount, again), directories, Map.of()));
 
         assertThat(standardOnly.exitCode()).isZero();
         assertThat(refused.exitCode()).isEqualTo(125);
         assertThat(refused.stderr()).contains("workspace_writable");
+        assertThat(unlisted.exitCode()).isEqualTo(125);
+        assertThat(unlisted.stderr()).contains("the mount " + workspace + ":/again:rw is refused", "writable_mounts",
+                traceworksHome.resolve("traceworks.json").toString());
         assertThat(allowed.exitCode()).as(allowed.stderr()).isZero();
     }
 
