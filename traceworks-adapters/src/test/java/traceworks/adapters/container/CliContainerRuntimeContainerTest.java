@@ -1,5 +1,6 @@
 package traceworks.adapters.container;
 
+import traceworks.adapters.config.HomeLayout;
 import traceworks.adapters.testing.ContainerTests;
 import traceworks.core.container.RunPaths;
 import traceworks.core.port.CommandRunner.CommandResult;
@@ -102,8 +103,20 @@ class CliContainerRuntimeContainerTest {
         List<Mount> mounts = List.of(new Mount(data.toString(), "/data", true), new Mount(out.toString(), "/out",
                 false));
 
-        CommandResult readOnly = shell("touch /data/x", mounts, false, Map.of(), null, 60);
-        CommandResult writable = shell("echo hello > /out/y", mounts, false, Map.of(), null, 60);
+        // A writable mount needs the operator's word: writable_mounts of the home lists the folder
+        CliContainerRuntime listing = RuntimeDetection.detect(null,
+                HomeLayout.of(traceworksHome).withWritableMounts(List.of(out)), 1024 * 1024).orElseThrow();
+
+        CommandResult readOnly = listing.run(new ContainerRun("traceworks-" + runId + "-" + ++containers, runId,
+                imageId, "/bin/bash", List.of("-c", "touch /data/x"), null, mounts, null, false, Map.of(), null, 60,
+                LIMITS));
+        CommandResult unlisted = shell("echo hello > /out/y", mounts, false, Map.of(), null, 60);
+        CommandResult writable = listing.run(new ContainerRun("traceworks-" + runId + "-" + ++containers, runId,
+                imageId, "/bin/bash", List.of("-c", "echo hello > /out/y"), null, mounts, null, false, Map.of(), null,
+                60, LIMITS));
+
+        assertThat(unlisted.exitCode()).isEqualTo(125);
+        assertThat(unlisted.stderr()).contains("writable_mounts");
 
         assertThat(readOnly.exitCode()).isNotZero();
         assertThat(readOnly.stderr()).contains("Read-only file system");
