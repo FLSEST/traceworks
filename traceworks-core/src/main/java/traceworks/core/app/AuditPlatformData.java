@@ -112,8 +112,8 @@ final class AuditPlatformData {
             }
 
             @Override
-            public java.util.Optional<byte[]> get(String sha256) {
-                java.util.Optional<byte[]> content = blobs.get(sha256);
+            public java.util.Optional<byte[]> getUnverified(String sha256) {
+                java.util.Optional<byte[]> content = blobs.getUnverified(sha256);
                 if (content.isPresent() && !sha256.equals(EventChain.sha256Hex(content.get()))) {
                     throw new IllegalStateException("the blob " + sha256 + " does not hash to its name");
                 }

@@ -124,7 +124,7 @@ final class RunRecords {
      * @throws RecordDamagedException if the blob has other content than the record names
      */
     static Optional<byte[]> checkedContent(StoredRun run, BlobRef ref, String what) {
-        Optional<byte[]> content = run.blobs().get(ref.sha256());
+        Optional<byte[]> content = run.blobs().getUnverified(ref.sha256());
         content.ifPresent(bytes -> {
             if (bytes.length != ref.size() || !EventChain.sha256Hex(bytes).equals(ref.sha256())) {
                 throw new RecordDamagedException("The " + what + " of run " + run.runId() + " has other content"

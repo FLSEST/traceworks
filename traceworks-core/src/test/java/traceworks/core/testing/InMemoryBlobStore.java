@@ -21,7 +21,7 @@ public final class InMemoryBlobStore implements BlobStore {
     }
 
     @Override
-    public synchronized Optional<byte[]> get(String sha256) {
+    public synchronized Optional<byte[]> getUnverified(String sha256) {
         byte[] content = blobs.get(sha256);
         return content == null ? Optional.empty() : Optional.of(content.clone());
     }

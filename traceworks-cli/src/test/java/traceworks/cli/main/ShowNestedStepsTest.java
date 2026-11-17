@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -109,6 +110,39 @@ class ShowNestedStepsTest {
             section.add(lines.get(i));
         }
         return section;
+    }
+
+    /**
+     * A view must neither die on one changed blob nor show it as sound: {@code show --outputs} shows a mark in place
+     * of an output whose blob does not match its name, and goes on with the other steps.
+     */
+    @Test
+    void aChangedOutputBlob_isMarkedInShow_andTheOtherStepsAreShown() throws IOException {
+        Path pkg = workflow("marked", """
+                {"type":"shell","name":"first","config":{"command":"echo unique-first-output"}},
+                {"type":"shell","name":"second","config":{"command":"echo unique-second-output"}}""");
+        Result run = exec("run", pkg.toString(), "--allow-host-execution", "--no-input", "--quiet");
+        Matcher id = RUN_ID.matcher(run.out());
+        assertThat(id.find()).as(run.out() + run.err()).isTrue();
+        Path blob;
+        try (Stream<Path> files = Files.walk(home.resolve("runs"))) {
+            blob = files.filter(Files::isRegularFile).filter(file -> file.getParent().getFileName().toString()
+                    .equals("blobs")).filter(file -> {
+                        try {
+                            return Files.readString(file).strip().equals("unique-first-output");
+                        } catch (IOException e) {
+                            return false;
+                        }
+                    }).findFirst().orElseThrow();
+        }
+        assertThat(blob.toFile().setWritable(true)).isTrue();   // a blob is stored read-only
+        Files.writeString(blob, "forged-output\n");
+
+        Result show = exec("show", id.group(1), "--outputs");
+
+        assertThat(show.code()).as(show.out() + show.err()).isZero();
+        assertThat(show.out()).contains("this blob does not match its name", blob.getFileName().toString(),
+                "unique-second-output").doesNotContain("forged-output");
     }
 
     @Test
