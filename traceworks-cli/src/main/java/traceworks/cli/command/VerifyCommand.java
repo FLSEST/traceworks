@@ -148,7 +148,12 @@ public final class VerifyCommand implements Command {
 
     private static int print(Context context, com.fasterxml.jackson.databind.node.ObjectNode root, boolean ok) {
         try {
-            context.out().println(JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root));
+            // The texts of a report hold what a record, a ledger entry or a note says, and this goes to a terminal.
+            // JSON escapes only what is below U+0020; with everything from DEL on escaped too, no control or format
+            // character arrives raw, and a reader gets the same strings
+            context.out().println(JSON.writerWithDefaultPrettyPrinter()
+                    .with(com.fasterxml.jackson.core.json.JsonWriteFeature.ESCAPE_NON_ASCII)
+                    .writeValueAsString(root).replace("\u007f", "\\u007f"));
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
