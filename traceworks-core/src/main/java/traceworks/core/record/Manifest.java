@@ -140,7 +140,7 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
 
     private static void collectDeletedMetadata(RunView view, BlobStore blobs, Set<String> deleted) {
         for (StepView step : view.steps()) {
-            if (step.metadata() != null && blobs.get(step.metadata().sha256()).isEmpty()) {
+            if (step.metadata() != null && blobs.getUnverified(step.metadata().sha256()).isEmpty()) {
                 deleted.add(step.metadata().sha256());
             }
         }
@@ -176,7 +176,9 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
             if (step.metadata() == null) {
                 continue;
             }
-            blobs.get(step.metadata().sha256()).ifPresent(bytes -> {
+            // Unverified: verify builds the manifest it expects even of a record whose blob changed, and reports the
+            // change itself; at a run's end the blobs were just written
+            blobs.getUnverified(step.metadata().sha256()).ifPresent(bytes -> {
                 try {
                     JsonNode model = MAPPER.readTree(bytes).path("model");
                     if (model.isTextual() && !model.asText().isEmpty()) {

@@ -135,7 +135,7 @@ public final class Main {
         } catch (RequestQueuedException e) {
             err.println("traceworks: " + TerminalFormat.safe(e.getMessage()));
             return ExitCodes.QUEUED;
-        } catch (RecordDamagedException e) {
+        } catch (RecordDamagedException | traceworks.core.port.BlobStore.ChangedBlobException e) {
             // One line, not cut: it names the blob or line and ends with the verify command
             err.println("traceworks: " + TerminalFormat.safe(e.getMessage().replaceAll("\\s+", " ")));
             keptCheckouts(err, e);

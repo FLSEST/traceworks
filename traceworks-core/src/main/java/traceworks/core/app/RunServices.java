@@ -10,6 +10,7 @@ import traceworks.core.engine.BlockTypeRegistry;
 import traceworks.core.engine.EventLogException;
 import traceworks.core.engine.WorkflowEngine;
 import traceworks.core.port.AiCli;
+import traceworks.core.port.BlobStore;
 import traceworks.core.port.LocalModels;
 import traceworks.core.port.AiProviders;
 import traceworks.core.port.Clock;
@@ -371,10 +372,13 @@ public final class RunServices {
         }
     }
 
-    /** The content of a blob of a run, such as an output or a question; empty when the blob was deleted. */
+    /**
+     * The content of a blob of a run, such as an output or a question, for a view; empty when the blob was deleted, a
+     * mark in its place when it does not match its name ({@link BlobStore#getForDisplay}).
+     */
     public Optional<byte[]> content(String runRef, String sha256) {
         try (StoredRun run = store.open(runRef)) {
-            return run.blobs().get(sha256);
+            return run.blobs().getForDisplay(sha256);
         }
     }
 

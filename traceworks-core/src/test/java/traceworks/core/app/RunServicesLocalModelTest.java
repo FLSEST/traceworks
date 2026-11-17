@@ -148,6 +148,41 @@ class RunServicesLocalModelTest {
         assertThat(fx.store.runIds()).as("no step ran").isEmpty();
     }
 
+    /** A local step nested in a switch case is a local step all the same: its server's secret, no provider credential. */
+    @Test
+    void aLocalStepNestedInASwitch_needsTheServersSecret_andTheRecordRedactsIt() {
+        declare("LLM_KEY");
+        fx.credentials.put("LLM_KEY", SERVER_KEY);
+        Path nested = Path.of("/pkg/nested-local");
+        fx.packages.put(nested, """
+                {"id": "wf-nested-local", "name": "Nested local", "provider": "PI", "blocks": [
+                  {"type": "switch", "name": "pick", "config": {"expression": "a", "cases": [{"value": "a",
+                   "blocks": [{"type": "simple", "name": "ask", "config": {"command": "Say hi",
+                   "model": "llm/qwen2.5-coder:7b"}}]}]}}
+                ]}""");
+        pi.answers("the key is " + SERVER_KEY);
+
+        RunResult result = fx.services().start(request(nested), null, null);
+
+        assertThat(result.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(aiContainer().environment()).containsOnlyKeys("LLM_KEY", "FAKE_CLI");
+        RecordedEvent response = fx.ofType(result.runId(), "ai.response").getFirst();
+        assertThat(fx.text(result.runId(), response, "output")).isEqualTo("the key is [redacted:LLM_KEY]");
+    }
+
+    /** A value the record could not redact (here: too short) is refused, not passed on to leak into the record. */
+    @Test
+    void aSecretOfAServerTheRecordCannotRedact_refusesTheRunBeforeItStarts() {
+        declare("LLM_KEY");
+        fx.credentials.put("LLM_KEY", "short");
+
+        assertThatThrownBy(() -> fx.services().start(request(LOCAL), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("the secret LLM_KEY of a local backend of AI provider")
+                .hasMessageContaining("shorter than 8 characters");
+        assertThat(fx.store.runIds()).as("no step ran").isEmpty();
+    }
+
     @Test
     void aModelTheServerDoesNotList_refusesTheRunBeforeItStarts() {
         fx.packages.put(LOCAL, pkg("llm/llama3"));

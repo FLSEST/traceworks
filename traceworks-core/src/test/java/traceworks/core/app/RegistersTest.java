@@ -415,6 +415,63 @@ class RegistersTest {
         assertThat(state().findings()).hasSize(2);
     }
 
+    /**
+     * The state of a register is replayed from its log and the blobs its lines name. A blob that holds other content
+     * than its name says is not what the line pointed to: nothing is decided on it and no report is applied to it,
+     * and the refusal names the blob.
+     */
+    @Test
+    void aChangedFindingsBlob_refusesADecision_andTheNextReport() {
+        fixture.services().start(request(AUDIT), null, null);
+        String id = state().findings().getFirst().id();
+        String sha = events().get(2).text("findings_blob");
+        Runnable change = () -> {
+            try (RegisterStore.Opened opened = fixture.registers.open("hello")) {
+                ((traceworks.core.testing.InMemoryBlobStore) opened.blobs()).putRaw(sha,
+                        "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        };
+        int lines = events().size();
+
+        // While the run runs, after its start check read the register as it was
+        fixture.commands.on("./measure", request -> {
+            change.run();
+            return traceworks.core.testing.FakeCommandRunner.ok("## FACT SHEET hello\nFACT files: 3\n");
+        });
+        RunResult fed;
+        try {
+            fed = fixture.services().start(request(AUDIT), null, null);
+        } catch (traceworks.core.port.BlobStore.ChangedBlobException e) {
+            fed = null;
+            assertThat(e).hasMessageContaining(sha);
+        }
+        assertThat(fed == null || fed.register() == null || !fed.register().applied()).as("no report applied")
+                .isTrue();
+        assertThat(events()).as("no line written on a register that cannot be replayed").hasSize(lines);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.services().findings()
+                        .dismiss("hello", id, "not ours"))
+                .isInstanceOf(traceworks.core.port.BlobStore.ChangedBlobException.class).hasMessageContaining(sha);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> fixture.services().start(request(AUDIT), null,
+                        null))
+                .as("a start reads the register first").isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining(sha);
+        assertThat(events()).hasSize(lines);
+    }
+
+    /** A view does not die on a changed blob and does not show it as sound: it shows a mark in its place. */
+    @Test
+    void theContentOfAChangedBlob_isShownAsAMark_notAsContent() {
+        String id = fixture.services().start(request(AUDIT), null, null).runId();
+        var output = fixture.ofType(id, "step.output").getFirst().blob("output");
+        fixture.run(id).blobs().putRaw(output.sha256(), "forged text".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        String shown = new String(fixture.services().content(id, output.sha256()).orElseThrow(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        assertThat(shown).contains("does not match its name", output.sha256()).doesNotContain("forged text");
+    }
+
     /** A record changed since the run ended vouches for nothing: its report does not reach the register. */
     @Test
     void aRunWhoseRecordWasChanged_doesNotFeedItsRegister_whenItsFinalisationIsCompleted() {

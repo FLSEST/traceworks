@@ -178,6 +178,25 @@ class RegexGuardTest {
         }).isInstanceOf(CompressionException.class).hasMessageContaining("Time limit exceeded");
     }
 
+    /** One long line reads far more than 1,024 characters, so the reads alone bring the deadline. */
+    @Test
+    void oneLongLine_runsIntoASpentDeadlineWhileItIsRead() {
+        RegexGuard spent = RegexGuard.startingNow(Duration.ofSeconds(-1));
+        Pattern neverMatches = RegexGuard.compile("a*b", 0, "Stage test");
+
+        assertThatThrownBy(() -> spent.find(neverMatches, "a".repeat(5000)))
+                .isInstanceOf(CompressionException.class).hasMessageContaining("Time limit exceeded");
+    }
+
+    /** The deadline is looked at every 1,024th read, not at every one: a short line is matched even when spent. */
+    @Test
+    void aShortLine_isMatchedBetweenTwoChecks_evenWhenTheDeadlineIsSpent() {
+        RegexGuard spent = RegexGuard.startingNow(Duration.ofSeconds(-1));
+        Pattern word = RegexGuard.compile("b+", 0, "Stage test");
+
+        assertThat(spent.find(word, "aaabbb")).isTrue();
+    }
+
     /** The first compile of a pattern hands it out as well as every later one. */
     @Test
     void compile_returnsANewPattern_onItsFirstCompileToo() {

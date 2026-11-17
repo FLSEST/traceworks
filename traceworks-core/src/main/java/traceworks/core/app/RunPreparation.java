@@ -306,34 +306,35 @@ final class RunPreparation {
     }
 
     /**
-     * A refusal of a resume's start check as it may be printed: with each value of a secret the run redacts
-     * replaced by its {@code [redacted:<NAME>]}. The check judges the real paths ({@link #realPath}) and names
-     * them in its reasons, before the run has a redactor; a refusal names a path as the record does.
+     * The recorded form of what a resume says of the paths it made real ({@link #realPath}): each value it put back
+     * into one of {@code recorded}, as it reads now, with the name that stands for it there. A resume works at the
+     * real paths before its run has a redactor, and routes every refusal, error and seal log line through this.
      *
-     * @param names the names the run redacts; asked only when {@code recorded} holds a replacement
-     * @param recorded the paths as the record holds them; without a replacement in any, nothing was made real
+     * @param recorded the paths as the record holds them; one without a replacement adds nothing
+     * @return {@link RecordedForm#NONE} when no path holds a replacement, or the values cannot be read (then no value
+     *         was put back either: {@link #realPath} refuses)
      */
-    RunRefusedException asRecorded(RunRefusedException refusal, Supplier<? extends Collection<String>> names,
-                                   String... recorded) {
-        if (java.util.Arrays.stream(recorded).noneMatch(path -> path != null && path.contains(Redactor.MARKER))) {
-            return refusal;
+    RecordedForm recordedForm(String... recorded) {
+        java.util.Set<String> names = new java.util.TreeSet<>();
+        for (String path : recorded) {
+            if (path != null) {
+                Matcher marker = REPLACEMENT.matcher(path);
+                while (marker.find()) {
+                    names.add(marker.group(1));
+                }
+            }
         }
-        Map<String, String> values = new java.util.TreeMap<>();
+        if (names.isEmpty()) {
+            return RecordedForm.NONE;
+        }
+        Map<String, String> values = new TreeMap<>();
         try {
             SecretValues source = values();
-            names.get().forEach(name -> source.value(name).filter(value -> !value.isEmpty())
-                    .ifPresent(value -> values.put(name, value)));
+            names.forEach(name -> source.value(name).ifPresent(value -> values.put(name, value)));
         } catch (RunRefusedException e) {
-            return refusal;   // no value could be read, so none was put into a path
+            return RecordedForm.NONE;
         }
-        String message = String.valueOf(refusal.getMessage());
-        // The longest value first: a value that is part of another must not break the longer one's replacement
-        List<Map.Entry<String, String>> longestFirst = new ArrayList<>(values.entrySet());
-        longestFirst.sort((a, b) -> b.getValue().length() - a.getValue().length());
-        for (Map.Entry<String, String> entry : longestFirst) {
-            message = message.replace(entry.getValue(), Redactor.MARKER + entry.getKey() + "]");
-        }
-        return message.equals(refusal.getMessage()) ? refusal : new RunRefusedException(message);
+        return new RecordedForm(values);
     }
 
     /**
@@ -505,6 +506,13 @@ final class RunPreparation {
         }
         Mounted mounted = new Mounted(checkedWorkspace == null ? null : checkedWorkspace.realPath(),
                 checkedPackage.realPath());
+        if (mounted.workspace() != null && mounted.packageDirectory() != null
+                && RunPaths.within(mounted.workspace(), mounted.packageDirectory() + "/.git")) {
+            // The package's .git is covered wherever a container sees the package; a workspace in it would be no
+            // part of the package's mount, and every step would see it uncovered
+            preflight.refuse("the workspace " + workspace + " lies in the .git of the package " + pkg.directory()
+                    + ", which the package digest leaves out and no step sees: run from a directory outside it");
+        }
         if (mounted.workspace() != null && mounted.packageDirectory() != null
                 && writesTheWorkspace(pkg.definition(), children)
                 && RunPaths.within(mounted.workspace(), mounted.packageDirectory())) {

@@ -135,7 +135,7 @@ public final class RunHtml {
     private static void workflow(StringBuilder out, RunView view, BlobStore blobs) {
         out.append("<h2>Workflow</h2>\n");
         WorkflowOutline outline = view.definition() == null ? null
-                : blobs.get(view.definition().sha256()).flatMap(WorkflowOutline::of).orElse(null);
+                : blobs.getForDisplay(view.definition().sha256()).flatMap(WorkflowOutline::of).orElse(null);
         if (outline != null && outline.description() != null) {
             out.append("<p>").append(Html.text(outline.description())).append("</p>\n");
         }

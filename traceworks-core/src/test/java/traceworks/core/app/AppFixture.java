@@ -336,6 +336,8 @@ final class AppFixture {
         final Set<Path> present = new LinkedHashSet<>();
         /** Every call: {@code checkout <source> <ref> <target>} and {@code remove <target>}. */
         final List<String> calls = new ArrayList<>();
+        /** Where the checkouts lie; a test sets another directory. */
+        Path root = ROOT;
         String sha = SHA;
         java.util.function.UnaryOperator<String> recorded = source -> source;
         RuntimeException failure;
@@ -343,7 +345,7 @@ final class AppFixture {
 
         @Override
         public Path directoryOf(String runId) {
-            return ROOT.resolve(runId);
+            return root.resolve(runId);
         }
 
         @Override
@@ -427,10 +429,21 @@ final class AppFixture {
         /** The digest of every package image: its tag ends in {@code :bbbbbbbbbbbb}. */
         static final String IMAGE_DIGEST = "b".repeat(64);
 
+        /** The package in {@code directory} is there and cannot be read, as a folder without read permission. */
+        void unreadable(Path directory) {
+            unreadable.add(directory);
+        }
+
+        private final java.util.Set<Path> unreadable = new java.util.LinkedHashSet<>();
+
         @Override
         public LoadedPackage load(Path location) {
             Path dir = location.getFileName() != null && location.getFileName().toString().equals("workflow.json")
                     ? location.getParent() : location;
+            if (unreadable.contains(dir.normalize())) {
+                throw new java.io.UncheckedIOException("Cannot read the package " + dir.normalize() + ": "
+                        + dir.normalize() + "/run.sh", new java.nio.file.AccessDeniedException(dir + "/run.sh"));
+            }
             String text = json.get(dir.normalize());
             if (text == null) {
                 throw new IllegalArgumentException("Not a package: " + dir + " has no workflow.json");

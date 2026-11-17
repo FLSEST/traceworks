@@ -223,21 +223,29 @@ final class SealAdmission {
      * @throws RunRefusedException if the seal check refuses
      */
     SealStatus admit(LoadedPackage pkg, boolean attended, String action, String runId) {
+        return admit(pkg, attended, action, runId, RecordedForm.NONE);
+    }
+
+    /**
+     * {@link #admit(LoadedPackage, boolean, String, String)} for a resume that works at paths it made real: what it
+     * writes into the seal log and what it throws names them as the run's record does ({@link RecordedForm}).
+     */
+    SealStatus admit(LoadedPackage pkg, boolean attended, String action, String runId, RecordedForm form) {
         SealStatus status = judge(pkg);
         if (status.state() == SealStatus.State.REFUSED) {
-            throw refuse(pkg, status, action, runId);
+            throw refuse(pkg, form, status, action, runId);
         }
-        adopt(status.adoptions());
+        adopt(status.adoptions(), form);
         if (status.state() == SealStatus.State.UNSEALED) {
             SealSettings.Require require = settings.require();
             Path dir = pkg.directory();
             if (require == SealSettings.Require.ALWAYS) {
-                throw refuse(pkg, SealStatus.refused("unsealed", "This home runs sealed packages only (require_seal:"
+                throw refuse(pkg, form, SealStatus.refused("unsealed", "This home runs sealed packages only (require_seal:"
                         + " always in traceworks.json), and " + dir + " is not sealed: seal it with 'traceworks seal "
                         + dir + "'", null, null), action, runId);
             }
             if (require == SealSettings.Require.UNATTENDED && !attended) {
-                throw refuse(pkg, SealStatus.refused("unsealed", "This home runs only sealed packages without a"
+                throw refuse(pkg, form, SealStatus.refused("unsealed", "This home runs only sealed packages without a"
                         + " terminal (require_seal: unattended in traceworks.json), and " + dir + " is not sealed:"
                         + " seal it with 'traceworks seal " + dir + "', or pass --allow-unsealed", null, null),
                         action, runId);
@@ -253,7 +261,7 @@ final class SealAdmission {
      *
      * @throws RunRefusedException if a line cannot be written: a seal the log cannot hold is not run with
      */
-    private void adopt(List<SealStatus.Adopted> adoptions) {
+    private void adopt(List<SealStatus.Adopted> adoptions, RecordedForm form) {
         if (adoptions.isEmpty()) {
             return;
         }
@@ -261,11 +269,11 @@ final class SealAdmission {
             SealLog writer = SealLog.forWriting(log.events(), clock);
             for (SealStatus.Adopted adopted : adoptions) {
                 writer.append(SealLog.SEALED, sealedFields(adopted.workflowId(), adopted.workflowName(),
-                        adopted.packageDir(), adopted.packageDigest(), adopted.seal(), adopted.key(),
+                        form.of(adopted.packageDir()), adopted.packageDigest(), adopted.seal(), adopted.key(),
                         adopted.principals(), actor, true));
             }
         } catch (RuntimeException e) {
-            throw new RunRefusedException("The seal of " + adoptions.getFirst().packageDir() + " was made elsewhere,"
+            throw new RunRefusedException("The seal of " + form.of(adoptions.getFirst().packageDir()) + " was made elsewhere,"
                     + " and it cannot be written into the seal log of this home (" + store.logLocation() + "): "
                     + e.getMessage() + ". Make the seal log writable; a seal this home cannot record is not run"
                     + " with");
@@ -301,7 +309,17 @@ final class SealAdmission {
      * stays a refusal, and its message says so.
      */
     RunRefusedException refuse(LoadedPackage pkg, SealStatus status, String action, String runId) {
-        String message = status.detail();
+        return refuse(pkg, RecordedForm.NONE, status, action, runId);
+    }
+
+    /**
+     * {@link #refuse(LoadedPackage, SealStatus, String, String)} with the paths of {@code pkg} and of every package
+     * the refusal names in their recorded form: in the line of the seal log and in the message.
+     */
+    RunRefusedException refuse(LoadedPackage pkg, RecordedForm form, SealStatus status, String action,
+                               String runId) {
+        String detail = form.of(status.detail());
+        String message = detail;
         if (status.recordable()) {
             Map<String, Object> fields = new LinkedHashMap<>();
             fields.put("action", action);
@@ -309,10 +327,9 @@ final class SealAdmission {
                 fields.put("run_id", runId);
             }
             fields.put("workflow_id", pkg.definition().id());
-            fields.put("package_dir", pkg.directory().toString());
+            fields.put("package_dir", form.of(pkg.directory().toString()));
             fields.put("reason", status.reason());
-            fields.put("detail", status.detail().length() <= DETAIL_LIMIT ? status.detail()
-                    : status.detail().substring(0, DETAIL_LIMIT - 1) + "…");
+            fields.put("detail", detail.length() <= DETAIL_LIMIT ? detail : detail.substring(0, DETAIL_LIMIT - 1) + "…");
             fields.put("digest", status.digest());
             fields.put("sealed_digest", status.seal() == null ? null : status.seal().digest());
             fields.put("actor", actor);
@@ -324,7 +341,7 @@ final class SealAdmission {
                 }
             } catch (RuntimeException e) {
                 message += " (the refusal could not be recorded in the seal log " + store.logLocation() + ": "
-                        + e.getMessage() + ")";
+                        + form.of(e.getMessage()) + ")";
             }
         }
         return new RunRefusedException(message);

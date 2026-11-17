@@ -112,6 +112,20 @@ final class Resuming {
      */
     RunResult resume(StoredRun run, ResumeRequest request, Consumer<RecordedEvent> listener, QuestionAsker asker,
                      Consumer<String> warnings) {
+        // A resume makes real again the paths its record holds redacted, and works at the real paths. Whatever it
+        // throws names them as the record does: every refusal and error goes through the one recorded form
+        java.util.concurrent.atomic.AtomicReference<RecordedForm> form =
+                new java.util.concurrent.atomic.AtomicReference<>(RecordedForm.NONE);
+        try {
+            return resume(run, request, listener, asker, warnings, form);
+        } catch (RuntimeException e) {
+            throw form.get().of(e);
+        }
+    }
+
+    private RunResult resume(StoredRun run, ResumeRequest request, Consumer<RecordedEvent> listener,
+                             QuestionAsker asker, Consumer<String> warnings,
+                             java.util.concurrent.atomic.AtomicReference<RecordedForm> form) {
         String runId = run.runId();
         if (!run.tryLockWriter()) {
             throw new RunRefusedException("Another process is writing run " + runId
@@ -123,6 +137,7 @@ final class Resuming {
         LeftoverContainers.requireRemoved(runtime, runId, LeftoverContainers.mayHaveContainers(events),
                 "Run " + runId + " cannot resume");
         RunView view = RunRecords.view(runId, events, false);
+        form.set(preparation.recordedForm(view.packageDir(), recordedWorkspaceText(events)));
         if (!RunRecords.isFinal(view.status()) && cancelRecorded(events)) {
             // A cancel was asked for, and its process ended before the run did: it is carried out, not continued.
             // This runs nothing, so it needs no consent and no start check.
@@ -144,7 +159,7 @@ final class Resuming {
         StoredRunPackage.Resolved resolved = storedPackage.resolve(run, view);
         LoadedPackage pkg = resolved.runs();
         // The seal before the question of a changed package: a seal that does not hold is no matter of a flag
-        checkSeal(runId, view, resolved.current(), request.attended());
+        checkSeal(runId, view, resolved.current(), request.attended(), form.get());
         boolean changed = StoredRunPackage.packageChanged(runId, view, pkg, request.allowChangedPackage());
         if (changed) {
             storedPackage.refuseARedactedDefinition(runId, view, pkg);
@@ -172,15 +187,8 @@ final class Resuming {
         view.modelChoices().forEach(pick -> recordedPicks.put(pick.choice(), pick.option()));
         Map<String, Object> pickInputs = new LinkedHashMap<>(snapshot.inputContext());
         pickInputs.putAll(recordedPicks);
-        RunPreparation.Prepared prepared;
-        try {
-            prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
-                    "Run " + runId + " cannot resume");
-        } catch (RunRefusedException e) {
-            // The check judged the real paths and names them: a refusal names a path as the record does
-            throw preparation.asRecorded(e, redacted, view.packageDir(),
-                    RunRecords.started(events).fields().path("workspace").asText(null));
-        }
+        RunPreparation.Prepared prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
+                "Run " + runId + " cannot resume");
         // The register folder is the one the run started with, whatever the register holds now: a file that is no
         // longer the one run.started recorded stops the resume, before anything is recorded
         RegisterFolder folder = view.register() == null ? null : new RegisterFolder(run, view.register());
@@ -262,7 +270,8 @@ final class Resuming {
             return prepared.result(runId, run.location(), outcome, kept, register);
         } catch (RuntimeException e) {
             if (source != null) {
-                checkouts.noteKept(runId, e);   // the resumed run ended in a failure: no summary will name it
+                // The resumed run ended in a failure: no summary will name its checkout
+                checkouts.noteKept(runId, e, form.get());
             }
             throw e;
         }
@@ -447,6 +456,12 @@ final class Resuming {
                         + checkpoint.state().sha256() + ")"));
     }
 
+    /** The workspace as {@code run.started} records it, redacted where the record holds it so; {@code null} for none. */
+    private static String recordedWorkspaceText(List<RecordedEvent> events) {
+        return events.isEmpty() || !RecordTypes.RUN_STARTED.equals(events.getFirst().type()) ? null
+                : events.getFirst().fields().path("workspace").asText(null);
+    }
+
     /**
      * The workspace {@code run.started} records, at its real path ({@link RunPreparation#realPath}); {@code null} for
      * none.
@@ -564,11 +579,11 @@ final class Resuming {
      *
      * @throws RunRefusedException if the seal check refuses
      */
-    private void checkSeal(String runId, RunView view, LoadedPackage current, boolean attended) {
-        SealStatus now = seals.admit(current, attended, "resume", runId);
+    private void checkSeal(String runId, RunView view, LoadedPackage current, boolean attended, RecordedForm form) {
+        SealStatus now = seals.admit(current, attended, "resume", runId, form);
         boolean sealedNow = now.state() == SealStatus.State.SEALED;
         if (view.seal() != null && !(sealedNow && now.seal().digest().equals(view.seal().digest()))) {
-            throw seals.refuse(current, SealStatus.refused("seal-differs-from-start", "Run " + runId
+            throw seals.refuse(current, form, SealStatus.refused("seal-differs-from-start", "Run " + runId
                     + " started with a sealed package (seal digest " + view.seal().digest() + "), and the package "
                     + current.directory() + " is " + (sealedNow ? "sealed with the digest " + now.seal().digest()
                     : "not sealed") + " now, so the run cannot go on as the run it started as: restore the package"
@@ -576,7 +591,7 @@ final class Resuming {
                     + "' and start a new one", now.seal(), now.digest()), "resume", runId);
         }
         if (view.seal() == null && sealedNow && !java.util.Objects.equals(current.digest(), view.packageDigest())) {
-            throw seals.refuse(current, SealStatus.refused("sealed-since-start", "The package " + current.directory()
+            throw seals.refuse(current, form, SealStatus.refused("sealed-since-start", "The package " + current.directory()
                     + " is sealed now and differs from the package run " + runId + " started with. A resume would run"
                     + " the definition recorded at its start, which the seal does not cover: end the run with"
                     + " 'traceworks cancel " + runId + "' and start a new one", now.seal(), now.digest()),

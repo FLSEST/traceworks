@@ -32,7 +32,7 @@ final class Content {
         if (ref == null) {
             return;
         }
-        var bytes = blobs.get(ref.sha256());
+        var bytes = blobs.getForDisplay(ref.sha256());
         if (bytes.isEmpty()) {
             out.append("<p class=\"deleted\">content deleted (sha256 ").append(Html.line(ref.sha256()))
                     .append(")</p>");
@@ -61,6 +61,11 @@ final class Content {
             out.append("<p class=\"deleted\">values deleted (sha256 ").append(Html.line(ref.sha256())).append(")</p>");
             return;
         }
+        if (traceworks.core.record.CommandView.values(json).isEmpty() && !json.strip().startsWith("{")) {
+            // No values object: a blob that does not match its name shows its mark, not an empty list
+            out.append("<p class=\"deleted\">").append(Html.line(json)).append("</p>");
+            return;
+        }
         traceworks.core.record.CommandView.values(json).forEach((name, value) -> {
             String shown = Html.cut(value, LIMIT);
             out.append("<details><summary>value <code>").append(Html.line(name)).append("</code> (")
@@ -80,7 +85,7 @@ final class Content {
         if (ref == null) {
             return null;
         }
-        return blobs.get(ref.sha256()).map(bytes -> new String(bytes, StandardCharsets.UTF_8)).orElse(null);
+        return blobs.getForDisplay(ref.sha256()).map(bytes -> new String(bytes, StandardCharsets.UTF_8)).orElse(null);
     }
 
     /** The content as one escaped line for short values such as an answer; cut and marked like {@link #pre}. */
@@ -88,7 +93,7 @@ final class Content {
         if (ref == null) {
             return "";
         }
-        var bytes = blobs.get(ref.sha256());
+        var bytes = blobs.getForDisplay(ref.sha256());
         if (bytes.isEmpty()) {
             return "<em class=\"deleted\">content deleted (sha256 " + Html.line(ref.sha256()) + ")</em>";
         }

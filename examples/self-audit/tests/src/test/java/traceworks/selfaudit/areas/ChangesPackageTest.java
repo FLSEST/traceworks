@@ -17,7 +17,7 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The package {@code security-changes} as it ships. It judges with the tool, the rules and the catalog of the
+ * The package {@code security-changes} as it ships. It judges with the tool, the rules, the limits and the catalog of the
  * security self-audit: each package keeps its own copy, so each image's build context stays inside its package, and
  * the copies stay the same bytes, so a fix in one that is not made in the other fails the build. What is the short
  * check's own is its workflow and the script that asks git.
@@ -54,7 +54,7 @@ class ChangesPackageTest {
             assertThat(PACKAGE.resolve("images").resolve(file)).as(file)
                     .hasBinaryContent(Files.readAllBytes(SECURITY.resolve("images").resolve(file)));
         }
-        for (String file : List.of("rules/security.rules", "catalog.json")) {
+        for (String file : List.of("rules/security.rules", "rules/security.limits", "catalog.json")) {
             assertThat(PACKAGE.resolve(file)).as(file).hasBinaryContent(Files.readAllBytes(SECURITY.resolve(file)));
         }
     }
@@ -102,6 +102,7 @@ class ChangesPackageTest {
         Map<String, Object> areas = config(own, "areas");
         assertThat(String.valueOf(areas.get("command"))).contains(" --changes {{ scratch_dir }}/changes ",
                 " --register security-changes ", " --items-file {{ register_dir }}/items.jsonl ",
+                " --known-file {{ register_dir }}/findings.jsonl ",
                 " --judge {{ judge }} ", " --green \"$SAY_GREEN\" ").doesNotContain("{{ audit_findings }}", "{{ green }}");
         assertThat((Map<String, Object>) areas.get("values")).containsEntry("SAY_GREEN", "{{ green }}");
         assertThat(areas).doesNotContainKeys("network", "workspace_writable");

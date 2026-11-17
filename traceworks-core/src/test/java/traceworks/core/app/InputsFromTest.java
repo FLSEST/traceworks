@@ -80,6 +80,35 @@ class InputsFromTest {
         assertThat(fixture.commands.requests()).hasSize(commands);
     }
 
+    /**
+     * The inputs are taken from the first line of the earlier record, so that record must hold: a run that does not
+     * verify (here its last line was changed, so it is no longer the record its manifest and its ledger entry name)
+     * is no source of inputs.
+     */
+    @Test
+    void aRunThatDoesNotVerify_isNoSourceOfInputs() {
+        RunResult first = fixture.services().start(new StartRequest(PKG, Map.of("version", "1"), AppFixture.WORKSPACE,
+                false, false), null, null);
+        String last = new String(fixture.events(first.runId()).getLast().raw(), java.nio.charset.StandardCharsets.UTF_8);
+        fixture.run(first.runId()).log().replaceLast(last.replaceFirst("\"status\":\"[A-Z_]+\"",
+                "\"status\":\"FAILED\"").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(fixture.services().verify(first.runId()).ok()).isFalse();
+
+        assertThatThrownBy(() -> fixture.services().start(from(first.runId(), Map.of()), null, null))
+                .isInstanceOf(RecordDamagedException.class).hasMessageContaining("--inputs-from")
+                .hasMessageContaining("traceworks verify " + first.runId());
+        assertThat(fixture.store.runIds()).hasSize(1);
+    }
+
+    /** A workspace inside the package's .git would show a step what the digest leaves out: the start refuses it. */
+    @Test
+    void aWorkspaceInsideThePackagesGitDirectory_isRefused() {
+        assertThatThrownBy(() -> fixture.services().start(new StartRequest(PKG, Map.of(), PKG.resolve(".git/x"),
+                false, false), null, null))
+                .isInstanceOf(RunRefusedException.class).hasMessageContaining(".git").hasMessageContaining("digest");
+        assertThat(fixture.store.runIds()).isEmpty();
+    }
+
     /** Inputs that are no JSON object are a damaged record, not a failure deeper down. */
     @Test
     void recordedInputsThatAreNoObject_areADamagedRecord() {

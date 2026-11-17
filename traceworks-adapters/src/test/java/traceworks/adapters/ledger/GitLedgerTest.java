@@ -651,6 +651,18 @@ class GitLedgerTest {
         assertArrayEquals(start("r1"), ledger().find("r1").or(() -> java.util.Optional.of(start("r1"))).get());
     }
 
+    /** The anchors are read through the same check: a ledger that is not one history gives no anchors. */
+    @Test
+    void registerAnchors_refuseALedgerThatIsNotOneHistory() throws Exception {
+        ledger().anchorRegister("security", 3, HEAD_A);
+        String older = git("rev-parse", "HEAD").strip();
+        ledger().anchorRegister("security", 4, HEAD_B);
+        git(ME, "replace", git("rev-parse", "HEAD").strip(), older);
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
+        assertTrue(e.getMessage().contains("not one history") && e.getMessage().contains("replace ref"), e.getMessage());
+    }
+
     /** A removal commit and its id in .git/shallow: the history ends there, and the start is named no more. */
     @Test
     void aShallowFile_failsTheCheck() throws Exception {

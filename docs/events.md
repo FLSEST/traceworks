@@ -1124,7 +1124,10 @@ lists them under `acknowledged` with the note, for good, and does not fail for t
 also one of the same kind with another content, is open again. For a record that does not verify (`record-broken`)
 the sentence names the whole record as it was: the number of its problems and one SHA-256 over all its lines and
 all its problems, each changed blob with the SHA-256 of what it holds. So a record that changes once more after it
-was acknowledged is open again. The line is not signed, like everything in the
+was acknowledged is open again, and an acknowledgement of a `record-broken` problem made by an earlier version,
+whose sentence named only the first problem and the last line, no longer covers it: acknowledge it again. Two
+sentences still name less than the whole record: "the record cannot be read (...)" covers by its message, and so
+does a folder that holds no record that can be read. The line is not signed, like everything in the
 ledger.
 
 ### The anchors of a register

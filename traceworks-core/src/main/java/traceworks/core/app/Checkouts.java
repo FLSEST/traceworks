@@ -105,10 +105,19 @@ final class Checkouts {
      * the checkout is still there ({@link KeptCheckoutNotice}).
      */
     void noteKept(String runId, RuntimeException failure) {
+        noteKept(runId, failure, RecordedForm.NONE);
+    }
+
+    /**
+     * {@link #noteKept(String, RuntimeException)} for a resume, which made recorded paths real again: the notice names
+     * the checkout as the run's record does ({@link RecordedForm}). The failure then needs no other form because of
+     * it, and stays of its kind.
+     */
+    void noteKept(String runId, RuntimeException failure, RecordedForm form) {
         try {
             Path directory = sources.directoryOf(runId);
             if (sources.exists(directory)) {
-                failure.addSuppressed(new KeptCheckoutNotice(directory.toString()));
+                failure.addSuppressed(new KeptCheckoutNotice(form.of(directory.toString())));
             }
         } catch (RuntimeException ignored) {
             // the failure that brought us here is the one to report
