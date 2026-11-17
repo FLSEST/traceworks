@@ -50,7 +50,8 @@ container gets the same flags, and no workflow or operator setting removes them:
 - secret values in the client's environment, never on a command line; a step's shell command on stdin;
 - an empty, read-only directory over the package's top-level `.git/`, when it has one. The package digest leaves
   that directory out, because git rewrites it without any file of the package changing; so a container does not see
-  it either, and a script the digest covers cannot run a payload from there that the digest does not cover. (A host
+  it either, and a script the digest covers cannot run a payload from there that the digest does not cover. Where the
+  workspace holds the package, the directory is covered at the package's place in `/workspace` as well. (A host
   run sees the package as it is. An image directory is hashed whole, a `.git/` in it included, because the build
   sends all of it.) Verified with Docker 29.1.3; not verified with Podman. A package with a file name that is not
 valid text in the system's encoding is refused: the digest names a file by the text of its path, and two names that
@@ -133,7 +134,9 @@ A path or a `--source` that holds a value is recorded with the replacement too, 
 to find the workspace or the package directory. It does that only for the names the run redacts (its declared
 secrets and the credentials of its AI providers), and a run whose source, workspace or package directory itself
 contains `[redacted:` is refused at the start: a replacement in a record is then always one the redactor wrote. A
-resume of a record that holds any other replacement in one of these is refused. A resume never puts a value back
+resume of a record that holds any other replacement in one of these is refused. A refusal of the resume's start
+check (a workspace that is gone, a package that may not be mounted) names such a path as the record does, with the
+replacement. A resume never puts a value back
 into a source: a value in a path stays on this machine, but a value in the URL of a clone goes to the host the URL
 names, and whoever can rewrite the record (a run folder copied from elsewhere) chooses that host. So a missing
 checkout whose recorded source holds a replacement is not cloned again, and neither is the missing checkout of a run
