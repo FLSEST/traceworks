@@ -12,6 +12,7 @@ import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunView;
+import traceworks.core.register.DecisionAgent;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -62,7 +63,15 @@ final class Answering {
                 + (RunTarget.resumeNeedsHostFlag(view.execution(), hostConsent) ? " --allow-host-execution" : "");
     }
 
-    AnswerResult answer(StoredRun run, AnswerRequest request) {
+    /**
+     * @throws IllegalArgumentException if the request names an agent with a blank or bad name
+     *                                  ({@link DecisionAgent}); nothing is recorded or sent then
+     */
+    AnswerResult answer(StoredRun run, AnswerRequest given) {
+        // Before anything is asked of the run: an answer with a name that is none must not be recorded as a person's
+        AnswerRequest request = given.agent() == null ? given : new AnswerRequest(given.kind(), given.step(),
+                given.answer(), given.values(), given.comment(),
+                DecisionAgent.checked(given.agent(), "The agent of an answer"));
         if (!"approval".equals(request.kind()) && !"human-input".equals(request.kind())) {
             return refused(false, "An answer is for an approval or a human input, not for '" + request.kind() + "'");
         }
@@ -138,6 +147,9 @@ final class Answering {
         fields.put("kind", question.kind());
         fields.put("answer", encoded.getBytes(StandardCharsets.UTF_8));
         fields.put("actor", actor);
+        if (request.agent() != null) {
+            fields.put("agent", request.agent());   // only when an agent said so, as the run's own answers
+        }
         fields.put("source", "cli");
         fields.put("request", ids.newRequestId());
         fields.put("comment", request.comment() == null ? null : request.comment().getBytes(StandardCharsets.UTF_8));
@@ -145,7 +157,8 @@ final class Answering {
         List<byte[]> lines = run.events().readAll();
         RunOutputs.writeView(run, RunRecords.view(id, RunRecords.parse(id, lines), false), lines);
         return new AnswerResult(true, true, "The answer to step " + question.step() + " of run " + id
-                + " is recorded; continue the run with " + resumeCommand(id, view));
+                + " is recorded" + DecisionAgent.through(request.agent()) + "; continue the run with "
+                + resumeCommand(id, view));
     }
 
     /**
@@ -197,7 +210,8 @@ final class Answering {
         String requestId = ids.newRequestId();
         int before = seen.size();
         run.inbox().post(new InboxRequest(requestId, request.kind(), asked.run(), asked.step(), asked.seq(),
-                request.answer(), values(asked.variable(), request), request.comment(), actor, clock.now()));
+                request.answer(), values(asked.variable(), request), request.comment(), actor, clock.now(),
+                request.agent()));
         long deadline = System.nanoTime() + wait.toNanos();
         while (System.nanoTime() < deadline) {
             try {
@@ -212,7 +226,13 @@ final class Answering {
                     continue;
                 }
                 if (RecordTypes.APPROVAL_ANSWERED.equals(event.type())) {
-                    return new AnswerResult(true, false, "The answer reached run " + run.runId());
+                    // The agent as the run's process recorded it. A process of an earlier version takes the
+                    // answer and knows no agent: the sender learns that its name did not arrive
+                    String recorded = event.fields().path("agent").asText(null);
+                    return new AnswerResult(true, false, "The answer reached run " + run.runId()
+                            + DecisionAgent.through(recorded) + (request.agent() == null || recorded != null ? ""
+                            : "; the process that runs it recorded no agent (an earlier version of Traceworks):"
+                            + " the answer stands as " + actor + "'s alone"));
                 }
                 if (RecordTypes.REQUEST_REFUSED.equals(event.type())) {
                     return refused(false, event.fields().path("reason").asText());

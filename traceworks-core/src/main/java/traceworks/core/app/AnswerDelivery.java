@@ -22,7 +22,13 @@ import java.util.function.BiConsumer;
 final class AnswerDelivery {
 
     /** Who gives an answer and how it arrived. */
-    record Attribution(String actor, String source, String requestId, String comment) {}
+    record Attribution(String actor, String source, String requestId, String comment, String agent) {
+
+        /** An answer no agent claims. */
+        Attribution(String actor, String source, String requestId, String comment) {
+            this(actor, source, requestId, comment, null);
+        }
+    }
 
     private final RunRecorder recorder;
     private final RunControl control;
@@ -42,14 +48,15 @@ final class AnswerDelivery {
 
     /**
      * Before a resumed run starts: the top-level step {@code step} answers its question from the record, and that
-     * {@code approval.answered} is attributed to {@code actor} with the source {@code resume}.
+     * {@code approval.answered} is attributed to {@code actor} with the source {@code resume}, and to the agent the
+     * recorded answer names ({@code null} for none): who resumes is not who answered.
      */
-    void replay(int step, String actor) {
+    void replay(int step, String actor, String agent) {
         turn.acquireUninterruptibly();   // nobody delivers before the run has started
         synchronized (lock) {
             replayStep = step;
         }
-        recorder.attributeNextAnswer(actor, "resume", null, null);
+        recorder.attributeNextAnswer(actor, "resume", null, null, agent);
     }
 
     /** Whether the line is the question the resumed step asks again to take the replayed answer. */
@@ -123,7 +130,8 @@ final class AnswerDelivery {
             // The attribution is set by the run, at the moment the answer resolves its question: an answer the
             // question's own end (a timeout, its default) wins against leaves no attribution behind
             answer.accept(control,
-                    () -> recorder.attributeNextAnswer(who.actor(), who.source(), who.requestId(), who.comment()));
+                    () -> recorder.attributeNextAnswer(who.actor(), who.source(), who.requestId(), who.comment(),
+                            who.agent()));
             // The answer is with the run: the turn passes on only once its approval.answered is written (or the
             // run ended), even if this thread is interrupted meanwhile
             awaitUninterruptibly(latch);

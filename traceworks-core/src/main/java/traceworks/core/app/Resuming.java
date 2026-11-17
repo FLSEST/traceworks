@@ -255,7 +255,7 @@ final class Resuming {
                 }
                 recorder.record(RecordTypes.RUN_RESUMED, resumed);
                 if (preset != null) {
-                    session.replay(preset.stepIndex(), given.actor());
+                    session.replay(preset.stepIndex(), given.actor(), given.agent());
                 }
                 RunOptions options = preparation.options(runId, session, recorder, paths, prepared,
                         TriggerSource.RESUME, asker == null, source == null ? null : source.sha(), folder)
@@ -495,9 +495,10 @@ final class Resuming {
     }
 
     /**
-     * An answer the resumed step receives: the preset, the seq of its {@code approval.answered} and who gave it.
+     * An answer the resumed step receives: the preset, the seq of its {@code approval.answered} and who gave it,
+     * with the agent that line names beside the actor ({@code null} for none).
      */
-    private record Given(PresetAnswer preset, int seq, String actor) {}
+    private record Given(PresetAnswer preset, int seq, String actor, String agent) {}
 
     /** The answer recorded for a parked run, as the resumed step receives it. */
     private static Given parked(StoredRun run, RunView view) {
@@ -515,7 +516,8 @@ final class Resuming {
         }
         return new Given(new PresetAnswer(answer.step(), question.kind(),
                 RunRecords.text(run, question.question(), "parked question"),
-                RunRecords.text(run, answer.answer(), "parked answer")), answer.seq(), answer.actor());
+                RunRecords.text(run, answer.answer(), "parked answer")), answer.seq(), answer.actor(),
+                answer.agent());
     }
 
     /**
@@ -556,7 +558,7 @@ final class Resuming {
         return new Given(new PresetAnswer(answered.step(), question.kind(),
                 RunRecords.text(run, question.question(), "parked question"),
                 RunRecords.text(run, answered.blob("answer"), "parked answer")), seq,
-                answered.fields().path("actor").asText(null));
+                answered.fields().path("actor").asText(null), answered.fields().path("agent").asText(null));
     }
 
     /** {@code {name, version}} of the runtime as the record names it; {@code null} for none. */
