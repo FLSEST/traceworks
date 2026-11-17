@@ -711,8 +711,8 @@ reason the engine's run admission would refuse the run for is an error, such as 
 requirement, an AI step's tools or a package image in a child of another package (`child-package-image`; see
 "Requirements" and "AI steps"). The rules judge the package's own workflow; of the child workflows it reaches by a
 literal `workflow_id`, `check` reports only their package images, their questions (`nested-wait-point`) and, for
-`protected-value-in-shell`, whether one of them asks a model; the shell lines of a child that take values its parent hands
-over are judged when the child runs ("Values: how a protected value reaches a command"). A child
+`protected-value-in-shell` and `protected-value-outside-shell`, whether one of them asks a model; the shell lines, tool
+arguments, mounts and `workflow_id`s of a child that take values its parent hands over are judged when the child runs ("Values: how a protected value reaches a command"). A child
 that names Codex, which refuses the run at its start ("AI steps"), is reported when you check the child's package. A
 Dockerfile under the package's `images/` whose `FROM` names no `@sha256:` digest gets the warning
 `unpinned-base-image`, one without the label `org.opencontainers.image.description` the warning
@@ -736,6 +736,7 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `duplicate-block-name` | `ERROR` | two blocks of one name that can both run in one run: `{{ block.<name>.output }}` would hold the output of whichever ran last, and a `compress` block refuses the name as its source. The blocks of `switch` cases share the names of the top-level blocks. The same name in two cases of one `switch` (or in a case and its `default`) is fine, because only one of them runs |
 | `empty-workflow` | `ERROR` | a workflow without blocks: a run of it does nothing and ends `COMPLETED` |
 | `protected-value-in-shell` | `ERROR` | a protected placeholder in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`), wherever it stands: bare, inside quotes, in a comment or a heredoc, with or without `shell_escape_variables`. A run refuses such a line ("Values: how a protected value reaches a command", below), so Traceworks refuses the workflow. Protected, as far as `check` can tell: the outside text `previous_report`, `audit_findings`, `audit_items` and `previous_chain_output`; the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen by `check`, and refused by the run: a loop item, a variable, an untrusted input, and the shell lines of a child workflow that take values its parent hands over. Correct: `"values": {"REVIEW": "{{ block.review.output }}"}` in the block's config, and `"$REVIEW"` in the command |
+| `protected-value-outside-shell` | `ERROR` or `WARNING` | a protected placeholder in one of the three places besides shell code that take none: an argument of a tool (`container_args` of a `shell` block), an entry of `mounts` (anywhere in it, the container side included; of a `shell` block, also in a `switch` case and in tool mode, of a `retry`, `while`, `conditional` or `foreach` in shell mode, and of a `simple` block in shell mode in a `switch` case), and the `workflow_id` of a `sub-workflow` or `foreach`. A run refuses the step when it reaches it ("Values: how a protected value reaches a command", below), and the finding says which runs do. An error where every run that reaches the step refuses it; a warning, which names the runs, where only some do: model text counts from the first call of a model on, so the output of a step after a model step that a run may skip (one under `run_if`, in a `switch` case, a `foreach` that may have no item, a `compress-ai` that may refuse its input, a child workflow) is protected only in the runs in which that step asks, and any other run takes the value as it is. A `simple`, `agentic`, `retry`, `while` or `conditional` step in AI mode without `run_if` asks in every run that gets past it. Outside text is reported only where a run sets it: `previous_report`, `audit_findings` and `audit_items` in an audit workflow, `previous_chain_output` in the check before a run that gets it as an input; anywhere else the placeholder stays text, the run takes it, and `chain-only-placeholder`, `audit-only-placeholder` or `previous-report-outside-audit` says so. The `mounts` of a top-level `shell` command without a `container_image` are read in a container run only, so the error there is about container runs: a host run starts the command on the host without its mounts, and a workflow meant for host runs alone needs `--no-check` or, better, no such mount. Model text is found as for `protected-value-in-shell`, which reports an error wherever a run may protect the value. In a `workflow_id` every `{{ previous_output }}` and `{{ block.<name>.output }}` is reported, in a workflow without a model too: the run takes no step output there. Not seen by `check`, and refused by the run: a loop item, a variable, an untrusted input, what a parent hands to a child, and a block output that only a run with untrusted input protects. Not judged, because no run reads it: `container_args` or `workflow_id` of a block in a `switch` case, `mounts` of a wrapper in AI mode. Correct: for a tool, a shell step before it that writes the value to a file (`"values": {"ANSWER": "{{ block.ask.output }}"}` and `printf '%s' "$ANSWER" > "{{ scratch_dir }}/answer.txt"`), and the file's path in the arguments; for a mount and a `workflow_id`, the path or the workflow written out, or a variable that `default_context` or an input of the run sets |
 | `invalid-value-name` | `ERROR` | `values` that a step cannot take: a name that is no variable name (`[A-Z_][A-Z0-9_]*`) or that the run or bash reserves (what a secret may not be called; every variable bash sets or uses, which are the sections "Bourne Shell Variables" and "Bash Variables" of its manual, `_` and the names that start with `BASH`; a secret of the same block), a value that is no text, `values` that are no object, and `values` on a tool step (`container_args`), which runs no shell. The step fails when it is reached, before anything runs |
 | `value-name-configures-program` | `WARNING` | a name under `values` of a family that programs read as their configuration: `GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`. The variable is not exported, so no program reads it by itself; a command that exports it (`export NODE_OPTIONS`) hands a protected value to such a program. Choose another name |
 | `unused-value` | `INFO` | a name under `values` that no shell line of the block uses as `$NAME` or `${NAME…}`: the variable is set and nothing reads it |
@@ -796,6 +797,36 @@ hold exactly what was sent) ends the shell with exit code 74 before the command'
 an end from a command that exits 74 by itself, by a token in the line the shell writes: the command counts as not
 run, and a `run_if`, a shell `condition` or the condition of a `while` fails its block instead of reading it as
 "false". A step with `values` needs bash 3.1 or later; an older one ends the same way. A name matches `[A-Z_][A-Z0-9_]*` and is none the run or bash reserves (`invalid-value-name`). A tool step (`container_args`) runs no shell and takes no values.
+
+Three places besides a shell line take no protected value: the arguments of a tool, where it would choose what the
+tool does, a `mounts` entry, where it would choose what the container sees, and a `workflow_id`, where it would
+choose which workflow runs. A `mounts` entry is refused as a whole, whichever side of it names the value.
+`check` reports each before a run where the workflow shows it (`protected-value-outside-shell`: an error where
+every run refuses, a warning where only some do); otherwise the run refuses the step when it reaches it, and
+nothing starts:
+
+```
+container_args must not contain untrusted values (untrusted input, tainted block output, platform data, text a
+model wrote): {{ block.ask.output }}
+mounts must not contain untrusted values (untrusted input, tainted block output, platform data, text a model
+wrote): {{ block.ask.output }}:/data:ro
+workflow_id may only use trusted context variables, not {{ block.ask.output }}
+```
+
+A tool reads such a value from a file that a shell step wrote, and its arguments name the file:
+
+```json
+{"type": "shell", "name": "hand_over", "config": {
+  "values": {"ANSWER": "{{ block.ask.output }}"},
+  "command": "printf '%s' \"$ANSWER\" > \"{{ scratch_dir }}/answer.txt\""}},
+{"type": "shell", "name": "scan", "config": {
+  "container_image": "./images/tool",
+  "container_args": ["scan", "--from", "{{ scratch_dir }}/answer.txt"]}}
+```
+
+The path of a mount and a `workflow_id` are written out, or come from a variable that `default_context` or an input
+of the run sets. A `workflow_id` takes no `{{ previous_output }}` and no `{{ block.<name>.output }}` in any run,
+protected or not.
 
 The record keeps the command as the workflow wrote it and, next to it, the values by name (`step.command`,
 docs/events.md); `show` names a step's values, and prints them with `--outputs`; `run.html` shows each under its
@@ -1436,8 +1467,9 @@ ends non-zero for a RED child (`... ; ! printf '%s\\n' \"$CHILD\" | grep -q '^ga
 so (`report-from-child-sets-no-gate`).
 
 A step that is refused before it runs anything ends its run whatever its `on_failure` says, like a setting of the
-wrong type: a shell line, the host path of a mount or a tool's `container_args` that names a protected value
-("Values: how a protected value reaches a command"). In a child workflow such a refusal ends the child run, and the
+wrong type: a shell line, an entry of `mounts` or a tool's `container_args` that names a protected value
+("Values: how a protected value reaches a command"; `check` reports them before the run where the workflow shows
+them, as `protected-value-in-shell` and `protected-value-outside-shell`). In a child workflow such a refusal ends the child run, and the
 `on_failure` of the block that started the child decides for the run above it.
 
 A run that reaches its end completes:

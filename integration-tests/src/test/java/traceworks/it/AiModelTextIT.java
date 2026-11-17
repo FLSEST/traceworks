@@ -36,7 +36,9 @@ class AiModelTextIT extends AiIntegrationTest {
 
     @Test
     void modelText_crossesBlocksOnlyAsAValue() throws IOException {
-        Result run = traceworks.run("combo-model-text");
+        // check reports the tool argument before a run (protected-value-outside-shell; AiCheckIT), and this test
+        // is about the run's own refusals
+        Result run = traceworks.run("combo-model-text", "--no-check");
 
         // The refused tool argument is the run's last step and ends it: on_failure: continue lets no run past a
         // refusal. A run that went on would end COMPLETED and start the step "never"
