@@ -151,7 +151,7 @@ guarantees and not the limits, so it reported what the documents already say, an
 that out.
 
 **The stated limits** are in `rules/security.limits`, and the instructions carry them as a numbered list of one
-line each, under the document and the heading they come from (`L1` to `L60`). The judge is told how to use them:
+line each, under the document and the heading they come from (`L1` to `L62`). The judge is told how to use them:
 
 - A behaviour that a limit states is not a finding. An open finding of an earlier run that describes only such a
   behaviour is answered `gone` with `"limit": "L<number>"`.

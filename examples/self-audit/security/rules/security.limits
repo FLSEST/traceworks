@@ -296,6 +296,17 @@ limit A writable mount below the home.
   says  The mount check refuses the home as a whole, the logins below it and the places it lists, not a writable mount of any other file or folder of the operator, such as ~/.bashrc or the .git/hooks of a repository.
   digest b28ca8938a975d2d
 
+limit A writable workspace has its own `.git`.
+  quote With `workspace_writable: true` a step writes everything in the workspace, its `.git/` included
+  quote Traceworks does not cover or check the workspace's `.git`
+  says  With workspace_writable: true a step writes everything in the workspace, its own .git included (hooks, config), which Traceworks neither covers nor checks: the next git command the operator runs in that directory on the host runs what the step left there, as the operator.
+  digest ba84cb6fcb578128
+
+limit A called package's `.git` in the workspace.
+  quote has no cover while the steps of the calling package run
+  says  The package's own .git is covered wherever a container sees the package, and a workspace that lies inside it is refused; the .git of a package it calls that lies in the workspace has no cover while the steps of the calling package run, which see it as any file of the workspace.
+  digest 8f118109e20af8a4
+
 limit The tool caches are shared between runs.
   quote What one run's tool wrote there, a later run's tool reads.
   says  A tool step's cache folder (cache_dir) belongs to an image name and is shared by every package that names that image: what one run's tool wrote, a later run's tool reads.
