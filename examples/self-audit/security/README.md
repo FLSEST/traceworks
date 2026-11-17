@@ -23,6 +23,9 @@ Why it is built this way:
   ([docs/security.md](../../../docs/security.md), "A model with tools can read its own credential"); the record
   redacts it, and the model has no tool to send it anywhere. The audited code is still untrusted input: the step
   declares `untrusted_input`.
+- **The judge knows the limits, not only the guarantees.** What the documents state as not protected is in its
+  instructions, so a stated limit is no finding, and code that does more than the limit says is one ("What the
+  judge is told").
 - **A finding counts only with evidence.** It must quote a line inside the area it judged; the report step checks that
   and lists every other finding as unverified.
 - **An answer cannot speak for another area.** Each line of `areas.jsonl` carries a random token of the run that no
@@ -132,9 +135,64 @@ run:
 | not judged | no place under the cap, a failed call, or an answer with a finding that did not verify, whatever its severity |
 
 The gate description ends with the number that can reach its goal, in the same words in every self-audit:
-`87 of 110 items settled (71 clean, 16 decided; 20 open, 3 not judged)`. The report has the same line. Where nothing
-sets `{{ audit_items }}` and `{{ audit_findings }}`, nothing was known before and the same holds with what this run
-judged.
+`87 of 110 items settled (71 clean, 16 decided; 20 open, 3 not judged)`. The report has the same line. Before the
+first applied report the register knows nothing, and the same holds with what this run judged.
+
+## What the judge is told
+
+The instructions of the verdict step (`instructions` in `workflow.json`) hold three things: who is not trusted, the
+eight guarantees of the threat model, and **the stated limits**: what
+[docs/security.md](../../../docs/security.md) says the defaults do not protect.
+
+**Why the limits.** A run of November 2026 (141 areas) left 15 open findings. Checked by hand, none was refuted,
+but 5 described a behaviour the documents state as a limit: a called package that is loaded again when its block
+runs, redaction that finds a value byte for byte only, a blob reference that is not redacted. The judge knew the
+guarantees and not the limits, so it reported what the documents already say, and a person spent the time to find
+that out.
+
+**The stated limits** are in `rules/security.limits`, and the instructions carry them as a numbered list of one
+line each, under the document and the heading they come from (`L1` to `L49`). The judge is told how to use them:
+
+- A behaviour that a limit states is not a finding. An open finding of an earlier run that describes only such a
+  behaviour is answered `gone`, with the number of the limit in the reason.
+- It is a finding when the code does more than the limit says. The issue then names the limit by its number and
+  says what goes beyond it.
+- In doubt it is a finding, with the limit quoted in the issue: a person decides.
+- A limit takes nothing from a guarantee beyond what it says.
+
+```
+source docs/security.md
+section Seals
+limit A called package is loaded again when its block runs.
+  quote A called package changed in between runs changed.
+  says  A called package is checked when the run starts and resumes, and is loaded from disk again when ...
+aside The private key is yours to keep.
+```
+
+| Line | Meaning |
+|---|---|
+| `source <file>` | the document the sections below are in |
+| `section <heading>` | a heading of that document |
+| `limit <lead>` | a bullet of the section, by its bold lead: a limit the judge gets |
+| `quote <text>` | a sentence of that bullet, word for word; one or more per limit |
+| `says <text>` | the limit in one line, as the judge gets it |
+| `aside <lead>` | a bullet that says nothing about what the code does (advice to the operator, a provider's behaviour): named, so that the list is whole, and not sent |
+
+**The file cannot drift from the documents unnoticed.** `LimitsTest` fails when "What they do not protect" of
+`docs/security.md` gets a heading or a bullet the file does not name, when a bullet the file names is gone or
+moved, when a quote is no longer in its bullet, and when the list in the instructions of this package or of
+`security-changes` is not the one the file gives. It writes the list as it goes into `workflow.json` to
+`target/security-limits.json-text`. A limit stated elsewhere (the one of `docs/events.md` is in the file) is pinned
+by its quote only: nothing finds a new one there.
+
+**Why a file of the package, and not the documents at run time.** The workspace is untrusted input, and this text
+tells the judge what not to report: read from the workspace, a line added to its `docs/security.md` would switch
+a finding off. The file belongs to the package, and a seal covers it and the instructions.
+
+**No step reads the file.** It is the source of the list and of the pin. Who changes a limit changes the file, puts
+the list into both `workflow.json` anew, and raises `--verdict-version` (below): the question changed. That was
+done on 2026-11-17, from 1 to 2, so the next run of this audit judges every area again: 141 calls on the sources
+of that day, where a run without the change would have asked about the open and the changed areas only.
 
 ## The register
 
@@ -154,18 +212,21 @@ because nothing looked for findings in that file. `catalog.json` names the rules
 verdict about it sees: `--verdict-version`, the rules that picked the area, and its code without line numbers, so
 an area that only moved keeps its digest. The judge of the run is not in it. The envelope lists every item, with `judged: true` for an area whose
 answer the report step read, and every finding names the item of its area. The register keeps the digest and the
-run of each item's last verdict and hands them to the next run as `{{ audit_items }}`:
+run of each item's last verdict and hands them to the next run. The `areas` step reads them, and the findings, from
+the register folder of the run (`{{ register_dir }}/items.jsonl` and `findings.jsonl`;
+[docs/registers.md](../../../docs/registers.md), "The register folder of a run"), where nothing is cut and no row
+is left out:
 
 | What the register says of the area | What the next run does |
 |---|---|
 | `clean` or `decided`, and the digest is the same | nothing: the area is not sent to the model |
 | `not judged`, or unknown, or the digest differs: the code of the area changed | judges it |
-| `open` and the digest is the same, or an open finding of the area is in `{{ audit_findings }}` | asks about its findings again, in the places the areas above leave (`--max-areas`) |
+| `open` and the digest is the same, or the register holds an open finding of the area | asks about its findings again, in the places the areas above leave (`--max-areas`) |
 
 So the 110 calls of a first run become the handful of areas that changed since. `traceworks findings security`
 shows how many items are settled, and `traceworks findings security items` lists them. Raise `--verdict-version`
 in `workflow.json` when the prompt or the instructions change what counts as a finding, and every area is judged
-again. Where nothing sets `{{ audit_items }}` (an older Traceworks), every area is judged. The subject
+again; it is 2 since the judge gets the stated limits. The subject
 of a finding is still the area's file and all its members; an area whose members change keeps its item name as
 long as the first one stays.
 
@@ -186,8 +247,8 @@ area, a low finding of a rule that is open in the area states that finding again
 
 **A finding is not resolved by silence.** A model that does not name a finding again has not said that it is
 fixed, so the register keeps a finding of a judged rule open until a run says explicitly that it is gone
-([docs/registers.md](../../../docs/registers.md), "Reconciliation"). The run therefore asks. The `areas` step gets
-`{{ audit_findings }}`, and `find --known` sorts it to the areas: each line of `areas.jsonl` carries the open
+([docs/registers.md](../../../docs/registers.md), "Reconciliation"). The run therefore asks. The `areas` step reads
+the findings of the register (`find --known-file`) and sorts them to the areas: each line of `areas.jsonl` carries the open
 findings of its own file and member, each with an id (`K1`), and the decided ones. The prompt holds only those,
 between frame lines, and wants an answer per open finding in `"known"`:
 
@@ -197,8 +258,36 @@ between frame lines, and wants an answer per open finding in `"known"`:
 | `{"id":"K1","status":"gone","reason":"..."}` | names the finding in the envelope's `gone`; the reason goes to the report | `RESOLVED` |
 | none, an unknown status, or `holds` with a quote that is not in the line | lists it under "Open findings without an answer"; the gate is at least YELLOW | stays `OPEN`, counted as not mentioned |
 
-A finding whose file and member are no area any more (the member was removed or renamed) is named as gone by
-`find` itself: it cannot hold as it was stated. Only `OPEN` and `AWAITING_VERIFICATION` findings are asked about.
+Only `OPEN` and `AWAITING_VERIFICATION` findings are asked about.
+
+**How a finding leaves the register.** There are four ways, and the report counts the first three under "Earlier
+findings that are gone", each finding with its old subject (`FACT report_known_gone_file`, `..._member`,
+`..._answered` in the output of the `report` step):
+
+| Why | Who says so | When |
+|---|---|---|
+| the file is gone | `find`, by measurement | no source file the audit reads has the path of the finding's subject: the file was removed, renamed or moved, as after the rename of a package |
+| the member is gone | `find`, by measurement | the file is still read, and none of its areas has the members of the subject: a member was removed or renamed, or lost what a rule points at |
+| the judge answered that it is gone | the model, not checked | the answer for its area said `gone`, with a reason: fixed, never held, or what a stated limit says |
+| a person decided | `traceworks findings security dismiss` or `accept` | any time |
+
+A finding's subject is `<file>#<members>`, and it is compared with the subjects of the areas the sources have now.
+No model is asked about a finding whose code is not there: it cannot hold as it was stated.
+
+**A renamed or moved member is not lost with its finding.** Its code is still in the sources, in an area whose
+name or digest the register does not know, so the same run judges that area: a defect that is still there is
+reported again, as a new finding under the new subject. What does not travel is a person's decision on the old
+subject, as with every rename. Where the cap (`--max-areas`) leaves that area without a place, the report lists it
+as cut, its item is not judged, and the gate is YELLOW until a run judges it.
+
+**Why a finding could stay open after its code was gone.** `find` named a finding gone only when it could compare
+its subject, and until 2026-11-17 it read the findings from `{{ audit_findings }}`, which shows 300 characters of
+a subject. A subject with a long path and the members of a whole class is longer: the block cut it, a cut subject
+equals no area's, and so the finding was neither asked about nor named gone, run after run (the report listed it
+under "Open findings that no item carries"). The run of November 2026 held three findings with paths from before a
+package was renamed. The step now reads `findings.jsonl` of the register folder, which holds every finding whole.
+An area whose members change, also by a neighbour that joins it, has another subject: its earlier finding is
+named gone ("the member is gone"), and the area is judged in the same run, since its digest changed.
 
 ```bash
 traceworks findings security list
@@ -238,7 +327,7 @@ The same pass notes who calls whom: for every member, the members of the sources
 by the type the compiler resolved, and for a method every method of the sources that overrides it. No rule and no
 step of this package reads that. The short check beside this audit,
 [`security-changes`](../security-changes/README.md), takes its neighbours from it: it judges only the areas that
-changed since a commit and the areas one call away, with `areas find --changes`, and keeps a copy of this tool, the
+changed since a commit and the areas one call away, with `areas find --changes`, and keeps a copy of this tool, the limits file, the
 rule file and the catalog, which a test holds to the same bytes. Change the tool here and copy it there.
 
 ## The rule file
@@ -286,6 +375,7 @@ The tool's tests are in [`examples/self-audit/tests`](../tests), a module of the
 them; they make no AI call. One of them runs the package's shape through the real engine as a host run (it needs
 `bash`), and the package's own workflow with a shell loop in the model's place: the verdict step is started with
 the picked option, the report names it, and two picks feed one register. `ModelChoicePackageTest` runs the package
-as it ships through `check`, `describe` and the start check of `run`, with a runtime that has no image. On its own,
+as it ships through `check`, `describe` and the start check of `run`, with a runtime that has no image.
+`LimitsTest` holds the limits file, the documents and the instructions together ("What the judge is told"). On its own,
 run the module with `-am`: `mvn -pl examples/self-audit/tests -am test`. No test here runs the package in containers
 with a model's CLI.

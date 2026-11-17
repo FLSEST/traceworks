@@ -100,7 +100,8 @@ full snapshot that does not state a finding resolved it. So the register tells t
 - **A judged finding** (a security finding, a split or move verdict, a contradiction, an uncaught change) stays
   open until a run says explicitly that it is gone. Silence says nothing.
 
-For that, each run asks. The fact step gets `{{ audit_findings }}`, reads the rows, and writes into each item of the
+For that, each run asks. The fact step gets what the register knows (`{{ audit_findings }}`, or in `security` and
+`security-changes` the file `findings.jsonl` of the register folder, which cuts nothing), reads the rows, and writes into each item of the
 loop the open findings that belong to it (and the ones a person decided), so a prompt holds only its own. The
 verdict has to answer for each open finding: **it still holds**, with the line as it is now, or **it is gone**,
 with a reason. The report step treats "holds" like a new finding (the quote is checked, then the finding is stated
@@ -109,6 +110,17 @@ usable answer is neither: the report lists it, the gate does not go green, and t
 the silent report (`findings <topic> show <id>` prints the count). "Gone" is not taken from an answer that also
 held a finding that did not verify: the item is not judged then, and were the finding resolved, the register would
 call the item decided by its earlier verdict and no run would ask again.
+
+Two things keep a person from findings that cost time for nothing, both in `security` and `security-changes`
+([security/README.md](security/README.md), "What the judge is told" and "How a finding leaves the register"):
+
+- **The judge knows the stated limits.** A behaviour the documents state as not protected is no finding; code that
+  does more than the limit says is one, and in doubt it is a finding with the limit quoted. The limits are a file
+  of the package, pinned to `docs/security.md` by a test.
+- **A finding whose code is gone is named gone by measurement.** When no source file has the path of its subject
+  any more, or the file has no area with its members, the fact step names it gone without asking a model, and the
+  report counts it with its reason. A member that only moved or was renamed is an area of the same run, so a
+  defect that is still there is reported under its new name.
 
 | Status in the register | Asked about in the next run? | Leaves that status when |
 |---|---|---|
