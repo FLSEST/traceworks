@@ -229,8 +229,12 @@ final class RunRecords {
     /** The inputs a run recorded, from the bytes of the {@code inputs} blob of its {@code run.started}. */
     static Map<String, Object> inputs(String runId, byte[] inputsJson) {
         try {
-            return DEFINITIONS.readValue(inputsJson, new com.fasterxml.jackson.core.type.TypeReference<
-                    java.util.LinkedHashMap<String, Object>>() { });
+            Map<String, Object> inputs = DEFINITIONS.readValue(inputsJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<java.util.LinkedHashMap<String, Object>>() { });
+            if (inputs == null) {
+                throw new IOException("they are no JSON object");
+            }
+            return inputs;
         } catch (IOException e) {
             throw new RecordDamagedException("The recorded inputs of run " + runId + " cannot be read: "
                     + e.getMessage() + RecordDamagedException.seeVerify(runId));
