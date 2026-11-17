@@ -134,9 +134,11 @@ A path or a `--source` that holds a value is recorded with the replacement too, 
 to find the workspace or the package directory. It does that only for the names the run redacts (its declared
 secrets and the credentials of its AI providers), and a run whose source, workspace or package directory itself
 contains `[redacted:` is refused at the start: a replacement in a record is then always one the redactor wrote. A
-resume of a record that holds any other replacement in one of these is refused. A refusal of the resume's start
-check (a workspace that is gone, a package that may not be mounted) names such a path as the record does, with the
-replacement. A resume never puts a value back
+resume of a record that holds any other replacement in one of these is refused. Whatever a resume then says of these paths names them as the record does, with
+the replacement: every refusal (a package that is gone or cannot be read, a workspace that may not be mounted, a
+seal that does not hold), an error it ends with, and the line the seal log keeps of a refused resume. This holds
+for the values the resume put back into the recorded package directory and workspace, and for nothing else: a path
+you type at a start is shown and logged as you typed it. A resume never puts a value back
 into a source: a value in a path stays on this machine, but a value in the URL of a clone goes to the host the URL
 names, and whoever can rewrite the record (a run folder copied from elsewhere) chooses that host. So a missing
 checkout whose recorded source holds a replacement is not cloned again, and neither is the missing checkout of a run
@@ -244,7 +246,11 @@ Traceworks reads the commit and the state of a package that has its own `.git`, 
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 
 **The record** is a hash chain: `traceworks verify` finds a changed or removed line, lines copied from another run, a
-changed blob, and a manifest or ledger entry that does not match the log.
+changed blob, and a manifest or ledger entry that does not match the log. Every other command reads a blob of a run
+or a register checked against its name: one that acts on it (a resume, a feed of a register, a decision, the list of
+findings, `diff`, `--inputs-from`) refuses as for a damaged record (exit 8) and names the blob, and a view (`show`,
+`run.html`, `diff --outputs`, `findings show`) shows a mark in its place, says that it does not match its name, and
+shows the rest. `--inputs-from` also takes nothing from a run whose record does not verify.
 
 **A run that began is named outside its folder.** The ledger gets an entry when a run starts, before its first step,
 and no step runs without it, at a start and at a resume (docs/events.md, "The start entry"). What that gives, in
@@ -759,6 +765,16 @@ What a seal does not protect:
   git runs later outside every container. `traceworks describe <package>` shows every mount of every block before
   anything runs: read it for a package you did not write, and run no package whose writable mounts you would not
   hand to its author.
+- **A writable workspace has its own `.git`.** With `workspace_writable: true` a step writes everything in the
+  workspace, its `.git/` included: `.git/hooks/*`, `.git/config` (an alias, a pager, a filter, `core.fsmonitor`).
+  The next git command you run in that directory on the host runs what the step left there, as you. Traceworks does
+  not cover or check the workspace's `.git`; a writing workflow may need git itself. Let a package you did not
+  write work on a checkout of its own (`run --source`, whose checkout no git of the host reads afterwards), or
+  look at `.git/config` and `.git/hooks` after a run that wrote the workspace, before you use git there.
+- **A called package's `.git` in the workspace.** The package's own `.git/` is covered wherever a container
+  sees the package. A package it calls that lies in the workspace has no cover while the steps of the calling
+  package run: they see its `.git/` as any file of the workspace. A workspace that lies inside the package's
+  `.git` is refused.
 - **The tool caches are shared between runs.** A tool step's cache folder (`cache_dir`) belongs to an image name,
   and every package that names that image, or gives its own package and image the same names, shares it. What one
   run's tool wrote there, a later run's tool reads.

@@ -113,7 +113,7 @@ public final class ChainVerifier {
         if (ref == null) {
             return Optional.empty();
         }
-        Optional<byte[]> content = blobs.get(ref.sha256());
+        Optional<byte[]> content = blobs.getUnverified(ref.sha256());
         if (content.isEmpty()) {
             deleted.add(ref.sha256());
         } else if (!EventChain.sha256Hex(content.get()).equals(ref.sha256())) {

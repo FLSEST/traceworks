@@ -126,7 +126,7 @@ final class FileBlobStore implements BlobStore {
     }
 
     @Override
-    public Optional<byte[]> get(String sha256) {
+    public Optional<byte[]> getUnverified(String sha256) {
         if (!sha256.matches("[0-9a-f]{64}")) {
             return Optional.empty();
         }

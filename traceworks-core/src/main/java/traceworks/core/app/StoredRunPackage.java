@@ -125,7 +125,9 @@ final class StoredRunPackage {
                 () -> preparation.redactedNames(RunRecords.definition(runId, workflowJson), null));
         try {
             return packages.load(Path.of(real));
-        } catch (IllegalArgumentException e) {   // InvalidPathException included
+        } catch (IllegalArgumentException | java.io.UncheckedIOException e) {
+            // InvalidPathException included; a package that is there and cannot be read (a file without read
+            // permission) refuses the resume like one that is gone, and names its directory as the record does
             throw new RunRefusedException("The package of run " + runId + " cannot be loaded from " + packageDir
                     + ": " + String.valueOf(e.getMessage()).replace(real, packageDir));
         }
