@@ -106,7 +106,7 @@ public final class ConsoleAsker implements QuestionAsker {
         out.println();
         out.println("? " + text);
         if (!options.isEmpty()) {
-            out.println("  answer with one of: " + joined(options));
+            options("answer with one of:", options);
         }
         while (true) {
             String line = prompt();
@@ -125,7 +125,7 @@ public final class ConsoleAsker implements QuestionAsker {
                     return Optional.of(option);
                 }
             }
-            out.println("  '" + TerminalFormat.oneLine(line) + "' is not one of: " + joined(options));
+            options("'" + TerminalFormat.oneLine(line) + "' is not one of:", options);
         }
     }
 
@@ -141,7 +141,9 @@ public final class ConsoleAsker implements QuestionAsker {
         for (Map<String, Object> field : question.fields()) {
             Object name = field.get("variable_name");
             Object label = field.getOrDefault("label", name);
-            out.println("  " + TerminalFormat.safe(String.valueOf(label)));
+            // A label is the workflow's text, as an option is
+            AnswerCommands.shown(LEAD, "", "", "", "", List.of(String.valueOf(label)))
+                    .forEach(shown -> out.println(LEAD + shown));
             String value = value(string(field.get("default_value")), !Boolean.FALSE.equals(field.get("required")),
                     pattern(field.get("validation_pattern")), strings(field.get("options")));
             if (value == null) {
@@ -160,7 +162,7 @@ public final class ConsoleAsker implements QuestionAsker {
     private String value(String defaultValue, boolean required, String pattern, List<String> options)
             throws InterruptedException {
         if (!options.isEmpty()) {
-            out.println("  one of: " + joined(options));
+            options("one of:", options);
         }
         // What comes back from here is the person's own answer, and the step stores it without the protection the
         // default had (a default may be made of a step's or a model's output). An empty line therefore takes the
@@ -182,7 +184,7 @@ public final class ConsoleAsker implements QuestionAsker {
             if (value.isEmpty() && required) {
                 out.println("  a value is required");
             } else if (!options.isEmpty() && !value.isEmpty() && !options.contains(value)) {
-                out.println("  not one of: " + joined(options));
+                options("not one of:", options);
             } else if (pattern != null && !value.isEmpty()) {
                 Boolean matches = matches(pattern, value);
                 if (matches == null) {
@@ -202,8 +204,15 @@ public final class ConsoleAsker implements QuestionAsker {
         }
     }
 
-    private static String joined(List<String> options) {
-        return options.stream().map(TerminalFormat::safe).collect(java.util.stream.Collectors.joining(" / "));
+    private static final String LEAD = "  ";
+
+    /**
+     * The options behind {@code caption}. They are the workflow's text: on the caption's line only where that line
+     * fits the terminal and no option holds a run of blanks, else each on marked lines below it, so that the end
+     * of a padded option never starts a terminal line that reads as one of Traceworks.
+     */
+    private void options(String caption, List<String> options) {
+        AnswerCommands.shown(LEAD, caption, " ", "", "", options).forEach(line -> out.println(LEAD + line));
     }
 
     /**

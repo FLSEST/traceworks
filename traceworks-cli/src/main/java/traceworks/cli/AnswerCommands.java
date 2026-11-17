@@ -88,17 +88,49 @@ public final class AnswerCommands {
         if (from / LINE_WIDTH != to / LINE_WIDTH || from > 0 && from % LINE_WIDTH == 0) {
             return false;
         }
+        return !blankRun(value);
+    }
+
+    /** Whether {@code value} holds two blanks in a row: white space of any kind, the no-break spaces too. */
+    static boolean blankRun(String value) {
         boolean blank = false;
         for (int i = 0; i < value.length(); ) {
             int c = value.codePointAt(i);
             i += Character.charCount(c);
             boolean isBlank = Character.isWhitespace(c) || Character.isSpaceChar(c);
             if (blank && isBlank) {
-                return false;
+                return true;
             }
             blank = isBlank;
         }
-        return true;
+        return false;
+    }
+
+    /**
+     * The lines that show texts of the workflow (options, a label) behind a caption of Traceworks, each line to be
+     * printed behind {@code lead}: one line, the texts joined by {@code " / "} behind the caption and between
+     * {@code open} and {@code close}, where that line fits the terminal and no text holds a run of blanks; else
+     * the caption alone (with {@code elsewhere} behind it) and each text on marked lines. So no text of the
+     * workflow ends on a terminal line of its own without a mark, wherever options or names are shown.
+     *
+     * @param caption   Traceworks' own text, or the operator's; may be empty
+     * @param elsewhere what the caption's line ends with when the texts follow on marked lines
+     */
+    public static List<String> shown(String lead, String caption, String open, String close, String elsewhere,
+                              List<String> values) {
+        List<String> safe = values.stream().map(TerminalFormat::safe).toList();
+        String line = caption + open + String.join(" / ", safe) + close;
+        List<String> lines = new ArrayList<>();
+        if (safe.stream().noneMatch(AnswerCommands::blankRun)
+                && RunReport.columns(lead + line) <= LINE_WIDTH) {
+            lines.add(line);
+            return lines;
+        }
+        if (!(caption + elsewhere).isEmpty()) {
+            lines.add(caption + elsewhere);
+        }
+        safe.forEach(value -> listed(lines, lead, value));
+        return lines;
     }
 
     /** One option or name on marked lines that fit the terminal behind {@code lead}; the blanks at a break go. */

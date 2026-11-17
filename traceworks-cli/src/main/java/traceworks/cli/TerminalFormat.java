@@ -42,7 +42,12 @@ public final class TerminalFormat {
     /** The line of an event; empty for events a terminal does not need (checkpoints, status changes). */
     public Optional<String> line(RecordedEvent event) {
         Optional<String> text = describe(event);
-        return text.map(t -> TIME.format(event.at()) + " " + (event.parent() == null ? "" : "  ") + safe(t));
+        Optional<String> line = text.map(t -> TIME.format(event.at()) + " " + (event.parent() == null ? "" : "  ")
+                + safe(t));
+        if (event.type().equals("approval.requested")) {
+            return line.map(head -> options(head, event.fields().path("options")));
+        }
+        return line;
     }
 
     private Optional<String> describe(RecordedEvent e) {
@@ -67,7 +72,7 @@ public final class TerminalFormat {
                     + (f.path("category").isNull() || f.path("category").isMissingNode() ? ""
                     : " " + f.path("category").asText())
                     + descriptionSuffix(e.blob("description"));
-            case "approval.requested" -> step + "question: " + content(e.blob("question")) + options(f.path("options"));
+            case "approval.requested" -> step + "question: " + content(e.blob("question"));
             case "approval.answered" -> step + "answered: " + content(e.blob("answer")) + by(f)
                     + through(f);
             case "request.refused" -> "request refused: " + f.path("reason").asText("?");
@@ -164,10 +169,19 @@ public final class TerminalFormat {
                 + cut.path("after_ms").asLong() + " ms)";
     }
 
-    private static String options(JsonNode options) {
+    /**
+     * The line of a question with its options behind it. The options are the workflow's text: they stay on the
+     * line only where it fits the terminal and none holds a run of blanks, else each follows on marked lines.
+     */
+    private static String options(String head, JsonNode options) {
         List<String> all = new ArrayList<>();
         options.forEach(o -> all.add(o.asText()));
-        return all.isEmpty() ? "" : " [" + String.join(" / ", all) + "]";
+        if (all.isEmpty()) {
+            return head;
+        }
+        List<String> lines = AnswerCommands.shown("  ", head, " [", "]", " [options:]", all);
+        return lines.getFirst() + lines.stream().skip(1).map(line -> "\n  " + line)
+                .collect(java.util.stream.Collectors.joining());
     }
 
     private String descriptionSuffix(BlobRef description) {
