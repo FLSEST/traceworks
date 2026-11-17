@@ -51,9 +51,13 @@ import java.util.Set;
  *                  already replaced by the operator's home directory. Empty without the setting: no package
  *                  mounts a host path of the operator's writable then. They are no places of the home; they lie
  *                  here because the layout is what the mount guard gets of {@code traceworks.json}
+ * @param workspaceGitWritable whether a step that may write its workspace ({@code workspace_writable: true}) may
+ *                  write the workspace's own {@code .git} as well ({@code workspace_git_writable}). {@code false}
+ *                  without the setting: the container of such a step gets that {@code .git} read-only. No place
+ *                  of the home either; it lies here for the reason the folders above do
  */
 public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List<SealFile> sealFiles,
-                         List<Path> writableMounts) {
+                         List<Path> writableMounts, boolean workspaceGitWritable) {
 
     static final String SIGNING_KEY = "signing_key";
     static final String ALLOWED_SIGNERS = "allowed_signers";
@@ -67,9 +71,12 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
     public record SealFile(String setting, Path file) {
     }
 
-    /** A layout without files of seal settings and without a folder for writable mounts. */
+    /**
+     * A layout without files of seal settings, without a folder for writable mounts, and with the {@code .git} of a
+     * writable workspace read-only.
+     */
     public HomeLayout(Path home, Path runs, Path ledger, Path registers) {
-        this(home, runs, ledger, registers, List.of(), List.of());
+        this(home, runs, ledger, registers, List.of(), List.of(), false);
     }
 
     /**
@@ -82,7 +89,7 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
         List<SealFile> files = new ArrayList<>();
         if (signingKey != null) files.add(new SealFile(SIGNING_KEY, signingKey));
         if (allowedSigners != null) files.add(new SealFile(ALLOWED_SIGNERS, allowedSigners));
-        return new HomeLayout(home, runs, ledger, registers, files, writableMounts);
+        return new HomeLayout(home, runs, ledger, registers, files, writableMounts, workspaceGitWritable);
     }
 
     /**
@@ -92,11 +99,24 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
      *              counts no folder that is the operator's home directory or holds it
      */
     public HomeLayout withWritableMounts(List<Path> roots) {
-        return new HomeLayout(home, runs, ledger, registers, sealFiles, roots);
+        return new HomeLayout(home, runs, ledger, registers, sealFiles, roots, workspaceGitWritable);
+    }
+
+    /**
+     * The same places, with the operator's word on the {@code .git} of a writable workspace
+     * ({@code workspace_git_writable}).
+     *
+     * @param writable whether a step that may write its workspace may write the workspace's own {@code .git} too
+     */
+    public HomeLayout withWorkspaceGitWritable(boolean writable) {
+        return new HomeLayout(home, runs, ledger, registers, sealFiles, writableMounts, writable);
     }
 
     /** The key of {@code traceworks.json} that lists the folders a package may mount writable. */
     public static final String WRITABLE_MOUNTS = "writable_mounts";
+
+    /** The key of {@code traceworks.json} that opens the {@code .git} of a writable workspace to its steps. */
+    public static final String WORKSPACE_GIT_WRITABLE = "workspace_git_writable";
 
     static final String RUNS_KEY = "runs_dir";
     static final String LEDGER_KEY = "ledger_dir";
@@ -176,7 +196,25 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
         return new HomeLayout(home, places.get(RUNS_KEY), places.get(LEDGER_KEY), places.get(REGISTERS_KEY))
                 .withSealFiles(OperatorConfigFile.path(home, file, root, SIGNING_KEY),
                         OperatorConfigFile.path(home, file, root, ALLOWED_SIGNERS))
-                .withWritableMounts(writableMounts(file, root.get(WRITABLE_MOUNTS), userHome));
+                .withWritableMounts(writableMounts(file, root.get(WRITABLE_MOUNTS), userHome))
+                .withWorkspaceGitWritable(workspaceGitWritable(file, root.get(WORKSPACE_GIT_WRITABLE)));
+    }
+
+    /**
+     * {@code workspace_git_writable}: a boolean. Missing or {@code null} is {@code false}; any other value that is
+     * no boolean is refused, the string {@code "true"} too, so that no repository is opened by the way a value is
+     * read.
+     */
+    private static boolean workspaceGitWritable(Path file, JsonNode value) {
+        if (value == null || value.isNull()) {
+            return false;
+        }
+        if (!value.isBoolean()) {
+            throw new IllegalArgumentException("'" + WORKSPACE_GIT_WRITABLE + "' in " + file + " must be a boolean,"
+                    + " true or false: whether a step that may write its workspace may write the workspace's .git"
+                    + " as well");
+        }
+        return value.booleanValue();
     }
 
     /**

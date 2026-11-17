@@ -45,7 +45,9 @@ import java.util.TreeMap;
  * backend id to {@code {url, api, models, secret}}: the model servers of the operator's own that a {@code PI} step
  * may name; missing or null is none). The keys {@code runs_dir}, {@code ledger_dir} and {@code registers_dir},
  * and {@code writable_mounts} (a list of directories, each absolute or starting with {@code ~/}: the folders in or
- * below which a package may mount a host path writable; missing or null is none), are read by {@link HomeLayout}.
+ * below which a package may mount a host path writable; missing or null is none) and
+ * {@code workspace_git_writable} (boolean: whether a step that may write its workspace may write the workspace's
+ * {@code .git} too; missing or null is false), are read by {@link HomeLayout}.
  * An unknown key or a value of the wrong type is an error that names the key.
  */
 public final class OperatorConfigFile {
@@ -54,7 +56,8 @@ public final class OperatorConfigFile {
     private static final Set<String> KEYS = Set.of("allow_host_execution", "actor", "package_path", "secret_names", "hooks",
             "container_runtime", "container_limits", "output_limit_mib", "run_output_budget_mib", "ai_images", "ai_network",
             "ai_hosts", "allowed_models", LocalModels.SETTING, "decision_on_higher_severity", "require_seal", "seal_immutable", "signing_key", "allowed_signers", HomeLayout.RUNS_KEY,
-            HomeLayout.LEDGER_KEY, HomeLayout.REGISTERS_KEY, HomeLayout.WRITABLE_MOUNTS);
+            HomeLayout.LEDGER_KEY, HomeLayout.REGISTERS_KEY, HomeLayout.WRITABLE_MOUNTS,
+            HomeLayout.WORKSPACE_GIT_WRITABLE);
     private static final Set<String> LIMIT_KEYS = Set.of("memory", "pids", "cpus");
     private static final Set<String> RUNTIMES = Set.of("podman", "docker");
 

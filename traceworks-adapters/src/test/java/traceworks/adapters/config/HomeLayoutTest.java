@@ -242,6 +242,44 @@ class HomeLayoutTest {
                 .hasMessageContaining("'writable_mounts'").hasMessageContaining("a list of directories");
     }
 
+    // --- workspace_git_writable: whether a step may write the .git of a writable workspace ---
+
+    @Test
+    void withoutWorkspaceGitWritable_theGitOfAWritableWorkspaceIsReadOnly() throws IOException {
+        assertThat(HomeLayout.of(home()).workspaceGitWritable()).isFalse();
+        config("{\"workspace_git_writable\": null}");
+        assertThat(HomeLayout.read(home(), userHome()).workspaceGitWritable()).isFalse();
+        config("{\"workspace_git_writable\": false}");
+        assertThat(HomeLayout.read(home(), userHome()).workspaceGitWritable()).isFalse();
+    }
+
+    @Test
+    void workspaceGitWritable_isRead_andKeptWithTheOtherSettings() throws IOException {
+        config("{\"workspace_git_writable\": true, \"writable_mounts\": [\"/data\"]}");
+
+        HomeLayout layout = HomeLayout.read(home(), userHome());
+
+        assertThat(layout.workspaceGitWritable()).isTrue();
+        assertThat(layout.writableMounts()).containsExactly(Path.of("/data"));
+        assertThat(layout.withSealFiles(temp.resolve("key"), null).workspaceGitWritable()).isTrue();
+        assertThat(layout.withWritableMounts(List.of()).workspaceGitWritable()).isTrue();
+        assertThat(layout.withWorkspaceGitWritable(false).writableMounts()).containsExactly(Path.of("/data"));
+        assertThat(HomeLayout.of(home()).withWorkspaceGitWritable(true).workspaceGitWritable()).isTrue();
+    }
+
+    @Test
+    void aWorkspaceGitWritable_thatIsNoBoolean_isRefused() throws IOException {
+        for (String value : List.of("\"true\"", "1", "[true]")) {
+            config("{\"workspace_git_writable\": " + value + "}");
+            Path home = home();
+            Path userHome = userHome();
+            assertThatThrownBy(() -> HomeLayout.read(home, userHome)).as(value)
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("'workspace_git_writable'")
+                    .hasMessageContaining("true or false")
+                    .hasMessageContaining(home.resolve("traceworks.json").toString());
+        }
+    }
+
     @Test
     void twoPlacesInOneFolder_orOneInsideTheOther_areRefused() throws IOException {
         Path disk = temp.resolve("disk");

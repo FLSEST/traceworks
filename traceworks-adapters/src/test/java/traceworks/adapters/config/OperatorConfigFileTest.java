@@ -120,6 +120,17 @@ class OperatorConfigFileTest {
                 .hasMessageContaining("'writable_mounts'");
     }
 
+    /** This setting is the layout's too: every reader of the file knows the key and refuses a wrong value. */
+    @Test
+    void workspaceGitWritable_isAKey_andAWrongValueIsRefusedByEveryReader() throws IOException {
+        config("{\"workspace_git_writable\": true}");
+        assertThat(OperatorConfigFile.read(home)).isEqualTo(OperatorSettings.defaults());
+
+        config("{\"workspace_git_writable\": \"yes\"}");
+        assertThatThrownBy(() -> OperatorConfigFile.read(home)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'workspace_git_writable'");
+    }
+
     @Test
     void unknownKey_isRefused_andNamed() throws IOException {
         config("{\"allow_host_exec\": true}");
