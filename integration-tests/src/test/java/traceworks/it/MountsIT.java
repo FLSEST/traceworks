@@ -10,8 +10,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * A block's own {@code mounts} (packages {@code mounts} and {@code login-mount}): {@code :ro} can be read but not
- * written, {@code :rw} can be written, and a login folder below the home directory ({@code ~/.ssh} of the sandbox's
- * fake home) is refused before anything starts.
+ * written, {@code :rw} can be written where the operator listed the folder in {@code writable_mounts}
+ * ({@link WritableMountsIT}), and a login folder below the home directory ({@code ~/.ssh} of the sandbox's fake
+ * home) is refused before anything starts.
  */
 class MountsIT extends IntegrationTest {
 
@@ -20,6 +21,8 @@ class MountsIT extends IntegrationTest {
         Path readOnly = Files.createDirectories(sandbox.resolve("ro-data"));
         Files.writeString(readOnly.resolve("given.txt"), "given-content\n");
         Path writable = Files.createDirectories(sandbox.resolve("rw-data"));
+        // A writable mount needs a folder the operator listed (WritableMountsIT)
+        traceworks.configure(java.util.Map.of("writable_mounts", java.util.List.of(writable.toString())));
 
         Result run = traceworks.run("mounts", "--input", "ro_dir=" + readOnly, "--input", "rw_dir=" + writable);
 

@@ -1,0 +1,39 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "5c0e6d0a-3b1f-4c53-9a50-0d7f1a2b6c02",
+  "name": "IT writable workspace git",
+  "description": "A step that may write the workspace can commit, and cannot write the hooks or the config of the workspace's .git, nor move the .git away.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "write_hook",
+      "config": {"command": "printf '#!/bin/sh\\ntouch /tmp/ran\\n' > .git/hooks/pre-commit", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_config",
+      "config": {"command": "printf '[core]\\n\\tfsmonitor = /tmp/payload\\n' >> .git/config", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "set_config",
+      "config": {"command": "git config core.fsmonitor /tmp/payload", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "move_git",
+      "config": {"command": "mv .git .git-moved", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "move_hooks",
+      "config": {"command": "mv .git/hooks .git/hooks-moved", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "commit",
+      "config": {"command": "echo changed > tracked.txt && git add tracked.txt && git -c user.name=IT -c user.email=it@example.invalid commit --quiet -m 'from the container' && git log -1 --format=%s", "workspace_writable": true}
+    }
+  ]
+}
