@@ -116,38 +116,42 @@ class FactsTest {
     }
 
     @Test
-    void anOptionOfAnotherProgram_namedWithAWord_isNoFindingOnlyInALineThatHoldsTheWordBeforeIt() {
+    void anOptionOfAnotherProgram_namedWithAWord_isNoFindingWhereTheWordStandsRightBeforeIt() {
         fixture.replace("docs/cli.md", "follows it.", """
-                follows it. A Dockerfile may use `COPY --from=` or
-                `RUN --mount=...,from=`, and a step hands a file to its tool:
-
-                ```json
-                {"container_args": ["scan", "--from", "answer.txt"]}
-                ```
+                follows it. A Dockerfile may use `COPY --from=`, "COPY" `--from=x`,
+                [RUN --mount=...,from=] or `RUN
+                --mount=x` across a line break, which is not right before it.
                 """);
         fixture.rule("foreign_option from COPY");
-        fixture.rule("foreign_option from container_args");
         fixture.rule("foreign_option mount RUN");
 
         fixture.facts();
 
-        assertThat(fixture.findings()).isEmpty();
+        // The last --mount has no RUN in its own line
+        assertThat(fixture.findings()).containsExactly("unknown-option-in-docs show/watch --mount");
     }
 
+    /** Each text names the option once, after the word but not right after it: still a finding. */
     @Test
-    void anOptionOfAnotherProgram_namedWithAWord_isStillUnknownAnywhereElse() {
-        // The word after the option or in the line before does not count, and "run" is not RUN
-        fixture.replace("docs/cli.md", "follows it.", """
-                follows it. `tool watch --from 3` starts later, unlike COPY
-                with `--from=` in the next line, `tool run --mount x` mounts, and `--mount` RUN too.
-                """);
-        fixture.rule("foreign_option from COPY");
-        fixture.rule("foreign_option mount RUN");
+    void anOptionOfAnotherProgram_namedWithAWord_isStillUnknownWhereTheWordDoesNotStandRightBeforeIt() {
+        List<String> texts = List.of(
+                // A table row is one line: RUN as a placeholder earlier in the row
+                "| `--input RUN` | the inputs of run RUN | `tool show --mount x` |",
+                // The word earlier in the sentence, before another program's option
+                "unlike `COPY --from=`, `tool resume --from 3` starts later",
+                "while RUNNING, `--mount x`",
+                "a DRY_RUN --mount x");
+        for (int i = 0; i < texts.size(); i++) {
+            Fixture each = new Fixture(temp.resolve("case-" + i));
+            each.replace("docs/cli.md", "follows it.", "follows it. " + texts.get(i));
+            each.rule("foreign_option from COPY");
+            each.rule("foreign_option mount RUN");
 
-        fixture.facts();
+            each.facts();
 
-        assertThat(fixture.findings()).containsExactly("unknown-option-in-docs show/watch --from",
-                "unknown-option-in-docs show/watch --mount");
+            assertThat(each.findings()).as(texts.get(i)).singleElement()
+                    .satisfies(f -> assertThat(f).startsWith("unknown-option-in-docs show/watch --"));
+        }
     }
 
     @Test

@@ -253,7 +253,7 @@ wrong, from the run that last reported the finding.
 | `block_doc` | one more document for the block types; repeatable |
 | `max_sections`, `max_section_chars` | the caps of the AI part |
 | `verdict_version` | the version of the question a verdict answers, part of every section's digest: raise it, and every section is judged again |
-| `foreign_option` | an option of another program that a command's section names, such as Docker's `--filter`; with a second word (`foreign_option from COPY`) only in a line that holds that word before the option, so that the same name anywhere else is still a finding; repeatable, each with its reason in a comment |
+| `foreign_option` | an option of another program that a command's section names, such as Docker's `--filter`; with a second word (`foreign_option from COPY`) only where that word stands right before the option, with nothing but a backtick, a quote, `[` or white space between, so that the same name anywhere else is still a finding; repeatable, each with its reason in a comment |
 | `not_a_block_type` | a word that a document uses as `` `word` block `` and that is no block type; repeatable |
 | `example_exclude` | a glob of directories below `examples/` that are no example packages; repeatable |
 

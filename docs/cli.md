@@ -821,7 +821,7 @@ A tool reads such a value from a file that a shell step wrote, and its arguments
   "command": "printf '%s' \"$ANSWER\" > \"{{ scratch_dir }}/answer.txt\""}},
 {"type": "shell", "name": "scan", "config": {
   "container_image": "./images/tool",
-  "container_args": ["scan", "--from", "{{ scratch_dir }}/answer.txt"]}}
+  "container_args": ["scan", "{{ scratch_dir }}/answer.txt"]}}
 ```
 
 The path of a mount and a `workflow_id` are written out, or come from a variable that `default_context` or an input

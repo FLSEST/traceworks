@@ -433,7 +433,7 @@ def heading_commands(heading):
 
 
 def foreign_options(values):
-    """The foreign_option lines of the rule file: option -> the words one of which a line must hold before it, or
+    """The foreign_option lines of the rule file: option -> the words one of which must stand right before it, or
     None for an option that is another program's wherever it stands."""
     foreign = {}
     for value in values:
@@ -456,7 +456,8 @@ def unknown_options(text, every_option, foreign):
             if option in foreign:
                 words = foreign[option]
                 before = line[:match.start()]
-                if words is None or any(re.search(r"(?<![\w-])" + re.escape(word) + r"(?![\w-])", before)
+                # The word stands right before the option: only a backtick, a quote, "[" or white space between
+                if words is None or any(re.search(r"(?<![\w-])" + re.escape(word) + r"[`'\"\[\s]*$", before)
                                         for word in words):
                     continue
             unknown.add(option)
