@@ -5,9 +5,10 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Seals;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -37,24 +38,27 @@ public final class SealCommand implements Command {
     public int run(Context context, Parsed args) {
         Path pkg = context.resolve(args.positional());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         String key = args.option("key");
         if (key != null && key.isBlank()) {
-            throw new UsageException("--key needs the path of an SSH key");
+            throw new UsageException(Message.of("--key needs the path of an SSH key"));
         }
         Seals.Sealed sealed = context.seals().seal(pkg, key == null ? null : context.resolve(key).toString());
         PrintStream out = context.out();
-        out.println("sealed " + TerminalFormat.safe(sealed.workflowName()) + " ("
-                + TerminalFormat.safe(sealed.seal().workflowId()) + ")");
-        out.println("  package  " + TerminalFormat.safe(sealed.directory()));
+        // The names are the package's text; its folder is the one the operator named
+        TerminalText.println(out, "sealed ", TerminalText.safe(sealed.workflowName()), " (",
+                TerminalText.safe(sealed.seal().workflowId()), ")");
+        TerminalText.println(out, "  package  ", TerminalText.whole(sealed.directory()));
         out.println("  digest   " + sealed.seal().digest());
         if (!sealed.children().isEmpty()) {
-            out.println("  covers   the packages it calls: " + TerminalFormat.safe(String.join(", ", sealed.children())));
+            TerminalText.println(out, "  covers   the packages it calls: ",
+                    TerminalText.safe(String.join(", ", sealed.children())));
         }
-        out.println("  signer   " + TerminalFormat.safe(String.join(", ", sealed.principals())) + " (key "
-                + TerminalFormat.safe(sealed.key()) + ")");
-        out.println("  seal     " + TerminalFormat.safe(Path.of(sealed.directory()).resolve("traceworks.seal").toString()));
+        TerminalText.println(out, "  signer   ", TerminalText.safe(String.join(", ", sealed.principals())), " (key ",
+                TerminalText.safe(sealed.key()), ")");
+        TerminalText.println(out, "  seal     ",
+                TerminalText.whole(Path.of(sealed.directory()).resolve("traceworks.seal").toString()));
         return ExitCodes.OK;
     }
 }

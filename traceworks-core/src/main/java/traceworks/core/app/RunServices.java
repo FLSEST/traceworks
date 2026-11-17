@@ -28,6 +28,7 @@ import traceworks.core.port.StoredRun;
 import traceworks.core.record.Manifest;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -583,7 +584,7 @@ public final class RunServices {
         try {
             return packages.load(location);
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 }

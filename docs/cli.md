@@ -1165,6 +1165,12 @@ option and reads the same variable ("approve and answer"). There no earlier vers
 such an answer with its actor alone.
 
 A `list` line is the first 8 characters of the finding's id, its status, severity, rule key, subject and title,
+without a title that only repeats the row: one that, in lower case and taken apart at white space and at
+`# , / : _ -`, holds nothing but parts of the rule key and of the subject and the words `finding`, `findings`, `in`,
+`of`, `for`, `at`, `on`, `the`, `a` and `an` (`path_check finding in core/Mounts.java, Mounts.check(Path)` under the
+subject `core/Mounts.java#Mounts.check(Path)`). A title with a word or a number of its own stays, and
+`findings <key> show <id>` and `list --json` hold every title whole. Under a subject too long for its line the title
+begins a line of its own, marked `| ` where the subject's lines are marked `|+`. The lines are
 sorted by status (`OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK`, `DISMISSED`, `RESOLVED`), severity, rule key and
 subject; a row whose decision was made on another severity than the finding has now ends with `(decided on LOW)`,
 and a row whose decision is no longer in force with `(dismissed on LOW before, not in force)`. `list --json` holds
@@ -1192,7 +1198,8 @@ Detail    from findings.jsonl of run 4c1f6a52-0d3e-4b56-9a57-2f1c8f0f3b1e
     fix     Compare the real path.
 ```
 
-Every value is on one line, with control characters replaced and cut at 200 characters; the whole text is in the
+Every value is made one line of text, with control characters replaced and cut at 200 characters (one too long
+for its line of the terminal goes on behind `|+`); the whole text is in the
 file (`show <run>` lists it as `file findings.jsonl ... blob <sha256>`). When there is no detail, one line says why
 and the rest is shown: `Detail    none: run <id> is not in this home`, `... recorded no findings.jsonl` (a run of
 an earlier version, or an audit that writes none), `... has no entry for this rule and subject in its
@@ -1575,12 +1582,67 @@ Without a terminal (CI, a pipe), or with `--no-input`, nobody can answer inside 
    row: an option padded to the terminal's width would otherwise end on a line of its own and read as a hint of
    Traceworks. With the run's id that is an option of up to 9 characters. For anything longer the command is
    printed once with a placeholder (`--answer '<option>'`, `--field '<name>=<value>'`) and the options or names
-   follow on lines marked with `|`, as the lines of the question are; type the one you choose, quoted for your
+   follow on lines marked with `|` (`| ` before each, `|+` where one goes on), as the lines of the question are; type the one you choose, quoted for your
    shell, or copy the command from `run.html`. The hint of a question that does not park the run
    (`waiting for an answer: ...`) follows the same rule, and so does every other place that shows options or a
    field's label on the terminal: the question asked at the console (`answer with one of:`, `one of:`,
    `is not one of:`) and the live line of a question (`question: ... [Yes / No]`, or `[options:]` with the
    options on marked lines below it).
+
+   **Text from outside on the terminal.** The same holds for every text that is not Traceworks' own, in every
+   command: a question, the hint of a default, a pattern, the name of a workflow or a step, a command line, an
+   output, an error, a finding, and the value a message quotes. Such a text is written into its line only where
+   it stays on one line of a terminal of 80 columns, has something of Traceworks in front of it there, and holds
+   no two blanks in a row.
+
+   - **A text that does not fit** goes on below, on lines that begin with `|+` behind the indent of their line. It
+     is broken at a blank; where none fits, behind a separator of a path or a member (`/` or `#` first, then `,`
+     or `(`, then `.`); and inside a word only where nothing else fits. What follows `|+` follows the end of the
+     line above as it is: `|+ word` after a break at a blank, `|+word` after any other break (behind a separator,
+     or inside a word), so nobody reads a blank into a path. Take every line break with the blanks and the `|+`
+     behind it out, and the line is as it was. A text that fits a line of its own is not cut in two, and on a
+     line that goes on already each further text that does not fit starts a line of its own: so a row of a list
+     (`findings <key> list`, `runs --long`, `seals`) keeps its own columns, and a subject or a title too long for
+     it stands under the row: the subject from the start of a `|+` line, and a title under such a subject on a line
+     of its own that begins with `| ` ("findings", what a `list` line holds).
+   - **A text that begins a line** has `| ` in front of it, in the place of the two blanks before it where the line
+     is indented, so that the columns of a table stay: a workflow's description and what a block runs in `show`,
+     the name of a step or an input in `diff`, a problem `verify` lists, a workflow's id in `seals`.
+   - **A text with a run of blanks** is written on marked lines only.
+   - **A text of several lines** (the question of a parked run, an output under `show --outputs`, a line diff)
+     has `| ` before each of its lines, and a line of it that is too wide goes on behind `|+`.
+
+   ```
+   76b8fad3  OPEN       MEDIUM    path_check
+     |+traceworks-adapters/src/main/java/traceworks/adapters/container/
+     |+MountGuard.java#MountGuard.normalized(String), MountGuard.real(Path),
+     |+ MountGuard.expandHome(String, Path)
+   12:34:56 run started: Security self-audit (run 1ce9f3bf) by you in containers (docker 29.1.3)
+   traceworks: The run is refused: image ./images/tool is missing: run 'traceworks images build /home/you/pkg'
+   ```
+
+   **What is Traceworks' own is printed whole**, at any length, and your terminal breaks it where it is wider:
+   its words, a command or a line of `traceworks.json` to copy, a run id, a number, a digest. A message of
+   Traceworks says which of its parts quote a value from outside, and only those parts are kept as above; the
+   parts are kept beside the message and are never in its text, so a record, an event, a register, `--json` and
+   `run.html` hold the message as plain text, and no quoted value can pass for Traceworks' words. What you typed
+   on the command line (a package, a run, an option's value) is shown whole too, unless it holds a run of blanks.
+   A value of a field that Traceworks writes into a record itself (a status, an exit code, the name and version
+   of the container runtime, a model's id in `runs --long`) is its own where it is one word of ASCII letters,
+   digits and `._+~-` of at most 40 characters; anything else in such a field is a text from outside.
+
+   A message that does not say its parts yet is a text from outside as a whole, and broken at 80 columns as one,
+   also on a wider terminal: put a command in it together again before you copy it. That holds for the findings
+   of `check`, the reasons a child workflow, a mount or a secret's name is refused for, what a damaged record or
+   a seal is refused for, the notes and warnings of a run, a failure of `images build`, and the refusal of an
+   answer. The lines of `describe` are laid out by Traceworks with the package's names in them, and only their
+   length is judged.
+
+   What you named yourself stays whole: the folder of a run in `record` and `report`, and the commands that
+   answer and resume a run. At the console a question of one line
+   that fits stays behind `? `; any other is printed below a lone `?`, every line behind `| `. The hint of a
+   default that does not fit its line goes on the same way, and an empty line does not take such a default.
+   Traceworks does not ask the terminal for its width: on one narrower than 80 columns any line can break.
 4. `traceworks approve` records the answer. `traceworks resume` (a host run with `--allow-host-execution`, or the
    setting) continues from the last checkpoint. The step asks again and receives the recorded answer at once. For a
    host run, the commands that `run`, `approve`, `answer` and `show` print to go on carry `--allow-host-execution`

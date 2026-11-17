@@ -376,7 +376,9 @@ class EngineRoundTripTest {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         Main.run(all, new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true,
                 StandardCharsets.UTF_8), env, temp, null, RuntimeSource.NONE);
-        return out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8);
+        // As it reads: a line Traceworks broke for an 80 column terminal goes on behind "|+"
+        return (out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8))
+                .replaceAll("\\R *\\|\\+", "");
     }
 
     private Path file(String name) throws IOException {

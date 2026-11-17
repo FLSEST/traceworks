@@ -72,8 +72,9 @@ class RunCheckTest {
         int code = Main.run(all.toArray(String[]::new), new PrintStream(new Tee(out, both), true, StandardCharsets.UTF_8),
                 new PrintStream(new Tee(err, both), true, StandardCharsets.UTF_8), Map.of("TRACEWORKS_ACTOR", "tester"),
                 work, null, RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8),
-                both.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(both.toString(StandardCharsets.UTF_8)));
     }
 
     /** Writes to two streams, so that a test sees a stream on its own and both in the order of their writes. */

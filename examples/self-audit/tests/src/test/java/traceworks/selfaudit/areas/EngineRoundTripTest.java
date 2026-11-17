@@ -76,7 +76,9 @@ class EngineRoundTripTest {
                         home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"},
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8),
                 env, temp, null, RuntimeSource.NONE);
-        String output = out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8);
+        // As it reads: a line Traceworks broke for an 80 column terminal goes on behind "|+"
+        String output = (out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8))
+                .replaceAll("\\R *\\|\\+", "");
 
         Path report;
         try (Stream<Path> walk = Files.walk(home.resolve("runs"))) {
@@ -724,6 +726,8 @@ class EngineRoundTripTest {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         traceworks.cli.main.Main.run(args, new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), env, temp, null, RuntimeSource.NONE);
-        return out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8);
+        // As it reads: a line Traceworks broke for an 80 column terminal goes on behind "|+"
+        return (out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8))
+                .replaceAll("\\R *\\|\\+", "");
     }
 }

@@ -40,23 +40,23 @@ class DiffIT extends IntegrationTest {
         assertThat(same.out()).contains("Run A     " + first, "Run B     " + second)
                 .containsPattern("(?m)^  same: workflow id, workflow name, package digest, .*image shell.*gate$")
                 .contains("  same: name")
-                .containsPattern("(?m)^  greet +COMPLETED +same output$")
-                .containsPattern("(?m)^  count +COMPLETED +same output$")
-                .containsPattern("(?m)^  publish +COMPLETED +same output$")
-                .containsPattern("(?m)^  done +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| greet +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| count +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| publish +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| done +COMPLETED +same output$")
                 .contains("same: run B reproduced run A");
         assertThat(same.err()).isEmpty();
 
         assertThat(differs.code()).as(differs.describe()).isEqualTo(11);
         assertThat(differs.out())
                 .containsPattern("(?m)^  inputs digest +A [0-9a-f]{64}\\R +B [0-9a-f]{64}$")
-                .containsPattern("(?m)^  name +A \"Anna\"\\R +B \"Bert\"$")
-                .containsPattern("(?m)^  greet +COMPLETED +output differs$")
+                .containsPattern("(?m)^\\| name +A \"Anna\"\\R +B \"Bert\"$")
+                .containsPattern("(?m)^\\| greet +COMPLETED +output differs$")
                 .contains("      | - Hello, Anna\n      | + Hello, Bert\n")
-                .containsPattern("(?m)^  count +COMPLETED +same output$")
-                .containsPattern("(?m)^  done +COMPLETED +output differs$")
-                .contains("differs: run B did not reproduce run A", "  the inputs differ",
-                        "  step greet: the output differs", "  step done: the output differs");
+                .containsPattern("(?m)^\\| count +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| done +COMPLETED +output differs$")
+                .contains("differs: run B did not reproduce run A", "| the inputs differ",
+                        "| step greet: the output differs", "| step done: the output differs");
 
         List<String> runs = traceworks.exec("runs", "--long").out().lines().toList();
         assertThat(runs).hasSize(3);
@@ -76,8 +76,8 @@ class DiffIT extends IntegrationTest {
         Result diff = traceworks.exec("diff", first, second);
 
         assertThat(diff.code()).as(diff.describe()).isEqualTo(11);
-        assertThat(diff.out()).containsPattern("(?m)^  count +COMPLETED +output differs$")
-                .contains("differs: run B did not reproduce run A", "  step count: the output differs")
+        assertThat(diff.out()).containsPattern("(?m)^\\| count +COMPLETED +output differs$")
+                .contains("differs: run B did not reproduce run A", "| step count: the output differs")
                 .doesNotContain("the inputs differ").doesNotContain("the package digest differs");
     }
 

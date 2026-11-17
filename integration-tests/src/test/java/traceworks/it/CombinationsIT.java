@@ -190,9 +190,9 @@ class CombinationsIT extends IntegrationTest {
         assertThat(diff.out()).contains("the inputs differ");
         for (String step : List.of("gather", "child", "child > add", "route", "final")) {
             assertThat(diff.out()).as(diff.describe())
-                    .containsPattern("(?m)^  " + step + " +COMPLETED +same output$");
+                    .containsPattern("(?m)^\\| " + step + " +COMPLETED +same output$");
         }
-        assertThat(diff.out()).as(diff.describe()).doesNotContainPattern("(?m)^  step (gather|child|route|final)");
+        assertThat(diff.out()).as(diff.describe()).doesNotContainPattern("(?m)^\\| step (gather|child|route|final)");
     }
 
     /**

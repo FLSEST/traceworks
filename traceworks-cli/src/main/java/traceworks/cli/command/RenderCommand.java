@@ -4,7 +4,7 @@ import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 
 /** {@code traceworks render <run>}: writes {@code run.html} again from the record. */
 public final class RenderCommand implements Command {
@@ -19,7 +19,8 @@ public final class RenderCommand implements Command {
     @Override
     public int run(Context context, Parsed args) {
         String folder = context.services().render(args.positional());
-        context.out().println(TerminalFormat.safe(folder) + "/run.html");
+        // The folder of a run the operator named, to be copied whole
+        TerminalText.println(context.out(), TerminalText.whole(folder), "/run.html");
         return 0;
     }
 }

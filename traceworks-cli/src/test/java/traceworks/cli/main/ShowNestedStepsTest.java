@@ -77,7 +77,8 @@ class ShowNestedStepsTest {
         int code = Main.run(all.toArray(String[]::new), new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), Map.of("TRACEWORKS_ACTOR", "tester"), work, null,
                 RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)));
     }
 
     /** Writes the workflow {@code dir/workflow.json} with {@code blocks}, a JSON list without its brackets. */
@@ -384,7 +385,8 @@ class ShowNestedStepsTest {
 
     /**
      * The whole of {@code show} for a run without child runs and switches, byte for byte: what it printed before it
-     * learnt to name what ran inside a step. A change to any line of it shows here.
+     * learnt to name what ran inside a step, but for the mark in front of a text of the workflow that begins its
+     * line (the description, what a block runs). A change to any line of it shows here.
      */
     @Test
     void aRunWithoutChildRunsAndSwitches_isShownByteForByteAsBefore() throws IOException {
@@ -411,12 +413,12 @@ class ShowNestedStepsTest {
             AI net    restricted
 
             Workflow
-              A fixed record.
+            | A fixed record.
               0   build                    shell                              step 0 COMPLETED
-                  make
+                | make
               1   route                    switch                             did not run
               2   outer                    sub-workflow                       did not run
-                  ./child
+                | ./child
 
             Steps
               0   build                    [shell]          COMPLETED         12 ms

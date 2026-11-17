@@ -3,6 +3,7 @@ package traceworks.core.app;
 import traceworks.core.port.ContainerRuntime;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
+import traceworks.core.util.Message;
 
 import java.util.List;
 
@@ -31,18 +32,18 @@ final class LeftoverContainers {
         String label = ContainerRuntime.RUN_LABEL + "=" + runId;
         if (runtime == null) {
             if (mayHaveContainers) {
-                throw new RunRefusedException(what + ": no container runtime answers (podman or docker), so what is"
+                throw new RunRefusedException(Message.of(what + ": no container runtime answers (podman or docker), so what is"
                         + " left of its containers (label " + label + ") cannot be confirmed removed, and one may"
-                        + " still write into its directories; make the runtime answer for this shell, then try again");
+                        + " still write into its directories; make the runtime answer for this shell, then try again"));
             }
             return;
         }
         if (!runtime.removeLeftovers(runId)) {
-            throw new RunRefusedException(what + ": what is left of its containers (label " + label + ") cannot be"
+            throw new RunRefusedException(Message.of(what + ": what is left of its containers (label " + label + ") cannot be"
                     + " confirmed removed, and one may still write into its directories; remove them with "
                     + runtime.name() + " rm -f $(" + runtime.name() + " ps -aq --filter label=" + label + "), and"
                     + " the networks of its AI steps with " + runtime.name() + " network rm $(" + runtime.name()
-                    + " network ls -q --filter label=" + label + "), then try again");
+                    + " network ls -q --filter label=" + label + "), then try again"));
         }
     }
 

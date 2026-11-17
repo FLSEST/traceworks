@@ -13,6 +13,7 @@ import traceworks.core.record.EventChain;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.StartEntry;
+import traceworks.core.util.Message;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -133,7 +134,7 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
     static LedgerReport acknowledge(Ledger ledger, RunStore store, Clock clock, String actor, String runRef,
                                     String note) {
         if (note == null || note.isBlank()) {
-            throw new RunRefusedException("An acknowledgement needs a note that says why: --note \"...\"");
+            throw new RunRefusedException(Message.of("An acknowledgement needs a note that says why: --note \"...\""));
         }
         LedgerReport before = of(ledger, store, clock, true);
         Set<String> reported = new LinkedHashSet<>();
@@ -142,9 +143,10 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                 ? List.of() : reported.stream().filter(id -> id.startsWith(runRef)).toList();
         if (hits.size() != 1) {
             throw new RunRefusedException(hits.isEmpty()
-                    ? "The check of the ledger reports nothing of a run " + runRef + ": there is nothing to"
-                    + " acknowledge (traceworks verify lists what it reports)"
-                    : runRef + " is the start of " + hits.size() + " runs the check reports; name one of them whole");
+                    ? Message.of("The check of the ledger reports nothing of a run ", Message.typed(runRef),
+                    ": there is nothing to acknowledge (traceworks verify lists what it reports)")
+                    : Message.of(Message.typed(runRef), " is the start of " + hits.size()
+                    + " runs the check reports; name one of them whole"));
         }
         String id = hits.getFirst();
         ObjectNode line = JSON.createObjectNode();
@@ -158,8 +160,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         try {
             ledger.acknowledge(id, JSON.writeValueAsBytes(line));
         } catch (IOException | RuntimeException e) {
-            throw new RunRefusedException("The ledger could not take the acknowledgement of run " + id + ": "
-                    + e.getMessage());
+            throw new RunRefusedException(Message.of("The ledger could not take the acknowledgement of run " + id + ": ",
+                    Message.of(e)));
         }
         return of(ledger, store, clock, true);
     }

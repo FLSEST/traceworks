@@ -6,6 +6,7 @@ import traceworks.core.port.AiCli;
 import traceworks.core.port.LocalModels;
 import traceworks.core.port.WorkflowResolver;
 import traceworks.core.record.Redactor;
+import traceworks.core.util.Message;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -74,7 +75,7 @@ final class AiCredentials {
         if (source == null) {
             return Map.of();
         }
-        List<String> refusals = new ArrayList<>();
+        List<Object> refusals = new ArrayList<>();
         Map<String, Map<String, String>> credentials = new LinkedHashMap<>();
         for (AiCli cli : used) {
             Set<String> ofCli = models.getOrDefault(cli.id().toLowerCase(Locale.ROOT), Set.of());
@@ -100,9 +101,10 @@ final class AiCredentials {
                 source.value(name).ifPresent(value -> ofTheProvider.put(name, value));
             }
             if (ofTheProvider.isEmpty()) {
-                refusals.add("AI provider " + cli.id() + " has no credential: " + source.whereToPut(false)
-                        + ", under one of the names "
-                        + String.join(", ", names) + subscriptionHint(cli.id()));
+                // All of it is Traceworks' own: the provider, the names it knows, and where a value goes
+                refusals.add(Message.of("AI provider " + cli.id() + " has no credential: "
+                        + source.whereToPut(false) + ", under one of the names "
+                        + String.join(", ", names) + subscriptionHint(cli.id())));
                 continue;
             }
             missingForAModel(cli, ofTheProvider.keySet(), ofProvider, source, refusals);
@@ -134,7 +136,7 @@ final class AiCredentials {
      * @return whether a model goes to a server of the operator's
      */
     private static boolean localSecrets(AiCli cli, Set<String> models, Set<String> ofProvider, SecretValues source,
-                                        Map<String, String> found, List<String> refusals) {
+                                        Map<String, String> found, List<Object> refusals) {
         boolean any = false;
         for (String model : models) {
             LocalModels.Use use = cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null,
@@ -168,7 +170,7 @@ final class AiCredentials {
     }
 
     /** A refusal for each value the record could not redact ({@link Redactor#problem}). */
-    private static void secretProblems(AiCli cli, Map<String, String> found, List<String> refusals) {
+    private static void secretProblems(AiCli cli, Map<String, String> found, List<Object> refusals) {
         found.forEach((name, value) -> {
             Redactor.ValueProblem problem = Redactor.problem(value);
             if (problem != null) {
@@ -186,7 +188,7 @@ final class AiCredentials {
      * message, as {@code check} reports it ({@code unknown-model-backend}).
      */
     private static void missingForAModel(AiCli cli, Set<String> withValue, Set<String> models, SecretValues source,
-                                         List<String> refusals) {
+                                         List<Object> refusals) {
         for (String model : models) {
             AiCli.AiCall call = new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null, ToolPolicy.NONE,
                     null, 1);

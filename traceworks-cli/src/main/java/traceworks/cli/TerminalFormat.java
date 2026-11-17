@@ -41,16 +41,22 @@ public final class TerminalFormat {
 
     /** The line of an event; empty for events a terminal does not need (checkpoints, status changes). */
     public Optional<String> line(RecordedEvent event) {
-        Optional<String> text = describe(event);
-        Optional<String> line = text.map(t -> TIME.format(event.at()) + " " + (event.parent() == null ? "" : "  ")
-                + safe(t));
-        if (event.type().equals("approval.requested")) {
-            return line.map(head -> options(head, event.fields().path("options")));
+        Object text = describe(event);
+        if (text == null) {
+            return Optional.empty();
         }
-        return line;
+        // Everything a line shows that is not Traceworks' own wording is a text from outside: a record can be
+        // another's, or edited. Each such part goes through TerminalText, so none starts a terminal line unmarked
+        List<String> lines = TerminalText.lines(TIME.format(event.at()) + " " + (event.parent() == null ? "" : "  "),
+                text);
+        if (event.type().equals("approval.requested")) {
+            lines = options(lines, event.fields().path("options"));
+        }
+        return Optional.of(String.join("\n", lines));
     }
 
-    private Optional<String> describe(RecordedEvent e) {
+    /** The parts of the line of an event, for {@link TerminalText#lines}; {@code null} for an event without one. */
+    private Object describe(RecordedEvent e) {
         JsonNode f = e.fields();
         if (e.type().equals("run.started") || e.type().equals("run.resumed")) {
             // A record of an earlier version names no limit: it had the default
@@ -58,50 +64,69 @@ public final class TerminalFormat {
                     : CommandRunner.OUTPUT_LIMIT_MIB;
         }
         String step = e.step() == null ? "" : "step " + e.step() + "  ";
-        return Optional.ofNullable(switch (e.type()) {
-            case "run.started" -> "run started: " + f.path("workflow").path("name").asText("?") + " (run "
-                    + shortId(e.run()) + ") by " + f.path("actor").asText("?") + where(f, false);
-            case "step.started" -> step + name(f) + " [" + badge(f) + "] started";
+        return switch (e.type()) {
+            case "run.started" -> seq("run started: ", text(f.path("workflow").path("name")), " (run ",
+                    TerminalText.word(shortId(e.run())), ") by ", text(f.path("actor")), where(f, false));
+            case "step.started" -> seq(step, name(f), " [", word(f.path("block_type")),
+                    f.path("mode").asText().equals("ai") ? ", ai" : "", "] started");
             case "step.waiting" -> step + (f.path("waiting").asBoolean() ? "waiting for an answer" : "going on");
-            case "step.command" -> step + "$ " + content(e.blob("command"));
-            case "step.command.finished" -> step + "exit " + f.path("exit_code").asText("?") + " after "
-                    + f.path("duration_ms").asLong() + " ms" + (f.path("timed_out").asBoolean() ? " (timed out)" : "")
-                    + truncated(f.path("truncated")) + outputCut(f.path("output_cut"));
-            case "step.output" -> step + "output: " + content(e.blob("output"));
-            case "gate.reported" -> step + "gate " + f.path("status").asText("?")
-                    + (f.path("category").isNull() || f.path("category").isMissingNode() ? ""
-                    : " " + f.path("category").asText())
-                    + descriptionSuffix(e.blob("description"));
-            case "approval.requested" -> step + "question: " + content(e.blob("question"));
-            case "approval.answered" -> step + "answered: " + content(e.blob("answer")) + by(f)
-                    + through(f);
-            case "request.refused" -> "request refused: " + f.path("reason").asText("?");
-            case "foreach.item.started" -> step + "item " + (f.path("item_index").asInt() + 1) + "/"
-                    + f.path("total").asInt() + " started: " + content(e.blob("item"));
-            case "foreach.item.finished" -> step + "item " + (f.path("item_index").asInt() + 1) + "/"
-                    + f.path("total").asInt() + " " + f.path("status").asText("?")
-                    + (f.path("resumed_from").isInt()
-                    ? " (taken over from event " + f.path("resumed_from").asInt() + ", not run again)" : "");
-            case "agentic.progress" -> step + "agent " + f.path("phase").asText("?");
-            case "step.finished" -> step + name(f) + " " + f.path("status").asText("?") + " after "
-                    + f.path("duration_ms").asLong() + " ms";
+            case "step.command" -> seq(step, "$ ", content(e.blob("command")));
+            case "step.command.finished" -> seq(step, "exit ", word(f.path("exit_code")), " after "
+                    + f.path("duration_ms").asLong() + " ms" + (f.path("timed_out").asBoolean() ? " (timed out)" : ""),
+                    truncated(f.path("truncated")), outputCut(f.path("output_cut")));
+            case "step.output" -> seq(step, "output: ", content(e.blob("output")));
+            case "gate.reported" -> seq(step, "gate ", word(f.path("status")),
+                    f.path("category").isNull() || f.path("category").isMissingNode() ? ""
+                            : seq(" ", TerminalText.safe(f.path("category").asText())),
+                    suffix(e.blob("description")));
+            case "approval.requested" -> seq(step, "question: ", content(e.blob("question")));
+            case "approval.answered" -> seq(step, "answered: ", content(e.blob("answer")), by(f), through(f));
+            case "request.refused" -> seq("request refused: ", text(f.path("reason")));
+            case "foreach.item.started" -> seq(step, "item " + (f.path("item_index").asInt() + 1) + "/"
+                    + f.path("total").asInt() + " started: ", content(e.blob("item")));
+            case "foreach.item.finished" -> seq(step, "item " + (f.path("item_index").asInt() + 1) + "/"
+                    + f.path("total").asInt() + " ", word(f.path("status")),
+                    f.path("resumed_from").isInt()
+                            ? " (taken over from event " + f.path("resumed_from").asInt() + ", not run again)" : "");
+            case "agentic.progress" -> seq(step, "agent ", word(f.path("phase")));
+            case "step.finished" -> seq(step, name(f), " ", word(f.path("status")), " after "
+                    + f.path("duration_ms").asLong() + " ms");
             case "run.parked" -> "pause".equals(f.path("kind").asText())
                     ? "run parked: paused" + (f.path("step").isInt()
                     ? " inside the loop of step " + f.path("step").asInt() : " before the next step")
-                    : "run parked at step " + f.path("step").asText("?") + ": waiting for an answer";
-            case "run.resumed" -> "run resumed by " + f.path("actor").asText("?") + where(f, true)
-                    + (f.path("rerun_step").isNumber() ? ", running step " + f.path("rerun_step").asInt() + " again"
-                    : "");
-            case "run.cancel_requested" -> "cancel requested" + by(f);
-            case "run.pause_requested" -> "pause requested" + by(f)
-                    + ": the run parks after the step or the loop item in flight";
+                    : seq("run parked at step ", word(f.path("step")), ": waiting for an answer");
+            case "run.resumed" -> seq("run resumed by ", text(f.path("actor")), where(f, true),
+                    f.path("rerun_step").isNumber() ? ", running step " + f.path("rerun_step").asInt() + " again"
+                            : "");
+            case "run.cancel_requested" -> seq("cancel requested", by(f));
+            case "run.pause_requested" -> seq("pause requested", by(f),
+                    ": the run parks after the step or the loop item in flight");
             case "run.recovered" -> "record recovered: a torn last line was set aside";
-            case "run.finished" -> "run finished: " + f.path("status").asText("?")
-                    + (f.path("gate").isObject() ? ", gate " + f.path("gate").path("status").asText() : "")
-                    + errorSuffix(e.blob("error"));
+            case "run.finished" -> seq("run finished: ", word(f.path("status")),
+                    f.path("gate").isObject() ? seq(", gate ", word(f.path("gate").path("status")))
+                            : "",
+                    suffix(e.blob("error")));
             case "run.checkpoint", "run.status" -> null;
-            default -> e.type();
-        });
+            default -> TerminalText.safe(e.type());
+        };
+    }
+
+    private static Object seq(Object... parts) {
+        return TerminalText.seq(parts);
+    }
+
+    /** A value of the record as a text from outside; {@code ?} for one that is missing. */
+    private static TerminalText text(JsonNode value) {
+        return TerminalText.safe(value.asText("?"));
+    }
+
+    /**
+     * A value of a field Traceworks writes itself (a status, an exit code, the runtime's name and version): its own
+     * where it has the shape of one, a text from outside where a record holds anything else
+     * ({@link TerminalText#word}).
+     */
+    private static TerminalText word(JsonNode value) {
+        return TerminalText.word(value.asText("?"));
     }
 
     /**
@@ -111,12 +136,12 @@ public final class TerminalFormat {
      *
      * @param resumed whether it is a resume, which keeps a host run on the host where a runtime works now
      */
-    private static String where(JsonNode f, boolean resumed) {
+    private static Object where(JsonNode f, boolean resumed) {
         JsonNode runtime = f.path("container_runtime");
         boolean found = runtime.isObject();
         return switch (f.path("execution").asText("")) {
-            case "container" -> " in containers" + (found ? " (" + runtime.path("name").asText("?") + " "
-                    + runtime.path("version").asText("?") + ")" : "");
+            case "container" -> seq(" in containers", found ? seq(" (", word(runtime.path("name")), " ",
+                    word(runtime.path("version")), ")") : "");
             case "host" -> " on the host" + (!found ? " (no container runtime works)" : resumed ? ", where it started"
                     : "");
             default -> "";
@@ -124,83 +149,88 @@ public final class TerminalFormat {
     }
 
     /** The block name of a step event; a block without one is shown as {@value StepView#UNNAMED}. */
-    private static String name(JsonNode f) {
+    private static Object name(JsonNode f) {
         JsonNode name = f.path("name");
-        return name.isTextual() ? name.asText() : StepView.UNNAMED;
+        return name.isTextual() ? TerminalText.safe(name.asText()) : StepView.UNNAMED;
     }
 
-    private static String badge(JsonNode f) {
-        return f.path("block_type").asText("?") + (f.path("mode").asText().equals("ai") ? ", ai" : "");
-    }
-
-    private static String by(JsonNode f) {
+    private static Object by(JsonNode f) {
         JsonNode actor = f.path("actor");
-        return actor.isNull() || actor.isMissingNode() ? "" : " by " + actor.asText();
+        return actor.isNull() || actor.isMissingNode() ? "" : seq(" by ", TerminalText.safe(actor.asText()));
     }
 
     /**
      * The agent an answer names beside its actor, in the register's words; nothing for an answer without one. The
      * name is bounded where it is given; a record that was edited can hold any, so it is made safe here.
      */
-    private static String through(JsonNode f) {
+    private static Object through(JsonNode f) {
         JsonNode agent = f.path("agent");
-        return agent.isTextual() ? DecisionAgent.through(oneLine(agent.asText())) : "";
+        return agent.isTextual() ? through(agent.asText()) : "";
+    }
+
+    /** {@link DecisionAgent#through} as the parts of a line: its words, and the name as a text from outside. */
+    public static Object through(String agent) {
+        return agent == null ? "" : seq(DecisionAgent.through(""), TerminalText.oneLine(agent));
     }
 
     /**
      * The streams a command's end names as cut at the output limit, such as {@code " (stdout beyond 16 MiB)"}, with the
      * run's limit.
      */
-    private String truncated(JsonNode streams) {
+    private Object truncated(JsonNode streams) {
         List<String> names = new ArrayList<>();
-        streams.forEach(stream -> names.add(oneLine(stream.asText())));
-        return names.isEmpty() ? "" : " (" + String.join(", ", names) + " beyond "
-                + CommandRunner.sizeText(outputLimitMib * 1024L * 1024L) + ")";
+        streams.forEach(stream -> names.add(stream.asText()));
+        return names.isEmpty() ? "" : seq(" (", TerminalText.oneLine(String.join(", ", names)), " beyond "
+                + CommandRunner.sizeText(outputLimitMib * 1024L * 1024L) + ")");
     }
 
     /**
      * The cut a command's end names, such as {@code " (output cut: stdout after 5000 ms)"}: the reading of the output
      * ended at its bound, because something the command left behind still held it.
      */
-    private static String outputCut(JsonNode cut) {
+    private static Object outputCut(JsonNode cut) {
         List<String> names = new ArrayList<>();
-        cut.path("streams").forEach(stream -> names.add(oneLine(stream.asText())));
-        return names.isEmpty() ? "" : " (output cut: " + String.join(", ", names) + " after "
-                + cut.path("after_ms").asLong() + " ms)";
+        cut.path("streams").forEach(stream -> names.add(stream.asText()));
+        return names.isEmpty() ? "" : seq(" (output cut: ", TerminalText.oneLine(String.join(", ", names)), " after "
+                + cut.path("after_ms").asLong() + " ms)");
     }
 
     /**
-     * The line of a question with its options behind it. The options are the workflow's text: they stay on the
-     * line only where it fits the terminal and none holds a run of blanks, else each follows on marked lines.
+     * The lines of a question with its options behind them. The options are the workflow's text: they stay on the
+     * question's last line only where it fits the terminal and none holds a run of blanks, else each follows on
+     * marked lines.
+     *
+     * @param head the lines of the question, the first as it is printed and each further one with its mark
      */
-    private static String options(String head, JsonNode options) {
+    private static List<String> options(List<String> head, JsonNode options) {
         List<String> all = new ArrayList<>();
         options.forEach(o -> all.add(o.asText()));
         if (all.isEmpty()) {
             return head;
         }
-        List<String> lines = AnswerCommands.shown("  ", head, " [", "]", " [options:]", all);
-        return lines.getFirst() + lines.stream().skip(1).map(line -> "\n  " + line)
-                .collect(java.util.stream.Collectors.joining());
+        List<String> lines = new ArrayList<>(head.subList(0, head.size() - 1));
+        List<String> shown = TerminalText.shown("", head.getLast(), " [", "]", " [options:]", all);
+        lines.add(shown.getFirst());
+        shown.stream().skip(1).forEach(line -> lines.add("  " + line));
+        return lines;
     }
 
-    private String descriptionSuffix(BlobRef description) {
-        return description == null ? "" : ": " + content(description);
+    private Object suffix(BlobRef text) {
+        return text == null ? "" : seq(": ", content(text));
     }
 
-    private String errorSuffix(BlobRef error) {
-        return error == null ? "" : ": " + content(error);
-    }
-
-    private String content(BlobRef ref) {
+    private Object content(BlobRef ref) {
         if (ref == null) {
             return "";
         }
-        return blobText.apply(ref.sha256()).map(TerminalFormat::oneLine).orElse("(deleted)");
+        return blobText.apply(ref.sha256()).<Object>map(TerminalText::oneLine).orElse("(deleted)");
     }
 
-    /** Text on one line: white space runs become one space, control characters become {@code ?}, cut at the limit. */
-    public static String oneLine(String text) {
+    /**
+     * Text on one line: white space runs become one space, control characters become {@code ?}, cut at the limit.
+     * A {@code String} for a place that prints nothing; a line takes {@link TerminalText#oneLine}.
+     */
+    static String oneLine(String text) {
         StringBuilder out = new StringBuilder();
         boolean space = false;
         for (int i = 0; i < text.length(); ) {
@@ -226,9 +256,10 @@ public final class TerminalFormat {
      * A value from the record or a package, made safe to print as part of a line: every control character (C0, DEL
      * and C1, so terminal escapes and the OSC introducers), every invisible format character (bidirectional
      * overrides and isolates, zero-width and tag characters, also those outside the basic plane) and every line
-     * separator becomes {@code ?}. Nothing is cut and nothing collapsed.
+     * separator becomes {@code ?}. Nothing is cut and nothing collapsed. Visible in this package only: a line
+     * takes {@link TerminalText#safe}, which also keeps the text from starting a terminal line.
      */
-    public static String safe(String text) {
+    static String safe(String text) {
         if (text == null) {
             return "";
         }
@@ -248,7 +279,7 @@ public final class TerminalFormat {
     }
 
     /** Text for several lines: control characters other than line feed and tab become {@code ?}. */
-    public static String printable(String text) {
+    static String printable(String text) {
         StringBuilder out = new StringBuilder(text.length());
         text.codePoints().forEach(c -> out.appendCodePoint(dangerous(c) && c != '\n' && c != '\t' ? '?' : c));
         return out.toString();

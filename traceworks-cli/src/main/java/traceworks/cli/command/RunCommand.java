@@ -6,7 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.FindingLines;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.RunCheck;
 import traceworks.core.app.RunResult;
@@ -14,6 +14,7 @@ import traceworks.core.app.RunServices;
 import traceworks.core.app.StartRequest;
 import traceworks.core.port.AiCli;
 import traceworks.core.port.SourceCheckout;
+import traceworks.core.util.Message;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -82,14 +83,14 @@ public final class RunCommand implements Command {
     public int run(Context context, Parsed args) {
         Path pkg = context.resolve(args.positional());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         Map<String, String> inputs = inputs(args);
         String threshold = threshold(args.option("fail-on-gate"));
         String source = source(context, args);
         String ref = args.option("ref");
         if (ref != null && source == null) {
-            throw new UsageException("--ref needs --source: it names what to check out of the source");
+            throw new UsageException(Message.of("--ref needs --source: it names what to check out of the source"));
         }
         Path workspace = source != null ? null : args.option("workspace") == null ? context.workingDirectory()
                 : context.resolve(args.option("workspace"));
@@ -113,9 +114,9 @@ public final class RunCommand implements Command {
      * @return whether the run may start: the check found no error
      */
     private static boolean checked(Context context, RunCheck check) {
-        check.errorsAndWarnings().forEach(finding -> context.err().println(FindingLines.line(finding)));
+        check.errorsAndWarnings().forEach(finding -> FindingLines.print(context.err(), finding));
         check.inputWarnings().forEach(warning ->
-                context.err().println("traceworks: warning: " + TerminalFormat.safe(warning)));
+                TerminalText.println(context.err(), "traceworks: warning: ", TerminalText.safe(warning)));
         int errors = check.errors().size();
         if (errors > 0) {
             context.err().println("traceworks: the run is refused: check reports " + errors
@@ -134,11 +135,11 @@ public final class RunCommand implements Command {
             return null;
         }
         if (args.option("workspace") != null) {
-            throw new UsageException("--source and --workspace exclude each other: a run with --source works in its"
-                    + " own checkout of the source");
+            throw new UsageException(Message.of("--source and --workspace exclude each other: a run with --source works in its"
+                    + " own checkout of the source"));
         }
         if (source.isBlank()) {
-            throw new UsageException("--source needs a path or a URL");
+            throw new UsageException(Message.of("--source needs a path or a URL"));
         }
         return !source.startsWith("-") && SourceCheckout.isLocalPath(source) ? context.resolve(source).toString()
                 : source;
@@ -149,7 +150,7 @@ public final class RunCommand implements Command {
         for (String input : args.options("input")) {
             int eq = input.indexOf('=');
             if (eq <= 0) {
-                throw new UsageException("--input takes NAME=VALUE, got '" + input + "'");
+                throw new UsageException(Message.of("--input takes NAME=VALUE, got '", Message.typed(input), "'"));
             }
             inputs.put(input.substring(0, eq), input.substring(eq + 1));
         }
@@ -162,7 +163,8 @@ public final class RunCommand implements Command {
         }
         String threshold = value.toLowerCase(Locale.ROOT);
         if (!threshold.equals("red") && !threshold.equals("yellow")) {
-            throw new UsageException("--fail-on-gate takes red or yellow, got '" + value + "'");
+            throw new UsageException(Message.of("--fail-on-gate takes red or yellow, got '", Message.typed(value),
+                    "'"));
         }
         return threshold;
     }

@@ -65,6 +65,11 @@ class MainTest {
     private record Result(int code, String out, String err) {
     }
 
+    /** The standard error of the last command as it was printed, with the lines broken for the terminal. */
+    private String printedErr;
+    /** The standard output of the last command as it was printed. */
+    private String printedOut;
+
     @BeforeEach
     void directories() throws IOException {
         home = Files.createDirectories(temp.resolve("home"));
@@ -114,7 +119,11 @@ class MainTest {
         int code = Main.run(all.toArray(String[]::new), new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), Map.copyOf(env), work,
                 console == null ? null : new ByteArrayInputStream(console.getBytes(StandardCharsets.UTF_8)), runtime);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        printedOut = out.toString(StandardCharsets.UTF_8);
+        printedErr = err.toString(StandardCharsets.UTF_8);
+        // What a command says, whatever an 80 column terminal breaks it into (Unbroken); printedErr is as printed
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(printedErr));
     }
 
     private Result runHost(Path pkg, String... more) {
@@ -271,7 +280,7 @@ class MainTest {
                         + "\"the tools on JDK 21\"}");
         Result show = exec("show", idOf(r));
         assertThat(show.out()).contains("Images" + System.lineSeparator()
-                + "  shell                    debian:bookworm-slim", "  ./images/tools           eclipse-temurin:21-jdk-noble"
+                + "| shell                    debian:bookworm-slim", "| ./images/tools           eclipse-temurin:21-jdk-noble"
                 + "   the tools on JDK 21");
     }
 
@@ -863,12 +872,13 @@ class MainTest {
                 + "\"options\":[\"Yes\",\"No" + " ".repeat(120) + forged + "\"]}}")));
 
         Result refused = exec("approve", id, "--answer", "Maybe");
+        String printed = printedErr;
         Result fine = exec("approve", parkedRun(), "--answer", "Maybe");
 
         assertThat(refused.code()).isNotZero();
-        assertThat(refused.err().lines()).isNotEmpty()
+        assertThat(printed.lines()).isNotEmpty()
                 .allSatisfy(line -> assertThat(line.length()).as(line).isLessThanOrEqualTo(80));
-        assertThat(refused.err().lines().filter(line -> line.contains("curl")))
+        assertThat(printed.lines().filter(line -> line.contains("curl")))
                 .isNotEmpty().allSatisfy(line -> assertThat(line).startsWith("  |"));
         assertThat(fine.err()).as("a refusal that fits stays one line")
                 .startsWith("traceworks: Answer 'Maybe' is not one of the offered options [Yes, No]");
@@ -1676,9 +1686,9 @@ class MainTest {
                 .doesNotContain("output");
         assertThat(r.out()).contains("Workflow" + System.lineSeparator()
                 + "  0   build                    shell                              step 0 COMPLETED"
-                + System.lineSeparator() + "      echo built" + System.lineSeparator()
+                + System.lineSeparator() + "    | echo built" + System.lineSeparator()
                 + "  1   publish                  approval                           step 1 WAITING_APPROVAL"
-                + System.lineSeparator() + "      Publish it?" + System.lineSeparator()
+                + System.lineSeparator() + "    | Publish it?" + System.lineSeparator()
                 + "  2   done                     shell                              did not run");
     }
 
@@ -2066,8 +2076,8 @@ class MainTest {
         Result r = exec("verify", renamed.toString());
 
         assertThat(r.code()).as(r.out() + r.err()).isEqualTo(8);
-        assertThat(r.out().lines().filter(line -> line.startsWith("  ")).toList())
-                .containsExactly("  run folder not-the-run-id holds run " + id);
+        assertThat(r.out().lines().filter(line -> line.startsWith("| ")).toList())
+                .containsExactly("| run folder not-the-run-id holds run " + id);
     }
 
     @Test
@@ -2172,11 +2182,12 @@ class MainTest {
         Result parked = runHost(pkg);
 
         assertThat(parked.code()).as(parked.out() + parked.err()).isEqualTo(5);
-        List<String> question = parked.out().lines().dropWhile(line -> !line.startsWith("waiting for an answer"))
+        List<String> question = printedOut.lines().dropWhile(line -> !line.startsWith("waiting for an answer"))
                 .skip(1).takeWhile(line -> !line.equals("answer it with one of:")).toList();
-        assertThat(question).as(parked.out()).hasSizeGreaterThan(3).allSatisfy(line ->
-                assertThat(line).startsWith("  | ").hasSizeLessThanOrEqualTo(80));
-        assertThat(question).contains("  | ok?", "  | then go on with:");
+        assertThat(question).as(printedOut).hasSizeGreaterThan(3).allSatisfy(line ->
+                assertThat(line).startsWith("  |").hasSizeLessThanOrEqualTo(80));
+        assertThat(question).as("the first part of a line, and the parts it goes on with")
+                .contains("  | ok?", "  |+ then go on with:");
         assertThat(String.join(" ", question.stream().map(line -> line.substring(4).strip()).toList()))
                 .as("nothing of the question is lost, and a break is at a blank").contains(sentence);
     }

@@ -4,6 +4,7 @@ import traceworks.core.engine.SecretNames;
 import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.WorkflowResolver;
 import traceworks.core.record.Redactor;
+import traceworks.core.util.Message;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -40,7 +41,7 @@ final class Secrets {
         if (declared.isEmpty()) {
             return Map.of();
         }
-        List<String> refusals = new ArrayList<>();
+        List<Object> refusals = new ArrayList<>();
         List<String> valid = new ArrayList<>();
         for (String name : declared) {
             String problem = SecretNames.problem(name);
@@ -75,10 +76,12 @@ final class Secrets {
         }
         if (!missing.isEmpty()) {
             List<String> kept = missing.stream().filter(source::keptFromTheEnvironment).toList();
-            refusals.add("secrets without a value: " + String.join(", ", missing) + " — "
-                    + source.whereToPut(true) + (kept.isEmpty() ? "" : ". " + String.join(", ", kept)
-                    + (kept.size() == 1 ? " is" : " are") + " set in the environment, but 'secret_names' in"
-                    + " traceworks.json does not allow " + (kept.size() == 1 ? "it" : "them")));
+            // The names are the workflow's; where to put a value is Traceworks' advice, with a command to copy
+            refusals.add(Message.of("secrets without a value: ", Message.quoted(String.join(", ", missing)), " — "
+                    + source.whereToPut(true), kept.isEmpty() ? "" : Message.of(". ",
+                    Message.quoted(String.join(", ", kept)), (kept.size() == 1 ? " is" : " are")
+                    + " set in the environment, but 'secret_names' in traceworks.json does not allow "
+                    + (kept.size() == 1 ? "it" : "them"))));
         }
         refused.forEach((problem, names) -> refusals.add("secrets with a value " + problem.what() + ": "
                 + String.join(", ", names) + " — " + problem.why()));

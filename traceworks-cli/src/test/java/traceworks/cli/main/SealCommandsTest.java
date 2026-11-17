@@ -88,7 +88,8 @@ class SealCommandsTest {
                 new PrintStream(err, true, StandardCharsets.UTF_8), Map.of("TRACEWORKS_ACTOR", "tester",
                         "SSH_ASKPASS", "/bin/false", "SSH_ASKPASS_REQUIRE", "force"), work, console,
                 RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)));
     }
 
     private Result run(String... more) {

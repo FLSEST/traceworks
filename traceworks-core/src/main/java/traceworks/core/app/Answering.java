@@ -13,6 +13,7 @@ import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunView;
 import traceworks.core.register.DecisionAgent;
+import traceworks.core.util.Message;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -156,9 +157,8 @@ final class Answering {
         recorder.record(RecordTypes.APPROVAL_ANSWERED, fields);
         List<byte[]> lines = run.events().readAll();
         RunOutputs.writeView(run, RunRecords.view(id, RunRecords.parse(id, lines), false), lines);
-        return new AnswerResult(true, true, "The answer to step " + question.step() + " of run " + id
-                + " is recorded" + DecisionAgent.through(request.agent()) + "; continue the run with "
-                + resumeCommand(id, view));
+        return new AnswerResult(true, true, Message.of("The answer to step " + question.step() + " of run " + id
+                + " is recorded", through(request.agent()), "; continue the run with " + resumeCommand(id, view)));
     }
 
     /**
@@ -229,10 +229,10 @@ final class Answering {
                     // The agent as the run's process recorded it. A process of an earlier version takes the
                     // answer and knows no agent: the sender learns that its name did not arrive
                     String recorded = event.fields().path("agent").asText(null);
-                    return new AnswerResult(true, false, "The answer reached run " + run.runId()
-                            + DecisionAgent.through(recorded) + (request.agent() == null || recorded != null ? ""
-                            : "; the process that runs it recorded no agent (an earlier version of Traceworks):"
-                            + " the answer stands as " + actor + "'s alone"));
+                    return new AnswerResult(true, false, Message.of("The answer reached run " + run.runId(),
+                            through(recorded), request.agent() == null || recorded != null ? ""
+                            : Message.of("; the process that runs it recorded no agent (an earlier version of"
+                            + " Traceworks): the answer stands as ", Message.quoted(actor), "'s alone")));
                 }
                 if (RecordTypes.REQUEST_REFUSED.equals(event.type())) {
                     return refused(false, event.fields().path("reason").asText());
@@ -301,6 +301,11 @@ final class Answering {
             return Map.of(variable, request.answer());
         }
         return request.values();
+    }
+
+    /** {@link DecisionAgent#through}, with the agent's name as what it is: a text from outside. */
+    private static Message through(String agent) {
+        return agent == null ? Message.of() : Message.of(DecisionAgent.through(""), Message.quoted(agent));
     }
 
     private static AnswerResult refused(boolean parked, String message) {

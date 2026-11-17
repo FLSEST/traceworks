@@ -11,6 +11,7 @@ import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -91,8 +92,8 @@ final class Cancelling {
         removeLeftovers.accept(run.runId(), events);
         RunView view = RunRecords.view(run.runId(), events, false);
         if (RunRecords.isFinal(view.status())) {
-            throw new RunRefusedException("Run " + run.runId() + " has finished (" + view.status()
-                    + "); there is nothing to cancel");
+            throw new RunRefusedException(Message.of("Run " + run.runId() + " has finished (" + view.status()
+                    + "); there is nothing to cancel"));
         }
         Map<String, Object> gate = checkpointGate(run, view);
         RunRecorder recorder = RunRecords.continueRecord(run, events, RunRecords.RECORDING_ONLY, clock);
@@ -188,8 +189,8 @@ final class Cancelling {
     private static void refuseIfRefused(StoredRun run, List<RecordedEvent> events, String requestId) {
         for (RecordedEvent event : events) {
             if (RecordTypes.REQUEST_REFUSED.equals(event.type()) && mine(event, requestId)) {
-                throw new RunRefusedException("The cancel of run " + run.runId() + " was refused: "
-                        + event.fields().path("reason").asText());
+                throw new RunRefusedException(Message.of("The cancel of run " + run.runId() + " was refused: ",
+                        Message.quoted(event.fields().path("reason").asText())));
             }
         }
     }
