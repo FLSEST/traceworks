@@ -227,7 +227,7 @@ public final class WorkflowAnalyzer {
             SecretRules.apply(blocks, findings);
             ValueRules.apply(blocks, findings);
             QuotingRules.apply(blocks, children, findings);
-            ProtectedPlaceRules.apply(blocks, children, findings);
+            ProtectedPlaceRules.apply(blocks, children, metadata, inputs, findings);
             WorkspaceRules.apply(workflow, findings);
             TraceworksRules.apply(blocks, metadata, registry.knownTypes(), findings);
             ParkingRules.apply(blocks, children, findings);

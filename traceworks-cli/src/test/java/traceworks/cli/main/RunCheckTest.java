@@ -185,6 +185,30 @@ class RunCheckTest {
                 + " {{ block.pick.output }}");
     }
 
+    /**
+     * Outside text is protected in the runs that get it: the check before a run knows the inputs, so it refuses the
+     * run that hands in {@code previous_chain_output}, and lets the run without it start, where the name is text.
+     */
+    @Test
+    void run_withChainOutputInAWorkflowId_isRefusedOnlyWhenTheRunGetsThatInput() throws IOException {
+        Path pkg = pkg("chained", "{}", """
+                {"type":"sub-workflow","name":"start","config":{"workflow_id":"./{{ previous_chain_output }}"}}""");
+
+        Result handedIn = run(pkg, "--input", "previous_chain_output=child");
+
+        assertThat(handedIn.code()).as(handedIn.all()).isEqualTo(6);
+        assertThat(handedIn.err())
+                .containsPattern("(?m)^ERROR   protected-value-outside-shell start \\(block 0\\): names"
+                        + " \\{\\{ previous_chain_output }} in workflow_id, text from outside the run")
+                .contains("check reports 1 error;");
+        assertThat(noRunExists()).as("no run was created").isTrue();
+
+        Result alone = run(pkg);
+
+        assertThat(alone.err()).as(alone.all()).doesNotContain("protected-value-outside-shell", "ERROR ");
+        assertThat(alone.out()).as("the run started").contains("run started: ");
+    }
+
     @Test
     void run_noCheck_startsTheRun_andPrintsNoFinding() throws IOException {
         Result run = run(typos(), "--no-check");

@@ -1,12 +1,14 @@
 package traceworks.core.analyzer;
 
 import traceworks.core.analyzer.AnalyzerFinding.Severity;
+import traceworks.core.analyzer.ProtectedValues.Protection;
 import traceworks.core.context.PlaceholderSyntax;
 import traceworks.core.context.ShellLineRefusedException;
 import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.model.BlockDefinition;
 import traceworks.core.port.WorkflowResolver;
 
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -14,10 +16,9 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * {@code protected-value-outside-shell} ({@code ERROR}): a placeholder the workflow shows to be protected
- * ({@link ProtectedValues}) stands in one of the places besides a shell line that take no protected value. The run
- * refuses each of them when the step is reached, so the check refuses the workflow before the start, as
- * {@code protected-value-in-shell} does for a shell line.
+ * {@code protected-value-outside-shell}: a placeholder the workflow shows to be protected ({@link ProtectedValues})
+ * stands in one of the places besides a shell line that take no protected value. The run refuses each of them when
+ * the step is reached, so the check says so before the start.
  *
  * <ul>
  *   <li>{@code container_args} of a {@code shell} block in tool mode: the value would choose what the tool does
@@ -25,12 +26,18 @@ import java.util.stream.Collectors;
  *   <li>{@code mounts}, the whole entry, of every block whose step reads them: a {@code shell} block (also one in a
  *       {@code switch} case, and a tool step), a wrapper in shell mode ({@code retry}, {@code while},
  *       {@code conditional}, a {@code foreach} with a command) and a {@code simple} block in shell mode in a
- *       {@code switch} case ({@code ShellBlockExecutor.resolveMounts}).</li>
+ *       {@code switch} case ({@code ShellBlockExecutor.resolveMounts}). A top-level {@code shell} command without a
+ *       {@code container_image} reads its mounts in a container run only ({@code ShellTarget}); the finding says
+ *       so.</li>
  *   <li>{@code workflow_id} of a {@code sub-workflow} or {@code foreach}: the value would choose which workflow runs
  *       ({@code SubWorkflowLauncher.resolveWorkflowId}). The run takes no {@code previous_output} and no
  *       {@code block.<name>.output} there at all, protected or not, so each of them is reported in every
  *       workflow.</li>
  * </ul>
+ *
+ * <p>An {@code ERROR} where every run that reaches the step refuses it ({@link Protection#always}; for a mount,
+ * every container run); a {@code WARNING} that names the runs where only some do, such as the runs in which a step
+ * under {@code run_if} asks a model. Outside text counts where a run sets it and nowhere else.
  *
  * <p>The run's refusal stays the guard: what the block list does not tell (a loop item, a variable, an untrusted
  * input, what a parent hands to a child) only the run knows. Settings no run reads are not judged:
@@ -47,42 +54,59 @@ final class ProtectedPlaceRules {
     /** Wrappers that run their command as a shell step, with the block's mounts, when in shell mode. */
     private static final Set<String> SHELL_SWITCHABLE = Set.of("retry", "foreach", "while", "conditional");
 
-    /** The protected placeholders of one place of a block, and what each stands for, in order of occurrence. */
-    private record Hits(Set<String> keys, Set<String> sources) {
+    /** The protected placeholders of one place of a block and how the run protects each, in order of occurrence. */
+    private static final class Hits {
+        private final Map<String, Protection> byKey = new LinkedHashMap<>();
 
-        Hits() {
-            this(new LinkedHashSet<>(), new LinkedHashSet<>());
+        void add(String key, Protection protection) {
+            byKey.putIfAbsent(key, protection);
         }
 
-        void add(String key, String source) {
-            keys.add(key);
-            sources.add(source);
+        /** The placeholders every run protects, or the others. */
+        Hits only(boolean always) {
+            Hits part = new Hits();
+            byKey.forEach((key, protection) -> {
+                if (protection.always() == always) part.add(key, protection);
+            });
+            return part;
         }
 
         boolean isEmpty() {
-            return keys.isEmpty();
+            return byKey.isEmpty();
+        }
+
+        boolean names(String key) {
+            return byKey.containsKey(key);
         }
 
         String first() {
-            return keys.iterator().next();
+            return byKey.keySet().iterator().next();
         }
 
         /** {@code {{ a }}, {{ b }}}. */
         String shown() {
-            return keys.stream().map(key -> "{{ " + key + " }}").collect(Collectors.joining(", "));
+            return byKey.keySet().stream().map(key -> "{{ " + key + " }}").collect(Collectors.joining(", "));
         }
 
         String said() {
-            return String.join(", ", sources);
+            return byKey.values().stream().map(Protection::source).distinct().collect(Collectors.joining(", "));
+        }
+
+        /** The runs that protect them, as the words after "a run": {@code "in which ask asks a model"}. */
+        String when() {
+            return byKey.values().stream().map(Protection::when).distinct().collect(Collectors.joining(" or "));
         }
     }
 
     /**
      * @param children finds the workflows of {@code sub-workflow} and {@code foreach} blocks, to see whether one
      *                 asks a model; {@code null} looks into none
+     * @param metadata the definition's metadata, which says whether it is an audit workflow
+     * @param inputs   the names of the inputs of the run the workflow is checked for
      */
-    static void apply(List<BlockDefinition> blocks, WorkflowResolver children, List<AnalyzerFinding> out) {
-        ProtectedValues values = ProtectedValues.of(blocks, children);
+    static void apply(List<BlockDefinition> blocks, WorkflowResolver children, Map<String, Object> metadata,
+                      Set<String> inputs, List<AnalyzerFinding> out) {
+        ProtectedValues values = ProtectedValues.of(blocks, children, metadata, inputs);
         BlockConfigs.walk(blocks, block -> {
             if (block.config() == null) return;
             if (!block.nested()) {
@@ -93,37 +117,68 @@ final class ProtectedPlaceRules {
         });
     }
 
+    /**
+     * One finding for the placeholders every run protects, an error, and one for the others, a warning.
+     *
+     * @param text the detail of a finding of these hits, given what the run does: the error's or the warning's
+     */
+    private static void report(Hits hits, BlockConfigs.Config block, List<AnalyzerFinding> out,
+                               java.util.function.BiFunction<Hits, Boolean, String> text) {
+        for (boolean always : new boolean[] {true, false}) {
+            Hits part = hits.only(always);
+            if (part.isEmpty()) continue;
+            out.add(AnalyzerFinding.of("protected-value-outside-shell", always ? Severity.ERROR : Severity.WARNING,
+                    block.index(), block.name(), text.apply(part, always)));
+        }
+    }
+
+    /**
+     * What the run does, in a finding: every run of the kind refuses, so the workflow is refused; or the runs named
+     * do, and any other run takes the value.
+     *
+     * @param run     {@code "a run"} or {@code "a container run"}
+     * @param refuses what such a run does, from the verb on
+     */
+    private static String outcome(Hits hits, boolean always, String run, String refuses) {
+        return always ? run + " " + refuses + ", so Traceworks refuses the workflow"
+                : run + " " + hits.when() + " " + refuses + ", and any other run takes the value";
+    }
+
     private static void toolArguments(ProtectedValues values, BlockConfigs.Config block, List<AnalyzerFinding> out) {
         if (!"shell".equals(block.type()) || !(block.config().get("container_args") instanceof List<?> args)) return;
         Hits hits = new Hits();
         for (Object arg : args) {
             if (arg instanceof String text) collect(values, block, text, hits);
         }
-        if (hits.isEmpty()) return;
-        String variable = ShellLineRefusedException.variableName(hits.first());
-        out.add(AnalyzerFinding.of("protected-value-outside-shell",Severity.ERROR, block.index(), block.name(),
-                "puts " + hits.shown() + " into container_args, " + hits.said() + NEVER + "the arguments of a tool:"
-                        + " the value would choose what the tool does; a run refuses the step before the tool"
-                        + " starts, whatever on_failure says, so Traceworks refuses the workflow. Correct: a tool"
-                        + " step takes no values, so have a shell step before it write the value to a file"
-                        + " (\"values\": {\"" + variable + "\": \"{{ " + hits.first() + " }}\"} and printf '%s' \"$"
-                        + variable + "\" > \"{{ scratch_dir }}/value.txt\"), and name the file in the arguments"));
+        report(hits, block, out, (part, always) -> {
+            String variable = ShellLineRefusedException.variableName(part.first());
+            return "puts " + part.shown() + " into container_args, " + part.said() + NEVER + "the arguments of a"
+                    + " tool: the value would choose what the tool does; " + outcome(part, always, "a run",
+                    "refuses the step before the tool starts, whatever on_failure says") + ". Correct: a tool step"
+                    + " takes no values, so have a shell step before it write the value to a file (\"values\": {\""
+                    + variable + "\": \"{{ " + part.first() + " }}\"} and printf '%s' \"$" + variable
+                    + "\" > \"{{ scratch_dir }}/value.txt\"), and name the file in the arguments";
+        });
     }
 
     private static void mounts(ProtectedValues values, BlockConfigs.Config block, List<AnalyzerFinding> out) {
         if (!readsMounts(block) || !(block.config().get("mounts") instanceof List<?> mounts)) return;
         Hits hits = new Hits();
-        Set<String> entries = new LinkedHashSet<>();
-        for (Object mount : mounts) {
-            if (!(mount instanceof String entry) || entry.isBlank()) continue;
-            if (collect(values, block, entry, hits)) entries.add("\"" + entry + "\"");
-        }
-        if (hits.isEmpty()) return;
-        out.add(AnalyzerFinding.of("protected-value-outside-shell",Severity.ERROR, block.index(), block.name(),
-                block.where() + "names " + hits.shown() + " in mounts (" + String.join(", ", entries) + "), "
-                        + hits.said() + NEVER + "a mount: the value would choose what the container sees; a run"
-                        + " refuses the step before anything starts, whatever on_failure says, so Traceworks"
-                        + " refuses the workflow. Correct: write the path out" + FROM_A_VARIABLE));
+        List<String> entries = mounts.stream().filter(mount -> mount instanceof String entry && !entry.isBlank())
+                .map(String.class::cast).toList();
+        entries.forEach(entry -> collect(values, block, entry, hits));
+        boolean hostToo = readsMountsOnTheHost(block);
+        report(hits, block, out, (part, always) -> {
+            String named = entries.stream()
+                    .filter(entry -> PlaceholderSyntax.keysIn(entry).stream().anyMatch(key -> part.names(key.strip())))
+                    .map(entry -> "\"" + entry + "\"").distinct().collect(Collectors.joining(", "));
+            return block.where() + "names " + part.shown() + " in mounts (" + named + "), " + part.said() + NEVER
+                    + "a mount: the value would choose what the container sees; "
+                    + outcome(part, always, hostToo ? "a run" : "a container run",
+                    "refuses the step before anything starts, whatever on_failure says" + (hostToo ? ""
+                            : " (a host run does not read the mounts of a step without a container_image)"))
+                    + ". Correct: write the path out" + FROM_A_VARIABLE;
+        });
     }
 
     /**
@@ -138,39 +193,39 @@ final class ProtectedPlaceRules {
         return SHELL_SWITCHABLE.contains(block.type()) && !ChildWorkflows.runsAChild(block.type(), block.config());
     }
 
+    /**
+     * Whether a host run reads the block's mounts too: all but a top-level {@code shell} command without a
+     * {@code container_image}, which a host run starts on the host, without them ({@code ShellTarget}).
+     */
+    private static boolean readsMountsOnTheHost(BlockConfigs.Config block) {
+        return block.nested() || !"shell".equals(block.type()) || block.config().containsKey("container_args")
+                || block.config().get("container_image") instanceof String image && !image.isBlank();
+    }
+
     private static void workflowId(ProtectedValues values, BlockConfigs.Config block, List<AnalyzerFinding> out) {
         if (!ChildWorkflows.runsAChild(block.type(), block.config())) return;
         Hits hits = new Hits();
-        for (String key : PlaceholderSyntax.keysIn((String) block.config().get("workflow_id"))) {
+        for (String key : new LinkedHashSet<>(PlaceholderSyntax.keysIn((String) block.config().get("workflow_id")))) {
             String name = key.strip();
-            String source = values.sourceOf(block.index(), name, true);
+            Protection protection = values.protectionOf(block.index(), name, true);
             // The run refuses these two kinds of key there in every run, whatever the value is
-            if (source == null && ("previous_output".equals(name) || name.startsWith("block."))) {
-                source = "a step output, which a workflow_id takes in no run";
+            if ("previous_output".equals(name) || name.startsWith("block.")) {
+                protection = new Protection(protection != null && protection.always() ? protection.source()
+                        : "a step output, which a workflow_id takes in no run", true, null);
             }
-            if (source != null) hits.add(name, source);
+            if (protection != null) hits.add(name, protection);
         }
-        if (hits.isEmpty()) return;
-        out.add(AnalyzerFinding.of("protected-value-outside-shell",Severity.ERROR, block.index(), block.name(),
-                "names " + hits.shown() + " in workflow_id, " + hits.said() + NEVER + "a workflow_id: the value"
-                        + " would choose which workflow runs, with the run's workspace and secrets; a run fails the"
-                        + " step before any workflow starts, so Traceworks refuses the workflow. Correct: write the"
-                        + " workflow out" + FROM_A_VARIABLE));
+        report(hits, block, out, (part, always) -> "names " + part.shown() + " in workflow_id, " + part.said()
+                + NEVER + "a workflow_id: the value would choose which workflow runs, with the run's workspace and"
+                + " secrets; " + outcome(part, always, "a run", "fails the step before any workflow starts")
+                + ". Correct: write the workflow out" + FROM_A_VARIABLE);
     }
 
-    /**
-     * Adds the placeholders of {@code text} that the workflow shows to be protected in {@code block}.
-     *
-     * @return whether the text names one
-     */
-    private static boolean collect(ProtectedValues values, BlockConfigs.Config block, String text, Hits hits) {
-        boolean found = false;
+    /** Adds the placeholders of {@code text} that the workflow shows to be protected in {@code block}. */
+    private static void collect(ProtectedValues values, BlockConfigs.Config block, String text, Hits hits) {
         for (String key : PlaceholderSyntax.keysIn(text)) {
-            String source = values.sourceOf(block.index(), key, !block.nested());
-            if (source == null) continue;
-            hits.add(key.strip(), source);
-            found = true;
+            Protection protection = values.protectionOf(block.index(), key, !block.nested());
+            if (protection != null) hits.add(key.strip(), protection);
         }
-        return found;
     }
 }

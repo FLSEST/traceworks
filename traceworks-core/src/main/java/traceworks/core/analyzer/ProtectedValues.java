@@ -35,15 +35,41 @@ import java.util.regex.Pattern;
  * variable, a child whose reference is a placeholder, the values a parent hands to a child) the run decides: it
  * refuses the value where it is used.
  *
- * @param first the position of the first top-level block that asks a model; -1 for a workflow without one
+ * <p>Two questions are answered. {@link #sourceOf} says whether a run <em>may</em> protect a value: outside text by
+ * its name, and model text from the first block on that could ask a model. {@link #protectionOf} also says whether
+ * <em>every</em> run does ({@link Protection#always}), which is less: the run marks model text when a model is
+ * called, so a block that may be skipped ({@code run_if}), a {@code switch} case, a loop that may have no item, a
+ * compression that may refuse its input and a child workflow protect what follows only in the runs in which they
+ * ask; and outside text is protected only where a run sets it.
+ *
+ * @param first     the position of the first top-level block that could ask a model; -1 for a workflow without one
+ * @param certain   the position of the first top-level block that asks a model in every run that gets past it; -1
+ *                  for a workflow without one
+ * @param audit     whether the workflow feeds a register, so that a run sets the platform data
+ * @param inputs    the names of the inputs of the run the workflow is checked for
  */
-record ProtectedValues(List<BlockDefinition> blocks, WorkflowResolver children, int first) {
+record ProtectedValues(List<BlockDefinition> blocks, WorkflowResolver children, int first, int certain,
+                       boolean audit, Set<String> inputs) {
 
     /** Outputs of earlier runs: always untrusted. */
     static final Set<String> PLATFORM_DATA = Set.of("previous_report", "audit_findings", "audit_items");
 
     /** Text from outside: a chain hands on the last entry's output. */
     private static final Set<String> FOREIGN_TEXT = Set.of("previous_chain_output");
+
+    /** The block types whose step calls a model whenever it runs in AI mode: no item list, no case, no input limit. */
+    private static final Set<String> ALWAYS_ASKING = Set.of("simple", "agentic", "retry", "while", "conditional");
+
+    /**
+     * How a run protects the value of a placeholder.
+     *
+     * @param source what the placeholder stands for, as the words a finding says it with
+     * @param always whether every run that reaches the block protects the value
+     * @param when   for a value only some runs protect, which ones, as the words after "a run": {@code "in which ask
+     *               asks a model"}; {@code null} with {@code always}
+     */
+    record Protection(String source, boolean always, String when) {
+    }
 
     private static final Pattern STEP_OUTPUT = Pattern.compile("step_(\\d{1,6})_output");
     private static final Pattern BLOCK_OUTPUT = Pattern.compile("block\\.([^.\\s]+)\\.output");
@@ -57,11 +83,80 @@ record ProtectedValues(List<BlockDefinition> blocks, WorkflowResolver children, 
      *                 asks a model; {@code null} looks into none
      */
     static ProtectedValues of(List<BlockDefinition> blocks, WorkflowResolver children) {
+        return of(blocks, children, Map.of(), Set.of());
+    }
+
+    /**
+     * @param metadata the definition's metadata, which says whether it is an audit workflow
+     * @param inputs   the names of the inputs of the run the workflow is checked for; empty for a check on its own
+     */
+    static ProtectedValues of(List<BlockDefinition> blocks, WorkflowResolver children, Map<String, Object> metadata,
+                              Set<String> inputs) {
         int first = -1;
-        for (int j = 0; j < blocks.size() && first < 0; j++) {
-            if (blocks.get(j) != null && asksModel(blocks.get(j), children)) first = j;
+        int certain = -1;
+        for (int j = 0; j < blocks.size(); j++) {
+            if (blocks.get(j) == null) continue;
+            if (first < 0 && asksModel(blocks.get(j), children)) first = j;
+            if (certain < 0 && alwaysAsks(blocks.get(j))) certain = j;
         }
-        return new ProtectedValues(blocks, children, first);
+        return new ProtectedValues(blocks, children, first, certain, WiringRules.auditWorkflow(metadata), inputs);
+    }
+
+    /**
+     * Whether every run that gets past the top-level block has asked a model: the block makes an AI call itself
+     * whenever it runs, and no {@code run_if} skips it.
+     */
+    private static boolean alwaysAsks(BlockDefinition block) {
+        return block.getType() != null && ALWAYS_ASKING.contains(block.getType()) && StepModes.usesAi(block)
+                && (block.getConfig() == null || !block.getConfig().containsKey("run_if"));
+    }
+
+    /**
+     * How a run protects the value of the placeholder {@code key} in block {@code i}; null for a value no run
+     * protects, as far as the workflow tells. Unlike {@link #sourceOf}, outside text counts only where a run sets
+     * it: the platform data in an audit workflow, the output of a chain in a run that gets it as an input.
+     *
+     * @param own whether the placeholder stands in a field of the top-level block itself, not of a block nested in it
+     */
+    Protection protectionOf(int i, String key, boolean own) {
+        String name = key.strip();
+        if (outsideText(name)) {
+            boolean set = PLATFORM_DATA.contains(name) ? audit : inputs.contains(name);
+            return set ? new Protection("text from outside the run", true, null) : null;
+        }
+        String source = modelText(i, name, own);
+        if (source == null) return null;
+        if (always(i, name, own)) return new Protection(source, true, null);
+        boolean untoldStep = STEP_OUTPUT.matcher(name).matches() && atStepIndex(blocks, stepIndex(name), i) == null;
+        return new Protection(source, false, untoldStep
+                ? "in which the step of that number runs after a model was asked"
+                : "in which " + label(blocks.get(first)) + " asks a model");
+    }
+
+    /**
+     * Whether every run that reaches block {@code i} protects {@code name}: the output it names is recorded before
+     * the block and after a call of a model that every such run makes, or is the output of that call.
+     */
+    private boolean always(int i, String name, boolean own) {
+        if (certain < 0) return false;
+        Matcher byName = BLOCK_OUTPUT.matcher(name);
+        Source source = null;
+        if (byName.matches()) {
+            source = named(blocks, children, byName.group(1));
+        } else if ("previous_output".equals(name)) {
+            if (!own) return certain < i;   // the output before a nested step is recorded after block i - 1 at least
+            source = i > 0 && blocks.get(i - 1) != null ? new Source(blocks.get(i - 1), i - 1) : null;
+        } else if (STEP_OUTPUT.matcher(name).matches()) {
+            source = atStepIndex(blocks, stepIndex(name), i);
+        }
+        if (source == null || source.position() >= i) return false;
+        boolean topLevel = blocks.get(source.position()) == source.block();
+        return certain < source.position() || (certain == source.position() && topLevel);
+    }
+
+    private static int stepIndex(String name) {
+        Matcher byIndex = STEP_OUTPUT.matcher(name);
+        return byIndex.matches() ? Integer.parseInt(byIndex.group(1)) : -1;
     }
 
     /**
