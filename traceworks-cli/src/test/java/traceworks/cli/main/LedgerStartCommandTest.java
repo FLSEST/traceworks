@@ -380,6 +380,67 @@ class LedgerStartCommandTest {
         assertThat(run.path("start").asText()).startsWith("ok");
     }
 
+    /** verify --json says every class of the home, and a failed check exits 8 also when an acknowledgement leaves problems. */
+    @Test
+    void verifyJson_listsEveryClassOfAHomeThatDoesNotHold_andExitsEight() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        // A run of a version without a start entry: no ledger_start in its first line, and the ledger knows nothing of it
+        String old = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        delete(home.resolve("ledger"));
+        Path oldEvents = folderOf(old).resolve("events.jsonl");
+        String eventLines = Files.readString(oldEvents);
+        assertThat(eventLines).contains("\"ledger_start\":true");
+        Files.writeString(oldEvents, eventLines.replaceFirst("\"ledger_start\":true", "\"ledger_start\":false"));
+
+        String finished = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        String lostOne = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        String lostTwo = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        delete(folderOf(finished));
+        delete(folderOf(lostOne));
+        delete(folderOf(lostTwo));
+        // A run whose writer is alive and whose record has no line yet
+        try (traceworks.core.port.StoredRun writing = new traceworks.adapters.record.FileRunStore(home.resolve("runs"))
+                .create("in-flight-run", java.time.Instant.now())) {
+            Result ack = exec("verify", "--acknowledge", lostOne, "--note", "disk full", "--json");
+            assertThat(ack.code()).as(ack.out() + ack.err()).isEqualTo(8);
+            com.fasterxml.jackson.databind.JsonNode after = json.readTree(ack.out());
+            assertThat(after.path("verified").asBoolean()).isFalse();
+            assertThat(after.path("acknowledged")).hasSize(1);
+            assertThat(after.path("acknowledged").get(0).path("run").asText()).isEqualTo(lostOne);
+
+            Result failed = exec("verify", "--json", "--quick");
+            assertThat(failed.code()).as(failed.out() + failed.err()).isEqualTo(8);
+            com.fasterxml.jackson.databind.JsonNode report = json.readTree(failed.out());
+            assertThat(report.path("ended_folder_gone")).hasSize(1);
+            assertThat(report.path("ended_folder_gone").get(0).path("run").asText()).isEqualTo(finished);
+            assertThat(report.path("before_ledger_not_ended")).hasSize(1);
+            assertThat(report.path("before_ledger_not_ended").get(0).path("run").asText()).isEqualTo(old);
+            assertThat(report.path("in_flight")).hasSize(1);
+            assertThat(report.path("in_flight").get(0).path("run").asText()).isEqualTo("in-flight-run");
+            assertThat(report.path("acknowledged")).hasSize(1);
+            assertThat(report.path("problems")).hasSize(1);
+            assertThat(report.path("problems").get(0).path("run").asText()).isEqualTo(lostTwo);
+        }
+    }
+
+    /** verify <run> --json: a record that does not hold exits 8 and lists the problems of its chain. */
+    @Test
+    void verifyJson_ofATamperedRun_exitsEight_andListsTheChainProblems() throws Exception {
+        String id = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        Path events = folderOf(id).resolve("events.jsonl");
+        String text = Files.readString(events);
+        assertThat(text).contains("\"say\"");
+        Files.writeString(events, text.replaceFirst("\"say\"", "\"sax\""));
+
+        Result result = exec("verify", id, "--json");
+
+        assertThat(result.code()).as(result.out() + result.err()).isEqualTo(8);
+        com.fasterxml.jackson.databind.JsonNode run = new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.out());
+        assertThat(run.path("verified").asBoolean()).isFalse();
+        assertThat(run.path("chain").path("intact").asBoolean()).isFalse();
+        assertThat(run.path("chain").path("problems")).isNotEmpty();
+    }
+
     /** A subject this version writes, for a commit made by hand: the ledger stays one of this version. */
     private static final String BY_HAND = "run by-hand ACKNOWLEDGED sha256:" + "0".repeat(64);
 
