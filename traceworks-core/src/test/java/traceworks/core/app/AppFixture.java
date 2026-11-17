@@ -336,6 +336,8 @@ final class AppFixture {
         final Set<Path> present = new LinkedHashSet<>();
         /** Every call: {@code checkout <source> <ref> <target>} and {@code remove <target>}. */
         final List<String> calls = new ArrayList<>();
+        /** Where the checkouts lie; a test sets another directory. */
+        Path root = ROOT;
         String sha = SHA;
         java.util.function.UnaryOperator<String> recorded = source -> source;
         RuntimeException failure;
@@ -343,7 +345,7 @@ final class AppFixture {
 
         @Override
         public Path directoryOf(String runId) {
-            return ROOT.resolve(runId);
+            return root.resolve(runId);
         }
 
         @Override

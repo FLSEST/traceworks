@@ -270,7 +270,8 @@ final class Resuming {
             return prepared.result(runId, run.location(), outcome, kept, register);
         } catch (RuntimeException e) {
             if (source != null) {
-                checkouts.noteKept(runId, e);   // the resumed run ended in a failure: no summary will name it
+                // The resumed run ended in a failure: no summary will name its checkout
+                checkouts.noteKept(runId, e, form.get());
             }
             throw e;
         }
