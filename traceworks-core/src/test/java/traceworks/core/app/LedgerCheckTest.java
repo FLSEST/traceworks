@@ -383,6 +383,35 @@ class LedgerCheckTest {
     }
 
     /**
+     * An acknowledged broken record is acknowledged as it was: the sentence names all of it, so whatever changes in
+     * the record afterwards (another blob, the same blob once more) is another sentence, which the acknowledgement
+     * does not cover.
+     */
+    @Test
+    void anAcknowledgedBrokenRecord_isOpenAgain_whenTheRecordChangesOnceMore() {
+        String id = finished();
+        List<traceworks.core.port.BlobRef> blobs = fx.events(id).stream()
+                .flatMap(event -> java.util.stream.Stream.of("command", "output", "inputs").map(event::blob))
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        assertThat(blobs).hasSizeGreaterThan(1);
+        traceworks.core.testing.InMemoryBlobStore store =
+                (traceworks.core.testing.InMemoryBlobStore) fx.run(id).blobs();
+        store.putRaw(blobs.getFirst().sha256(), "changed once".getBytes(StandardCharsets.UTF_8));
+        assertThat(codes(services.ledgerReport())).containsExactly(tuple(id, "record-broken"));
+
+        assertThat(services.acknowledge(id, "a disk error in one blob, restored from nowhere").ok()).isTrue();
+        assertThat(services.ledgerReport().ok()).as("nothing changed since").isTrue();
+
+        store.putRaw(blobs.getLast().sha256(), "another blob changed".getBytes(StandardCharsets.UTF_8));
+        assertThat(codes(services.ledgerReport())).as("another blob").containsExactly(tuple(id, "record-broken"));
+
+        assertThat(services.acknowledge(id, "and one more").ok()).isTrue();
+        store.putRaw(blobs.getFirst().sha256(), "changed twice".getBytes(StandardCharsets.UTF_8));
+        assertThat(codes(services.ledgerReport())).as("the same blob once more")
+                .containsExactly(tuple(id, "record-broken"));
+    }
+
+    /**
      * A new ledger beside runs of a version that noted no start: the ledger never knew them. The check of the home
      * counts them as from before the ledger, which is no failure, and the check of such a run says that its ledger
      * part is not checked. A run of this version without its entries fails as ever.
