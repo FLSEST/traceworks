@@ -294,14 +294,15 @@ limit A mount is checked, then mounted.
 limit A listed folder is open to every package.
   quote inside a listed folder a package may mount any file or folder writable
   quote it does not refuse a repository with its `.git/hooks` and `.git/config`
-  says  A writable mount is refused unless it lies in a folder the operator listed in writable_mounts; inside a listed folder every package may mount any file or folder writable, a repository with its .git/hooks and .git/config or a script included, and the mount check refuses there only what it refuses everywhere.
-  digest cfe53723a271814d
+  says  A writable mount is refused unless it lies in a folder the operator listed in writable_mounts, or in the workspace of a step that may write its workspace anyway; inside a listed folder every package may mount any file or folder writable, a repository with its .git/hooks and .git/config or a script included, and the mount check refuses there only what it refuses everywhere.
+  digest df7389e201f7aca8
 
-limit A writable workspace's `.git` beyond its hooks and its config.
-  quote a step can still create what git reads once it is there
+limit A writable workspace beyond its top-level `.git`.
+  quote In a workspace without a `.git` a step can make one
   quote A host run holds nothing
-  says  With workspace_writable: true a container step sees only the hooks and the config of the workspace's top-level .git read-only: it still writes the rest of .git, creates files git reads later (commondir, config.worktree), writes files of the workspace the config names and the git directories of submodules and deeper repositories, and makes a .git where there is none; a host run holds nothing.
-  digest 3006f8d8eb851e17
+  quote a container step writes all of it too
+  says  With workspace_writable: true a container step sees only the workspace's own top-level .git read-only: it still makes a .git where there is none, writes deeper repositories and a submodule's .git, a git directory in the workspace that a .git file names, and files the config or the hooks name; a host run holds nothing; with the operator's workspace_git_writable: true, and in the checkout of run --source, a step writes all of that .git.
+  digest 6ce83509fe05c40b
 
 limit A called package's `.git` in the workspace.
   quote has no cover while the steps of the calling package run
