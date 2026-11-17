@@ -409,6 +409,6 @@ In [`examples/self-audit/tests`](../tests), without a container and without an A
 (`ChangesMainTest`), the script and the tool against real git repositories, hostile ones among them
 (`ChangesScriptTest`; it needs bash and git and fails without them), the package as it ships (`ChangesPackageTest`), and the
 package through the engine into its register across runs with different bases, with a shell loop in the model's
-place (`ChangesRoundTripTest`). `SecurityChangesToolIT` in `integration-tests` runs the script and the area tool
-in their images on a small repository; it is written and was not run here. `SecurityChangesScriptIT` in `integration-tests` runs the script in the shell image
-(`mvn -Pit`); it is written and was not run.
+place (`ChangesRoundTripTest`). In `integration-tests`, `SecurityChangesToolIT` runs the script and the area tool
+in their images on a small repository, and `SecurityChangesScriptIT` runs the script in the shell image. Both run in
+every full build (`mvn -Pit verify`); they ran green on 2026-11-17 with Docker 29.1.3.
