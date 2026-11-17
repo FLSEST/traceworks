@@ -129,7 +129,26 @@ final class AppFixture {
             checkedAs.put(directory, role);
             return check(directory);
         }
+
+        @Override
+        public java.util.Optional<String> writableMountRefusal(String hostPath) {
+            return java.util.Optional.ofNullable(unlistedWritableMounts.get(hostPath));
+        }
+
+        @Override
+        public java.util.Optional<String> writableMountRefusal(String hostPath, String writableWorkspace) {
+            askedWritableMounts.add(hostPath + " in " + writableWorkspace);
+            boolean inside = writableWorkspace != null && Path.of(hostPath).startsWith(writableWorkspace);
+            return inside ? java.util.Optional.empty() : writableMountRefusal(hostPath);
+        }
     };
+    /** What the start check asked of each writable mount: {@code <host side> in <the writable workspace or null>}. */
+    final List<String> askedWritableMounts = new java.util.ArrayList<>();
+    /**
+     * The host sides of writable mounts that lie in no folder the operator listed, each with the refusal; any other
+     * host side lies in one.
+     */
+    final Map<String, String> unlistedWritableMounts = new LinkedHashMap<>();
     /** What the start check asked each directory as: the role it named with the check. */
     final Map<Path, HostDirectories.Role> checkedAs = new LinkedHashMap<>();
 
@@ -336,6 +355,8 @@ final class AppFixture {
         final Set<Path> present = new LinkedHashSet<>();
         /** Every call: {@code checkout <source> <ref> <target>} and {@code remove <target>}. */
         final List<String> calls = new ArrayList<>();
+        /** Where the checkouts lie; a test sets another directory. */
+        Path root = ROOT;
         String sha = SHA;
         java.util.function.UnaryOperator<String> recorded = source -> source;
         RuntimeException failure;
@@ -343,7 +364,7 @@ final class AppFixture {
 
         @Override
         public Path directoryOf(String runId) {
-            return ROOT.resolve(runId);
+            return root.resolve(runId);
         }
 
         @Override
@@ -427,10 +448,21 @@ final class AppFixture {
         /** The digest of every package image: its tag ends in {@code :bbbbbbbbbbbb}. */
         static final String IMAGE_DIGEST = "b".repeat(64);
 
+        /** The package in {@code directory} is there and cannot be read, as a folder without read permission. */
+        void unreadable(Path directory) {
+            unreadable.add(directory);
+        }
+
+        private final java.util.Set<Path> unreadable = new java.util.LinkedHashSet<>();
+
         @Override
         public LoadedPackage load(Path location) {
             Path dir = location.getFileName() != null && location.getFileName().toString().equals("workflow.json")
                     ? location.getParent() : location;
+            if (unreadable.contains(dir.normalize())) {
+                throw new java.io.UncheckedIOException("Cannot read the package " + dir.normalize() + ": "
+                        + dir.normalize() + "/run.sh", new java.nio.file.AccessDeniedException(dir + "/run.sh"));
+            }
             String text = json.get(dir.normalize());
             if (text == null) {
                 throw new IllegalArgumentException("Not a package: " + dir + " has no workflow.json");

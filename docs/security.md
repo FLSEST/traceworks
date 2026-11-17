@@ -50,7 +50,8 @@ container gets the same flags, and no workflow or operator setting removes them:
 - secret values in the client's environment, never on a command line; a step's shell command on stdin;
 - an empty, read-only directory over the package's top-level `.git/`, when it has one. The package digest leaves
   that directory out, because git rewrites it without any file of the package changing; so a container does not see
-  it either, and a script the digest covers cannot run a payload from there that the digest does not cover. (A host
+  it either, and a script the digest covers cannot run a payload from there that the digest does not cover. Where the
+  workspace holds the package, the directory is covered at the package's place in `/workspace` as well. (A host
   run sees the package as it is. An image directory is hashed whole, a `.git/` in it included, because the build
   sends all of it.) Verified with Docker 29.1.3; not verified with Podman. A package with a file name that is not
 valid text in the system's encoding is refused: the digest names a file by the text of its path, and two names that
@@ -95,15 +96,19 @@ workspace holds the package, the container sees the package read-only at its pla
 writable workspace inside the package is refused, so no step changes the package. A block's own `mounts`
 must state `:ro` or `:rw`, and each host path is checked on its real path, with `..` and symbolic links resolved: the
 home directory, logins below it (`~/.ssh`, the AI CLIs' logins, ...), the runtimes' sockets and storage, your
-session's sockets, socket files and folders that directly hold one, the Traceworks home (but for the tool caches of
-the tool mode, the run's own scratch directory and its own checkout) with its `runs/`, `ledger/`, `registers/`,
+session's sockets, socket files, device nodes, named pipes and folders that directly hold one of these, `/dev` (the
+terminals of your session, shared memory, device nodes), the Traceworks home (but for the run's own scratch
+directory and its own checkout; of the tool caches a tool step gets the one folder of its image through `cache_dir`,
+and a `mounts` entry names none of them) with its `runs/`, `ledger/`, `registers/`,
 `seals/` and `cache/` also where a link or a setting (`runs_dir`, `ledger_dir`, `registers_dir` in `traceworks.json`) puts them
 elsewhere, and a path that does not exist or cannot be resolved are refused. The forbidden
 paths are compared with the path as written and with the real path, so `link/..` counts as the folder the kernel
 mounts. A block's own mount is resolved once too: the real path the check judged is the path the runtime is given,
 and the path as the block wrote it is not read again. Where the package has a top-level `.git/`, a mount of that directory, of something in it, of the package
 again or of a folder holding the package is refused too: it would show what the cover hides.
-The workspace and the package are checked against the same paths before the run is created, with two differences:
+The workspace and the package are checked against the same paths before the run is created, with three differences:
+a folder in `/dev/shm` may be one (a memory disk is a common place for a build), while `/dev/shm` itself and the
+rest of `/dev` are refused, and a block's own mount from there is refused as any mount from `/dev`;
 inside the Traceworks home only its `runs/`, `ledger/`, `registers/`, `seals/` and `cache/` are refused (a package or
 a run's checkout may lie elsewhere in it), a folder that holds one of the places the settings name is refused wherever
 it is, and a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused. Each of
@@ -111,6 +116,42 @@ them, and the checkout of a `--source`, is resolved once: the real path the chec
 so a directory that something replaces by a link after the check is not what the containers get, and every container
 start refuses a run directory that no longer resolves to that path. The full list
 is in the row on declared mounts of [docs/workflow-format.md](workflow-format.md).
+
+**Writable mounts.** A block's own mount that is writable (`:rw`) is refused unless its real path lies in or below a
+folder you listed in `writable_mounts` of `traceworks.json` (docs/cli.md, "Writable mounts"), wherever it lies, in
+your home directory or outside it. Without the setting every such mount is refused. The reason: a step runs as you,
+so a file it writes on the host can be one the host runs later, outside every container (`~/.bashrc`, a script in
+`~/.local/bin`, a unit in `~/.config/systemd/user`, the `.git/hooks` of a repository), and no list of such files
+could be complete, so you say where packages may write. A mount that the workflow writes out is refused before the
+run is created, and before a resume records anything, so no step runs first; one that a placeholder names is
+refused when its step runs, with exit code 125 and nothing started. The refusal names the mount and the line to add
+to `traceworks.json`. A listed folder lifts no other refusal of the mount check, and the setting itself refuses `/`,
+your home directory, a folder that holds it and a path that is not absolute; both sides are compared by their real
+paths. What the step writes anyway needs no entry: the run's scratch directory, the cache folder and the output
+folder of a tool step, and the workspace or a folder in it, by its real path, while the step may write its
+workspace (`workspace_writable: true`; the run's own checkout of `run --source` is such a workspace). A folder that
+holds the workspace needs an entry. While the step only reads its workspace, a writable mount in or around it is
+refused whatever you listed. A read-only mount needs no entry either. `traceworks describe` marks a writable mount
+that no listed folder holds.
+
+**A writable workspace's `.git`.** With `workspace_writable: true` a container step writes the workspace, but
+nothing of its top-level `.git`: what a step left there, the next git command you run in that directory would run
+on the host, as you (a hook, an alias, a pager, a filter, `core.fsmonitor`, a `commondir` file that names another
+config and other hooks). The container gets the `.git`, a directory or the file of a linked worktree, mounted once
+more at its place, read-only and as a whole: no list of files in it, and nothing asked of what it holds. A step
+reads the repository (`git log`, `git diff`) and writes none of it, so it cannot commit, stage or stash, and it can
+neither move the `.git` away nor put its own in its place. A writable mount of the step's own that is that `.git`,
+lies in it or holds it is refused, in a listed folder too. Traceworks writes nothing into your repository for this.
+A `.git` that is a symbolic link cannot be held in place and refuses the step when it runs (exit code 125, nothing
+started).
+
+You open it with `"workspace_git_writable": true` in `traceworks.json` (docs/cli.md, "The `.git` of a writable
+workspace"): the `.git` of a writable workspace is then writable like the rest of it, in every run of this home,
+and a writable mount in it is a mount in the workspace. That is your trust in every package you run with a
+writable workspace: its step can leave hooks, a config, a `commondir` or the state of a rebase, and your next git
+command there runs them. The run's own checkout of `run --source` is writable with its `.git` without the setting:
+it is a run's data and no repository of yours, and git on the host never runs in it after a step ran in it (below,
+"`--source`"). What the read-only mount does not cover is under "Images and containers" below.
 
 **Secrets** (docs/cli.md, "Secrets"). A step names the secrets it needs, and only that step gets them, as environment
 variables (what it writes is another matter; see "Secrets and the record" below). `credentials.json` is refused
@@ -129,7 +170,11 @@ A path or a `--source` that holds a value is recorded with the replacement too, 
 to find the workspace or the package directory. It does that only for the names the run redacts (its declared
 secrets and the credentials of its AI providers), and a run whose source, workspace or package directory itself
 contains `[redacted:` is refused at the start: a replacement in a record is then always one the redactor wrote. A
-resume of a record that holds any other replacement in one of these is refused. A resume never puts a value back
+resume of a record that holds any other replacement in one of these is refused. Whatever a resume then says of these paths names them as the record does, with
+the replacement: every refusal (a package that is gone or cannot be read, a workspace that may not be mounted, a
+seal that does not hold), an error it ends with, and the line the seal log keeps of a refused resume. This holds
+for the values the resume put back into the recorded package directory and workspace, and for nothing else: a path
+you type at a start is shown and logged as you typed it. A resume never puts a value back
 into a source: a value in a path stays on this machine, but a value in the URL of a clone goes to the host the URL
 names, and whoever can rewrite the record (a run folder copied from elsewhere) chooses that host. So a missing
 checkout whose recorded source holds a replacement is not cloned again, and neither is the missing checkout of a run
@@ -142,7 +187,9 @@ the operator replaces it (`ai_images`, see "What they do not protect"), with onl
 credential of the backend its model names: `ANTHROPIC_API_KEY` and `ANTHROPIC_OAUTH_TOKEN` for `anthropic/...`, for a
 model without a backend and for a step without a model, `OPENAI_API_KEY` for `openai/...`, `GEMINI_API_KEY` for
 `google/...` and `OPENROUTER_API_KEY` for `openrouter/...`. The other keys you stored for Pi never reach that
-container. A model that names another backend is refused, and the message says how to name the backend: Traceworks
+container. A model whose backend is a model server the operator declared (`local_models`) gets no credential of
+any provider: it gets that server's secret, when it has one ("A local model" below). A model that names any other
+backend is refused, and the message names the backends Traceworks knows: Traceworks
 cannot tell which credential it would take, so it hands over none. A model written as a literal is refused before
 the run starts (by `traceworks check`, and by the start check when its backend has no credential); a model built
 from a placeholder is refused when its step runs, before its CLI starts.
@@ -150,7 +197,8 @@ from a placeholder is refused when its step runs, before its CLI starts.
 switches, and the second is not the workflow's: the container joins one network that has no way out, and next to it
 Traceworks starts a proxy (the built-in image `egress`) that tunnels `CONNECT` to the listed hosts and refuses
 everything else. The hosts are the provider's API (`api.anthropic.com:443` for Claude; for Pi the API of the model's
-backend) and what the operator adds in `ai_hosts`; no workflow can name one. The proxy reports every request, allowed
+backend) and what the operator adds in `ai_hosts`; no workflow can name one. A call to a model server of the
+operator's has that server as its only host, and none of these. The proxy reports every request, allowed
 or not, and the record keeps them with the call (`egress` in `step.command.finished`: the target and the verdict, never
 a path, a header or content); `show` and `run.html` mark a denied one. The proxy and both networks exist only while
 the call runs. With `ai_network: "open"` the operator gives the AI containers the runtime's default network instead,
@@ -176,14 +224,25 @@ register's folder, and nothing else, can append a line that chains (a forged dec
 leaves that was cut off before its anchor, so `verify` holds, names the lines as unproven, and the next write takes
 them and anchors the head. What shows it: `verify` until then, the note of that next write, and the line
 `register.unanchored` it records in the log with the sequence numbers. A register's folder is therefore still worth
-the protection of the ledger's. Whoever can write the ledger too can rewrite both, as with a run.
+the protection of the ledger's. Whoever can write the ledger too cannot rewrite the register unnoticed: the anchors
+are only added to, and a rewritten anchor file is found. But they can **add** to both: append a forged decision that
+chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace
+(docs/events.md, "What the ledger shows, and what it does not"). Signatures of decisions would close that; they are
+not built. **Who decided is a label, not a proof.** A decision names its actor, who ran the command, and beside it
+the agent that decided under that actor when the caller named one (`--agent`, or `TRACEWORKS_AGENT`). The name is
+self-declared and unsigned: an agent that works with your user and leaves it out is recorded as you, and any
+caller can give any name. What Traceworks does about it: the name is bounded (64 characters, ASCII letters and
+digits, `. _ - : / @ +` and single spaces), a blank one is refused instead of being taken for none, and an earlier
+version refuses a register that names an agent rather than show the decision as the actor's own
+(docs/registers.md, "Who decided").
 
 **The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
 read-only at `/register`. What that means:
 
 - *The files hold more than the placeholders.* Besides every finding with its whole evidence and its description,
-  each decision is there with who made it and when (`disposition.actor`, `disposition.at`), which
+  each decision is there with who made it and when (`disposition.actor`, `disposition.agent` for a decision an
+  agent made, `disposition.at`), which
   `{{ audit_findings }}` does not carry, and the ids of the runs that reported a finding. Every shell and tool step
   of the audit can read that, and what a step prints of it is in the run's record. An audit package you run is
   trusted with the names of the people who decided on its findings.
@@ -230,7 +289,55 @@ Traceworks reads the commit and the state of a package that has its own `.git`, 
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 
 **The record** is a hash chain: `traceworks verify` finds a changed or removed line, lines copied from another run, a
-changed blob, and a manifest or ledger entry that does not match the log. `run.html` has no scripts and loads
+changed blob, and a manifest or ledger entry that does not match the log. Every other command reads a blob of a run
+or a register checked against its name: one that acts on it (a resume, a feed of a register, a decision, the list of
+findings, `diff`, `--inputs-from`) refuses as for a damaged record (exit 8) and names the blob, and a view (`show`,
+`run.html`, `diff --outputs`, `findings show`) shows a mark in its place, says that it does not match its name, and
+shows the rest. `--inputs-from` also takes nothing from a run whose record does not verify.
+
+**A run that began is named outside its folder.** The ledger gets an entry when a run starts, before its first step,
+and no step runs without it, at a start and at a resume (docs/events.md, "The start entry"). What that gives, in
+three groups:
+
+- **What the check finds on this machine** (`traceworks verify` without a run, exit 8): a run that started, never
+  ended, and whose folder is gone, empty or holds another record; an entry that is not what the commit that names
+  it left, by the SHA-256 in that commit's message, because a later, ordinary commit changed or removed it (so a
+  rewritten record with a new manifest committed over the end entry is found, also by `verify <run>`); anything in
+  the ledger that is no regular file at the path of an entry, and a path a tree lists twice; a
+  commit that names a run without its entry; an end entry added by hand that is no manifest of the run or does not
+  agree with its commit and its start entry, and a manifest in the run folder that is not the end entry; a run
+  folder whose record says its start was noted and that has no start entry (a ledger deleted and made again,
+  another `ledger_dir`, a kill between `run.started` and the commit), unless its process is alive and that line
+  is younger than five minutes; and a ledger
+  with replace refs, a shallow or grafts file, alternates, a `.git` that is not a plain directory, a second
+  branch, a merge, a detached HEAD, a commit HEAD does not reach, or a setting of its own that is not allowed
+  there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). An honest
+  cause is acknowledged with a note, which the ledger keeps and the check lists for good; it covers what the check
+  said then and nothing that comes later.
+- **What a ledger that others hold adds:** a rewritten history that no reference names any more is not found on
+  this machine. The ledger is a plain git repository, so the operator can push it to a remote they do not control
+  alone and that refuses a rewritten history (a protected branch without force push, or an append-only mirror).
+  What was pushed can then be changed only by an ordinary commit on top, which the remote takes and the check
+  finds; the remote itself finds nothing, it keeps the commit from being taken out again. Traceworks does not push
+  by itself, has no setting for a remote and writes the ledger without git hooks, so the push is the operator's: a
+  cron entry, a timer or CI that runs `git push` in the ledger folder. Entries that are not pushed yet are only as
+  safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
+  The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
+  of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
+  verifies the record of every ended run against its end entry, unless `--quick` is given.
+- **What nothing in this version finds:** what was before a new ledger, and that there was one. A ledger this
+  version does not accept is moved aside and not read, and one hand-made commit forces that; the new ledger says
+  nothing of earlier runs and register lines, and the home does not record the restart. The move itself is the
+  alarm, and a remote that refuses the new history is what shows it (docs/events.md, "A new ledger"); a well-formed entry or line added with write access to the
+  ledger (the ledger is not
+  signed: a well-formed end entry or an acknowledgement can be committed by hand, and the run then reads as ended
+  or acknowledged); a record cut to its first line (it reads as a crash right after the start, and stays listed as
+  started and not ended); and an audit run somewhere this ledger does not see at all (another home, another
+  `ledger_dir`, the ledger folder swapped for the time of the run, a jar of a version that noted no start). Against the last, start audits only from a place that owns
+  the home, such as a CI job with its own account that pushes the ledger after every run, and accept as a result
+  only a run whose start entry is in the pushed ledger.
+
+`run.html` has no scripts and loads
 nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
@@ -251,6 +358,56 @@ content, and no blob is written through one.
   `allowed_models`, any package may name any model of a provider you hold a credential for; and a step that names no
   model runs its provider's default, which Traceworks does not know. `run.started` names the pick, and every
   `ai.request` the provider and model of its call.
+- **A local model** (docs/cli.md, "Local models"). The operator declares a model server of their own in
+  `local_models`, and a `PI` step whose model names it runs against that server. What that changes, and what it
+  does not:
+  - *Nothing of the step goes to a provider.* The call gets no credential of a provider, and its container's only
+    host is the server: the hosts of Anthropic, OpenAI, Google and OpenRouter are not on its list, and neither are
+    the operator's `ai_hosts`. An attempt to reach one is refused by the proxy and is in the record as a `DENY`.
+    This holds with `ai_network: "open"` too: a local step always runs behind the proxy. With a server on your own
+    machine or network, the prompt, the files a model's tools read and the answer stay there.
+  - *Only the operator names a server.* `local_models` is read from `traceworks.json` only. A workflow asks for a
+    server by its id and for one of the models the operator listed; it cannot name a URL, add a model or change
+    the key. Pi's provider configuration is written by Traceworks from the setting alone, reaches the container
+    in an environment variable and never comes from the workspace; no extension is loaded for it, and Pi starts
+    with the same options as for a provider.
+  - *What Traceworks cannot know: what the server does with what it gets.* A server that is a gateway, a hosted
+    service or a proxy in front of a provider forwards the prompts, and Traceworks sees only the `host:port` you
+    named. "Local" is what you declared, not what Traceworks verified. The record says which server a call went
+    to (`local` in `ai.request`), not where that server sent it.
+  - *A small local model is a weaker model.* Its answers are less reliable than a large provider model's, and it
+    follows instructions hidden in what it reads more easily. Keep `tools` low and the workspace read-only on such
+    a step, check its work in a deterministic step, and do not let its verdict alone set a gate.
+  - *Plain HTTP is not encrypted.* A server whose `url` starts with `http://` gets the prompt and its key in clear
+    over the network between this machine and the server. The proxy forwards plain HTTP to exactly these servers
+    and to no other target. Use it on a network you trust, or give the server TLS.
+  - *The server's key.* The `secret` of a server is a secret like any other in `credentials.json`: the record
+    redacts it, a model with tools can read it in its container (below), and a step of any package may declare
+    the same name in `secrets` and get the value. Give a local server a key that is worth nothing elsewhere.
+  - *A server on this machine is a service of this machine.* It must listen on an address the proxy's container
+    reaches. Bind it to one such address, or put a firewall rule in front of it: a server that listens on every
+    address (`0.0.0.0`) is reachable from your whole network. Whether a step's container reaches it only through
+    the proxy depends on the runtime: with Docker 28 or newer the machine has no address on the step's network,
+    so the proxy and the one `host:port` of the URL are the only way. With an older Docker and with Podman the
+    machine keeps an address there ("The host's own services, on an older runtime" below), and a server that
+    listens on it is reachable directly from the container of every AI step, a provider's steps included, past
+    the proxy and without an `egress` line. Traceworks does not warn about this when a run starts.
+  - *The refusal of `localhost` is a hint, not a barrier.* `localhost`, `127.0.0.1` and `0.0.0.0` are refused as a
+    `url` because they cannot work from a container; any other name or address is taken as the operator wrote it.
+  - *One server, several names.* The proxy allows a `host:port`. For a forwarded plain HTTP request it sets the
+    `Host` header to that `host:port`, so a server that serves several names there is asked for the listed one
+    only. Inside a tunnel (`https://`, or a client that tunnels plain HTTP) the proxy sees no header: a reverse
+    proxy that serves other names on the same `host:port` can be asked for them. List a server, not a gateway to
+    several.
+  - *A child workflow the start check did not see.* A child named through a placeholder is judged at its step,
+    not at the start. Its call to a declared server without a `secret` runs; what still holds there is the
+    server's closed list of models, `allowed_models`, and the server as the container's only host.
+  - *Not verified* (Pi 1.5.2 was read, not run, to build this; no model was called): whether Pi sends the key as
+    `Authorization: Bearer` with `authHeader: true`, as its reference says, which Traceworks writes for a server
+    with a `secret`; whether Pi asks the server for anything besides the
+    chat completion (a list of models, for example); whether Pi sends a plain HTTP request through its proxy as a
+    tunnel or as a forwarded request (the proxy takes both); and what Pi makes of a model name with a `:` in it.
+    The container test `AiLocalModelIT` shows the first three in its record. Podman is not verified at all.
 - **`ai_images` replaces the built-in image.** The guarantee that AI runs only in the built-in images holds only while
   the operator replaces none (docs/cli.md, "AI images"). A replacement image gets the provider's credentials, the
   workspace (read-only unless the step writes it), the prompt and the network exactly as the built-in image would, and
@@ -370,7 +527,10 @@ content, and no blob is written through one.
     workflow the values are handed to, for the output of a child (or a child of a child) that asked a model, and
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
-    static `items` of a `foreach`, a person's answer.
+    static `items` of a `foreach`, a person's answer. A default that a person takes at the console with an empty
+    line is such an answer, so the console takes it only when its prompt showed the whole default: one that is
+    longer than the 200 characters shown, or has a line break or a character a terminal does not show, must be
+    typed. What the prompt shows, the person has seen and answers for.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
@@ -396,9 +556,11 @@ content, and no blob is written through one.
     the value: `eval "$REVIEW"`, `bash -c "$REVIEW"`, `$REVIEW` as the command itself, and bash's arithmetic, which
     evaluates a variable's content (`$(( REVIEW ))`, `[[ $REVIEW -eq 1 ]]`, an array index, `declare -i`). The
     same holds for programs that take code: `xargs`, `find -exec`, `ssh host "$REVIEW"`, an `awk` or `sed` program.
-  - **No protected value outside a shell line either.** A tool step's `container_args`, the host path of a
-    `mounts` entry and a child's `workflow_id` take none, model text included: it would choose what the tool does,
-    what the container sees or which workflow runs. The image of a step (`container_image`), its `network` and its
+  - **No protected value outside a shell line either.** A tool step's `container_args`, a
+    `mounts` entry (either side of it) and a child's `workflow_id` take none, model text included: it would choose what the tool does,
+    what the container sees or which workflow runs. `check` reports such a placeholder
+    (`protected-value-outside-shell`) where the workflow shows it, as an error where every run refuses the step
+    and as a warning where only some runs do, and the run refuses the step in every case. The image of a step (`container_image`), its `network` and its
     secrets are read as written, without placeholders; a hook gets its payload on standard input and its program
     and arguments from `traceworks.json`; the git commands of `run --source` take the operator's arguments only.
   - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it,
@@ -478,8 +640,9 @@ content, and no blob is written through one.
   in its own environment. Keep the runtime to yourself.
 - **The record is tamper-evident, not signed.** Manifests carry no signature in this version; only the seal of a
   package is signed ("Seals" below). Whoever can write the
-  Traceworks home can rewrite a run folder and its ledger entry together. Keep a copy of the ledger (a git repository)
-  where your runs cannot write. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
+  Traceworks home can rewrite a run folder and its ledger entries together, the start entry too. Keep a copy of the
+  ledger (a git repository) where your runs cannot write: push it to a remote that refuses a rewritten history
+  ("A run that began is named outside its folder" above). Traceworks does not push it. `ledger_dir` puts the ledger itself on another disk; that changes where it lies, not
   who can write it: Traceworks writes it as the user who runs it.
 - **The places are the operator's.** `runs_dir`, `ledger_dir` and `registers_dir` are read from `traceworks.json`
   only; no workflow, input or environment variable sets them. The check of the file compares the paths as written.
@@ -532,11 +695,19 @@ What a seal does not protect:
   `allowed_signers` gives it (`key` and `principals` in `run.started`). Read those to know who sealed.
 - **What the digest does not see.** An empty directory; a file that is not a regular file (a named pipe, a socket);
   permission bits other than the owner's execute bit; the top-level `.git/`. A change there breaks no seal. A
-  container does not see the package's `.git/`, and a workflow under it cannot be sealed.
+  container does not see the package's `.git/`, and a workflow under it cannot be sealed. That holds for
+  these other spellings a file system may take for the directory: another case (`.GIT` on macOS or Windows), the
+  characters HFS+ ignores, dots and blanks at the end (`.git.`), the short name `GIT~<n>`, and an NTFS stream
+  suffix (`.git::$INDEX_ALLOCATION`). It does not hold for the hashed short name NTFS gives `.git` when `GIT~1` to
+  `GIT~4` are taken; seal on a file system that knows one spelling.
 - **A called package is loaded again when its block runs.** The seal digest and the seals of the called packages
   are checked when the run starts and when it resumes. The engine loads a called package from disk again at the
   moment its `sub-workflow` or `foreach` block runs, and does not compare it with what the start saw. A called
-  package changed in between runs changed. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
+  package changed in between runs changed. A step of the run itself can be the one that changes it: with
+  `workspace_writable: true` a container sees only the run's own package read-only inside the workspace, so a
+  called package that lies in the workspace can be rewritten by a step, or by a model with write tools, before its
+  block runs, and its steps then get the secrets the run took at its start. Keep called packages outside every
+  workspace a run writes. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
   an unsealed package is not known at the start at all, so a sealed package reached that way is not checked.
 - **Whoever writes the home is the operator.** `traceworks.json`, `allowed_signers` and the seal log are files of
   the home. Someone who can write them can allow a key of their own, switch `require_seal` off or undo
@@ -586,6 +757,25 @@ What a seal does not protect:
   package only when its `allowed_signers` allows the key that signed, and refuses it otherwise (docs/cli.md, "seal,
   unseal and seals").
 
+### Child workflows
+
+- **A child workflow is not a boundary.** A child run (`sub-workflow`, a `foreach` with `workflow_id`) is part of
+  the run that started it: it gets the same workspace and the same scratch directory, its containers carry that
+  run's label and name, and its AI calls use that run's two networks and credentials. It can read whatever the
+  parent's steps wrote into the scratch directory, overwrite it before the parent's next step reads it, and it gets
+  the parent's variables, the protected ones as protected. Nothing a parent does keeps a child from a file, and
+  nothing a child writes is marked as the child's. Do not run a workflow you would not run yourself as a child of
+  one that handles what it must not see: start it as a run of its own, with its own workspace.
+- **The parent's package decides which workflows run.** A `workflow_id` is a path below the package or a workflow
+  id, written out or filled in from a trusted variable, an input of the run included; it never takes a protected
+  value. So whoever writes the package, or picks such an input, picks the code that runs with the run's secrets and
+  workspace. A seal covers the package and every package it names by a literal `workflow_id` (`traceworks seal`);
+  a package whose child is named through a placeholder cannot be sealed, since the seal could not say what runs.
+- **A child's gate does not reach the run.** A child that is RED, or that completed with errors, leaves its parent
+  `COMPLETED` without a gate unless a step of the parent states the verdict (docs/cli.md, "When a step fails"). A
+  pipeline that gates on the exit code or on `--fail-on-gate` of a parent whose checks live in children passes when
+  they fail.
+
 ### Images and containers
 
 - **A package image's `RUN` steps run at build time.** `traceworks images build <package>` builds the package's
@@ -613,8 +803,46 @@ What a seal does not protect:
   was checked, so a link that replaces a part of the path as written changes nothing. What is left is the runtime
   itself, which opens that real path a moment later: a process that can write one of its parent directories could
   still swap a part of it in between. Do not declare mounts below directories that others can write.
-- **Sockets deeper down.** A socket file and a folder that directly holds one are refused (all of `/tmp` is, since it
-  holds the X11 socket directory), but a folder with a socket two or more levels down is not. Mount the narrowest
+- **A listed folder is open to every package.** A writable mount (`:rw`) is refused unless it lies in or below a
+  folder you listed in `writable_mounts`, or in the workspace of a step that may write its workspace anyway
+  ("Writable mounts", above). The list is a grant to every package you run,
+  not to one: inside a listed folder a package may mount any file or folder writable, and its step, which runs as
+  you, can leave commands there that your shell, your session or git runs later outside every container. The mount
+  check refuses there only what it refuses everywhere (a login, a folder with a credential store of its own, a
+  socket, the Traceworks home); it does not refuse a repository with its `.git/hooks` and `.git/config`, a script or
+  a folder on your `PATH`. A step that writes a listed folder can also put a link there while a container of a
+  second run starts, and so reach the limit "A mount is checked, then mounted" above: the mount of a path in that
+  folder may then land where the link points, outside the list. List folders that hold results, not folders that
+  hold what the host runs, and none that two runs write at once.
+  `traceworks describe <package>` shows every mount of every block before anything runs.
+- **A writable workspace beyond its top-level `.git`.** With `workspace_writable: true` a container step sees the
+  workspace's own top-level `.git` read-only as a whole ("A writable workspace's `.git`", above), and that is all
+  the mount holds. In a workspace without a `.git` a step can make one, there or in any folder below it, with a
+  config and hooks of its choosing; a workspace that is a folder inside your repository is such a workspace. It
+  writes the repositories deeper in the workspace, hooks and config included, and the `.git` of a submodule's
+  working tree, which it can replace by a repository of its own making: a `git status` in the workspace looks
+  into its submodules. Where the workspace's `.git` is a file (a linked
+  worktree), the git directory that file names is not held when it lies in the workspace. A step writes
+  `.gitattributes`, which hands more files to a filter, diff or merge driver your config already defines, and any
+  file of the workspace your config or your hooks name (`core.hooksPath`, an `include.path`, a script that a hook
+  calls or links to). A host run holds nothing: a command on the host writes all of `.git`. And
+  with `"workspace_git_writable": true` in `traceworks.json` a container step writes all of it too, in every run of
+  that home: the hooks, the config, a `commondir` file, which makes git take its config and its hooks from the
+  directory that file names, `info/attributes`, and the state of a rebase or a bisect, whose commands run when you
+  continue it. The next git command you run there on the host can run what the step left, as you. Let a package
+  you did not write work on a checkout of its own (`run --source`, whose `.git` a step writes without the setting
+  and whose checkout no git of Traceworks reads afterwards; a checkout that is kept holds what the steps left), and
+  set `workspace_git_writable` only where you wrote the packages that write a workspace.
+- **A called package's `.git` in the workspace.** The package's own `.git/` is covered wherever a container
+  sees the package. A package it calls that lies in the workspace has no cover while the steps of the calling
+  package run: they see its `.git/` as any file of the workspace. A workspace that lies inside the package's
+  `.git` is refused.
+- **The tool caches are shared between runs.** A tool step's cache folder (`cache_dir`) belongs to an image name,
+  and every package that names that image, or gives its own package and image the same names, shares it. What one
+  run's tool wrote there, a later run's tool reads.
+- **Sockets, pipes and devices deeper down.** A socket file, a named pipe, a device node and a folder that directly
+  holds one are refused (all of `/tmp` is, since it holds the X11 socket directory), but a folder with one of them
+  two or more levels down is not. Mount the narrowest
   directory a step needs.
 - **Runtime storage elsewhere.** The guard knows the runtimes' default storage (`/var/lib/docker`,
   `/var/lib/containers`, `~/.local/share/docker`, `~/.local/share/containers`). Storage moved elsewhere, such as
@@ -656,12 +884,24 @@ this setting is the usual one for Docker hosts and has not been verified here.
   busy until the Traceworks process ends (a thread inside the regex engine cannot be stopped). A pattern whose
   counts (`{n}`, `{n,}`, `{n,m}`) multiply to more than 1,000,000,000,000 is refused before any match, with a
   message that says so; a count written with white space or a comment in it, which `(?x)` allows, is read as the
-  engine reads it.
+  engine reads it, and so is quoting: the counts are read after `\Q...\E` is taken out the way the engine takes it
+  out, so an empty `\Q\E` between the digits of a count hides nothing. A brace that is escaped, in a character
+  class or in quoted text counts nothing, unless the pattern holds a control escape (`\c`) or a `#`: either can
+  make a class or an escape look like one where the engine reads none, so in such a pattern every brace counts.
+  What this guarantees: no count Java's engine takes is missed (checked against the engine for quoting, nested
+  classes, intersections and the braces of `\p{..}`, `\x{..}`, `\N{..}`); it refuses some patterns the engine would
+  match quickly, since it multiplies all counts, nested or not.
 - **A token in a `--source` URL** is an argument of `git clone`, so every process on the machine can read it in the
   process list while the clone runs. Use a credential helper instead.
 - **A gitfile that points into a checkout.** A local source whose `.git` is a file (`gitdir: ...`) that points into a
   run's checkout is not refused, so the clone's git on the host would read the checkout's `.git`, which a step with a
   writable workspace may have written. Planting such a file needs a write outside the checkout, on the host or
   through a writable mount a step declares; do not use a directory that steps could write as a `--source`.
+- **A source path is checked, then cloned.** Whether a local `--source` lies in a folder that steps write is
+  judged on the path as it resolves at the check, and git resolves the path again when it clones. A path through
+  such a folder with a part that does not exist yet (`<run folder>/scratch/missing/../../../../repo`) is judged
+  as if the part were a plain folder; a step of a run going on at that moment that creates it as a link changes
+  where git ends up. The path is yours: name a source by a path that exists and passes through no folder a run
+  writes.
 - **Paths in a package.** A `sub-workflow` or `foreach` block may name its workflow by any path on the machine. Run
   only packages you trust.

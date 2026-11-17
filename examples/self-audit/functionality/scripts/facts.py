@@ -94,6 +94,10 @@ def read_rules(path):
             else:
                 rules[key].append(value)
             given.add(key)
+    for value in rules["foreign_option"]:
+        if not re.fullmatch(NAME + r"( [A-Za-z_][\w.-]*)?", value):
+            raise SystemExit(f"facts: {path}: 'foreign_option' takes an option's name, or the name and one word"
+                             f" the line must hold before it, got '{value}'")
     for key in ("max_sections", "max_section_chars", "verdict_version"):
         if not re.fullmatch(r"[1-9][0-9]{0,6}", rules[key][0]):
             raise SystemExit(f"facts: {path}: '{key}' takes a positive number, got '{rules[key][0]}'")
@@ -428,6 +432,38 @@ def heading_commands(heading):
     return None
 
 
+def foreign_options(values):
+    """The foreign_option lines of the rule file: option -> the words one of which must stand right before it, or
+    None for an option that is another program's wherever it stands."""
+    foreign = {}
+    for value in values:
+        option, _, word = value.partition(" ")
+        if not word:
+            foreign[option] = None
+        elif foreign.get(option, set()) is not None:
+            foreign.setdefault(option, set()).add(word)
+    return foreign
+
+
+def unknown_options(text, every_option, foreign):
+    """The options a text names that no command has and that are not another program's where they stand, sorted."""
+    unknown = set()
+    for line in text.split("\n"):
+        for match in OPTION_IN_TEXT.finditer(line):
+            option = match.group(1)
+            if option in every_option:
+                continue
+            if option in foreign:
+                words = foreign[option]
+                before = line[:match.start()]
+                # The word stands right before the option: only a backtick, a quote, "[" or white space between
+                if words is None or any(re.search(r"(?<![\w-])" + re.escape(word) + r"[`'\"\[\s]*$", before)
+                                        for word in words):
+                    continue
+            unknown.add(option)
+    return sorted(unknown)
+
+
 def slug(heading):
     return re.sub(r"[^a-z0-9]+", "-", heading.lower()).strip("-") or "section"
 
@@ -516,7 +552,7 @@ class Audit:
                          "The heading '" + documented[name][0].heading + "' (line "
                          + str(documented[name][0].start) + ") names it; " + main + " dispatches no such command.")
 
-        foreign = set(self.rules["foreign_option"])
+        foreign = foreign_options(self.rules["foreign_option"])
         every_option = set(globals_)
         for name in in_code:
             every_option.update(specs[name]["options"])
@@ -532,10 +568,8 @@ class Audit:
                                  specs[name]["file"] + " declares it; the section '" + documented[name][0].heading
                                  + "' does not name it.")
             for section in documented[name]:
-                for option in sorted(set(OPTION_IN_TEXT.findall(texts[id(section)]))):
-                    # An option of another command may be named in passing: only one no command has is unknown
-                    if option in every_option or option in foreign:
-                        continue
+                # An option of another command may be named in passing: only one no command has is unknown
+                for option in unknown_options(texts[id(section)], every_option, foreign):
                     subject = "/".join(heading_commands(section.heading)) + " --" + option
                     if subject not in seen_unknown:
                         seen_unknown.add(subject)

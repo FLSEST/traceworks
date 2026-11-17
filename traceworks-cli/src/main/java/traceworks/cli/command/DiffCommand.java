@@ -221,6 +221,7 @@ public final class DiffCommand implements Command {
         }
         out.println("        " + run + "  " + TerminalFormat.safe(call.provider())
                 + "  model " + (call.model() == null ? "(default)" : TerminalFormat.safe(call.model()))
+                + (call.local() == null ? "" : "  " + TerminalFormat.safe(call.local()))
                 + "  answered by " + (call.answeredBy() == null ? "-" : TerminalFormat.safe(call.answeredBy()))
                 + (call.effort() == null ? "" : "  effort " + TerminalFormat.safe(call.effort()))
                 + "  tools " + TerminalFormat.safe(call.tools())

@@ -1,0 +1,16 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a70",
+  "name": "IT combo-model-choice",
+  "description": "A workflow without a model choice of its own that starts a child with one: the input of the run picks the child's option.",
+  "blocks": [
+    {
+      "type": "sub-workflow",
+      "name": "judged",
+      "config": {
+        "workflow_id": "./child"
+      }
+    }
+  ]
+}

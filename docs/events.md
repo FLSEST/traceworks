@@ -239,20 +239,23 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `execution` | where the run runs its steps: `container` (wherever a container runtime works: every command in a container) or `host` (a host run, where none works and the operator consents: shell commands without an image on the host). A resume keeps it. A record of an earlier version says `host` |
 | `container_runtime` | `{name, version}` of the container runtime the run uses (`docker` or `podman`, and the version it reported); `null` for a host run that found none |
 | `output_limit_mib` | the output limit of every command of the run, in MiB: the operator's `output_limit_mib`, `16` by default (docs/cli.md, "Output limit"). A record of an earlier version has no such field; its limit was 16 MiB |
+| `records` | what this version writes into the record only when it happened, so that its absence says that it did not: a list of names, now `["output_cut"]` (the field of `step.command.finished`). `run.resumed` has it too: a run that an earlier version started or resumed has a line without it, and from then on the record cannot say. A record of an earlier version has no such field |
 | `run_output_budget_mib` | the output budget of the run, in MiB: the operator's `run_output_budget_mib`, or its default (`128`, or eight times `output_limit_mib` when that is more), always as the number in force (docs/cli.md, "Output budget"). A record of an earlier version has no such field; its run had no budget |
 | `ai_images` | the images the operator's `ai_images` runs AI CLIs in instead of their built-in images, as an object by CLI id (`{"claude": "registry.example.org/ops/claude:2.1"}`); `{}` when it replaces none (docs/cli.md, "AI images"). A record of an earlier version has no such field; it ran only the built-in images |
 | `ai_network` | where the containers of the AI CLIs can connect: `restricted` (the default: only to the hosts of the call's provider and the operator's `ai_hosts`, through the egress proxy) or `open` (the runtime's default network), the operator's `ai_network` (docs/cli.md, "The network of an AI step"). A record of an earlier version has no such field; its AI containers had the open network |
 | `ai_hosts` | the operator's `ai_hosts`: more hosts for the containers of an AI CLI, as an object of sorted lists by CLI id (`{"claude": ["gateway.example.org:8443"]}`); `{}` without any. A record of an earlier version has no such field |
 | `images` | what each image the run may use holds, one object per image: `reference` (a built-in image by name, `shell`, `claude`, `pi`, `egress`; a package image as `./images/<name>`), `base` (the image of the Dockerfile's last `FROM`, without its digest) and `description` (the Dockerfile's label `org.opencontainers.image.description`, on one line, at most 200 characters; `null` without the label). The built-in images of this distribution and the package's own; a registry image a step names has no Dockerfile here and is not listed. A record of an earlier version has no such field |
 | `seal` | the seal the package carried and the seal check accepted (docs/cli.md, "seal, unseal and seals"): `{workflow_id, digest, signer, sealed_at, key, principals, signature}`. `digest` is the seal digest, which covers the package and the packages it calls, so it differs from `package.digest`; `signer` and `sealed_at` are what the seal says; `key` is the fingerprint of the key that signed (`SHA256:...`); `principals` are the names the allowed signers file of the home gave that key when the run started; `signature` is the armored SSH signature. `null` for a package that is not sealed. A record of an earlier version has no such field |
+| `local_models` | only in a home that declares a model server (docs/cli.md, "Local models"): the operator's `local_models`, an object by backend id, each `{url, api, models, secret}`; `secret` is the name of the secret that holds the server's key, or `null`, never a value. Every other `run.started` has no such field |
 | `model_choices` | only for a workflow that declares a model choice (docs/cli.md, "Model choices"): an object by the name of the choice, each `{option, default, provider, model}`: the option the run picked, whether it is the choice's default, and the provider and the model of that option, which the steps that refer to the choice ran with. The pick comes from the run's inputs (the `inputs` blob), and a resume keeps it. A run of a workflow without a choice has no such field, so its `run.started` is byte for byte what earlier versions wrote; a child run has no `run.started`, and its calls name their provider and model in `ai.request` |
 | `register` | only for an audit workflow (docs/registers.md, "The register folder of a run"): what the register handed the run before its first step. `key` is the register; `seq` and `head` are the last line of the register's log the run read, its sequence number and its SHA-256, both `null` when the register did not exist yet; `files` lists the files of the run's `register/` folder in the order they were written, each `{name, sha256, size}`. The files are not blobs of the run: the folder is part of the run folder, `traceworks verify` compares it with these digests, a host run does so before each command that gets the folder, and a resume refuses a folder that differs. A run of any other workflow has no such field, so its `run.started` is byte for byte what earlier versions wrote |
+| `ledger_start` | `true`: the ledger notes the start of this run, with an entry written right after this line and before the first step ("The start entry" below). No step runs without the entry, so a run with this field and without an entry lost it, and `traceworks verify` fails. A record of an earlier version has no such field, and no start entry until it is resumed |
 | `workspace` | the directory the steps work in, as its real path (symbolic links resolved); with `--source`, the run's checkout `<home>/workspaces/<run-id>` |
 | `workspace_source` | only with `--source`: the source the workspace is a checkout of, a local path as an absolute path, a URL without its credentials, query and fragment (`https://user:token@host/repo?x=1#y` is `https://host/repo`; an `ssh://` URL keeps its user name, which is no credential) |
 | `workspace_source_sha` | only with `--source`: the full commit the checkout is detached at, which the steps also see as `workspace_source_sha` |
 
 ```json
-{"workflow":{"id":"b1445bda-e182-479a-bf85-f5b519d68ad2","name":"Hello"},"package":{"dir":"/work/hello","digest":"ad91b638...","git_commit":null,"git_dirty":null},"definition":{"sha256":"3915...","size":912},"inputs":{"sha256":"ea6e...","size":2},"trigger":"MANUAL","actor":"anna@laptop","version":"0.1.0","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{},"workspace":"/work/project"}
+{"workflow":{"id":"b1445bda-e182-479a-bf85-f5b519d68ad2","name":"Hello"},"package":{"dir":"/work/hello","digest":"ad91b638...","git_commit":null,"git_dirty":null},"definition":{"sha256":"3915...","size":912},"inputs":{"sha256":"ea6e...","size":2},"trigger":"MANUAL","actor":"anna@laptop","version":"0.1.0","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{},"workspace":"/work/project"}
 ```
 
 The `register` field of an audit run:
@@ -372,7 +375,7 @@ command whose mount is refused only then, because its path changed in between, e
 | `image_id` | the local ID of the image the container starts from (`sha256:...`), or `null` on the host and for a command that starts no container (see above) |
 | `mounts` | list of `{host, container, read_only}`: the standard mounts first, then the block's own |
 | `network` | where the container can connect: `none` (no network), `open` (the runtime's default network: a shell step or tool with `network: true`, and an AI call when the operator's `ai_network` is `open`) or `hosts` (only the hosts in `network_hosts`: an AI call). A record of an earlier version says `false` or `true` here, which is `none` or `open` |
-| `network_hosts` | only with `network: "hosts"`: the targets the container can reach, each `host:port` in lower case, sorted. They are the hosts of the call's provider, the operator's `ai_hosts` for its CLI and, for a step with `web: fetch`, its `web_hosts`; `*` among them (first) is the star of `web_hosts`, for which the proxy allows only public names on port 443; the container has no network but the egress proxy, which connects to these and to nothing else (docs/security.md, "AI steps") |
+| `network_hosts` | only with `network: "hosts"`: the targets the container can reach, each `host:port` in lower case, sorted. They are the hosts of the call's provider, the operator's `ai_hosts` for its CLI and, for a step with `web: fetch`, its `web_hosts`; of a call to a model server of the operator's (`local` in its `ai.request`), that server alone; `*` among them (first) is the star of `web_hosts`, for which the proxy allows only public names on port 443; the container has no network but the egress proxy, which connects to these and to nothing else (docs/security.md, "AI steps") |
 | `env_names` | the sorted names of the environment variables the step set, such as the secrets it declares (never their values) |
 | `host` | `true` when the command runs on the host |
 
@@ -402,7 +405,8 @@ On the host:
 | `duration_ms` | how long it ran |
 | `timed_out` | whether it was stopped by its time limit |
 | `truncated` | the streams that went beyond the output limit, `stdout` before `stderr`; `[]` when the output was whole. The limit is the `output_limit_mib` of `run.started`, or of the last `run.resumed` before the command (16 MiB by default). Of such a stream only its first part up to the limit was kept, and what ran the command failed (docs/cli.md, "Output limit"). On the host, `stdout` is the merged output. A record of an earlier version has no such field |
-| `egress` | only for a command with `network: "hosts"`: what its container asked the egress proxy for, as a list of `{target, verdict, count}`, counted by target and verdict, in the order of their first appearance; `[]` when it asked for nothing. `target` is `host:port` as the container wrote it, in lower case, or `?` for a request that named none; it comes from inside the container. `verdict` is `ALLOW` (connected), `DENY` (not in `network_hosts`, or a plain HTTP request, which the proxy never forwards, or, for a target only `*` allows, another port than 443, an IP address or a name that resolves to an address that is not public), `FAIL` (listed, but the connection failed) or `LIMIT`. Nothing else of a connection is recorded: no path, no header, no content. A `DENY` fails no step and changes no gate; `show` and `run.html` mark it and count it. The list names at most 100 targets; the requests to further ones are counted together under the target `(other targets)`. After 10,000 requests the proxy refuses every further one, and the list ends with `{"target": "*", "verdict": "LIMIT", "count": 1}`. A command that could not start its proxy did not run (exit code 125) and has `[]` |
+| `output_cut` | only when the reading of the output ended before the end of a stream: `{streams, after_ms}`. Either something the command left behind (a background job, a process substitution) still held the output at the bound after the command's end, or the wait for the command was interrupted. What was written afterwards is not in the record, so the output may be incomplete. `streams` names the streams it happened to, `stdout` before `stderr` (on the host, `stdout` is the merged output). `after_ms` is how long the output was read after the command's end: on the host 5000 after a command that ended by itself and 2000 after one that was stopped (a timeout, an output beyond the limit, a cancel), 2000 for a container's client, and 0 for an interrupted wait (exit code 130), whose command had not ended. A mark: it fails no step and changes no gate; `show` and `run.html` mark it and count it, and `diff` compares it (docs/cli.md, "diff"). It is another matter than `truncated`: there the stream was longer than the limit, here it had not ended in time. The mark is set at the bound, also when what holds the output never writes; the reader of such a stream stays until that process ends and keeps nothing more. **What no field means:** in a record whose `run.started` and every `run.resumed` name `output_cut` in `records`, no reading was ended at its bound or by an interrupt. It does not promise more. Two cases leave the output short and are not marked: a stream whose reading failed is kept up to the failure; and a command that ends within the instant of its start, before the reader holds its stream, is read up to its own end only, without what a process it left behind writes later (the host runner closes that window, the container client keeps it). In a record without `records`, of an earlier version, the absence says nothing (docs/cli.md, "Host execution") |
+| `egress` | only for a command with `network: "hosts"`: what its container asked the egress proxy for, as a list of `{target, verdict, count}`, counted by target and verdict, in the order of their first appearance; `[]` when it asked for nothing. `target` is `host:port` as the container wrote it, in lower case, or `?` for a request that named none; it comes from inside the container. `verdict` is `ALLOW` (connected), `DENY` (not in `network_hosts`, or a plain HTTP request, which the proxy forwards only to a model server of the operator's whose URL starts with `http://`, or, for a target only `*` allows, another port than 443, an IP address or a name that resolves to an address that is not public), `FAIL` (listed, but the connection failed) or `LIMIT`. Nothing else of a connection is recorded: no path, no header, no content. A `DENY` fails no step and changes no gate; `show` and `run.html` mark it and count it. The list names at most 100 targets; the requests to further ones are counted together under the target `(other targets)`. After 10,000 requests the proxy refuses every further one, and the list ends with `{"target": "*", "verdict": "LIMIT", "count": 1}`. A command that could not start its proxy did not run (exit code 125) and has `[]` |
 
 ```json
 {"step":0,"item":null,"exit_code":0,"duration_ms":8,"timed_out":false,"truncated":[]}
@@ -412,6 +416,13 @@ An AI call whose model, with shell tools, also tried another host:
 
 ```json
 {"step":1,"item":null,"exit_code":0,"duration_ms":18244,"timed_out":false,"truncated":[],"egress":[{"target":"api.anthropic.com:443","verdict":"ALLOW","count":3},{"target":"paste.example.org:443","verdict":"DENY","count":1}]}
+```
+
+A host command that left a writer behind (`server & echo started`): its output was read for 5 seconds after its end
+and then closed:
+
+```json
+{"step":0,"item":null,"exit_code":0,"duration_ms":5012,"timed_out":false,"truncated":[],"output_cut":{"streams":["stdout"],"after_ms":5000}}
 ```
 
 A command whose output went beyond the limit:
@@ -442,6 +453,7 @@ holds for all of them.
 | `tools` | the tool policy of the call: `none`, `read`, `write` or `shell` |
 | `web` | whether the model may use the web: `none`, `search` (the provider's search tool) or `fetch` (search, and the fetch of a page from the call's container); docs/cli.md, "Web tools of an AI step". A record of an earlier version has no such field; its calls had no web tools |
 | `web_hosts` | only with `web: "fetch"`: the hosts the step named, each `host:port` in lower case, or `["*"]` for any public host. They are among the `network_hosts` of the call's `step.command`, unless the operator's `ai_network` is `open`: then they are recorded here and nothing enforces them |
+| `local` | only for a call to a model server of the operator's (docs/cli.md, "Local models"): `{backend, url, api}`, the backend id of `local_models`, the base URL of the server and the API it was asked in. A call to a provider has no such field, so a reader can tell the two apart. The container of such a call reaches that server only (the `network_hosts` of its `step.command`) and gets no credential of a provider |
 | `prompt` | blob: the request's prompt; the system prompt has a field of its own, and the CLI's arguments are in the `step.command` that follows |
 | `system_prompt` | blob: the system prompt, or `null` |
 
@@ -775,14 +787,16 @@ that step was the last one, the run ends instead. A run records it once: a secon
 | `execution` | the target the run keeps, as `run.started` records it: `container` or `host`. A host run resumes on the host also where a container runtime works now |
 | `container_runtime` | `{name, version}` of the container runtime of the process that resumed the run, which may differ from the one in `run.started` (another machine, an update); `null` when it found none (a host run) |
 | `output_limit_mib` | the output limit of the commands after the resume, in MiB: the operator's setting when the run resumed, which may differ from the one in `run.started`. A record of an earlier version has no such field |
+| `records` | as in `run.started`: what the version that resumed the run records only when it happened (`["output_cut"]`). A `run.resumed` of an earlier version has no such field |
 | `run_output_budget_mib` | the output budget of the run after the resume, in MiB, as in `run.started`: the one in force when the run resumed, which may differ from the one there. The resumed run counts the texts of its checkpoint and the variables its steps set against it; a resume whose checkpoint already holds more is refused, and nothing is recorded. A record of an earlier version has no such field |
 | `ai_images` | the operator's `ai_images` when the run resumed, as in `run.started`, which may differ from the one there: the AI calls after the resume run in these images. A record of an earlier version has no such field |
 | `ai_network`, `ai_hosts` | the operator's `ai_network` and `ai_hosts` when the run resumed, as in `run.started`, which may differ from the ones there: the AI calls after the resume connect as these say. A record of an earlier version has no such fields |
+| `local_models` | only in a home that declares a model server: the operator's `local_models` when the run resumed, as in `run.started`, which may differ from the one there: the calls after the resume go to these servers |
 | `model_choices` | only for a workflow that declares a model choice: the picks the resumed run goes on with, as in `run.started`: per choice `{option, default, provider, model}`. The option is the one `run.started` recorded; `default` says whether it is the default of the definition the resume runs. A run of a workflow without a choice has no such field |
 | `workspace_cloned` | only for a run started with `--source`: `true` when its checkout was missing and the resume cloned the source again at `workspace_source_sha`, so whatever a step had written there before is gone; `false` when it works in the checkout as it was |
 
 ```json
-{"actor":"anna@laptop","from_checkpoint":14,"next_position":2,"rerun_step":2,"answer":19,"package_changed":false,"package_digest":"ad91b638...","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{}}
+{"actor":"anna@laptop","from_checkpoint":14,"next_position":2,"rerun_step":2,"answer":19,"package_changed":false,"package_digest":"ad91b638...","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{}}
 ```
 
 A resume runs the package's `workflow.json`, which is the definition the run started with as long as the package
@@ -853,6 +867,7 @@ lines: its parent's lines follow it in the same log.
 | `tool_versions` | `{}` in this version |
 | `events` | the number of lines in `events.jsonl` |
 | `head` | the hash of the last line |
+| `run_started` | the SHA-256 of the `run.started` line, which the start entry of the ledger names too ("The start entry" below): it ties an end entry to its start entry without the run folder. A manifest of an earlier version has no such field; `traceworks verify` accepts that for a run whose `run.started` has no `ledger_start`, and for no other |
 | `status` | the final status |
 | `gate` | `{status, category}` or `null` |
 | `started_at`, `finished_at` | ISO-8601 UTC times |
@@ -868,29 +883,256 @@ was deleted, the models cannot be told from the record, and the ones the manifes
 ## The ledger
 
 The ledger is a git repository at `<home>/ledger/`, or where `ledger_dir` in `traceworks.json` puts it (docs/cli.md,
-"Places of the runs, the ledger and the registers"). It holds one commit per finished run, and one per write of a
-register:
+"Places of the runs, the ledger and the registers"). It is a second place, outside the run folders and the register
+folders, that says which runs began and ended and where the log of each register stood. It holds regular files at
+four kinds of path and nothing else:
 
 ```
-ledger/runs/<run-id>.json     a byte-identical copy of the manifest
+ledger/starts/<run-id>.json   the start entry: the run began, and with which first line
+ledger/runs/<run-id>.json     the end entry: a byte-identical copy of the manifest
+ledger/acks/<run-id>.jsonl    the acknowledgements of a run: one line per acknowledgement
 ledger/registers/<key>.jsonl  the anchors of a register: one line {"seq":N,"head":"<sha256>"} per write
 ```
 
-`traceworks run` refuses to start (exit 6) when the ledger cannot take an entry: git is missing, or the
-repository cannot be created. If the manifest or the ledger entry still cannot be written when the run ends,
-`traceworks resume` writes them later from the record, and adds nothing to the log.
+Every write is one commit of one file. Its message is one line:
 
-The commit message is `run <run-id> <STATUS>`, or `register <key> seq <N>` for an anchor. Author and committer are
-`Traceworks <traceworks@localhost.invalid>`.
-The ledger is written with an empty git configuration, no hooks and no signing, so the operator's git setup does
-not change it. Writers take `ledger.lock` (beside the ledger, or in the ledger folder when `ledger_dir` places it;
-never committed), so two runs that end at the same time commit one after the other. An entry names its run by id,
-not by a path, so the runs folder and the ledger can each be moved.
+| Message | The commit |
+|---|---|
+| `run <run-id> STARTED sha256:<hex>` | adds the start entry |
+| `run <run-id> <STATUS> sha256:<hex>` | adds the end entry (`COMPLETED`, `COMPLETED_WITH_ERRORS`, `FAILED`, `CANCELLED`) |
+| `run <run-id> ACKNOWLEDGED sha256:<hex>` | adds a line to the acknowledgements |
+| `register <key> seq <N> sha256:<hex>` | adds a line to the anchors |
 
-`traceworks verify` checks that the ledger's copy equals `manifest.json`. The ledger is a second place that
-names the head of the run: to change a record unnoticed, you would have to change both.
+`<hex>` is the SHA-256 of the file after the commit. It is what the file is judged by later ("How the ledger is
+judged"). Author and committer are `Traceworks <traceworks@localhost.invalid>`. The ledger is written with an empty
+git configuration, no hooks, no signing, no attributes and no housekeeping (`gc.auto=0`), so the operator's git
+setup does not change it; it is packed only when the operator runs `git gc`. After every commit Traceworks compares
+the object git stored with the bytes it gave, and fails the write when they differ.
 
-An anchor of a register says that line `N` of its log had the hash `head` when it was written. The file keeps every
+Writers take `ledger.lock` (beside the ledger, or in the ledger folder when `ledger_dir` places it; never
+committed), so two runs that start or end at the same time commit one after the other. A writer waits at most 60
+seconds for the lock; then it gives up with a message that names the lock file, which refuses a run before it starts
+(exit 6). An entry names its run by id, not by a path, so the runs folder and the ledger can each be moved.
+
+`traceworks run` refuses to start (exit 6) when the ledger cannot take an entry: git is missing, the repository
+cannot be created, or the ledger is one this version does not accept ("A ledger this version does not accept"). If
+the manifest or the end entry cannot be written when the run ends, `traceworks resume` writes them later from the
+record, and adds nothing to the log.
+
+### The start entry
+
+A run that was killed, parked and never resumed, or is still running has no manifest. So that such a run is named
+outside its own folder too, the ledger gets an entry as soon as the record holds `run.started`, and before the first
+step runs:
+
+```json
+{
+  "run_id" : "3f2a91c4-6d1e-4c0b-9a57-1f0e8a2b7c11",
+  "started_at" : "2026-11-16T09:12:44.118Z",
+  "run_started" : "b7a1…",
+  "workflow_id" : "self-audit-security",
+  "package_digest" : "5f2c…",
+  "register" : {
+    "key" : "security",
+    "seq" : 212,
+    "head" : "6f48…"
+  },
+  "traceworks_version" : "0.1.0"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `run_id` | the run |
+| `started_at` | the `at` of its `run.started` |
+| `run_started` | the SHA-256 of the `run.started` line, which is also the `prev` of the record's second line. It ties the entry to one record: another record under the same run id, or a changed first line, does not match. The manifest names the same line (`run_started`), which ties the end entry to the start entry |
+| `workflow_id`, `package_digest` | `workflow.id` and `package.digest` of `run.started` |
+| `register` | only for an audit workflow: the register and the head of its log the run read (`key`, `seq`, `head` of `run.started.register`; `seq` and `head` are `null` when the register did not exist yet) |
+| `traceworks_version` | the version that started the run |
+
+- **No entry, no step.** When the ledger cannot take the start entry, no step runs: the run ends `FAILED` with
+  `run.started` and `run.finished` as its only lines, the error says why, and `traceworks run` exits 6. A record with
+  events is never removed, so the folder stays. Once the ledger can be written, `traceworks resume <run>` writes the
+  start entry, the manifest and the end entry of that run; it runs no step.
+- **One per run.** A resume is the same run and adds no start entry to a run that has one, and the ledger notes
+  nothing between the start and the end of a run (no pause, no resume). A child run has no folder, no manifest and
+  no entry of its own: its lines are in the record of the run that started it. A finished run has both entries.
+- **Which runs have one.** `run.started` of a run that gets a start entry holds `"ledger_start": true`. A record
+  without the field was written by a version that noted no start.
+- **A resume makes sure of it.** Before a resume goes on, the ledger must hold the start entry of the run. A run
+  without one gets it then, from the first line of its record: a run of a version that noted no start, a run whose
+  process was killed between `run.started` and the commit. When the ledger cannot take it, the resume is refused
+  (exit 6) and records nothing. So no step of this version runs in a run the ledger does not name.
+
+### How the ledger is judged
+
+Every reader judges the ledger the same way, from two things git says: one listing of the files of HEAD, and the
+subjects of the commits (read as records that end with a NUL, which no message can hold; no message body and no
+old tree is read). Content is read by the object id the listing gives, never by a path.
+
+- **A start entry and an end entry** are added once. The oldest commit that names the path counts: the file must
+  have the SHA-256 its subject names. A second commit under the message of an entry is a problem.
+- **The acknowledgements and the anchors** are added to. Every commit that names the file, in the order of the
+  history, must name the SHA-256 of a beginning of the file as it is now that ends with a line, each longer than
+  the one before, and the newest the whole file. So a commit can only have added lines: a file that was rewritten,
+  also by a commit that names the correct hash of the new file, no longer begins with what the earlier commits
+  left.
+- **A commit that does not match** what the ledger holds (it names a path the ledger does not hold, or a hash the
+  file does not have) is a problem of the path it names: of the run, or of `registers.<key>` for anchors. It is
+  listed by `traceworks verify`, with the commit, the path and the hashes, and can be acknowledged ("Acknowledging
+  a run"). Anchors that were rewritten also fail `traceworks findings <key> verify`, which reads them through the
+  same judgement. The commit that did a change is not named; `git log -- <path>` in the ledger shows it.
+
+### A ledger this version does not accept
+
+No command that needs the ledger reads or writes such a ledger. Each message says what was found and what to do.
+
+| Command | With such a ledger |
+|---|---|
+| `run`, `resume` | refused before anything is recorded, exit 6 |
+| `verify`, `verify <run>`, `findings <key> verify`, `diff` | fail, exit 8 (`verify <run>` and `diff` say `ledger    NOT checked: ...`) |
+| `findings <key> accept`, `dismiss`, `reopen`, `render`, and the register's part of a run's end | the write to the register is kept, the command exits 0 and says that the write is `not anchored in the ledger (<why>)` |
+| `cancel` of a parked or interrupted run, and the end of a run that is already running | the run ends in its record; the end entry is not written, the command fails, and `resume` writes it once the ledger is one this version accepts |
+| `runs`, `show`, `watch`, `findings <key> list`, `show`, `items`, `describe`, `check` | never read the ledger: as ever |
+
+| What the ledger holds | What to do |
+|---|---|
+| a commit whose message is none of the four above, or a file no such commit names: `The ledger ... was written by an earlier version of Traceworks, or by hand` | move the ledger folder aside and keep it; the runs and the registers stay where they are, and the next run starts a new ledger ("A new ledger") |
+| a file that is no entry, a link, an executable file, a path listed twice | if the commit that added it is the newest, take it back (`git -C <ledger> reset --hard HEAD~1`); else move the ledger aside |
+| something that makes git show another history than the commits hold: replace refs, `.git/shallow`, `.git/info/grafts`, `.git/objects/info/alternates`, a `.git` that is a file or a link or has a `commondir`, a HEAD that names no branch, a second branch, a merge commit, a commit a reference holds and HEAD does not reach | remove what the message names (the reference, the file, the branch); a history that was merged or rewound is moved aside |
+| an attributes file (`.gitattributes`, `.git/info/attributes`) | delete it |
+| a key in the ledger's own git configuration that is not allowed ("The ledger's own git settings") | `git -C <ledger> config --unset <key>` |
+| a repository git cannot read | repair it, or move it aside |
+
+A hand-made commit therefore has no place in a ledger, also one that tidies up: its message is none this version
+writes.
+
+### A new ledger
+
+A ledger starts when a run finds none: in a new home, or after the folder was moved aside. It knows nothing of what
+was before it:
+
+- **Runs.** A run folder of a version that noted no start (`run.started` without `ledger_start`), whose
+  `run.started` is older than the ledger's first commit and of which the ledger holds nothing, is from before the
+  ledger. Such a record is **unproven**: no entry vouches for it, the check of the home does not check its chain,
+  and a record that is made up, dated back and left without the field reads the same. One that is dated after the
+  ledger began is a problem (`the ledger does not know this run`). `traceworks verify` counts such folders (`N run folders from
+  before the ledger`) and lists those that have not ended; that is no failure. `traceworks verify <run>` checks the
+  record and the manifest of such a run and says `ledger    not checked (the ledger does not know this run ...)`. A
+  run folder whose record says the ledger noted its start, and of which the new ledger holds nothing, is a problem
+  as ever (it can be acknowledged). The old ledger, kept aside, is the record of that time; this version does not
+  read it.
+- **Registers.** A register keeps its log, and its next write anchors it again: one line with the sequence number
+  and the hash of the line the log ends with then. That anchor **proves nothing about the lines before it**: it
+  says where the log stood when the new ledger first saw it. Until that write, `findings <key> verify` says
+  `anchor    none`.
+
+### The ledger's own git settings
+
+The ledger is a repository an operator may push, so its `.git/config` may hold what a push needs. It may hold
+nothing else: a setting such as `core.autocrlf`, `core.worktree`, `core.hooksPath` or a `log.*` or `diff.*` key
+could change what git writes into the ledger or shows of it. The rule is the same for a run as for a check, and the
+message names the key and what to do: remove it (`git -C <ledger> config --unset <key>`), and give a setting that
+only a push needs on the command line of the push (`git -c <key>=... push`), or push from a clone.
+
+| Allowed | Why it cannot change what the history reads as |
+|---|---|
+| `core.repositoryformatversion`, `core.filemode`, `core.bare`, `core.logallrefupdates`, `core.ignorecase`, `core.precomposeunicode`, `core.symlinks`, `extensions.objectformat` | what `git init` writes: the format of the repository and what the file system can do |
+| `remote.*`, `branch.*`, `push.*`, `fetch.*`, `pull.*`, `url.*`, `http.*`, `credential.*`, `core.sshCommand` | where and how a push or a fetch connects, and as whom. Traceworks never fetches or pulls; a pull that rewinds or merges the history is found. Refused among them: `remote.<name>.promisor` and `remote.<name>.partialclonefilter`, which let git fetch a missing object by itself (Traceworks also sets `GIT_NO_LAZY_FETCH`, which an older git may not know) |
+| `user.*` | the identity of commits made by hand; Traceworks sets its own for every commit |
+| `gc.*`, `maintenance.*` | the housekeeping of git calls the operator makes. Traceworks runs every call of its own with `gc.auto=0` and `maintenance.auto=false`, so none of these (`gc.recentObjectsHook`, which names a command, among them) takes effect in a call Traceworks makes |
+
+### What the ledger shows, and what it does not
+
+The ledger is not signed, and it lies on the machine that runs the runs, written as the user who runs them.
+
+**What the checks find**, with nothing but this machine (`traceworks verify` without a run, exit 8; docs/cli.md,
+"verify"):
+
+- a run that started, never ended, and whose folder is gone, is empty, or holds another record than the one that
+  started;
+- an entry that is not what its commit left, anchors or acknowledgements that were rewritten, and a commit that
+  does not match what the ledger holds ("How the ledger is judged"). So a new manifest committed over an end entry,
+  after the record was rewritten to match it, is found although no history was rewritten;
+- an end entry that is no manifest of the run, does not have the status its commit says, or does not name the
+  `run.started` line of the start entry (such an entry does not end the run); a manifest in the run folder that is
+  not the end entry; and, unless `--quick` is given, a record of an ended run that does not verify or does not give
+  the end entry;
+- a run folder whose record says the ledger noted its start, without a start entry (a ledger that was replaced,
+  another `ledger_dir` that was in force for the run, a process killed between `run.started` and the commit), and
+  a finished run without its end entry. A run whose process is alive is in flight for five minutes after
+  `run.started` without its start entry, and after `run.finished` without its end entry: listed, and no failure.
+  Past that the missing entry is a problem although a process holds the run's lock;
+- a ledger this version does not accept.
+
+Every problem of a run is listed, and every sentence holds what tells its case from another of its kind.
+
+**What a ledger that others hold adds, and what it does not.** Someone who rewrites the ledger's history so that no
+reference names the old one (a reset and new commits, a new repository with the same entries but one) leaves
+nothing on this machine that the checks can see. The ledger is a plain git repository, so it can be pushed to a
+remote that the operator does not control alone and that refuses a rewritten history (a protected branch without
+force push, or an append-only mirror). Then a rewrite of what was pushed is refused by the next push, and all that
+is left is a commit on top, which the checks judge as above, here and on any clone of the remote. The remote finds
+nothing by itself; it keeps commits from being taken out again. It adds nothing for entries that are not pushed
+yet, and nothing against a well-formed entry that is new. Traceworks does not push and has no setting for a
+remote, and it runs no git hook: the push is the operator's, by a cron entry, a timer or CI that runs `git push` in
+the ledger folder.
+
+**What nothing in this version finds:**
+
+- **A well-formed entry or line added with write access to the ledger.** Whoever can commit to it can add, under
+  the right message and with the right hash, an end entry that is a manifest of the run and names the right
+  `run.started` line, an acknowledgement under any name, or one more anchor. **For a register this is a practical
+  attack:** with write access to the home and the ledger, append a line that chains to `registers/<key>/` (a forged
+  decision, with its state blob), then append the anchor of the new head under `register <key> seq <n>
+  sha256:<the whole file>`. `findings <key> verify` says `anchor    ok`, and nothing shows it. Rewriting what the
+  register held is found; adding to it is not. Signatures of decisions and of ledger entries, by a key the writer
+  of the home does not hold, would close this; they are not built.
+- **A record cut to its first line.** It cannot be told from a crash right after the start: the run reads
+  `INTERRUPTED` and its own `verify` holds, because the start entry pins the first line only. What remains is that
+  the run stays listed as started and not ended, for good, until someone resumes or cancels it, which is recorded.
+- **A run the ledger never sees.** An audit run in another home, under another `ledger_dir`, with the ledger
+  folder swapped for the time of the run, or with a jar of a version that noted no start. What an operator can do:
+  start audits only from a place that owns the home, such as a CI job with its own account that pushes the ledger
+  after every run, and take as an audit result only a run whose start entry is in the pushed ledger.
+- **What was before a new ledger, and that there was one.** A ledger that was moved aside is not read; the new one
+  says nothing of the runs and the register lines from before it, and nothing in the home records that it once had
+  another ledger. This can be forced: one commit with a message of its own makes this version refuse the ledger,
+  and once that commit is pushed it cannot be taken back, so the only remedy is to move the ledger aside. After
+  that everything earlier is unproven, and `traceworks resume <run>` of an old unfinished run writes fresh entries
+  for it from its record as it is. **The move is the alarm:** treat a ledger that had to be moved aside as an
+  incident, keep the old folder, and compare; a remote that refuses the new history is what shows a restart to
+  others, since the new ledger cannot be pushed over the old one.
+- **A run folder without a line whose lock a process holds.** It is listed as in flight for as long as the lock is
+  held: it has no record, so it claims nothing.
+
+### Acknowledging a run
+
+A deleted folder of an interrupted run, a `runs_dir` that changed, or a ledger two homes share makes the check fail
+although nothing was hidden. `traceworks verify --acknowledge <run> --note "..."` settles one such run on the
+record: one commit `run <run-id> ACKNOWLEDGED sha256:<hex>` adds a line to `acks/<run-id>.jsonl`:
+
+```json
+{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"operator@box","note":"deleted by hand, the disk was full","problems":[{"problem":"lost","said":"started, never ended, and the folder is gone (the ledger noted run.started b7a1…)"}]}
+```
+
+`actor` and `at` are who acknowledged and when, as a decision in a register records them; `note` is required;
+`problems` holds every problem the check reported of the run at that moment, each with its kind and its sentence.
+Only a run the check reports can be acknowledged, one run per call; the anchors of a register are acknowledged
+under the name `registers.<key>`. The acknowledgement covers exactly those problems, by what was said: the check
+lists them under `acknowledged` with the note, for good, and does not fail for them. A problem that comes later,
+also one of the same kind with another content, is open again. For a record that does not verify (`record-broken`)
+the sentence names the whole record as it was: the number of its problems and one SHA-256 over all its lines and
+all its problems, each changed blob with the SHA-256 of what it holds. So a record that changes once more after it
+was acknowledged is open again, and an acknowledgement of a `record-broken` problem made by an earlier version,
+whose sentence named only the first problem and the last line, no longer covers it: acknowledge it again. Two
+sentences still name less than the whole record: "the record cannot be read (...)" covers by its message, and so
+does a folder that holds no record that can be read. The line is not signed, like everything in the
+ledger.
+
+### The anchors of a register
+
+An anchor says that line `N` of a register's log had the hash `head` when it was written. The file keeps every
 anchor, oldest first, and an anchor equal to the last one is not added again. `traceworks findings <key> verify`
 checks each against the register's log (docs/registers.md, "The anchor"). A register's write does not wait for the
 ledger: when the anchor cannot be committed, the write stays and the command says that it is not anchored.
@@ -906,14 +1148,14 @@ blobs and the recorded states.
 | Type | Fields | Meaning |
 |---|---|---|
 | `register.created` | `workflow_id`, `category` | the first line |
-| `register.requires` | `feature` | from this line on the register needs a version that knows `feature`. `decision_severity`: a decision covers the severity it was made on, reports are applied by `decision_on_higher_severity`, of two findings of one identity the most severe counts, and the states name the severity a decision was made on where the finding has another one. Written once, before the first line that needs it. A version that does not know the line (any before 2026-11-14) or the feature refuses to replay the log, and so writes nothing more into it: **a register that holds this line must not be written by an earlier version**, whose fold of the lines after it would differ from the states they recorded (docs/registers.md, "What a decision covers") |
+| `register.requires` | `feature` | from this line on the register needs a version that knows `feature`. `decision_severity`: a decision covers the severity it was made on, reports are applied by `decision_on_higher_severity`, of two findings of one identity the most severe counts, and the states name the severity a decision was made on where the finding has another one. Written once, before the first line that needs it. A version that does not know the line (any before 2026-11-14) or the feature refuses to replay the log, and so writes nothing more into it: **a register that holds this line must not be written by an earlier version**, whose fold of the lines after it would differ from the states they recorded (docs/registers.md, "What a decision covers"). `decision_agent`: a line of a decision after it may name the agent that decided under the actor (`agent`), and the states name it too. Written once, before the first such line; a register in which no agent decided has none. A version that does not know the feature (any before 2026-11-17) refuses the log rather than show the decision as the actor's own (docs/registers.md, "Who decided") |
 | `register.repaired` | `discarded_bytes` | a tail without its line feed, left by a writer that was cut off, was discarded before this line |
 | `report.applied` | `run_id`, `run_head`, `finished_at`, `report_blob`, `findings_blob`, `gone_blob`, `items_blob`, `items_complete`, `items`, `catalog_blob`, `decision_on_higher_severity`, `fact_names`, `counts`, `state_blob` | a run's report was applied (`decision_on_higher_severity` is the operator's setting it was applied with, `reopen` or `keep`; a line of an earlier version has no such field, and a replay applies it as that version did: every decision stayed, and of two findings of one identity the first counted; any other value is a broken line, which a replay refuses): the run and the head of its chain, the report text, the findings it stated (each with `item` when it names one), the findings it named as gone (`gone_blob`, an array of `rule_key` and `subject`; the field is absent when it named none, and in a line of an earlier version), the items it listed (`items_blob`, an array of `name`, `digest` and `judged`; `items_complete`, whether the report vouched for the whole list; `items`, the counts `listed`, `judged` and `settled` after the report; all three absent for a report without a list), the package's `catalog.json` it was applied with (`null` without one), the facts the run measured, the counts by kind of change (`not_mentioned` counts the open findings of a judged rule the report was silent about), and the state after it |
 | `report.rejected` | `run_id`, `reason`, `errors` | a run's report changed nothing, and why |
 | `finding.new` | `id`, `run_id`, `rule_key`, `subject`, `severity`, `title` | a finding seen for the first time |
 | `finding.resolved`, `finding.reopened`, `finding.review_due` | `id`, `run_id`, `reason`; `decided_severity` and `severity` with the reason `higher_severity: ...` | a change of a known finding by a report. A reopening names why: `regression` (it was resolved), `seen_again` (it awaited verification), `worse: 320 LOC → 360 LOC` (an accepted risk whose evidence got worse), or `higher_severity: LOW → CRITICAL` (an accepted or dismissed finding stated with a severity above the one the decision was made on, with both as `decided_severity` and `severity`) |
-| `finding.accepted`, `finding.dismissed` | `id`, `note`, `actor`, `until` (accepted), `evidence`, `severity`, `signature`, `state_blob` | a person's decision, and what it was made on: the `evidence` and the `severity` the finding had at that moment. A line of an earlier version has no `severity`, and a dismissal of one no `evidence`; a replay takes the severity the finding had at that line. `signature` is `null` until signed decisions exist |
-| `finding.reopened` | `id`, `note`, `actor`, `reason: "manual"`, `signature`, `state_blob` | a person reopened a finding |
+| `finding.accepted`, `finding.dismissed` | `id`, `note`, `actor`, `agent`, `until` (accepted), `evidence`, `severity`, `signature`, `state_blob` | a decision, and what it was made on: the `evidence` and the `severity` the finding had at that moment. `actor` is who ran the command; `agent` is the agent that decided under that actor, by the name it gave itself (`--agent` or `TRACEWORKS_AGENT`), and the key is absent for a decision that named none, which reads as a person's. The name is self-declared and unsigned. A line of an earlier version has no `severity`, and a dismissal of one no `evidence`; a replay takes the severity the finding had at that line. `signature` is `null` until signed decisions exist |
+| `finding.reopened` | `id`, `note`, `actor`, `agent`, `reason: "manual"`, `signature`, `state_blob` | a person reopened a finding, or an agent under the actor (`agent`, as above; absent when none was named) |
 | `hook.ran` | `run_id`, `exit_code`, `duration_ms`, `stderr_tail` | the operator's hook ran for the run's diff |
 | `register.unanchored` | `first_seq`, `last_seq` | a writer found the lines `first_seq` to `last_seq` after the last anchor in the ledger, before it wrote: no anchor vouches for them. It took them as they are; its own lines follow, and the anchor it writes covers all of them (docs/registers.md, "The anchor"). A version before this line existed cannot replay a log that holds it |
 

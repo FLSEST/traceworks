@@ -115,4 +115,39 @@ class AiModelChoiceIT extends AiIntegrationTest {
         assertThat(check.out()).doesNotContainPattern("(?m)^ERROR ");
         assertThat(check.out()).doesNotContainPattern("(?m)^WARNING +(?!unwired-output)");
     }
+
+    /**
+     * A choice of a child workflow (package {@code combo-model-choice}; docs/cli.md, "Model choices"): the parent
+     * declares none, and the input of the run picks the option of the child its {@code sub-workflow} starts. The
+     * start check follows the pick into the child: it asks for the credential of the picked option's provider.
+     */
+    @Test
+    void aModelChoiceInAChild_isPickedByTheParentsInput() {
+        // The sandbox holds ANTHROPIC_API_KEY only. A start check that judged the child by its default option
+        // would let this run start, and its step would fail later
+        Result refused = traceworks.run("combo-model-choice", "--input", "judge=astra");
+        assertThat(refused.code()).as(refused.describe()).isEqualTo(6);
+        assertThat(refused.out() + refused.err()).contains(
+                "AI provider PI has no credential for the model openai/gpt-6-astra", "OPENAI_API_KEY");
+        assertThat(traceworks.folders()).as("the start check refused before a run existed").isEmpty();
+
+        traceworks.credentials(Map.of("OPENAI_API_KEY", OPENAI_FAKE));   // and no Anthropic key: Claude is not asked
+        Result run = traceworks.run("combo-model-choice", "--input", "judge=astra");
+
+        assertThat(run.code()).as(run.describe()).isZero();
+        RunFolder folder = traceworks.folder(run);
+        // The child's call went to the fake Pi with the picked model: a child that ignored its parent's input would
+        // answer as the fake Claude, with the default's model
+        assertThat(folder.output("judged")).startsWith("fake-pi answered").contains("gpt-6-astra");
+        String child = folder.metadata("judged").path("subRunId").asText();
+        JsonNode request = folder.eventsOf(child, "ai.request").getFirst();
+        assertThat(request.path("provider").asText()).isEqualTo("PI");
+        assertThat(request.path("model").asText()).isEqualTo("openai/gpt-6-astra");
+        for (JsonNode command : folder.events("step.command")) {
+            assertThat(command.path("image").asText("")).as("no command of the run ran in Claude's image")
+                    .doesNotContain("claude");
+        }
+        // The pick of a child stands in no run.started: the parent declares no choice, and a child run has none
+        assertThat(folder.only("run.started").path("model_choices").path("judge").isMissingNode()).isTrue();
+    }
 }

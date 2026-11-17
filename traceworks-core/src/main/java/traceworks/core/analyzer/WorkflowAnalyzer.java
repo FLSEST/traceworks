@@ -45,18 +45,20 @@ import java.util.Set;
  *       {@code unsupported-mcp-servers}, and {@code invalid-config-value} for {@code tools};</li>
  *   <li>shell quoting ({@link QuotingRules}): {@code quoted-placeholder}, {@code placeholder-self-compare},
  *       {@code heredoc-placeholder}, {@code protected-value-in-shell};</li>
+ *   <li>a protected value in the arguments of a tool, a mount or a {@code workflow_id}
+ *       ({@link ProtectedPlaceRules}): {@code protected-value-outside-shell};</li>
  *   <li>the shell variables of a block ({@link ValueRules}): {@code invalid-value-name}, {@code unused-value};</li>
  *   <li>the isolation setting {@code workspace} ({@link WorkspaceRules}): {@code legacy-install-npm},
  *       {@code unknown-workspace-mode}, {@code workspace-not-on-first-block}, {@code build-in-project-path};</li>
  *   <li>Traceworks ({@link TraceworksRules}): {@code unknown-format}, {@code unknown-requirement},
  *       {@code unsupported-workspace-isolation}, {@code explicit-execution-mode}, {@code unsupported-block-type},
  *       {@code unsupported-skills}, {@code dollar-placeholder-in-switch}, {@code docker-socket-refused},
- *       {@code unbalanced-placeholder}, {@code report-block-required}, {@code unprovided-variable},
- *       {@code blank-ai-prompt}, {@code unknown-provider}, {@code host-dependent-step},
- *       {@code invalid-audit-config}, {@code invalid-audit-key},
- *       {@code report-block-missing}, {@code catalog-invalid}, {@code previous-report-outside-audit},
- *       {@code register-dir-outside-audit},
- *       {@code register-dir-in-ai-prompt};</li>
+ *       {@code unbalanced-placeholder}, {@code unprovided-variable},
+ *       {@code blank-ai-prompt}, {@code unknown-provider}, {@code host-dependent-step};</li>
+ *   <li>audit workflows ({@link AuditRules}): {@code invalid-audit-config}, {@code invalid-audit-key},
+ *       {@code report-block-missing}, {@code report-block-required}, {@code catalog-invalid},
+ *       {@code report-from-child-sets-no-gate}, {@code previous-report-outside-audit},
+ *       {@code register-dir-outside-audit}, {@code register-dir-in-ai-prompt};</li>
  *   <li>parking ({@link ParkingRules}): {@code nested-wait-point}, {@code question-changes-on-resume};</li>
  *   <li>package images ({@link PackageImageRules}): {@code child-package-image}, {@code invalid-image-name},
  *       {@code unpinned-base-image}, {@code image-without-description};</li>
@@ -199,8 +201,8 @@ public final class WorkflowAnalyzer {
         }
         List<AnalyzerFinding> findings = new ArrayList<>();
         TraceworksRules.applyDefinition(workflow, findings);
-        TraceworksRules.auditRules(workflow, findings);
-        TraceworksRules.catalog(catalogJson, findings);
+        AuditRules.apply(workflow, findings);
+        AuditRules.catalog(catalogJson, findings);
         PackageImageRules.unpinnedBaseImages(images, findings);
         PackageImageRules.imagesWithoutDescription(images, findings);
         PackageImageRules.invalidNames(invalidImageDirectories, findings);
@@ -225,6 +227,7 @@ public final class WorkflowAnalyzer {
             SecretRules.apply(blocks, findings);
             ValueRules.apply(blocks, findings);
             QuotingRules.apply(blocks, children, findings);
+            ProtectedPlaceRules.apply(blocks, children, metadata, inputs, findings);
             WorkspaceRules.apply(workflow, findings);
             TraceworksRules.apply(blocks, metadata, registry.knownTypes(), findings);
             ParkingRules.apply(blocks, children, findings);

@@ -27,8 +27,9 @@ class DataDirsIT extends IntegrationTest {
         runs = disk.resolve("runs");
         ledger = disk.resolve("ledger");
         registers = disk.resolve("registers");
+        // writable_mounts: the folder the package "mounts" writes, which the tests below make
         traceworks.configure(Map.of("runs_dir", runs.toString(), "ledger_dir", ledger.toString(), "registers_dir",
-                registers.toString()));
+                registers.toString(), "writable_mounts", java.util.List.of(sandbox.resolve("rw-data").toString())));
     }
 
     /** The folder {@code <runs>/<day>/<runId>} of the configured runs folder. */

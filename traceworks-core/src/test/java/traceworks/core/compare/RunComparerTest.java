@@ -52,6 +52,8 @@ class RunComparerTest {
         Map<String, String> aiImages = Map.of();
         Map<String, List<String>> aiHosts = Map.of();
         List<traceworks.core.model.ModelPick> modelChoices = List.of();
+        /** Whether the record can name a cut of an output; an earlier version's cannot. */
+        boolean recordsCuts = true;
         final List<StepView> steps = new ArrayList<>();
         final Map<String, RunView> children = new LinkedHashMap<>();
 
@@ -61,6 +63,14 @@ class RunComparerTest {
 
         Run shell(String name, String output) {
             return step(name, "shell", false, StepStatus.COMPLETED, output, List.of(), List.of(), List.of());
+        }
+
+        /** A shell step with these commands, in order. */
+        Run commands(String name, traceworks.core.record.CommandView... commands) {
+            steps.add(new StepView(steps.size(), name, "foreach", steps.size(), false, StepStatus.COMPLETED, false,
+                    false, 5, 1, List.of(), List.of(commands), blob("in"), blob("out"), null, null, List.of(),
+                    List.of(), List.of(), List.of(), null, List.of()));
+            return this;
         }
 
         Run ai(String name, String output, AiCallView... calls) {
@@ -89,7 +99,7 @@ class RunComparerTest {
             RunView view = new RunView(id, "wf", "Wf", "/pkg", digest, commit, dirty, "flo", "MANUAL", execution, T0,
                     T0.plusSeconds(3), status, null, gate, steps, null, null, null, blob("definition"),
                     blob(inputsDigest), children, 10, "head", List.of(), List.of(), network, aiHosts, null, null,
-                    modelChoices);
+                    modelChoices, null, false, null, recordsCuts);
             Manifest manifest = new Manifest(id, "wf", "Wf", digest, blob(inputsDigest).sha256(), execution, images,
                     models, 10, "head", status, gate, T0, T0.plusSeconds(3), version);
             return new RunFacts(view, manifest, inputs, aiImages);
@@ -111,6 +121,47 @@ class RunComparerTest {
         return new AiCallView(1, null, "CLAUDE", "opus", null, "read", web, webHosts, blob("Review"),
                 blob(systemPrompt), List.of(),
                 new AiCallView.Response("claude-opus-5-5", 100, 20, 0.01, 1, 0, blob("fine"), null));
+    }
+
+    /** A command of {@code item} whose end names a cut of {@code cutStream}, or none for {@code null}. */
+    private static traceworks.core.record.CommandView command(Integer item, String cutStream) {
+        return new traceworks.core.record.CommandView(1, item, blob("cmd"), null, "/w", null, null, List.of(), "none",
+                List.of(), List.of(), true, new traceworks.core.record.CommandView.Result(0, 5, false, List.of(),
+                cutStream == null ? null
+                        : new traceworks.core.port.CommandRunner.OutputCut(List.of(cutStream), 5000)));
+    }
+
+    /** The same number of cuts in both runs, but of other commands: that is not the same run. */
+    @Test
+    void anOutputCutOfAnotherCommand_differs_andTheSameCommandsCutDoNot() {
+        Run a = new Run("run-a").commands("each", command(2, "stdout"), command(7, null), command(7, null));
+        Run b = new Run("run-b").commands("each", command(2, null), command(7, null), command(7, "stdout"));
+        Run c = new Run("run-c").commands("each", command(2, "stdout"), command(7, null), command(7, null));
+
+        assertThat(compare(a, b).differences()).containsExactly("step each: the output was cut differently"
+                + " (item 2, command 1: stdout after 5000 ms in run A, item 7, command 2: stdout after 5000 ms in run B)");
+        assertThat(compare(a, c).reproduced()).isTrue();
+    }
+
+    /**
+     * A record of an earlier version does not say whether an output was cut. Against a run that names a cut, that is
+     * no difference: a note says that the cuts are not compared. Without any cut there is nothing to say.
+     */
+    @Test
+    void aRecordThatCannotNameACut_isANote_notADifference() {
+        Run old = new Run("run-old").commands("build", command(null, null));
+        old.recordsCuts = false;
+        Run cut = new Run("run-new").commands("build", command(null, "stdout"));
+        Run whole = new Run("run-whole").commands("build", command(null, null));
+
+        RunComparison comparison = compare(old, cut);
+
+        assertThat(comparison.reproduced()).as(comparison.differences().toString()).isTrue();
+        assertThat(comparison.notes()).containsExactly("run run-old is of a version that does not record whether an"
+                + " output was cut: the cuts of the two runs are not compared");
+        assertThat(compare(cut, old).notes()).hasSize(1);
+        assertThat(compare(old, whole).notes()).as("no cut anywhere").isEmpty();
+        assertThat(compare(whole, cut).differences()).as("both can say").hasSize(1);
     }
 
     private static RunComparison compare(Run a, Run b) {
@@ -373,6 +424,37 @@ class RunComparerTest {
         assertThat(step(comparison, "review").calls().getFirst().setupDifferences())
                 .containsExactly("provider", "effort");
         assertThat(comparison.reproduced()).isFalse();
+    }
+
+    /** A call that moved to a model server of the operator's, or to another one, is another setup. */
+    @Test
+    void aCallOnALocalBackend_andOneAtTheProvider_orAtAnotherServer_differInTheirSetup() {
+        AiCallView.Response response = new AiCallView.Response("m", 100, 20, 0.01, 1, 0, blob("fine"), null);
+        AiCallView provider = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response);
+        AiCallView local = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response,
+                new AiCallView.Local("llm", "http://llm.internal:8080/v1", "openai-completions"));
+        AiCallView moved = new AiCallView(1, null, "PI", "llm/qwen", null, "none", "none", List.of(),
+                blob("Review"), null, List.of(), response,
+                new AiCallView.Local("llm", "http://other.internal:8080/v1", "openai-completions"));
+
+        RunComparison toLocal = compare(new Run("run-a").ai("review", "fine", provider),
+                new Run("run-b").ai("review", "fine", local));
+        RunComparison toAnotherServer = compare(new Run("run-a").ai("review", "fine", local),
+                new Run("run-b").ai("review", "fine", moved));
+        RunComparison same = compare(new Run("run-a").ai("review", "fine", local),
+                new Run("run-b").ai("review", "fine", local));
+
+        assertThat(step(toLocal, "review").calls().getFirst().setupDifferences()).containsExactly("local backend");
+        assertThat(toLocal.reproduced()).isFalse();
+        assertThat(step(toLocal, "review").calls().getFirst().a().local()).isNull();
+        assertThat(step(toLocal, "review").calls().getFirst().b().local())
+                .isEqualTo("local backend llm at http://llm.internal:8080/v1");
+        assertThat(step(toAnotherServer, "review").calls().getFirst().setupDifferences())
+                .containsExactly("local backend");
+        assertThat(step(same, "review").calls().getFirst().setupDifferences()).isEmpty();
+        assertThat(same.reproduced()).isTrue();
     }
 
     @Test

@@ -1,0 +1,44 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "5c0e6d0a-3b1f-4c53-9a50-0d7f1a2b6c02",
+  "name": "IT writable workspace git",
+  "description": "A step that may write the workspace writes its files and reads its repository, and can write nothing under the workspace's .git: no hook, no config, no commondir, no commit, and it cannot move the .git away.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "write_file",
+      "config": {"command": "echo changed > tracked.txt && cat tracked.txt", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_hook",
+      "config": {"command": "mkdir -p .git/hooks && printf '#!/bin/sh\\ntouch /tmp/ran\\n' > .git/hooks/pre-commit", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_config",
+      "config": {"command": "printf '[core]\\n\\tfsmonitor = /tmp/payload\\n' >> .git/config", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "write_commondir",
+      "config": {"command": "echo /tmp/elsewhere > .git/commondir", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "move_git",
+      "config": {"command": "mv .git .git-moved", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "commit",
+      "config": {"command": "git add tracked.txt && git -c user.name=IT -c user.email=it@example.invalid commit --quiet -m 'from the container'", "workspace_writable": true, "on_failure": "continue"}
+    },
+    {
+      "type": "shell",
+      "name": "read_git",
+      "config": {"command": "git log -1 --format=%s", "workspace_writable": true}
+    }
+  ]
+}

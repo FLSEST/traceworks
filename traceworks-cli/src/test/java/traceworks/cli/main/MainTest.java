@@ -477,6 +477,55 @@ class MainTest {
         assertThat(r.out()).doesNotContain("unknown-provider");
     }
 
+    /**
+     * {@code check} and {@code describe} read the operator's model servers from the {@code traceworks.json} of the
+     * home they run with: a backend declared there is no unknown backend, one nobody declared stays an error, and a
+     * model the server does not list is an error too.
+     */
+    @Test
+    void check_andDescribe_knowTheLocalBackendsOfTheHome_andKeepTheErrorForOneNobodyDeclared() throws IOException {
+        Path pkg = Files.createDirectories(temp.resolve("local"));
+        Files.writeString(pkg.resolve("workflow.json"), """
+                {"id":"local","name":"local flow","provider":"PI","blocks":[{"type":"simple","name":"ask",\
+                "config":{"command":"Say hi","model":"llm/qwen2.5-coder:7b"}}]}""");
+
+        Result undeclared = exec("check", pkg.toString());
+
+        assertThat(undeclared.code()).isEqualTo(6);
+        assertThat(undeclared.out()).as("what to do is in the part of the line a terminal shows")
+                .contains("ERROR", "unknown-model-backend", "names the backend llm, which is no backend of a provider"
+                        + " (anthropic, google, openai, openrouter) and no model server that local_models in"
+                        + " traceworks.json declares");
+
+        Files.writeString(home.resolve("traceworks.json"), """
+                {"local_models": {"llm": {"url": "http://llm.internal:8080/v1", "api": "openai-completions",
+                  "models": ["qwen2.5-coder:7b"]}}}""");
+        Result declared = exec("check", pkg.toString());
+        Result describe = exec("describe", pkg.toString());
+
+        assertThat(declared.code()).as(declared.out() + declared.err()).isZero();
+        assertThat(declared.out()).doesNotContain("unknown-model-backend");
+        assertThat(describe.code()).as(describe.err()).isZero();
+        assertThat(describe.out()).contains("model llm/qwen2.5-coder:7b runs on the local backend llm at"
+                + " http://llm.internal:8080/v1 (local_models in traceworks.json)");
+
+        Files.writeString(pkg.resolve("workflow.json"), Files.readString(pkg.resolve("workflow.json"))
+                .replace("llm/qwen2.5-coder:7b", "llm/llama3"));
+        Result unlisted = exec("check", pkg.toString());
+
+        assertThat(unlisted.code()).isEqualTo(6);
+        assertThat(unlisted.out()).contains("unknown-model-backend", "The local backend llm does not serve the model"
+                + " llama3");
+
+        Files.writeString(home.resolve("traceworks.json"), """
+                {"local_models": {"llm": {"url": "http://localhost:11434/v1", "api": "openai-completions",
+                  "models": ["llama3"]}}}""");
+        Result loopback = exec("check", pkg.toString());
+
+        assertThat(loopback.code()).as("a setting that is refused refuses every command that reads it").isEqualTo(6);
+        assertThat(loopback.err()).contains("names this machine's loopback (localhost)");
+    }
+
     @Test
     void run_anAiStepWithoutAClaudeCredential_exits6_namingThem() throws IOException {
         FakeContainerRuntime runtime = new FakeContainerRuntime().present(shellTag(), "sha256:" + "5".repeat(64))
@@ -829,6 +878,49 @@ class MainTest {
         assertThat(parked.out()).contains("on the host (no container runtime works)")
                 .contains("traceworks resume '" + id + "'").doesNotContain("--allow-host-execution");
         assertThat(approve.out()).contains("traceworks resume").doesNotContain("--allow-host-execution");
+    }
+
+    // ---- an output cut at the bound ----
+
+    /**
+     * A host step whose command leaves a writer behind: the reading of its output ends at the bound, and the record
+     * says so in the command's end. The step and the run are as they would be; {@code show}, {@code run.html} and the
+     * live lines mark it, and the record verifies. A step whose output ended has no such field.
+     */
+    @Test
+    void aHostCommandThatLeavesAWriterBehind_hasItsOutputCutInTheRecord_andTheViewsMarkIt() throws IOException {
+        Path pkg = pkg("server", """
+                {"type":"shell","name":"serve","config":{"command":
+                  "(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null) & echo early"}},
+                {"type":"shell","name":"plain","config":{"command":"echo fine"}}""");
+
+        Result run = runHost(pkg);
+        String id = idOf(run);
+        Result show = exec("show", id);
+        Result verify = exec("verify", id);
+
+        assertThat(run.code()).as(run.out() + run.err()).isZero();
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        List<com.fasterxml.jackson.databind.JsonNode> ends = new ArrayList<>();
+        for (String line : Files.readAllLines(runFolder(id).resolve("events.jsonl"))) {
+            com.fasterxml.jackson.databind.JsonNode event = json.readTree(line);
+            if (event.path("type").asText().equals("step.command.finished")) {
+                ends.add(event);
+            }
+        }
+        assertThat(ends).hasSize(2);
+        assertThat(ends.getFirst().path("output_cut"))
+                .isEqualTo(json.readTree("{\"streams\":[\"stdout\"],\"after_ms\":5000}"));
+        assertThat(ends.getFirst().path("exit_code").asInt()).isZero();
+        assertThat(ends.get(1).has("output_cut")).as("an output that ended").isFalse();
+        assertThat(run.out()).contains("(output cut: stdout after 5000 ms)");
+        assertThat(show.out()).contains("Status    COMPLETED\n",
+                "Output    1 command whose output was CUT before the end of its stream: it may be incomplete\n",
+                "      output CUT     stdout after 5000 ms   <== may be incomplete\n");
+        assertThat(show.out().split("output CUT", -1)).as("the other step is not marked").hasSize(2);
+        assertThat(Files.readString(runFolder(id).resolve("run.html")))
+                .contains("<strong class=\"problem\">output cut: stdout after 5000 ms</strong>");
+        assertThat(verify.code()).as(verify.out() + verify.err()).isZero();
     }
 
     // ---- the output limit ----
@@ -1618,6 +1710,47 @@ class MainTest {
                     Map.of()));
             recorder.emit(new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null));
         }
+    }
+
+    /**
+     * A call that went to a model server of the operator's says so where the call is, in {@code show} and in
+     * {@code run.html}: the backend and its URL, next to the model.
+     */
+    @Test
+    void show_andRunHtml_nameTheLocalBackendOfAnAiCall_andItsUrl() throws Exception {
+        String id = "00000000-0000-0000-0000-0000000000a7";
+        traceworks.core.port.LocalModels local = new traceworks.core.port.LocalModels(Map.of("llm",
+                new traceworks.core.port.LocalModels.Backend("llm", "http://llm.internal:8080/v1",
+                        traceworks.core.port.LocalModels.OPENAI_COMPLETIONS, List.of("qwen"), null)));
+        WorkflowDefinition definition = new WorkflowDefinition("wf-ai", "ai flow", null, List.of(), null, null, null,
+                null, null, null, null, null, null);
+        Clock clock = () -> Instant.parse("2026-11-04T10:00:00Z");
+        try (StoredRun run = new FileRunStore(home.resolve("runs")).create(id, clock.now())) {
+            RunRecorder recorder = RunRecorder.start(run.events(), run.blobs(), clock, id, definition);
+            recorder.runStarted(new RunStart("wf-ai", "ai flow", "/pkg", "d", null, null,
+                    "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "tester", "0.1.0",
+                    "container", null, null));
+            recorder.emit(new RunEvent.StepStarted(0, "ask", "simple", 0, true));
+            FakeAiCli cli = FakeAiCli.pi().localModels(local).answers("hi");
+            AiProviders providers = recorder.recording(AiProviders.of("PI", List.of(new CliAiProvider(cli,
+                    recorder.recording(request -> new CommandResult(0, "", "", 1, false)), "traceworks/pi:abc",
+                    Map.of()))));
+            providers.resolve("PI").executeAction(new AiProvider.ActionRequest("Say hi", "llm/qwen", null, null, null,
+                    null, ToolPolicy.NONE, false, null));
+            recorder.emit(new RunEvent.StepFinished(0, "ask", "simple", StepStatus.COMPLETED, "hi", 5, Map.of()));
+            recorder.emit(new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null));
+        }
+
+        Result show = exec("show", id);
+        Result render = exec("render", id);
+
+        assertThat(show.code()).as(show.err()).isZero();
+        assertThat(show.out()).contains("      ai PI  model llm/qwen  local backend llm at"
+                + " http://llm.internal:8080/v1  tools none  exit 0");
+        assertThat(render.code()).as(render.err()).isZero();
+        assertThat(Files.readString(runFolder(id).resolve("run.html"))).contains("PI model <code>llm/qwen</code>"
+                + " local backend <code>llm</code> at <code>http://llm.internal:8080/v1</code> tools"
+                + " <code>none</code>");
     }
 
     /** {@code show} lists each AI call of a step and its tool calls, with the names a hostile stream gave made safe. */

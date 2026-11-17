@@ -176,8 +176,11 @@ public final class GitProcess {
             // wait must end on the timeout or the limit when git hangs or never stops printing
             BoundedOutput out = new BoundedOutput(outputLimit);
             BoundedOutput err = new BoundedOutput(outputLimit);
-            Thread outReader = out.drain(process.getInputStream(), "git-output");
-            Thread errReader = err.drain(process.getErrorStream(), "git-error");
+            // git is not held back until the readers hold its streams: of a git that ended within the instant of its
+            // start, what a helper it left behind writes afterwards is lost (BoundedOutput#drain). No caller reads
+            // such output: they read exit codes and plumbing output, which git writes itself
+            out.drain(process.getInputStream(), "git-output");
+            err.drain(process.getErrorStream(), "git-error");
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
             while (!process.waitFor(POLL_MILLIS, TimeUnit.MILLISECONDS)) {
                 if (out.exceeded() || err.exceeded()) {
@@ -188,8 +191,8 @@ public final class GitProcess {
                     throw new TimedOut("git did not finish within " + timeoutMillis / 1000 + " seconds");
                 }
             }
-            outReader.join(timeoutMillis);
-            errReader.join(timeoutMillis);
+            out.end(timeoutMillis);
+            err.end(timeoutMillis);
             if (out.exceeded() || err.exceeded()) {
                 throw new OutputLimitExceeded(outputLimit);
             }

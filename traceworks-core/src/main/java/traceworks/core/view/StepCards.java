@@ -88,6 +88,10 @@ final class StepCards {
             out.append(' ').append(badge("problem", denied + (denied == 1 ? " connection" : " connections")
                     + " denied"));
         }
+        if (step.commands().stream().anyMatch(command -> command.outputCut() != null)) {
+            // A mark like a denied connection: the step's status is as it was, its output may be incomplete
+            out.append(' ').append(badge("problem", "output cut"));
+        }
         out.append("</h3>\n<p>status <strong>").append(Html.line(step.shownStatus())).append("</strong>");
         if (step.interrupted()) {
             out.append(" (interrupted)");
@@ -248,6 +252,11 @@ final class StepCards {
             if (result.timedOut()) {
                 out.append(" &middot; timed out");
             }
+            if (result.outputCut() != null) {
+                // The reading ended at its bound, not at the end of the stream; the names come from the record
+                out.append(" &middot; <strong class=\"problem\">output cut: ")
+                        .append(Html.line(result.outputCut().summary())).append("</strong>");
+            }
             result.egress().forEach(connection -> egress(out, connection));
         }
         if (!command.envNames().isEmpty()) {
@@ -287,6 +296,11 @@ final class StepCards {
         }
         if (call.model() != null) {
             out.append(" model <code>").append(Html.line(call.model())).append("</code>");
+        }
+        if (call.local() != null) {
+            // A call that went to a model server of the operator's, not to a provider
+            out.append(" local backend <code>").append(Html.line(call.local().backend())).append("</code> at <code>")
+                    .append(Html.line(call.local().url())).append("</code>");
         }
         if (call.effort() != null) {
             out.append(" effort <code>").append(Html.line(call.effort())).append("</code>");

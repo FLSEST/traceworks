@@ -7,7 +7,6 @@ import traceworks.core.model.WorkflowDefinition;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * The models that may run in a Traceworks home: the operator's {@value #SETTING} in {@code traceworks.json}. It
@@ -46,16 +45,39 @@ public record AllowedModels(List<Entry> entries) {
                 return true;
             }
             // The default model of a provider is not known here, so only an entry for every model allows it
-            return stepModel != null && pattern().matcher(stepModel).matches();
+            return stepModel != null && matches(model, stepModel);
         }
 
-        private Pattern pattern() {
-            StringBuilder regex = new StringBuilder();
-            for (String part : model.split("\\*", -1)) {
-                regex.append(Pattern.quote(part)).append(".*");
+        /**
+         * Whether {@code text} is {@code glob}, in which each {@code *} stands for any text without a line break.
+         * One pass and no regular expression: the text is the workflow's and has no bound of its own, and a
+         * pattern with two wildcards that tries again costs a time that grows with the square of its length. The
+         * first part must begin the text and the last must end it; each part between is taken at its first place
+         * after the part before, which leaves the most room for the rest.
+         */
+        private static boolean matches(String glob, String text) {
+            String[] parts = glob.split("\\*", -1);
+            if (parts.length == 1) {
+                return glob.equals(text);
             }
-            regex.setLength(regex.length() - 2);
-            return Pattern.compile(regex.toString());
+            String first = parts[0];
+            String last = parts[parts.length - 1];
+            if (text.length() < first.length() + last.length() || !text.startsWith(first) || !text.endsWith(last)) {
+                return false;
+            }
+            int from = first.length();
+            int end = text.length() - last.length();
+            for (int i = 1; i < parts.length - 1; i++) {
+                int at = text.indexOf(parts[i], from);
+                if (at < 0 || at + parts[i].length() > end) {
+                    return false;
+                }
+                from = at + parts[i].length();
+            }
+            // What the stars stand for lies between the parts; none of it may be a line break. A part of the entry
+            // is the operator's text and has none, so the whole text is looked at
+            return text.chars().noneMatch(c -> c == '\n' || c == '\r' || c == '\u0085' || c == ' '
+                    || c == ' ');
         }
 
         /** The entry as a message names it: {@code CLAUDE claude-*}, {@code PI (every model)}. */

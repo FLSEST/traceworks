@@ -910,6 +910,40 @@ class RunHtmlTest {
                 + " <strong class=\"problem\">2 denied</strong></td></tr>");
     }
 
+    /**
+     * A command whose output was cut at the bound cannot be overlooked: marked at the command, at the step and in
+     * the run's summary. The step's status is as it was.
+     */
+    @Test
+    void anOutputCut_isMarkedAtTheCommand_theStep_andInTheSummary() {
+        started();
+        emit(new StepStarted(0, "serve", "shell", 0, false));
+        recorder.recording(request -> new CommandResult(0, "", "", 1, false)
+                        .withOutputCut(new traceworks.core.port.CommandRunner.OutputCut(List.of("stdout"), 5000)))
+                .run(new CommandRequest("serve &", "/w", 30, null, null, null, false));
+        emit(new StepFinished(0, "serve", "shell", StepStatus.COMPLETED, "i", 5, Map.of()));
+
+        String html = render();
+
+        assertThat(html).contains("<strong class=\"problem\">output cut: stdout after 5000 ms</strong>");
+        assertThat(html).contains("<span class=\"badge problem\">output cut</span>");
+        assertThat(html).contains("<tr><th>output</th><td><strong class=\"problem\">1 command whose output was cut"
+                + "</strong> before the end of its stream: it may be incomplete</td></tr>");
+        assertThat(html).contains("status <strong>COMPLETED</strong>");
+    }
+
+    /** A record without the field, as every record of an earlier version, shows no cut. */
+    @Test
+    void aCommandWithoutAnOutputCut_isNotMarked() {
+        started();
+        emit(new StepStarted(0, "serve", "shell", 0, false));
+        recorder.recording(request -> new CommandResult(0, "", "", 1, false))
+                .run(new CommandRequest("ls", "/w", 30, null, null, null, false));
+        emit(new StepFinished(0, "serve", "shell", StepStatus.COMPLETED, "i", 5, Map.of()));
+
+        assertThat(render()).doesNotContain("output cut").doesNotContain("<th>output</th>");
+    }
+
     /** One denied connection is named in the singular. */
     @Test
     void oneDeniedConnection_isNamedInTheSingular() {

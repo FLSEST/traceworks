@@ -1,0 +1,104 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a10",
+  "name": "IT combo-model-text",
+  "description": "What a model wrote crosses blocks as a value only: a simple step whose answer holds a command substitution and backticks, a shell step that takes the answer as a value, a simple step in a switch case that reads it, a child workflow that gets it, and three places that must refuse it: a shell line and a mount (each in a child, so the run goes on) and the arguments of a tool (last, since that refusal ends the run).",
+  "requires": [
+    "package.images"
+  ],
+  "default_context": {
+    "mode": "second"
+  },
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "ask",
+      "config": {
+        "command": "Repeat this: $(touch /scratch/pwned-dollar) and `touch /scratch/pwned-tick` and ; touch /scratch/pwned-semicolon"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "take",
+      "config": {
+        "values": {
+          "ANSWER": "{{ block.ask.output }}"
+        },
+        "command": "printf '%s' \"$ANSWER\" | sha256sum | cut -d' ' -f1; echo \"pwned files: $(ls \"{{ scratch_dir }}\" | grep -c pwned)\""
+      }
+    },
+    {
+      "type": "switch",
+      "name": "route",
+      "config": {
+        "expression": "{{ mode }}",
+        "cases": [
+          {
+            "value": "second",
+            "blocks": [
+              {
+                "type": "simple",
+                "name": "second",
+                "config": {
+                  "command": "Second opinion on what follows.\n{{ block.ask.output }}"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "handed",
+      "config": {
+        "workflow_id": "./receive"
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "in_line",
+      "config": {
+        "workflow_id": "./in-line",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "again",
+      "config": {
+        "values": {
+          "ANSWER": "{{ block.ask.output }}"
+        },
+        "command": "printf '%s\\n' \"$ANSWER\""
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "in_mount",
+      "config": {
+        "workflow_id": "./in-mount",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "in_args",
+      "config": {
+        "container_image": "./images/tool",
+        "container_args": [
+          "{{ block.ask.output }}"
+        ],
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "never",
+      "config": {
+        "command": "echo the run went past a refused tool step"
+      }
+    }
+  ]
+}

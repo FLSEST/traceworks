@@ -57,10 +57,16 @@ import java.util.regex.Pattern;
  *   <li><b>SIGTERM</b> on a timeout or cancel: the client hands it to the container's init ({@code --init}, tini),
  *       which sends it to the whole process group of the command with {@code TINI_KILL_PROCESS_GROUP=1}, so the
  *       running command gets it and its own TERM trap runs ({@link BashScript}).</li>
+ *   <li><b>The {@code .git} of a writable workspace:</b> after the mount of a workspace that the step may write
+ *       comes the mount of its top-level {@code .git}, a directory or a file, at the place it has in the
+ *       workspace, read-only as a whole ({@link WorkspaceGit#readOnly}); not where the operator opened it
+ *       ({@code workspace_git_writable}) and not in the run's own checkout of its source.</li>
  *   <li><b>Refused</b> with an {@link IllegalArgumentException}, before anything starts: a value that would reach the
  *       client as an option (an image, name, working directory, entrypoint or user that starts with {@code -}), an
  *       image that is not a local image ID, a mount path that is not absolute or holds a comma, a quote or a line
- *       break ({@code --mount} would split or misread it), and an environment name that is no variable name.</li>
+ *       break ({@code --mount} would split or misread it), an environment name that is no variable name, and a
+ *       writable workspace whose {@code .git} is to be read-only and is a symbolic link, which no mount holds in
+ *       place.</li>
  * </ul>
  */
 final class ContainerArguments {
@@ -78,6 +84,12 @@ final class ContainerArguments {
 
     /** The port the egress proxy listens on, as its image has it. */
     static final int PROXY_PORT = 3128;
+
+    /**
+     * What marks a target of the egress proxy as one it also forwards a plain HTTP request to
+     * ({@link Egress#plain()}), as the proxy's image reads its arguments.
+     */
+    static final String PLAIN_TARGET = "http://";
 
     /** The variables that point a container's clients at the egress proxy, in the order they are set. */
     static final List<String> PROXY_VARIABLES = List.of("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy");
@@ -138,14 +150,27 @@ final class ContainerArguments {
     }
 
     /**
+     * {@link #of(Client, ContainerRun, String, List, boolean)} in a home whose operator did not open the
+     * {@code .git} of a writable workspace, for a workspace that is no checkout of the run's own.
+     */
+    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths) {
+        return of(client, run, user, declaredRealPaths, false);
+    }
+
+    /**
      * The command line that starts {@code run}, with the host side of each mount the step declared as it was judged.
      *
      * @param declaredRealPaths the real path of each of {@link ContainerRun#declaredMounts()}, in their order: the
      *                          path the mount guard judged, which is mounted as it is and not resolved again
-     * @throws IllegalArgumentException for what the command line must not carry, and for a declared mount without a
-     *                                  judged path: a mount the guard did not judge is never mounted as given
+     * @param workspaceGitWritable whether a step that may write the workspace may write its top-level {@code .git}
+     *                          as well ({@link MountGuard.Context#workspaceGitWritable()}); without it that
+     *                          {@code .git} is mounted read-only ({@link WorkspaceGit#readOnly})
+     * @throws IllegalArgumentException for what the command line must not carry (see the class documentation), and
+     *                                  for a declared mount without a judged path: a mount the guard did not judge
+     *                                  is never mounted as given
      */
-    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths) {
+    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths,
+                         boolean workspaceGitWritable) {
         if (declaredRealPaths.size() != run.declaredMounts().size() || declaredRealPaths.contains(null)) {
             throw new IllegalArgumentException("A mount of the step was not judged, so the container is not started");
         }
@@ -177,8 +202,19 @@ final class ContainerArguments {
             Mount mount = run.mounts().get(i);
             String source = i < own ? MountGuard.realRunDirectory(mount.hostPath()) : declaredRealPaths.get(i - own);
             arguments.addAll(List.of("--mount", bind(mount, source)));
+            if (i < own && !workspaceGitWritable && isWritableWorkspace(mount, run)) {
+                // After the workspace's own mount: its .git once more at its place, read-only as a whole
+                WorkspaceGit.readOnly(Path.of(source)).ifPresent(git -> arguments.addAll(List.of("--mount",
+                        bind(new Mount(git.toString(), inside(mount.containerPath(), WorkspaceGit.NAME), true),
+                                git.toString()))));
+            }
             if (isPackageWithGitDirectory(mount, run, source)) {
                 arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + GIT_COVER));
+            } else if (i < own) {
+                String inside = packageWithGitDirectoryInside(mount, run, source);
+                if (inside != null) {
+                    arguments.addAll(List.of("--tmpfs", mountPath("container", inside) + GIT_COVER));
+                }
             }
         }
         for (String name : new TreeSet<>(run.environment().keySet())) {
@@ -264,7 +300,8 @@ final class ContainerArguments {
     /**
      * The command line that starts the egress proxy of {@code run}, detached: the secure defaults of every container
      * (read-only, no capabilities, no new privileges, the user, the limits, the run's label), both networks, no mount
-     * and no variable of the step, and the listed hosts as its arguments. Unlike a step's container it keeps the
+     * and no variable of the step, and the listed hosts as its arguments, a host that also takes plain HTTP as
+     * {@code http://host:port}. Unlike a step's container it keeps the
      * runtime's log, which holds only the proxy's lines and is read with {@code logs}, and it has no {@code --rm}:
      * Traceworks reads the log and then removes it. Podman takes several networks as one list.
      *
@@ -296,7 +333,10 @@ final class ContainerArguments {
         arguments.addAll(List.of("-e", "HOME=/tmp", "-e", "TMPDIR=/tmp", "-e", "LANG=C.UTF-8",
                 "-e", "TINI_KILL_PROCESS_GROUP=1"));
         arguments.add(image);
-        arguments.addAll(run.network().hosts());
+        for (String host : run.network().hosts()) {
+            // A model server of the operator's that speaks http: the proxy also forwards a plain request to it
+            arguments.add(run.network().plain().contains(host) ? PLAIN_TARGET + host : host);
+        }
         return arguments;
     }
 
@@ -327,6 +367,42 @@ final class ContainerArguments {
         String pkg = run.directories() == null ? null : run.directories().packageDirectory();
         return pkg != null && pkg.equals(mount.hostPath())
                 && Files.isDirectory(Path.of(source, ".git"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Where the run's package shows inside {@code mount}, one of the run's own, when the mount holds the package
+     * and the package has a top-level {@code .git} directory: the container path of the package there, whose
+     * {@code .git} needs the cover too. A read-only workspace that holds the package is such a mount: the package
+     * has its own mount at {@code /package}, with its cover, and would show its {@code .git} once more at its
+     * place in the workspace. {@code null} when the mount does not hold the package, the package has no
+     * {@code .git} directory, or another mount of the run already shows the package at that place (the second
+     * package mount of a writable workspace, which brings its own cover).
+     */
+    private static String packageWithGitDirectoryInside(Mount mount, ContainerRun run, String source) {
+        String pkg = run.directories() == null ? null : run.directories().packageDirectory();
+        if (pkg == null || pkg.isBlank()) {
+            return null;
+        }
+        Path holder = Path.of(source);
+        Path real = Path.of(MountGuard.realRunDirectory(pkg));
+        if (real.equals(holder) || !real.startsWith(holder)
+                || !Files.isDirectory(real.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        String base = mount.containerPath().endsWith("/") ? mount.containerPath() : mount.containerPath() + "/";
+        String place = base + holder.relativize(real);
+        return run.mounts().stream().anyMatch(other -> other.containerPath().equals(place)) ? null : place;
+    }
+
+    /** Whether {@code mount} is the run's own mount of its workspace, and a step may write it. */
+    private static boolean isWritableWorkspace(Mount mount, ContainerRun run) {
+        String workspace = run.directories() == null ? null : run.directories().workspace();
+        return workspace != null && !workspace.isBlank() && workspace.equals(mount.hostPath()) && !mount.readOnly();
+    }
+
+    /** The container path of {@code relative} inside the mount at {@code containerPath}. */
+    private static String inside(String containerPath, String relative) {
+        return (containerPath.endsWith("/") ? containerPath : containerPath + "/") + relative;
     }
 
     /** @param source the host side as it is mounted: the real path that was judged */

@@ -13,7 +13,8 @@ import java.util.Objects;
 /**
  * The {@link HostDirectories} of this machine: real paths from the file system, and the start check of the run's own
  * directories with {@link MountGuard}'s rules ({@link MountGuard#checkRunDirectory}), so a workspace or a package
- * cannot hand a container what a step's own mount may not.
+ * cannot hand a container what a step's own mount may not; and the guard's answer on a writable mount that a
+ * workflow writes out, before the run starts ({@link MountGuard#writableMountRefusal}).
  */
 public final class RunDirectoryGuard implements HostDirectories {
 
@@ -58,5 +59,23 @@ public final class RunDirectoryGuard implements HostDirectories {
     @Override
     public Checked check(Path directory, Role role) {
         return MountGuard.checkRunDirectory(directory, home, layout, sessionPaths, role);
+    }
+
+    /** By the home's {@code writable_mounts} and the real path, as the mount check asks it when the step runs. */
+    @Override
+    public java.util.Optional<String> writableMountRefusal(String hostPath) {
+        return MountGuard.writableMountRefusal(hostPath, home, layout, null);
+    }
+
+    /** The home's {@code workspace_git_writable}. */
+    @Override
+    public boolean workspaceGitWritable() {
+        return layout.workspaceGitWritable();
+    }
+
+    /** The same, and nothing asked of a mount in the workspace that its step may write, by the real path. */
+    @Override
+    public java.util.Optional<String> writableMountRefusal(String hostPath, String writableWorkspace) {
+        return MountGuard.writableMountRefusal(hostPath, home, layout, writableWorkspace);
     }
 }

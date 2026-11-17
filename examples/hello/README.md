@@ -59,6 +59,8 @@ Open the `run.html` that the commands print to see the run in a browser.
   ([docs/registers.md](../../docs/registers.md)).
 - `examples/ai-hello`: one AI step, with Claude or Pi in a container.
 - `examples/self-audit/`: the audits Traceworks runs on itself.
+- `examples/audit/testing` and `examples/audit/testing-again`: an audit of the tests of a Maven project by mutation
+  testing, with a model that rates each gap.
 
 The same sequence runs as tests in `traceworks-cli`: `HelloExampleTest` as a host run, in every build, and
 `HelloContainerTest` in containers, only with `mvn -Pcontainers verify` or `mvn -Pit verify`, where it fails when no

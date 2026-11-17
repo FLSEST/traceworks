@@ -23,6 +23,7 @@ traceworks run examples/hello --no-input             # parks at the approval, ex
 traceworks approve <run> --answer Yes
 traceworks resume <run> --no-input                   # finishes, exit 0
 traceworks verify <run>
+traceworks verify                                    # the ledger against the runs folder: what started and never ended
 ```
 
 `<run>` is the run id or a unique prefix of at least four characters. A path to a run folder works too, when it is written as a path
@@ -47,7 +48,7 @@ is refused before it is read.
 | Flag | Meaning |
 |---|---|
 | `--input K=V` | an input of the run; repeatable; split at the first `=`. The input named like a model choice of the workflow picks one of its options ("Model choices") |
-| `--inputs-from RUN` | take the inputs an earlier run was started with (its id or a prefix); an `--input` overrides one of them. Refused when that run's inputs are deleted from its record; `run.started` records `inputs_from` |
+| `--inputs-from RUN` | take the inputs an earlier run was started with (its id or a prefix); an `--input` overrides one of them. Refused when that run's inputs are deleted from its record, or are not the bytes its record names (a changed blob); `run.started` records `inputs_from` |
 | `--workspace DIR` | the directory the steps work in (default: the working directory) |
 | `--source PATH\|URL` | work in a new checkout of this git repository instead of a workspace (see "Isolated workspace"); excludes `--workspace` |
 | `--ref REF` | the branch, tag or commit of `--source` to check out (default: its `HEAD`); only with `--source` |
@@ -187,7 +188,10 @@ holds; in every other case it runs:
   record redacted a secret's value is not the output the item produced, so that item runs again.
 
 A failed or cancelled item, and the item that was in flight, run again. The loop's output is put together as in one
-pass, so the steps after it read the same text and get the same step indices. The terminal and `run.html` mark a
+pass, so the steps after it read the same text and get the same step indices. No other block takes anything over: a
+`while` that was in flight starts at its first iteration again, a `retry` at its first attempt, a `switch` at the
+first block of its case, and a `sub-workflow` starts a new child run from the child's first block. Write such a step
+so that it can run twice, or let it note in the scratch directory what it has done. The terminal and `run.html` mark a
 taken-over item (`taken over from event <seq>, not run again`), and the record names the earlier event
 (docs/events.md, `foreach.item.finished`). A loop that runs a workflow per item (`workflow_id`) takes nothing over:
 a child run has no checkpoints of its own, so every item runs again.
@@ -197,7 +201,12 @@ not repeated, and the resume trusts that what it wrote is still there.
 
 A run that finished but whose manifest or ledger entry could not be written (for example because git was missing)
 is completed by `resume`: it writes the missing manifest and ledger entry from the record, adds nothing to the log
-and prints what it wrote. A resume of a run that is complete is refused, and so is a resume of a finished run
+and prints what it wrote. The same holds for a run that ended `FAILED` without a step because the ledger could not
+note its start (docs/events.md, "The start entry"): `resume` writes its start entry too, and runs no step.
+
+Before a resume of an unfinished run goes on, the ledger must hold the start entry of the run. A run without one
+(a run of an earlier version, one whose entry was lost) gets it then; when the ledger cannot take it, the resume is
+refused with exit 6 and records nothing. A resume of a run that is complete is refused, and so is a resume of a finished run
 whose folder is not in the runs folder of this home (a copied folder): its ledger entry belongs to the home that ran it,
 and `traceworks verify` is what checks a copy.
 
@@ -231,6 +240,10 @@ What "in flight" means:
   output of the items that finished, and the run `CANCELLED`.
 - A loop that runs a workflow per item (`workflow_id`) and a child workflow do not park in the middle: a resume
   could not take over what they did. They run to their end, and the run parks after that step.
+- A `while` and a `retry` do not park in the middle either: each is one step, and a pause is no cancel. The `while`
+  runs until its condition or its limit ends it, the `retry` until an attempt completes or its attempts are used up,
+  waits between attempts included, and the run parks after that step. The resume runs nothing of it again. The same
+  holds for a `foreach` inside a child workflow. To stop such a step now, cancel the run.
 - A pause during the last step parks nothing: the run ends.
 
 In the terminal of the run itself, the first Ctrl-C does the same (see "run").
@@ -299,6 +312,9 @@ running run removes its own: a container whose step times out or is cancelled is
 `traceworks runs [--status S] [--workflow ID_OR_NAME] [--limit N] [--long]` lists the newest runs, one per line: the first
 8 characters of the run id, which `<run>` takes as long as no other run starts with them, the status, the workflow's
 name and the start time (UTC). The default limit is 20.
+
+`runs` reads the runs folder, so a run whose folder was removed is not in it. `traceworks verify` without a run reads
+the ledger and names such a run, and every run that started and never ended ("verify").
 
 ```
 c0c0f5eb  COMPLETED              Hello  2026-11-03T12:00:00Z
@@ -406,14 +422,20 @@ says `not compared` with the reason. The findings never change the exit code.
 | 0 | the same: everything in the list below is equal |
 | 11 | differs: something in the list below is not; the last lines name each reason |
 | 6 | a run has not finished (`PARKED`, `RUNNING`, `INTERRUPTED`): it has no manifest and no ledger entry yet |
-| 8 | a run's record cannot be read or does not verify (what `traceworks verify` checks: chain, blobs, manifest, ledger entry) |
+| 8 | a run's record cannot be read or does not verify (what `traceworks verify` checks: chain, blobs, manifest, ledger entry, start entry) |
 | 2 | an unknown or ambiguous run |
 
 `1` is not used for "differs", because it already means that a run completed with errors. What counts:
 
 - the **package digest** and the **inputs** (the inputs digest);
 - every **deterministic step**: its status and its output, and each `foreach` item of it. A step that only one run
-  has counts too. This is strict on purpose: a deterministic step counts also when it comes after an AI answer that
+  has counts too, and so does a step of which other commands had their output cut (`output_cut`, "Host execution"):
+  `step build: the output was cut in run B (command 1: stdout after 5000 ms), not in run A`. A command is matched
+  by its `foreach` item and its order among the commands of that item, in the latest attempt of the step, so a cut
+  in item 2 against a cut in item 7 differs. This holds only between two records that can name a cut (`records` in
+  `run.started` and in every `run.resumed`). A record of an earlier version does not say whether an output was cut:
+  then the cuts are not compared, and when either run names one, a note says so (`note: run 5cf3... is of a version
+  that does not record whether an output was cut: the cuts of the two runs are not compared`); This is strict on purpose: a deterministic step counts also when it comes after an AI answer that
   differed and only carries that answer on; the reason then ends with `(after an AI output that differed)`;
 - the **setup of every AI call**: provider, model asked for, effort, tool policy, web mode and hosts, system prompt
   and prompt, and the model that answered when both calls report one. A different model or another prompt is another
@@ -423,27 +445,67 @@ says `not compared` with the reason. The findings never change the exit code.
   follows an AI output that differed)`. A prompt that differs with no differing AI output before it does count:
   something outside the record changed it, such as a file of the workspace.
 
-What does not count, and is reported: the answer of an AI call, the output and status of an AI step, an AI step or
-call that only one run has, and the other header fields (Traceworks version, execution, images, the operator's AI
+What does not count, and is reported: the answer of an AI call, the output and status of an AI step, an output cut
+of an AI step that differs (a note), an AI step or call that only one run has, and the other header fields (Traceworks version, execution, images, the operator's AI
 settings, models, status, gate). So `0` means "the deterministic part ran the same, and the AI part was asked the
 same way", not "the two runs printed the same".
 
 ### show and watch
 
-`traceworks show [<run>] [--outputs] [--full]` shows a run: status, the workflow it ran (its package directory and
+`traceworks show [<run>] [--outputs] [--full] [--children]` shows a run: status, the workflow it ran (its package directory and
 commit, its description, and one line per block of the recorded definition with the step it became, or `did not
 run`), steps with their files, gate and the question it waits for. For a workflow with a model choice, a line
 `Model` names the option the run picked, whether it is the default, and its provider and model (`Model     judge =
-astra (picked): PI openai/gpt-6-astra`); `run.html` has the same as a row of its Workflow section. For the run of
+astra (picked): PI openai/gpt-6-astra`); `run.html` has the same as a row of its Workflow section. A line `Ledger` says
+whether the ledger noted the start of the run (`Ledger    start noted in the ledger: yes (traceworks verify compares
+the entry)`, or `no (recorded by a version that noted no start)`); it is what `run.started` says, `run.html` has the
+same as the row `ledger`, and `traceworks verify <run>` is what compares the entry itself. For the run of
 an audit workflow, a line `Register` names the head of the register's log the run started from and how many files
 its steps were handed (`Register  hello at seq 17 (head 6f486c7c31a3), 4 files handed to the steps`, or `hello before
 its first line` when the register did not exist yet); `run.html` has the row `register` with the whole head
 (docs/registers.md, "The register folder of a run"). It names where the run's AI containers could
 connect (`AI net`), and under each AI step the hosts its container could reach and every connection it asked the
 egress proxy for; a denied one is marked `DENIED`, and the line `Egress` counts them for the whole run ("The network
-of an AI step").
+of an AI step"). A command whose output was not read to its end is marked `output CUT` under its step, and the line
+`Output` counts them ("Host execution", "A process the command leaves behind"). The line counts the whole run. The
+steps of a child run that is listed carry the mark like any step, as far in as their step; the commands of an
+earlier attempt of a step, and of the child runs a step with more than 10 of them does not list, are under no step,
+so the line says how many of its count are those.
 `--outputs` adds each step's output, cut at 2000 characters. `--full` adds it whole. A step's status is `COMPLETED`,
 `FAILED`, `SKIPPED`, `CANCELLED` (the run's cancel ended it), `RUNNING` or `WAITING_APPROVAL`.
+
+**What ran inside a step** stands under it, further in:
+
+```
+Steps
+  0   route                    [switch]         COMPLETED         412 ms
+      case fast|quick: case_fast [shell], notify [simple (PI)]
+  2   child                    [sub-workflow]   COMPLETED         5210 ms
+      child run 1a2b3c4d COMPLETED
+        0   count_up                 [while]          COMPLETED         2204 ms
+        1   deeper                   [sub-workflow]   COMPLETED         801 ms
+            child run 77aa01c3 COMPLETED_WITH_ERRORS  gate RED (build)
+              0   build                    [shell]          FAILED            640 ms
+  3   each                     [foreach]        FAILED            9120 ms
+      item 7/14  child run 5e6f7a8b FAILED
+        0   work                     [shell]          FAILED            301 ms
+      13 more child runs, all COMPLETED (show --children lists each)
+```
+
+- **A child run** (`sub-workflow`, a `foreach` with `workflow_id`) is one line under the step that started it: the
+  first 8 characters of its run id, its status, its item for a `foreach` (`item 2/3`), and its gate when it reported
+  one. Its steps follow, each as a step of the run itself is shown (its line, AI calls, egress, values, files, and
+  its output with `--outputs`), six columns further in; a child of a child stands under its step the same way, to
+  any depth. These are the child runs `run.html` draws under the same step, from the same reading of the record.
+- **A step with more than 10 child runs** lists only those that did not end `COMPLETED`, at most 10, and counts the
+  others by status. `--children` lists every child run of every step.
+- **A `switch`** names the case that ran, as its `value` is written, and the blocks of that case with their types,
+  from the definition the record holds; `case default` for the default blocks, `no case matched` when none ran
+  (a case whose value is `none` is named as a case: the step's metadata says whether one ran, `caseMatched`). The
+  blocks of a case are no steps of their own: their commands and AI calls are those of the switch's step. Under a
+  switch of a child run only the case is named, since the record holds the definition of the run itself.
+
+A run without child runs and switches is shown as before.
 
 `show` and `run.html` also list the interventions: what people and processes did to the run from outside its
 steps, with who and when. These are resumes (with the step that runs again and whether the package changed),
@@ -464,7 +526,7 @@ Text from the run is shown with control characters made harmless, so output cann
 ### verify
 
 `traceworks verify <run>` checks the record of a run: the hash chain, the blobs, the manifest, the ledger
-entry, the seal the run started with and, for the run of an audit workflow, its register folder (see docs/events.md). It prints one line for each and exits 8 when something does not hold. Bytes after the
+entry, the start entry of the ledger, the seal the run started with and, for the run of an audit workflow, its register folder (see docs/events.md). It prints one line for each and exits 8 when something does not hold. Bytes after the
 last line feed of a finished run's `events.jsonl` count as a problem of the chain, since nothing appends after
 `run.finished`. Those of a parked or interrupted run are a line its killed process did not finish; the next
 `resume`, `answer` or `cancel` cuts them off and records them (`run.recovered`).
@@ -489,22 +551,129 @@ the run started. To check the seal of a package as it is now, use `traceworks se
 chain     ok (34 events, head 7e364c17...)
 manifest  ok
 ledger    ok
+start     ok (the ledger noted the start, run.started b7a1c09e44d2)
 seal      ok (sealed by anna@example.org, key SHA256:0pVQIJF1..., digest 5f2c...)
 verified
 ```
 
-The run of an audit workflow has one more line, `register`: the files of the run's `register/` folder are compared
-with the name, the SHA-256 and the size `run.started` recorded for each (docs/registers.md, "The register folder of
-a run"). A file that is changed, missing or added fails the verification, on a copied run folder too. A run of any
-other workflow has no such line.
+The `start` line compares the start entry of the ledger (docs/events.md, "The start entry") with the first line of
+the record. It is checked for a run in any state, also one that is running, parked or interrupted:
+
+| Line | Meaning | Exit |
+|---|---|---|
+| `start     ok (the ledger noted the start, run.started b7a1c09e44d2)` | the ledger holds the entry, and it names this record's `run.started` line | 0 |
+| `start     none: the run was recorded by a version that noted no start in the ledger (Traceworks 0.1.0)` | `run.started` has no `ledger_start`: a run of an earlier version, which has no entry | 0 |
+| `start     missing: run.started says the ledger noted the start of this run, and the ledger holds no start entry of it` | the entry was taken out of the ledger; the ledger was deleted or replaced, or another `ledger_dir` was in force when the run started; the process was killed between `run.started` and the commit of the entry (a power cut at that moment: the honest cause); or the run ended because its start could not be noted. A `resume` writes the entry before it goes on, or completes a run that ended | 8 |
+| `start     mismatch: the ledger noted the start of run ... with the run.started line ..., and the first line of this record is ...` | the record is not the one that started under this id, or its first line was changed | 8 |
+| `ledger    changed: runs/<run-id>.json is not what commit 4f1d2c3b4a59 ("run ... COMPLETED sha256:...") left: that names the SHA-256 ..., and the ledger holds ...` | an entry of this run is not what the commit that names it left: a later commit changed or removed it, a second commit names it, or no commit does. It is not the entry of this run any more, whatever it holds now (printed on the `ledger` line, for the start entry too) | 8 |
+| `start     NOT checked: ...` | the ledger exists and cannot be read, or holds something that makes git show another history than its commits (a replace ref, a shallow or grafts file, a second branch; docs/events.md, "What the ledger shows, and what it does not") | 8 |
+| `start     not checked` | a copied run folder: this home's ledger does not speak for it | 0 |
+| `ledger    not checked (the ledger does not know this run: it is of a version before this ledger began)` | a finished run of a version that noted no start, of which this ledger holds nothing (docs/events.md, "A new ledger"); the chain and the manifest are checked | 0 |
+
+How a run of an earlier version is told from one whose entry was removed is the field `ledger_start` of its
+`run.started`, which the hash chain covers. Such a run gets its start entry when it is resumed. Whoever can rewrite the whole record of a run that has not finished, and
+the ledger's history with it, can make it read as an earlier version's; an entry that is still there is compared
+whatever the record says.
+
+#### verify without a run: the ledger against the runs folder
+
+`traceworks verify` without a run checks the ledger against the runs folder of the home, both ways: what the
+ledger says of every run it names, and what every run folder says the ledger should hold. It writes nothing.
 
 ```
-register  ok (4 files of the register hello at seq 17)
-register  the register folder of the run changed: findings.jsonl is not the file the run started with (sha256 4a1f..., recorded 0c1e...)
+$ traceworks verify
+ledger    6 runs started, 3 ended; 1 run folder from before the ledger
+started, not ended (3)
+  3f2a91c4-6d1e-4c0b-9a57-1f0e8a2b7c11  2026-11-16T09:12:44.118Z  self-audit-security  folder INTERRUPTED
+  7be01d22-0c4e-4a67-8a3b-52d1c9e7f004  2026-11-16T10:02:10.560Z  self-audit-security  folder GONE
+  c40e7d1a-93b5-4e1f-a0d2-6b8f5e3c9a77  2026-11-16T11:30:02.004Z  self-audit-security  folder GONE
+ended, folder gone (1)
+  91aa0b6e-2f5d-4a0e-b1c3-7d9e6f4a2c18  COMPLETED
+from before the ledger, not ended (1)
+  0d2c44f1-7a9e-4b53-8c10-e5f6a7b8c9d0  folder PARKED
+acknowledged (1)
+  7be01d22-0c4e-4a67-8a3b-52d1c9e7f004  started, never ended, and the folder is gone
+    by operator@box at 2026-11-16T15:04:10.220Z: deleted by hand, the disk was full
+problems (2)
+  c40e7d1a-93b5-4e1f-a0d2-6b8f5e3c9a77  started, never ended, and the folder is gone
+  5b1f0e9d-8c7a-4f6e-9d5c-4b3a2f1e0d9c  the record says the ledger noted the start (PARKED), and the ledger holds no start entry of the run
+verification FAILED: 2 problems; acknowledge one that has an honest cause with traceworks verify --acknowledge <run> --note "..."
 ```
 
-The line says that the files are the ones the run's steps got. It does not say that the register held the truth,
-and it does not check the register: `traceworks findings <key> verify` does that.
+- **started, not ended** lists every run with a start and no end in the ledger, oldest first, with the time and
+  the workflow of the start entry and what the run's folder says: `RUNNING`, `PARKED`, `INTERRUPTED` (its process
+  is gone; `resume` goes on), a final status (the run ended and its end entry could not be written; `resume` writes
+  it), `GONE` (no folder of this run in the runs folder), `UNREADABLE` (a folder without a record that starts with
+  this run's `run.started`: an empty folder made again counts as no folder), or `OTHER RECORD` (the first line is
+  not the one the start entry names). A run stays in this list until it ends: a record cut to its first line reads
+  `INTERRUPTED` like a crash and cannot be told from one, but it never leaves the list.
+- **ended, folder gone** lists the finished runs whose folder is not there, with the status. The ledger still holds
+  the manifest of each (`runs/<run-id>.json`), so this is no failure.
+- **from before the ledger** counts the run folders of a version that noted no start, older than the ledger's first
+  commit, of which the ledger holds
+  nothing (docs/events.md, "A new ledger"), and lists those that have not ended. No failure: the ledger never knew
+  them.
+- **The records.** For every ended run whose folder is there, the check verifies the record against the end entry:
+  the chain, the blobs, and that the manifest the record gives is the end entry byte for byte. So a record that
+  was rewritten while its manifest was left alone fails here too (`the end entry of the ledger is not the manifest
+  the record gives`). This reads every record and every blob of the home. `--quick` leaves it out and reads the
+  first line and the manifest of each run only; the output then says `records   not verified (--quick)`, and only
+  `traceworks verify <run>` checks a record.
+- **in flight** appears for a run whose process is alive and has not written an entry yet: `its start entry is not
+  written yet (run.started 12 s ago)` (it may wait for the ledger's lock), `its end entry is not written yet
+  (run.finished 3 s ago)`, `its record has no line yet`. No failure, for five minutes after that line: then the
+  missing entry is a problem that says `a process holds the lock of the run, and that line is 6 min old`. The same
+  record without a live process is a problem at once.
+- **acknowledged** lists every problem someone acknowledged, for good, with what the check said, who, when and the
+  note. `[no longer what the check finds]` marks one the check no longer says in those words.
+- **problems** is what fails the check, one line per problem, every problem of a run:
+
+| Problem | What it means |
+|---|---|
+| `started, never ended, and the folder is gone (the ledger noted run.started ...)` | the case the start entry is for |
+| `... holds no record that can be read` | a run folder, known to the ledger or not, without a record that starts with its `run.started` |
+| `the record in the folder is not the one the ledger saw start` | another first line than the start entry names |
+| `the record says the ledger noted the start (<status>), and the ledger holds no start entry of the run` | the ledger was deleted or replaced, another `ledger_dir` was in force, the entry was removed, or the process was killed between `run.started` and the commit |
+| `the record ended <STATUS>, and the ledger holds no end entry of the run` | as `ledger    missing` of `traceworks verify <run>`; `resume` writes it |
+| `starts/<run-id>.json is not what commit <id> ("<message>") left: that names the SHA-256 ..., and the ledger holds ...` | a later commit changed an entry, which Traceworks never does; also `commit <id> names <path>, and the ledger does not hold it`, `2 commits name <path>`, and for the acknowledgements and the anchors `commit <id> left <path> with a SHA-256 that is no beginning of the file the ledger holds`, `... no longer than the commit before it` and `the ledger holds more of <path> than commit <id> left` |
+| `the ledger does not know this run, and its record ... is dated ..., after the ledger began (...)` | a record without `ledger_start` and without entries that is not older than the ledger: not a run from before it |
+| `the manifest in the run folder (SHA-256 ...) is not the end entry of the ledger (SHA-256 ...)` | `manifest.json` and `runs/<run-id>.json` differ, or the folder has no manifest; `traceworks verify <run>` says which one the record gives |
+| `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
+
+- A problem of the anchors of a register is listed under `registers.<key>` and acknowledged under that name.
+- **`--json`** prints the same as one JSON object, in ASCII (every character from U+007F on is written as `\uXXXX`, so no text of a record or a note steers the terminal): `verified`, `records_verified`, the counts `started`, `ended`
+  and `before_ledger`, and the arrays `open`, `ended_folder_gone`, `before_ledger_not_ended`, `in_flight`,
+  `acknowledged` and `problems` (each problem with `run`, `code` and `text`; the codes are `lost`, `unreadable`,
+  `other-record`, `no-start-entry`, `no-end-entry`, `entry-invalid`, `entry-changed`, `manifest-differs`,
+  `record-broken`, `unknown-run`). `traceworks verify <run> --json` prints `verified`, `chain`, `manifest`, `ledger`,
+  `ledger_reason`, `start`, `seal` and `register`. The exit codes are the same as without it.
+- **Exit codes of `verify`:** 0 when nothing that was checked fails; 8 when anything does, when the ledger cannot
+  be read, or when it is one this version does not accept (the reason is on standard error then, and nothing on
+  standard output); 2 for a wrong call or an unknown run. **Exit 0 does not say that everything was checked.** Not
+  checked, and said in the output each time: the records of the ended runs with `--quick`; a run in flight (its
+  entry is on its way); a run folder from before the ledger (the ledger never knew it, its record is unproven and
+  its chain is not checked here; `traceworks verify <run>` checks the chain and the manifest); an ended run whose
+  folder is gone (the ledger holds its manifest, and nothing can be compared with it).
+- **Registers.** `traceworks verify` without a run does not compare the log of a register with its anchors;
+  `traceworks findings <key> verify` does. What it does judge is the anchor file itself (`registers.<key>`).
+- The whole check fails, without a list, when the ledger cannot be read or holds something that makes git show
+  another history than its commits: `traceworks: The ledger cannot be relied on ...: it has the replace ref ...`.
+- It exits 8 when there is a problem nobody acknowledged; else 0.
+
+**Acknowledging a run.** `traceworks verify --acknowledge <run> --note "why"` records that one problem of one run
+has an honest cause: a folder deleted by hand, a `runs_dir` that changed, the run of another home that shares the
+ledger. `<run>` is the run id or a prefix of at least four characters that one reported run has; the note is
+required; a run the check does not report cannot be acknowledged, and there is no way to acknowledge several runs
+at once. The ledger gets one commit for it (docs/events.md, "Acknowledging a run") that names every problem the
+check reports of the run at that moment, the command prints the check again, and from then on those problems are
+listed under `acknowledged` and do not fail the check. The acknowledgement covers them as the check worded them, and
+every sentence holds what tells its case from another (a SHA-256, a commit, a line of the record): a problem that
+comes later, also one of the same kind with another content, fails the check again.
+
+What the check cannot find is said in docs/events.md, "What the ledger shows, and what it does not".
+
+No command of Traceworks removes a run folder. Whoever removes one by hand leaves the ledger's entries: this command
+still names the run.
 
 ### render
 
@@ -542,8 +711,8 @@ reason the engine's run admission would refuse the run for is an error, such as 
 requirement, an AI step's tools or a package image in a child of another package (`child-package-image`; see
 "Requirements" and "AI steps"). The rules judge the package's own workflow; of the child workflows it reaches by a
 literal `workflow_id`, `check` reports only their package images, their questions (`nested-wait-point`) and, for
-`protected-value-in-shell`, whether one of them asks a model; the shell lines of a child that take values its parent hands
-over are judged when the child runs ("Values: how a protected value reaches a command"). A child
+`protected-value-in-shell` and `protected-value-outside-shell`, whether one of them asks a model; the shell lines, tool
+arguments, mounts and `workflow_id`s of a child that take values its parent hands over are judged when the child runs ("Values: how a protected value reaches a command"). A child
 that names Codex, which refuses the run at its start ("AI steps"), is reported when you check the child's package. A
 Dockerfile under the package's `images/` whose `FROM` names no `@sha256:` digest gets the warning
 `unpinned-base-image`, one without the label `org.opencontainers.image.description` the warning
@@ -567,12 +736,13 @@ commonest ways to write one, two more mistakes of the same kind, and free text i
 | `duplicate-block-name` | `ERROR` | two blocks of one name that can both run in one run: `{{ block.<name>.output }}` would hold the output of whichever ran last, and a `compress` block refuses the name as its source. The blocks of `switch` cases share the names of the top-level blocks. The same name in two cases of one `switch` (or in a case and its `default`) is fine, because only one of them runs |
 | `empty-workflow` | `ERROR` | a workflow without blocks: a run of it does nothing and ends `COMPLETED` |
 | `protected-value-in-shell` | `ERROR` | a protected placeholder in shell code (`command`, `items_command`, `run_if`, a shell `condition`, `then_command` or `else_command`), wherever it stands: bare, inside quotes, in a comment or a heredoc, with or without `shell_escape_variables`. A run refuses such a line ("Values: how a protected value reaches a command", below), so Traceworks refuses the workflow. Protected, as far as `check` can tell: the outside text `previous_report`, `audit_findings`, `audit_items` and `previous_chain_output`; the output of a block that asks a model (`simple`, `agentic`, `compress-ai`, a wrapper in AI mode, a block with such a step nested in it, a step an AI actor decides, a `sub-workflow` or `foreach` whose child workflow, named literally, has one); the output of a top-level block after the first of them, and of a block nested after a nested one (in a loop, of any block nested next to one); a `{{ step_N_output }}` after a `foreach`, `while`, `retry`, `conditional`, `switch` or `sub-workflow`, where the numbers are not known before the run, and a `{{ previous_output }}` in a nested block, both when a model is asked before the block. Named outputs are found through `{{ block.<name>.output }}`, `{{ previous_output }}` in the block's own fields and `{{ step_N_output }}` where the numbers are known. Not seen by `check`, and refused by the run: a loop item, a variable, an untrusted input, and the shell lines of a child workflow that take values its parent hands over. Correct: `"values": {"REVIEW": "{{ block.review.output }}"}` in the block's config, and `"$REVIEW"` in the command |
+| `protected-value-outside-shell` | `ERROR` or `WARNING` | a protected placeholder in one of the three places besides shell code that take none: an argument of a tool (`container_args` of a `shell` block), an entry of `mounts` (anywhere in it, the container side included; of a `shell` block, also in a `switch` case and in tool mode, of a `retry`, `while`, `conditional` or `foreach` in shell mode, and of a `simple` block in shell mode in a `switch` case), and the `workflow_id` of a `sub-workflow` or `foreach`. A run refuses the step when it reaches it ("Values: how a protected value reaches a command", below), and the finding says which runs do. An error where every run that reaches the step refuses it; a warning, which names the runs, where only some do: model text counts from the first call of a model on, so the output of a step after a model step that a run may skip (one under `run_if`, in a `switch` case, a `foreach` that may have no item, a `compress-ai` that may refuse its input, a child workflow) is protected only in the runs in which that step asks, and any other run takes the value as it is. A `simple`, `agentic`, `retry`, `while` or `conditional` step in AI mode without `run_if` asks in every run that gets past it. Outside text is reported only where a run sets it: `previous_report`, `audit_findings` and `audit_items` in an audit workflow, `previous_chain_output` in the check before a run that gets it as an input; anywhere else the placeholder stays text, the run takes it, and `chain-only-placeholder`, `audit-only-placeholder` or `previous-report-outside-audit` says so. The `mounts` of a top-level `shell` command without a `container_image` are read in a container run only, so the error there is about container runs: a host run starts the command on the host without its mounts, and a workflow meant for host runs alone needs `--no-check` or, better, no such mount. Model text is found as for `protected-value-in-shell`, which reports an error wherever a run may protect the value. In a `workflow_id` every `{{ previous_output }}` and `{{ block.<name>.output }}` is reported, in a workflow without a model too: the run takes no step output there. Not seen by `check`, and refused by the run: a loop item, a variable, an untrusted input, what a parent hands to a child, and a block output that only a run with untrusted input protects. Not judged, because no run reads it: `container_args` or `workflow_id` of a block in a `switch` case, `mounts` of a wrapper in AI mode. Correct: for a tool, a shell step before it that writes the value to a file (`"values": {"ANSWER": "{{ block.ask.output }}"}` and `printf '%s' "$ANSWER" > "{{ scratch_dir }}/answer.txt"`), and the file's path in the arguments; for a mount and a `workflow_id`, the path or the workflow written out, or a variable that `default_context` or an input of the run sets |
 | `invalid-value-name` | `ERROR` | `values` that a step cannot take: a name that is no variable name (`[A-Z_][A-Z0-9_]*`) or that the run or bash reserves (what a secret may not be called; every variable bash sets or uses, which are the sections "Bourne Shell Variables" and "Bash Variables" of its manual, `_` and the names that start with `BASH`; a secret of the same block), a value that is no text, `values` that are no object, and `values` on a tool step (`container_args`), which runs no shell. The step fails when it is reached, before anything runs |
 | `value-name-configures-program` | `WARNING` | a name under `values` of a family that programs read as their configuration: `GIT_*`, `*_OPTIONS`, `LD_*`, `PYTHON*`, `NODE_*`, `JAVA_*`. The variable is not exported, so no program reads it by itself; a command that exports it (`export NODE_OPTIONS`) hands a protected value to such a program. Choose another name |
 | `unused-value` | `INFO` | a name under `values` that no shell line of the block uses as `$NAME` or `${NAME…}`: the variable is set and nothing reads it |
 | `quoted-placeholder` | `WARNING` | a step output the run inserts as it is, inside quotes: an apostrophe or a quote in the value ends them. In a block with `shell_escape_variables`, also any placeholder in single quotes, where the two pairs of quotes cancel out. (A protected placeholder is `protected-value-in-shell`, wherever it stands) |
 | `heredoc-placeholder` | `ERROR` or `WARNING` | a step output the run inserts as it is, in the body of a heredoc. An error where an interpreter reads the body as its program (`python3 - <<'PY'`, `… \| sh`): the value turns into code. A warning under an unquoted delimiter (the shell runs `$(…)` in the value), and for any placeholder in a body of a block with `shell_escape_variables` |
-| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, such as `ollama/llama3`: Traceworks cannot tell which credential the backend takes, and the step's call would be refused when it runs. The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
+| `unknown-model-backend` | `ERROR` | a `model` written as a literal on a step of the provider `PI` (or the workflow's `model` such a step takes) that names a backend other than `anthropic`, `openai`, `google` and `openrouter`, and none that `local_models` in the `traceworks.json` of the home declares, such as `ollama/llama3` in a home without an `ollama` entry: Traceworks cannot tell which credential the backend takes, and the run is refused at its start. A model that names a declared backend whose `models` do not list it is reported under the same rule ("Local models"). The `model` of an option of a model choice whose provider is `PI` is judged the same way, for every option (`model_choices.<choice>.options.<option>`). A model with a placeholder is `placeholder-in-model` |
 | `placeholder-in-model` | `ERROR` | a `model` with a placeholder, the workflow's or that of a block that makes an AI call, such as `"model": "{{ m }}"`: no run resolves it, so the CLI would be asked for a model of that text. Traceworks refuses the workflow. A model a run may pick is a declared choice ("Model choices") |
 | `invalid-model-choice` | `ERROR` | a `model_choices` declaration that is not understood completely (a choice that is no object, a key other than `default` and `options`, an option without `provider` or `model`, a placeholder in either, the provider Codex, a name that is no plain name or one a run sets itself, a `default_context` entry of the choice's name), a `default` that is none of the options, a block whose `model_choice` names no declared choice, and a block that names `provider` or `model` next to `model_choice`. Traceworks refuses the workflow |
 | `unused-model-choice` | `WARNING` | a declared model choice that no block refers to with `model_choice`: a pick of it changes nothing |
@@ -628,6 +798,36 @@ an end from a command that exits 74 by itself, by a token in the line the shell 
 run, and a `run_if`, a shell `condition` or the condition of a `while` fails its block instead of reading it as
 "false". A step with `values` needs bash 3.1 or later; an older one ends the same way. A name matches `[A-Z_][A-Z0-9_]*` and is none the run or bash reserves (`invalid-value-name`). A tool step (`container_args`) runs no shell and takes no values.
 
+Three places besides a shell line take no protected value: the arguments of a tool, where it would choose what the
+tool does, a `mounts` entry, where it would choose what the container sees, and a `workflow_id`, where it would
+choose which workflow runs. A `mounts` entry is refused as a whole, whichever side of it names the value.
+`check` reports each before a run where the workflow shows it (`protected-value-outside-shell`: an error where
+every run refuses, a warning where only some do); otherwise the run refuses the step when it reaches it, and
+nothing starts:
+
+```
+container_args must not contain untrusted values (untrusted input, tainted block output, platform data, text a
+model wrote): {{ block.ask.output }}
+mounts must not contain untrusted values (untrusted input, tainted block output, platform data, text a model
+wrote): {{ block.ask.output }}:/data:ro
+workflow_id may only use trusted context variables, not {{ block.ask.output }}
+```
+
+A tool reads such a value from a file that a shell step wrote, and its arguments name the file:
+
+```json
+{"type": "shell", "name": "hand_over", "config": {
+  "values": {"ANSWER": "{{ block.ask.output }}"},
+  "command": "printf '%s' \"$ANSWER\" > \"{{ scratch_dir }}/answer.txt\""}},
+{"type": "shell", "name": "scan", "config": {
+  "container_image": "./images/tool",
+  "container_args": ["scan", "{{ scratch_dir }}/answer.txt"]}}
+```
+
+The path of a mount and a `workflow_id` are written out, or come from a variable that `default_context` or an input
+of the run sets. A `workflow_id` takes no `{{ previous_output }}` and no `{{ block.<name>.output }}` in any run,
+protected or not.
+
 The record keeps the command as the workflow wrote it and, next to it, the values by name (`step.command`,
 docs/events.md); `show` names a step's values, and prints them with `--outputs`; `run.html` shows each under its
 command; `describe` lists a block's value names.
@@ -640,7 +840,9 @@ An audit workflow (`metadata.audit`, docs/registers.md) is understood completely
 `enabled: true` but a missing, blank or non-string `key`, `category` or `report_block`, a `schema_version` other than
 the number 1, or an `enabled` that is no boolean is the error `invalid-audit-config`; a `key` that is no register key
 (`[a-z0-9][a-z0-9._-]{0,127}`) is `invalid-audit-key`; a `report_block` that names no top-level block is
-`report-block-missing`; a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
+`report-block-missing`; a `report_block` that runs a child workflow (`sub-workflow`, a `foreach` with
+`workflow_id`) is the info `report-from-child-sets-no-gate`, since a gate marker in the child's output sets no gate
+of the run ("When a step fails"); a `catalog.json` the register cannot read is `catalog-invalid`; `{{ previous_report }}`
 in a workflow that feeds no register (no `metadata.audit`, or `enabled: false`) is `previous-report-outside-audit`,
 and `{{ register_dir }}` there is `register-dir-outside-audit`; and `{{ register_dir }}` in the prompt of an AI step
 is `register-dir-in-ai-prompt` in every workflow, since the container of an AI call does not get the folder. Each
@@ -733,9 +935,14 @@ Nothing was checked: 'traceworks check <package>' says what a run would refuse.
   claude-fable-5-2) unless the run picks opus or astra`. Then what the block may touch, each line only when it applies:
   - `shell:` for a block whose command runs as a shell step (a `shell` block, a wrapper with `execution_mode: shell`,
     a `simple` block of a switch case in shell mode): `network none` or `network open` (`network: true`),
-    `workspace read-only` or `workspace writable`, the names of its `secrets` (a name, never a value: `describe` reads
+    `workspace read-only`, or for a writable one whether its `.git` is writable too in this home
+    (`workspace writable, its .git read-only` or `workspace writable, with its .git (workspace_git_writable)`;
+    "The `.git` of a writable workspace"), the names of its `secrets` (a name, never a value: `describe` reads
     no credential), its image (`container_image`, else the run's shell image), its `mounts` and its
-    `timeout_seconds` when the block sets them. An image of the package itself is followed by what its Dockerfile
+    `timeout_seconds` when the block sets them. A writable mount that the block writes out and that lies in no
+    folder of your `writable_mounts` is followed by `(writable, in no folder of writable_mounts: a run is
+    refused)`, and for a block with `workspace_writable: true` by `... a run is refused unless the folder lies in
+    its workspace)`; `describe` reads the home's `traceworks.json` for both ("Writable mounts"). An image of the package itself is followed by what its Dockerfile
     says it holds, as in `image ./images/areas — eclipse-temurin:21-jdk-noble: the area finder on JDK 21` (see
     "images"); a child workflow of another package gets no such text, since a run refuses a `./images/` there.
   - `ai:` for a block that calls an AI: the provider, model and effort the call runs with (the block's own, else the
@@ -873,9 +1080,11 @@ traceworks findings architecture render      # writes state.json and report.html
 traceworks findings architecture accept 9d3692a8 --note "a fold over every event type stays one" --until 2027-03-31
 traceworks findings architecture dismiss 9d3692a8 --note "not ours"
 traceworks findings architecture reopen 9d3692a8 --note "fix it after all"
+traceworks findings architecture dismiss 9d3692a8 --note "not ours" --agent claude-code   # an agent decides under your user
 ```
 
-A decision is recorded in the register with who decided (the actor, see "Actor") and when, and it changes the
+A decision is recorded in the register with who decided (the actor, see "Actor", and the agent, below) and when,
+and it changes the
 finding's status: `accept` makes it `ACCEPTED_RISK` with a review date (`--until`, a date at most 180 days ahead,
 which is the default), freezes its evidence for the comparison with later runs, and needs `--note`; `dismiss` makes
 it `DISMISSED`, with `--note` and without a review; `reopen` makes an accepted, dismissed or resolved finding `OPEN`
@@ -890,6 +1099,36 @@ finding that three applied reports in a row do not state, or whose rule left `ca
 rule that `catalog.json` marks as judged by a model, silence resolves nothing: an open finding stays open until a
 report names it as gone, a decided one stays decided, and `show` says how long no report has mentioned an open one
 (`Silent    the last 2 applied reports did not mention it`; docs/registers.md, "Reconciliation").
+
+**An agent that decides names itself.** An AI agent that works with your user is your user to the machine, so the
+actor alone would record its decision as yours. `accept`, `dismiss` and `reopen` take `--agent NAME`, and without
+the option the environment variable `TRACEWORKS_AGENT`, which a harness sets once for its agent; the option wins.
+The register records the name beside the actor (`agent` in the line of the decision, `disposition.agent` in
+`state.json`, `list --json` and the register folder of a run), and the views say it after the actor:
+
+```
+$ traceworks findings security dismiss 9d3692a8 --note "RunPaths refuses this mount before the call" --agent claude-code
+dismissed 9d3692a8 through the agent claude-code
+$ traceworks findings security list
+9d3692a8  DISMISSED  LOW       path_check  core/Mounts.java#Mounts.check(Path)  A link gets past the path check  (through the agent claude-code)
+$ traceworks findings security show 9d3692a8
+...
+Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17T10:02:11.418Z, made on severity LOW
+```
+
+- **The name:** at most 64 characters, each an ASCII letter or digit, one of `. _ - : / @ +`, or a single space
+  between two of those; white space around it is dropped.
+- **A blank name, or one beyond these bounds, is a usage error** (exit 2) and records nothing, whether it came from
+  the option or from the variable: it is not taken for "no agent". `--agent` on any other `findings` command is a
+  usage error too; the variable is read by these three only.
+- **A decision without an agent** is recorded and shown exactly as before.
+- **The name is self-declared and unsigned.** An agent that leaves it out is recorded as you, and anyone can give
+  any name. It is a label like the actor, not a proof (docs/registers.md, "Who decided").
+- **An earlier version of Traceworks refuses a register in which an agent decided** (`register.requires` with the
+  feature `decision_agent`), so that it cannot show such a decision as yours.
+
+The answer to an `approval` or a `human-input` of a run (`traceworks approve`, `traceworks answer`) takes no
+`--agent` and does not read the variable: `approval.answered` names the actor alone.
 
 A `list` line is the first 8 characters of the finding's id, its status, severity, rule key, subject and title,
 sorted by status (`OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK`, `DISMISSED`, `RESOLVED`), severity, rule key and
@@ -1192,7 +1431,7 @@ seal protects and what it does not.
 | 3 | the run failed |
 | 4 | the run was cancelled |
 | 5 | the run is parked: it waits for an answer, or it was paused (`traceworks pause`, Ctrl-C) and waits for its `resume` |
-| 6 | refused: the start check failed (no container runtime for a container run, a missing image, a workspace or package that cannot be mounted, a secret without a value or with a value shorter than 8 characters, a `credentials.json` others can read), `credentials` cannot trust or write `credentials.json`, was given a value no run would take or none at all, or shall remove a name that is not stored, a host run's resume lacks the consent, the workflow was not admitted, the package is invalid, the ledger cannot take an entry (no git, or `ledger/` cannot be created), the `--source` is not allowed or cannot be checked out, a package or a local source lies in `<home>/workspaces/`, a resume's missing checkout cannot be cloned again, a resume's checkpoint state or a text it refers to is deleted, a resume's checkpoint holds more output text than the output budget in force, a `resume` of a run that has finished (unless it only writes a missing manifest or ledger entry), of a run parked at a question that has no answer yet, of a run that another process writes, or of a run whose package changed without `--allow-changed-package`, a `cancel` of a run that has finished, a `pause` of a run that no process runs or that is already asked to pause, `traceworks.json` holds an unknown key or an invalid value, `check`, or the check before a `run`, found errors, or a seal refused: a `run` or a `resume` of a sealed package whose seal does not hold, of an unsealed package where `require_seal` asks for a seal, a `seal` that cannot sign or whose key the home does not allow, or an `unseal` under `seal_immutable` (see "seal, unseal and seals") |
+| 6 | refused: the start check failed (no container runtime for a container run, a missing image, a workspace or package that cannot be mounted, a secret without a value or with a value shorter than 8 characters, a `credentials.json` others can read), `credentials` cannot trust or write `credentials.json`, was given a value no run would take or none at all, or shall remove a name that is not stored, a host run's resume lacks the consent, the workflow was not admitted, the package is invalid, the ledger cannot take an entry (no git, or `ledger/` cannot be created) or could not note the start of the run (the run then ended `FAILED` without a step), the ledger's lock is held for more than 60 seconds, the ledger's own git configuration holds a key that is not allowed there or its `.git` is not a plain directory (docs/events.md, "The ledger's own git settings"), a resume whose run has no start entry and cannot get one, a `verify --acknowledge` of a run the check does not report, the `--source` is not allowed or cannot be checked out, a package or a local source lies in `<home>/workspaces/`, a resume's missing checkout cannot be cloned again, a resume's checkpoint state or a text it refers to is deleted, a resume's checkpoint holds more output text than the output budget in force, a `resume` of a run that has finished (unless it only writes a missing manifest or ledger entry), of a run parked at a question that has no answer yet, of a run that another process writes, or of a run whose package changed without `--allow-changed-package`, a `cancel` of a run that has finished, a `pause` of a run that no process runs or that is already asked to pause, `traceworks.json` holds an unknown key or an invalid value, `check`, or the check before a `run`, found errors, or a seal refused: a `run` or a `resume` of a sealed package whose seal does not hold, of an unsealed package where `require_seal` asks for a seal, a `seal` that cannot sign or whose key the home does not allow, or an `unseal` under `seal_immutable` (see "seal, unseal and seals") |
 | 7 | the run completed, but its gate reached the `--fail-on-gate` level |
 | 8 | verification failed, or the record of the run does not hold, so the command refused to act on it; the message points to `traceworks verify`, or `findings <key> verify` found a register that does not hold, or `seals` found a seal log that does not hold, or `seals verify` a seal that does not |
 | 9 | the run was interrupted (`show` and `watch`): its process ended without the run's end, and `resume` continues it |
@@ -1230,6 +1469,45 @@ reports every other value as the error `invalid-config-value`. The key belongs i
 and `check` reports the error `unknown-block-field`. In a `switch` case, a block's `on_failure` says whether the case
 goes on with its next block; a `switch` step one of whose blocks failed fails, and its own `on_failure` decides for
 the run.
+
+What fails a block that holds a command or blocks:
+
+| Block | A failure inside it |
+|---|---|
+| `switch` | a failed case block fails the step; the case's next blocks do not run unless that block says `on_failure: continue` |
+| `foreach` | a failed item does not stop the loop: the other items run, and the step fails after the last one, naming the failed items. `continue_on_error: true` completes the step all the same. After `max_consecutive_failures` failed items in a row (3 by default) the loop stops and the step fails |
+| `while` | a failed iteration ends the loop and fails the step, with the output of the iterations so far |
+| `retry` | a failed attempt is tried again, one that timed out included, until one completes; when none does, the step fails with the output of the last attempt |
+| `conditional` | a failed branch fails the step |
+| `sub-workflow`, a `foreach` item with `workflow_id` | the child run ends as a run of its own does (`FAILED` at its first failed step without `on_failure: continue`), and a child that ended `FAILED` fails the step or the item, with the child's last output and its error |
+
+**A child run's gate and its errors stay in the child.** A workflow whose checks live in child workflows ends
+`COMPLETED`, exit 0, with no gate, while a child of it is RED or ended `COMPLETED_WITH_ERRORS`: `--fail-on-gate`
+does not fire, and a caller that reads the exit code or the gate sees a pass. The child's `gate_status` marker and
+the RED of its failed `checked_command` stand in the record under the child's run id (`gate.reported`, and the
+`gate` of its `run.finished`; `show` names the gate on the child run's line), and the step that ran the child
+copies the child's output, marker included: a copy sets no gate, and a child that completed with errors leaves
+that step `COMPLETED`. Only a child that ended `FAILED` fails the step.
+
+A parent carries a child's verdict up with a step of its own after the child, which prints the marker lines it
+finds in the child's output (the output of the child's last step, so let that step state the verdict):
+
+```json
+{"type": "shell", "name": "carry_gate", "config": {
+  "values": {"CHILD": "{{ block.checks.output }}"},
+  "command": "printf '%s\\n' \"$CHILD\" | grep -E '^gate_(status|category|description):' || true"}}
+```
+
+That step's output is its own, so its marker sets the run's gate. With `checked_command: true` and a command that
+ends non-zero for a RED child (`... ; ! printf '%s\\n' \"$CHILD\" | grep -q '^gate_status: RED'`), the run also ends
+`COMPLETED_WITH_ERRORS`, exit 1. For an audit whose `report_block` is itself a step that runs a child, `check` says
+so (`report-from-child-sets-no-gate`).
+
+A step that is refused before it runs anything ends its run whatever its `on_failure` says, like a setting of the
+wrong type: a shell line, an entry of `mounts` or a tool's `container_args` that names a protected value
+("Values: how a protected value reaches a command"; `check` reports them before the run where the workflow shows
+them, as `protected-value-in-shell` and `protected-value-outside-shell`). In a child workflow such a refusal ends the child run, and the
+`on_failure` of the block that started the child decides for the run above it.
 
 A run that reaches its end completes:
 
@@ -1294,7 +1572,9 @@ The running process looks into the inbox every 200 ms, carries the request out a
 `approval.answered` (with the request id), `request.refused`, `run.pause_requested` or `run.cancel_requested`. The
 command waits up to 10 seconds for that record (`cancel` waits up to 30 seconds for the run to end) and prints it. When nothing is
 recorded within the wait, the command exits 10: the request is queued, not yet recorded, and `traceworks show`
-tells later what became of it. Handled requests move to `inbox/done/`.
+tells later what became of it. Handled requests move to `inbox/done/`. A request file is at most 8 MiB: a larger
+answer is refused by the command that would post it, and a larger file found in the inbox is not read: it moves to
+`inbox/done/` with `.invalid` at its name, as a file that is no request does.
 
 A request still in the inbox when a `resume` or a `cancel` takes over a run nobody ran is handled by its kind. An
 answer was bound to a question of a run that went on without it: it is refused with `request.refused` and the reason
@@ -1319,8 +1599,8 @@ or the registers ("Places of the runs, the ledger and the registers"). It is, in
   credentials.json       values of secrets and AI credentials (optional, only its owner may read it; written by
                          'traceworks credentials', see "Secrets")
   runs/<yyyy-mm-dd>/<run-id>/    one folder per run, see docs/events.md (or in runs_dir)
-  ledger/                a git repository with one commit per finished run and one per write of a register (or
-                         ledger_dir)
+  ledger/                a git repository with one commit per started run, one per finished run and one per write
+                         of a register (or ledger_dir)
   registers/<key>/       one folder per register (docs/registers.md): events.jsonl, blobs/, state.json, report.html
                          and register.lock, written by the audit runs of that key and by 'traceworks findings'
                          (or in registers_dir)
@@ -1348,6 +1628,8 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `container_runtime` | `"podman"`, `"docker"` or `null` | the container runtime; `null` (the default) takes the first of `docker` and `podman` on `PATH` that answers `version`. Docker comes first because this release is tested with it (29.1.3); Podman is supported by the code but untested |
 | `hooks` | object or `null` | the operator's hooks: `register_changed`, the program and its arguments as a list (never a shell line) that gets the diff of a register after an audit run on its standard input, and `timeout_seconds` (default 60), after which the hook is ended. See "Hooks" and `examples/hooks/` |
 | `secret_names` | list of names or `null` | the secrets a run may take from the environment of Traceworks. `null` or missing (the default) and `[]` allow none; a list allows those names. Values from `credentials.json` and the AI providers' credentials are not affected. Each name must match `[A-Z_][A-Z0-9_]*`, else the file is refused (see "Secrets") |
+| `writable_mounts` | list of directories or `null` | the folders in or below which a package may mount a host path writable (`:rw` in `mounts`). `null` or missing (the default) and `[]` allow none: every writable mount is refused. Each entry is an absolute path, or starts with `~/` for a folder below your home directory; `/`, your home directory, a folder that holds it and a relative path are refused. No workflow can set it (see "Writable mounts") |
+| `workspace_git_writable` | boolean or `null` | whether a container step that may write its workspace (`workspace_writable: true`) may write the workspace's own top-level `.git` too. `false`, `null` or missing (the default): the container gets that `.git` read-only as a whole, so a step reads the repository and cannot commit. `true`: the `.git` is writable like the rest of the workspace, in every run of this home. The checkout of `run --source` is writable with its `.git` either way. No workflow can set it (see "The `.git` of a writable workspace") |
 | `container_limits` | object | the limits of every container: `memory` (a string such as `"4g"`), `pids` (an integer) and `cpus` (a string or a number, such as `"2"` or `0.5`); a missing one keeps its default, `"4g"`, `1024` and `"2"` |
 | `output_limit_mib` | integer or `null` | how much Traceworks keeps of each stream of every command, in MiB: from `1` to `1024`; `null` (the default) is `16`. A string such as `"16"` or a number such as `1.5` is refused. No workflow can set it (see "Output limit") |
 | `run_output_budget_mib` | integer or `null` | how much memory the output text a run holds may take, in MiB: from `1` to `65536`, and at least twice `output_limit_mib`; `null` (the default) is `128`, or eight times `output_limit_mib` when that is more. A smaller value, a string or a fraction is refused. No workflow can set it (see "Output budget") |
@@ -1360,6 +1642,7 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `allowed_signers` | path or `null` | the allowed signers file; a relative path is relative to the home. `null` (the default) is `allowed_signers` in the home. No workspace, package or step mount may be this file or a folder that holds it, nor the `signing_key` (exit 6, the refusal names the setting; docs/security.md): keep each in a folder of its own |
 | `allowed_models` | list of objects or `null` | the models that may run in this home: `[{"provider": "CLAUDE", "model": "claude-fable-*"}, {"provider": "PI"}]`. `provider` is `CLAUDE` or `PI` (any case); `model` is a model name in which `*` stands for any text, and an entry without `model` allows every model of the provider, its default included. Missing or `null` (the default) is no restriction; `[]` allows no model. A run with an AI step whose provider and model no entry allows is refused before it starts (exit 6), whatever the package names or the caller picks. No workflow or environment variable can set it (see "Model choices") |
 | `ai_hosts` | object or `null` | more hosts for the containers of an AI CLI: `{"claude": ["<host>:<port>", ...], "pi": [...]}`. A key is a CLI Traceworks runs (`claude`, `pi`); any other is refused. A host is a name or an IPv4 address (`[a-z0-9]([a-z0-9.-]*[a-z0-9])?`, compared in lower case) with a port from 1 to 65535: no wildcard, no scheme, no path. Missing, `null` and `{}` add none. No workflow or environment variable can set it |
+| `local_models` | object or `null` | the model servers of your own that a `PI` step may name: `{"<backend>": {"url": "http://llm.internal:8080/v1", "api": "openai-completions", "models": ["<model>", ...], "secret": "<NAME>"}}`. A step with the model `<backend>/<model>` runs against that server, needs no credential of a provider and reaches nothing but the server. Every value is checked when the file is read, and a wrong one refuses the command (exit 6). Missing, `null` and `{}` declare none. No workflow, workspace, run input or environment variable can set it (see "Local models") |
 
 ```json
 {
@@ -1446,6 +1729,88 @@ on another disk, or beside a project. Without them nothing changes: each lies in
   `<home>/ledger` of one home as the `ledger_dir` of another, since the two would not exclude each other. A shared
   runs or registers folder would mix the runs and the audits of both.
 
+### Writable mounts
+
+A block may ask for more mounts than the run's own (`mounts`, each `host:container:ro` or `host:container:rw`). A
+read-only one is checked as before. A writable one is refused unless you listed a folder that holds it:
+
+```json
+{
+  "writable_mounts": ["~/traceworks-out", "/srv/reports"]
+}
+```
+
+- **What an entry is.** A directory: an absolute path, or one that starts with `~/`, which is your home directory as
+  on the host side of a mount. It need not exist. The file is refused (exit 6, by every command that reads the home)
+  for an entry that is no string, begins or ends with white space, is not absolute, is `/`, or is your home
+  directory or a folder that holds it, as written or behind a symbolic link.
+- **What it allows.** A writable mount whose real path (`..` and symbolic links resolved) is a listed folder or lies
+  below one, with the listed folder resolved the same way: a link inside a listed folder that leads out of it allows
+  nothing. Without the setting, and with `[]`, no package mounts a host path of yours writable.
+- **What it does not allow.** Anything the mount check refuses anyway (docs/workflow-format.md, the row on declared
+  mounts): a login, a folder with a credential store of its own, a socket, the Traceworks home, the package, the
+  workspace of a step without `workspace_writable: true`, the `.git` of a writable workspace (unless you opened it:
+  "The `.git` of a writable workspace"). A file directly in
+  your home directory (`~/.bashrc`) can never be mounted writable, since its folder cannot be listed.
+- **What needs no entry.** What the step writes anyway: the run's scratch directory (`{{ scratch_dir }}`), the
+  cache folder (`cache_dir`) and the output folder (`output_dir`) of a tool step, and the workspace or a folder in
+  it while the step has `workspace_writable: true`, your own workspace as well as the checkout of `run --source`:
+  the step writes it at `/workspace` anyway, and a second, writable mount of a folder in it shows the step nothing
+  more. That is judged by the real path, so a link in the workspace that leads out of it needs an entry for where
+  it leads, and so does a folder that holds the workspace. `describe` knows no workspace: it marks such a mount with
+  `a run is refused unless the folder lies in its workspace`.
+- **When it is refused.** A mount that the workflow writes out (`"~/out:/out:rw"`) is refused by the start check,
+  before the run is created and before a resume records anything (exit 6), with every such mount in one message. A
+  mount that a placeholder names (`"{{ out_dir }}:/out:rw"`) is known when its step runs: the step is refused with
+  exit code 125, and nothing starts. Both name the mount and the line to add:
+
+```
+The run is refused: Block 2 "export": the mount ~/out:/out:rw is refused: a package may mount a host path writable
+only in or below a folder that writable_mounts in /home/anna/.traceworks/traceworks.json lists, and /home/anna/out
+lies in none; mount it :ro, or, if every package you run may write that folder, allow it with this line in
+/home/anna/.traceworks/traceworks.json: "writable_mounts": ["/home/anna/out"]
+```
+
+The list is a grant to every package you run in this home, not to one. List folders that hold results, and none
+that holds what the host runs later: a repository (its `.git/hooks`), a folder on your `PATH`, a folder of startup
+files (docs/security.md, "A listed folder is open to every package"). `traceworks describe <package>` shows the
+mounts of every block, and marks a writable one that no listed folder holds.
+
+### The `.git` of a writable workspace
+
+A step with `workspace_writable: true` writes the workspace. In a container it does not write the workspace's own
+top-level `.git`: the container gets that `.git`, a directory or the file of a linked worktree, read-only as a
+whole. The step reads the repository (`git log`, `git diff`, `git status`) and can leave nothing in it that your
+next git command there would run on the host: no hook, no config, no `commondir`. So it cannot commit, stage or
+stash either. You open it with one setting:
+
+```json
+{
+  "workspace_git_writable": true
+}
+```
+
+- **What it allows.** In every run of this home, a container step with `workspace_writable: true` writes the
+  workspace's `.git` like the rest of the workspace: it commits. A writable mount (`:rw`) of that `.git` or of a
+  folder in it is then a mount in the workspace and needs no entry in `writable_mounts`.
+- **What it means.** Every package you run with a writable workspace can leave hooks, a config, a `commondir` or
+  the state of a rebase in that repository, and the next git command you run there runs them, on the host and as
+  you (docs/security.md, "A writable workspace beyond its top-level `.git`"). Set it in a home where you wrote the
+  packages that write a workspace. The value is `true` or `false`; anything else refuses the file (exit 6).
+- **Without it.** `false`, `null` or missing (the default): the `.git` is read-only. A package that commits in your
+  workspace fails at that step with git's `Read-only file system`. A `.git` that is a symbolic link cannot be
+  mounted read-only in its place: the step is refused when it runs (exit code 125, nothing started). A writable
+  mount that is that `.git`, lies in it or holds it is refused, in a folder you listed too.
+- **What needs neither.** The checkout of `run --source` ("Isolated workspace"): its `.git` is writable with the
+  checkout, since it is the run's data and Traceworks runs no git in it after a step ran in it. A package that
+  commits works there without the setting.
+- **What it does not reach.** A host run has no mounts: a command on the host writes all of `.git`, with or without
+  the setting. Only the workspace's own top-level `.git` is read-only: a repository deeper in the workspace, and a
+  workspace without a `.git`, where a step can make one, are not covered.
+
+`traceworks describe <package>` says which holds in this home for every block with a writable workspace:
+`workspace writable, its .git read-only` or `workspace writable, with its .git (workspace_git_writable)`.
+
 ## AI images
 
 Every AI call runs its CLI in a built-in image (`claude` or `pi`, built by `traceworks images build`). `ai_images` in
@@ -1484,8 +1849,9 @@ record names every connection it asked for. It needs no configuration.
 - **The hosts** are fixed in Traceworks, never taken from a workflow: `api.anthropic.com:443` for Claude; for Pi the
   API of the backend the call's model names (`anthropic/...` or no backend: `api.anthropic.com:443`, `openai/...`:
   `api.openai.com:443`, `google/...`: `generativelanguage.googleapis.com:443`, `openrouter/...`:
-  `openrouter.ai:443`). A Pi call with another backend has no host and no credential: it fails before anything
-  runs, and the message says how to name a backend Traceworks knows ("AI steps", "Credentials").
+  `openrouter.ai:443`). A Pi call whose backend is a model server you declared reaches that server and none of
+  these hosts ("Local models"). A Pi call with any other backend has no host and no credential: it fails before
+  anything runs, and the message names the backends Traceworks knows ("AI steps", "Credentials").
 - **`ai_hosts`** in `traceworks.json` adds hosts for every container of one CLI: a gateway or a mirror your provider
   traffic goes through.
 
@@ -1497,8 +1863,9 @@ record names every connection it asked for. It needs no configuration.
   egress proxy (the built-in image `egress`, built by `traceworks images build`), which is on that network and on one
   with a way out, and points the container's clients at it (`HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`,
   `http_proxy`; a step cannot set these names itself). The proxy tunnels `CONNECT <host>:<port>` to the listed hosts
-  and answers everything else with 403: another host, a plain HTTP request, an IP address that is not listed. A
-  target is compared as the client writes it. The proxy and both networks carry the run's label and are removed when
+  and answers everything else with 403: another host, a plain HTTP request, an IP address that is not listed. The
+  one plain HTTP request it sends on is one to a model server of yours whose URL starts with `http://` ("Local
+  models"). A target is compared as the client writes it. The proxy and both networks carry the run's label and are removed when
   the call has ended, also after a timeout or a cancel. When the proxy does not listen within 15 seconds, or a
   network cannot be created, nothing of the call runs and it fails: its `step.command.finished` has exit code 125.
 - **The record.** The call's `step.command` says `"network": "hosts"` and lists them in `network_hosts`; its
@@ -1524,6 +1891,128 @@ record names every connection it asked for. It needs no configuration.
   "Many containers on a desktop machine" in docs/security.md.
 
 What it does not close is in docs/security.md, "What they do not protect": the provider's own host stays reachable.
+
+## Local models
+
+A model on a server of your own: with it no prompt, no file and no answer of an AI step goes to a provider. Only a
+`PI` step can use one, and only the operator declares the server, in `traceworks.json`. No workflow, workspace, run
+input or environment variable names a server or its URL.
+
+```json
+{"local_models": {
+  "llm": {
+    "url": "http://llm.internal:8080/v1",
+    "api": "openai-completions",
+    "models": ["qwen2.5-coder:7b", "llama3.3"],
+    "secret": "LLM_KEY"
+  }
+}}
+```
+
+| Key | Value |
+|---|---|
+| the key of an entry | the backend id, of your choosing: `[a-z][a-z0-9-]{0,31}`, and none of `anthropic`, `openai`, `google`, `openrouter` |
+| `url` | the base URL of the server's API, as the server documents it for OpenAI clients: `http://` or `https://`, a host name in small letters or an IPv4 address, an optional port (80 or 443 without one) and an optional path of plain segments. No user, no query, no fragment, no IPv6 literal, and not this machine's loopback (below) |
+| `api` | `openai-completions`: the chat completions API of OpenAI (`POST <url>/chat/completions`), which Ollama, llama.cpp's server, vLLM and LM Studio speak. It is the only kind in this version |
+| `models` | the model names a step may ask the server for, a closed list of 1 to 64 names, each as the server knows it: parts of letters, digits and `. _ : + -` with `/` between them, at most 128 characters. A name cannot end in `:off`, `:minimal`, `:low`, `:medium`, `:high`, `:xhigh` or `:max`, which Pi reads as a thinking level |
+| `secret` | optional: the name of the secret that holds the server's key, for a server that wants one. The value comes from `credentials.json` (`traceworks credentials set LLM_KEY`), or from the environment when `secret_names` lists the name. It is no name of a provider's credential and none the CLI reads as a setting (`PI_...`, `NODE_...`, `TRACEWORKS_...`) |
+
+**In a workflow** a step asks for the model as `<backend>/<model>`, as a literal or as an option of a model choice
+("Model choices"):
+
+```json
+{"type": "simple", "name": "review",
+ "config": {"command": "Review the diff.", "provider": "PI", "model": "llm/qwen2.5-coder:7b"}}
+```
+
+A thinking level goes into `effort`; `llm/qwen2.5-coder:7b:high` is no model of the list.
+
+**`traceworks check`** reads `traceworks.json` of the home it runs with (`--home`, `TRACEWORKS_HOME`, or
+`~/.traceworks`), as every command does. A backend that home declares is known; a backend nobody declared stays the
+error `unknown-model-backend`, and so is a model its server does not list. So a package that uses a local model
+checks clean in the home that declares the server, and has an error in a home that does not: there it could not
+run. `traceworks describe` names the server and its URL next to the model.
+
+**What a run does with it.**
+
+- *The start check* refuses the run (exit 6) before its first step when a model names a backend nobody declared,
+  when the server does not list the model, and when the server's `secret` has no value. It sees the workflow and
+  the children it names by a literal `workflow_id`. A child named through a placeholder is not seen: its step is
+  judged when it runs. There a model its server does not list and a model `allowed_models` does not allow are
+  still refused, and a server with a `secret` has no value and is refused too; a call to a declared server without
+  a `secret` runs, since it needs nothing the start check would have read. It asks for no credential of
+  a provider: a run whose `PI` steps all name local models needs none and reads none. A step that goes to a provider
+  next to them still needs that provider's credential. `allowed_models` applies as to every model:
+  `[{"provider": "PI", "model": "llm/*"}]` allows this server's models and no provider's.
+- *Pi's configuration* is written by Traceworks, from your setting and from nothing else. Pi knows such a server
+  as a provider of its own configuration file, `models.json` in its agent directory; no extension is loaded, and
+  every option of a Pi call stays (`--offline`, `--no-extensions`, `--no-mcp`, `--no-approve`, `--no-skills` and
+  the rest). The file names one provider, always `traceworks-local`, with your URL, the API and the one model of
+  the call:
+
+  ```json
+  {"providers":{"traceworks-local":{"baseUrl":"http://llm.internal:8080/v1","api":"openai-completions","apiKey":"$LLM_KEY","authHeader":true,"models":[{"id":"qwen2.5-coder:7b"}]}}}
+  ```
+
+  It reaches the container as the system prompt does: base64-encoded in the environment variable
+  `TRACEWORKS_PI_MODELS`, which a fixed script decodes into `/tmp/traceworks-pi-agent/models.json` in the
+  container's own `/tmp` and drops, before it starts Pi with `PI_CODING_AGENT_DIR=/tmp/traceworks-pi-agent`. The
+  key is never in the file: `"$LLM_KEY"` is Pi's own way to read it from its environment, where the value travels
+  as every credential does. For a server with a `secret` the file also says `"authHeader": true`, Pi's setting for
+  sending the key as `Authorization: Bearer`, which is off by default. A server without a `secret` gets the word `none` as its key, since Pi offers a model
+  only when its provider has one. Pi is called with `--provider traceworks-local --model <model>`.
+- *The network.* The container reaches that one server, through the egress proxy, and nothing else: not the hosts of
+  any provider, not your `ai_hosts`, which are for calls to a provider. This holds with `ai_network: "open"` too: a
+  local step always runs behind the proxy. Every connection is in the record as for any AI call.
+- *The record.* `run.started` and `run.resumed` name your servers (`local_models`: URL, API, models and the name of
+  the secret, never its value). The `ai.request` of each call to one says `"local": {"backend": "llm", "url":
+  "http://llm.internal:8080/v1", "api": "openai-completions"}`; a call to a provider has no such field. `show` and
+  `run.html` print `local backend llm at http://llm.internal:8080/v1` with the call, and `diff` counts a call that
+  moved between a provider and a server, or to another URL, as another setup. `run` and `resume` print one note per
+  declared server. The secret is redacted like every credential.
+
+**Where the server may be.**
+
+- *Elsewhere in your network, or anywhere a name or an address leads*: supported, by name or by IPv4 address. A
+  name you list is connected to as it is, a private address included: you named it. The proxy resolves the name,
+  from its own container, with the name servers the container runtime gives it: a name that only this machine's
+  `/etc/hosts` knows does not resolve there, so write the address instead. A server that cannot be reached is a
+  `FAIL` in the call's `egress`, and the call fails with Pi's error.
+- *On the machine that runs Traceworks*: supported through an address of the machine that containers reach, not
+  through its loopback. `localhost`, `127.0.0.1` and `0.0.0.0` are refused when the file is read, since the loopback
+  of a container is its own, and the message says what to write instead. The refusal is a hint against a common
+  mistake, not a barrier: any other name or address of the machine is taken as written. Bind the server to one
+  address of the machine that the proxy's container reaches, such as the machine's address in your network (Ollama:
+  `OLLAMA_HOST=192.168.1.20`; llama.cpp's server: `--host 192.168.1.20`), and write that address in `url`; a
+  firewall rule that lets only the container runtime's networks in narrows it further. Listening on every address
+  (`0.0.0.0`) works too, and opens more: the server is then reachable from your whole network, and, with a Docker
+  older than 28 or with Podman, directly from the container of every AI step, a provider's steps included, past the
+  proxy and without a line in `egress`. With Docker 28 or newer the machine has no address on the step's network, so
+  a step's container reaches the server only through the proxy, and only the one `host:port` of the URL. With an
+  older Docker or with Podman that is not so (docs/security.md, "The host's own services, on an older runtime"):
+  what the machine serves on an address of the step's network is reachable from the step, whatever the proxy
+  allows. Traceworks prints no warning for it at a run: `local_models` is checked before a container runtime is
+  looked for, and which address of the machine a network gets is the runtime's choice.
+- *Plain `http://`*: supported, since a local server usually speaks it. The proxy never forwarded plain HTTP
+  before; it now does so to exactly the servers whose `url` starts with `http://`, and to nothing else. A tunnel to
+  that `host:port` already carries any bytes, so forwarding reaches nothing a tunnel does not; the proxy sets the
+  `Host` header of a forwarded request to that `host:port`, whatever the client wrote. What it means for
+  you: the prompt and the key travel unencrypted between this machine and the server. Use it on a network you
+  trust, or `https://`.
+- *`https://`*: supported for a server whose certificate a public authority signed, since the `pi` image holds
+  the certificate authorities of Node.js only. A certificate of a private authority is refused by Pi, and
+  Traceworks has no setting to add one.
+
+**Not verified.** This was built from the documentation of Pi 1.5.2, and no real model was called. A container
+test with the real Pi CLI against a stand-in server exists (`AiLocalModelIT` in `integration-tests`); read
+docs/security.md, "A local model", for what is still open: how Pi sends the key, whether it asks the server for
+anything besides the chat completion, and how it sends a plain HTTP request through a proxy. Two more things are
+open that are no matter of security. The file names a model by its id alone, so Pi takes its own defaults for the
+rest: a context window of 128,000 tokens, at most 16,384 output tokens, no thinking; a model with a smaller window
+may refuse a long prompt. And Traceworks writes none of Pi's `compat` settings, so which request fields Pi sends
+to a server it does not know (the role of the system prompt, the field of the token limit) is Pi's choice; a
+server that rejects one of them fails the call, and the error is in the record. Only Docker is meant; nothing about
+Podman is verified.
 
 ## Web tools of an AI step
 
@@ -1601,9 +2090,9 @@ A block takes `command` or `container_args`, not both. A block with `container_a
 | `output_dir` | where the tool writes its SARIF files in its container (default `/out`); read only with `output_format: sarif` |
 | `fact_prefix` | the prefix of the fact sheet; default the block's name. It is lower-cased, every run of characters other than `a-z`, `0-9` and `_` becomes one `_`, and `_` at its ends is dropped (`Scan-Tree` gives `scan_tree`); a prefix with nothing left is `tool` |
 | `cache_dir` | where the tool's persistent cache folder appears in its container (see "The cache folder") |
-| `mounts` | more mounts, as for a command, each with `:ro` or `:rw` |
+| `mounts` | more mounts, as for a command, each with `:ro` or `:rw`; a writable one must lie in a folder of the operator's `writable_mounts` ("Writable mounts") |
 | `network` | `true` gives the tool network access; by default it has none |
-| `workspace_writable` | `true` mounts the workspace writable; by default the tool sees it read-only |
+| `workspace_writable` | `true` mounts the workspace writable, with its top-level `.git` read-only unless the operator set `workspace_git_writable` ("The `.git` of a writable workspace"); by default the tool sees the workspace read-only |
 | `timeout_seconds` | how long the tool may run (default 300); a tool that is stopped for it has exit code 124 |
 | `secrets` | the names of secrets that reach the tool as environment variables (see "Secrets") |
 | `mount_docker_socket` | refused: with `true` the step fails, and `traceworks check` reports `docker-socket-refused` |
@@ -1827,9 +2316,11 @@ not follow a reference with a placeholder, nor one that names no workflow:
   without a model; `OPENAI_API_KEY` for `openai/...`; `GEMINI_API_KEY` for `google/...`; `OPENROUTER_API_KEY` for
   `openrouter/...`. A model written as a literal is judged before the run starts: the start check refuses the run
   (exit 6) when the backend of such a model has no credential with a value, naming the model and the names, and a
-  step without a model counts as `anthropic`. A model with another backend is an error of `traceworks check`
-  (`unknown-model-backend`), so `run` starts no run of it, since Traceworks cannot tell which credential it takes:
-  the message says to name the model as `<backend>/<model>` with one of these four backends. The model of a
+  step without a model counts as `anthropic`. A model whose backend is a model server you declared needs none of
+  these: it gets the server's secret, when it has one, and nothing else ("Local models"). A model with any other
+  backend is an error of `traceworks check` (`unknown-model-backend`) and refuses the run at its start, since
+  Traceworks cannot tell which credential it takes: the message names these four backends and the servers
+  `local_models` declares. The model of a
   picked option of a model choice is a literal like any other, so its backend needs its credential at the start. A
   placeholder in `model` refuses the workflow (`placeholder-in-model`).
 - A run that uses a provider with none of them is refused at start (exit 6), naming the names, the command that
@@ -2074,6 +2565,9 @@ traceworks run <package> --input judge=astra    # the option astra: PI with open
   its default meanwhile runs the new one.
 - **A seal** covers the declaration, since it is part of `workflow.json`: the default and the list of options. A
   pick within the list does not touch the package, so it breaks no seal; a caller cannot add an option or a model.
+- **An option may be a local model.** An option with the provider `PI` and a model `<backend>/<model>` of a model
+  server the operator declared runs on that server ("Local models"); the start check then asks for that server's
+  secret, if it has one, and for no credential of a provider, when the run picks it.
 - **The operator narrows, and never widens.** `allowed_models` in `traceworks.json` lists the provider and model
   pairs that may run in a home ("traceworks.json"). A run with an AI step whose provider and model no entry allows
   is refused before it starts, whether the workflow names the model or the run picked it: `the model
@@ -2130,6 +2624,10 @@ Every run, answer, resume and cancel is attributed to an actor. It is, in this o
 
 The actor is only a label for the record. Traceworks does not authenticate it.
 
+An AI agent that works with your user has your actor. For a decision in a register it can name itself beside the
+actor (`--agent NAME` or `TRACEWORKS_AGENT`; "findings"); for a run, an answer, a resume and a cancel there is no
+such name, and the record names the actor alone.
+
 ## Output limit
 
 Traceworks keeps at most the output limit of what a command prints on stdout, and as much of what it prints on
@@ -2146,7 +2644,9 @@ run is refused (exit 6). `run.started` records the limit a run starts with as
 budget bounds what a run holds in all (see "Output budget").
 
 A stream that goes beyond the limit stops the command at once, as a timeout does: the command and what it started get
-SIGTERM, what is left 2 seconds later SIGKILL, and its container is removed. The command has failed, whatever its own
+SIGTERM (each process before its children, so a shell does not go on to its next command because the one in flight
+ended; one whose own TERM trap does not exit does go on), what is left 2 seconds later SIGKILL in the same order,
+and its container is removed. The command has failed, whatever its own
 exit code would have been, and what ran it never reads the cut text as if it were whole:
 
 - a `shell` step, also the inner shell step of `conditional`, `retry`, `switch`, `while` and `foreach`, fails with
@@ -2250,7 +2750,9 @@ read-only, at its place in `/workspace`. A writable workspace that is the packag
 
 `workspace_writable: true` works on a `shell` block (its tool mode included), on `simple` and `agentic`, on
 `conditional`, `retry`, `while` and `foreach` for their inner shell or AI steps, and on the shell and `simple`
-blocks of a `switch` case. Every other container sees the workspace read-only.
+blocks of a `switch` case. Every other container sees the workspace read-only. A container that may write the
+workspace still sees the workspace's own top-level `.git` read-only, unless you set `workspace_git_writable` in
+`traceworks.json` or the workspace is the checkout of `--source` ("The `.git` of a writable workspace").
 
 A **host run** is the fallback for a machine where no container runtime works, and it needs your consent, with
 `--allow-host-execution` or with `allow_host_execution: true` in `traceworks.json`. The consent only allows a host run:
@@ -2283,9 +2785,10 @@ Before a run is created, the start check refuses it (exit 6), with every reason 
   Traceworks home or a folder holding it, its run records, ledger, registers, seal log and caches (`<home>/runs`,
   `<home>/ledger`, `<home>/registers`, `<home>/seals`, `<home>/cache`, the folders that `runs_dir`, `ledger_dir` and `registers_dir`
   name, and everything in them or holding them), a login below the home (`~/.ssh`, ...), the paths a step's own `mounts`
-  may not name (`/etc`, `/proc`, `/sys`, `/run/user` and below, the runtimes' sockets and storage, your session's
-  sockets), a directory that does not exist or directly holds a socket, and a path with a comma, a quote or a line
-  break. The check reads the real path, with symbolic links resolved;
+  may not name (`/etc`, `/proc`, `/sys`, `/dev`, `/run/user` and below, the runtimes' sockets and storage, your session's
+  sockets), a directory that does not exist or directly holds a socket, a named pipe or a device node, and a path
+  with a comma, a quote or a line break. A folder in `/dev/shm` may be a workspace or a package (a memory disk for a
+  build); `/dev/shm` itself and the rest of `/dev` may not. The check reads the real path, with symbolic links resolved;
 - a workspace that is the package or lies inside it, when a step of the run (of a literal child workflow too) sets
   `workspace_writable: true`: the step would change the package, which every step only reads.
 
@@ -2304,6 +2807,33 @@ categories (`LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`, `LC_TIME`, `LC_NUMERIC`, `LC_CO
 name), `TERM`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL` and `TZ`, plus what the step sets itself. API keys and tokens
 stay out.
 
+**A process the command leaves behind.** A command on the host can end while something it started still writes to
+its output: a background job (`server &`), or a process substitution, which bash does not wait for
+(`exec > >(tee log)`). The step's output holds what such a process writes until it closes the output, for a bounded
+time: up to 5 seconds after a command that ended by itself, up to 2 seconds after one that was stopped (a
+timeout, an output beyond the limit, a cancel). The step takes that much longer. A process that still holds the output then
+is not ended: the output is closed, so its next write fails (it gets SIGPIPE), and what it would have written is not
+in the record. The record marks that: the command's `step.command.finished` has `output_cut` with the stream and
+the bound (`{"streams":["stdout"],"after_ms":5000}`, docs/events.md), and only then; a command whose output ended
+has no such field. The step's status and the gate are as they would be. `traceworks show` prints
+`output CUT     stdout after 5000 ms   <== may be incomplete` under the step and counts such commands in a line
+`Output`, `run.html` marks the step and the command, and `traceworks diff` takes a cut in one run and none in the
+other as a difference ("diff"). A process that holds the output and never writes is marked the same way, at the
+bound; the record holds what came before. A wait that was interrupted (exit code 130) ends the reading at once and is
+marked with `"after_ms":0`. A record of an earlier version has no mark for any of this, and its silence says
+nothing: only a record whose `run.started` names `output_cut` in `records` can say (docs/events.md). Let the command wait for what it starts (`wait`) when its output matters, and send
+the output of a server it leaves running to a file.
+
+Reading past the command's end rests on how the JDK handles the output of a process on Linux and macOS (tested with
+a JDK 21). On a JDK or a platform that handles it differently, the output ends with the command: what a process it
+left behind writes afterwards is lost. A test of Traceworks fails when that changes.
+
+In a container there is no such process: the container ends with its command, and everything the command started
+ends with it. What Traceworks reads there is the output of the client (`docker run`, `podman run`), which alone
+holds those pipes; the processes in the container write to the runtime's. So a container step is not cut this way.
+The client's output is still read with a bound, 2 seconds after the client's end, and a client that left something
+behind which holds its output would be marked the same way.
+
 ## Isolated workspace
 
 `traceworks run <package> --source <path|url> [--ref <ref>]` runs the package in a new checkout of a git repository,
@@ -2316,8 +2846,12 @@ Before the run is created, and after the start check, the source is cloned into 
 commit, detached (`git checkout --detach <sha>`); each git call may take ten minutes. That checkout is the run's
 workspace: a container sees it at `/workspace`, read-only unless a block sets `workspace_writable: true`, and then
 the step's writes stay in the checkout, never in the source. A step's own `mounts` entry inside the checkout follows
-the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`. Another run's
-checkout cannot be mounted.
+the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`, and then without
+an entry in `writable_mounts`, as in any workspace the step may write. The `.git` of the checkout is writable with
+the rest of it, without `workspace_git_writable` ("The `.git` of a writable workspace"): a step commits there. The
+checkout is a run's data and no repository of yours, and Traceworks runs no git in it after a step ran in it; a
+checkout that is kept after the run holds what its steps left, so read it with care before you run git in it.
+Another run's checkout cannot be mounted.
 
 `run.started` records the source as `workspace_source` and the full commit as `workspace_source_sha` (see
 docs/events.md). The steps see the commit as the run variable `{{ workspace_source_sha }}`, which is empty in a run
@@ -2420,4 +2954,7 @@ uncommitted changes (`git_commit`, `git_dirty`). A package may come from somewhe
 run programs that a repository's own configuration names. Traceworks therefore asks git with `core.fsmonitor`
 and the hooks switched off, without writing the index (`--no-optional-locks`), with every filter driver
 (`filter.<name>.clean`, `smudge` and `process`) emptied and not required, and with submodules ignored. A package
-that uses filter drivers, for example git-lfs, may therefore read as dirty.
+that uses filter drivers, for example git-lfs, may therefore read as dirty. A driver whose name cannot be handed
+back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied: git is then not asked for the state at all. Each of the three git calls (the commit, the listing
+of the filter drivers, the status) keeps at most 16 MiB of git's output; one that prints more is ended. In all
+these cases the run records neither `git_commit` nor `git_dirty`: the state reads as unknown, never as dirty.

@@ -25,6 +25,13 @@ record GitInfo(String commit, Boolean dirty) {
 
     static final int TIMEOUT_SECONDS = 10;
 
+    /**
+     * How many bytes of git's output a call keeps at most, of stdout and of stderr each. git reads the package's own
+     * configuration here, and a configuration can repeat its keys without end (includes); a listing beyond the
+     * limit ends the call, and the git state counts as unknown.
+     */
+    static final int OUTPUT_LIMIT = traceworks.core.port.CommandRunner.OUTPUT_LIMIT_BYTES;
+
     static GitInfo of(Path directory) {
         return of(directory, "git", TIMEOUT_SECONDS * 1000L);
     }
@@ -58,7 +65,8 @@ record GitInfo(String commit, Boolean dirty) {
     /**
      * The names of the filter drivers git's configuration defines, from {@code git config --name-only}, which reads
      * the configuration and runs nothing; {@code null} when they cannot be told, so the caller runs no
-     * {@code status}. A name with {@code =} cannot be passed as {@code -c} and counts as unknown.
+     * {@code status}. A name with {@code =} cannot be passed as {@code -c} and counts as unknown, and so does a name
+     * that is not plain ASCII, which need not reach git as the bytes it listed.
      */
     private static List<String> filterDrivers(Path directory, String gitExecutable, long timeoutMillis,
             Map<String, String> parentEnvironment) {
@@ -73,10 +81,19 @@ record GitInfo(String commit, Boolean dirty) {
             int last = key.lastIndexOf('.');
             if (!key.startsWith("filter.") || last <= "filter.".length()) return null;
             String name = key.substring("filter.".length(), last);
-            if (name.contains("=")) return null;
+            if (name.contains("=") || !plainAscii(name)) return null;
             names.add(name);
         }
         return List.copyOf(names);
+    }
+
+    /**
+     * Whether a driver name is printable ASCII only. To git a name is bytes; here it was decoded as UTF-8 and goes
+     * back as an argument in the JVM's encoding. Only ASCII is the same bytes both ways whatever the locale: a byte
+     * that is no UTF-8 reads as U+FFFD, and the {@code -c} would then empty a driver of another name.
+     */
+    private static boolean plainAscii(String name) {
+        return name.chars().allMatch(c -> c >= 0x20 && c <= 0x7E);
     }
 
     /** The standard output of a successful git call, else {@code null}. */
@@ -103,7 +120,8 @@ record GitInfo(String commit, Boolean dirty) {
     /** The exit code and standard output of a git call; {@code null} when git could not run or timed out. */
     private static Output run(Path directory, String gitExecutable, long timeoutMillis, Map<String, String> parentEnvironment,
             String... args) {
-        GitProcess git = new GitProcess(gitExecutable, NO_TRANSPORT, parentEnvironment, NO_PROTOCOL, timeoutMillis);
+        GitProcess git = new GitProcess(gitExecutable, NO_TRANSPORT, parentEnvironment, NO_PROTOCOL, timeoutMillis,
+                OUTPUT_LIMIT);
         try {
             GitProcess.Result result = git.run(directory, List.of(args));
             return new Output(result.exitCode(), result.outputText());

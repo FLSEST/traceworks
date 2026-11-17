@@ -133,7 +133,9 @@ class CheckIT extends IntegrationTest {
     @ValueSource(strings = {"placeholders", "branches", "loops", "children", "approval", "human-input", "compress",
             "gates", "isolation", "secrets", "secret-astral", "secret-broken-off", "package-image",
             "missing-image", "limits", "timeout", "output-limit", "output-limit-setting", "items-timeout",
-            "output-budget", "retry-cancel", "register-files"})
+            "output-budget", "retry-cancel", "register-files", "combo-pipeline", "combo-approval",
+            "combo-failures", "combo-register", "pause-child", "interrupt-while",
+            "interrupt-retry"})
     void everyOtherPackage_checksWithoutAnError(String name) {
         Result check = traceworks.exec("check", traceworks.packageDir(name).toString());
 
@@ -150,6 +152,7 @@ class CheckIT extends IntegrationTest {
         Path readOnly = Files.createDirectories(sandbox.resolve("ro-data"));
         Files.writeString(readOnly.resolve("given.txt"), "given-content\n");
         Path writable = Files.createDirectories(sandbox.resolve("rw-data"));
+        traceworks.configure(java.util.Map.of("writable_mounts", java.util.List.of(writable.toString())));
         Result check = traceworks.exec("check", traceworks.packageDir("mounts").toString());
         Result run = traceworks.run("mounts", "--input", "ro_dir=" + readOnly, "--input", "rw_dir=" + writable);
 

@@ -21,6 +21,11 @@ max_section_chars 12000
 # section be judged again: raise it when the instructions or the prompt of the workflow change what is asked.
 verdict_version 1
 
-# Options of other programs that a command's section names. Each needs its reason.
+# Options of other programs that a command's section names. Each needs its reason. With a second word, the option
+# is the other program's only where that word stands right before it (a backtick, a quote, "[" or white space may
+# be between); anywhere else it is still a finding.
 # resume: "docker ps -aq --filter label=..." and "docker network ls -q --filter label=...", Docker's own option.
 foreign_option filter
+# seal: "COPY --from=" and "RUN --mount=...,from=", options of Dockerfile instructions.
+foreign_option from COPY
+foreign_option mount RUN

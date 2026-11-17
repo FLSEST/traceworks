@@ -20,7 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code tool-mode-socket}, docs/cli.md "Tool mode of the shell block"): a block with {@code container_image} and
  * {@code container_args} runs the image's own entrypoint with those arguments, no shell in between. The package's image
  * {@code ./images/tool} holds one POSIX {@code sh} entrypoint that behaves by its first argument. The workflow's input
- * {@code case} chooses which blocks run, so each test shows one thing.
+ * {@code case} chooses which blocks run, so each test shows one thing. The two runs that hand in
+ * {@code previous_chain_output} start with {@code --no-check}: with that input, the check before the run reports the
+ * argument that names it ({@code protected-value-outside-shell}), and here the run must refuse it by itself.
  *
  * <p>Not covered: {@code network: true} on a tool step, since the suite needs no network at run time (the same key on a
  * command is covered by {@link IsolationIT}).
@@ -65,7 +67,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void anUntrustedInput_isRefusedInAnArgument_beforeTheToolRuns() {
-        Result run = traceworks.run("tool-mode", "--input", "case=untrusted", "--input",
+        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=untrusted", "--input",
                 "previous_chain_output=--config=/etc/x");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
@@ -83,7 +85,7 @@ class ToolModeIT extends IntegrationTest {
     @Test
     void aTaintedOutput_isRefusedInAnArgument_beforeTheToolRuns() {
         // Untrusted platform data that a shell line quotes taints the outputs of the steps after it
-        Result run = traceworks.run("tool-mode", "--input", "case=tainted", "--input",
+        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=tainted", "--input",
                 "previous_chain_output=--config=/etc/x");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
@@ -310,6 +312,7 @@ class ToolModeIT extends IntegrationTest {
         Path readOnly = Files.createDirectories(sandbox.resolve("ro-data"));
         Files.writeString(readOnly.resolve("given.txt"), "given-content\n");
         Path writable = Files.createDirectories(sandbox.resolve("rw-data"));
+        traceworks.configure(java.util.Map.of("writable_mounts", java.util.List.of(writable.toString())));
 
         Result run = traceworks.run("tool-mode", "--input", "case=mounts", "--input", "ro_dir=" + readOnly,
                 "--input", "rw_dir=" + writable);
@@ -396,6 +399,11 @@ class ToolModeIT extends IntegrationTest {
 
     // ---------------------------------------------------------------- traceworks check and wrong blocks
 
+    /**
+     * On its own the package has no error: nothing sets {@code previous_chain_output}, so the argument that names it
+     * is text. A run that hands the name in is refused by the check before it
+     * ({@link #aRunThatHandsInChainOutput_isRefusedByTheCheck}).
+     */
     @Test
     void theToolModePackage_checksWithoutAnError() {
         Result check = traceworks.exec("check", traceworks.packageDir("tool-mode").toString());
@@ -408,6 +416,19 @@ class ToolModeIT extends IntegrationTest {
                 .hasSize(2).allMatch(line -> line.contains("chain-only-placeholder"));
         assertThat(check.out().lines().filter(line -> line.contains("unknown-variable")))
                 .hasSize(3).allMatch(line -> line.contains("{{ ro_dir }}") || line.contains("{{ rw_dir }}"));
+    }
+
+    /** The check before a run knows the run's inputs: with the chain's output handed in, the run is refused. */
+    @Test
+    void aRunThatHandsInChainOutput_isRefusedByTheCheck() {
+        Result run = traceworks.run("tool-mode", "--input", "case=untrusted", "--input",
+                "previous_chain_output=--config=/etc/x");
+
+        assertThat(run.code()).as(run.describe()).isEqualTo(6);
+        assertThat(run.err()).containsPattern("(?m)^ERROR +protected-value-outside-shell +untrusted_input"
+                + " \\(block 2\\): puts \\{\\{ previous_chain_output }} into container_args, text from outside the"
+                + " run");
+        assertThat(traceworks.folders()).as("refused before a run exists").isEmpty();
     }
 
     @Test

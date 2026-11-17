@@ -8,6 +8,7 @@ import traceworks.core.engine.RunOptions;
 import traceworks.core.engine.RunOutcome;
 import traceworks.core.engine.WorkflowEngine;
 import traceworks.core.model.ModelPick;
+import traceworks.core.model.RunStatus;
 import traceworks.core.model.TriggerSource;
 import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.BlobRef;
@@ -17,6 +18,7 @@ import traceworks.core.port.Ids;
 import traceworks.core.port.Ledger;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.PackageImage;
+import traceworks.core.port.RunEvent.RunFinished;
 import traceworks.core.port.RunStore;
 import traceworks.core.port.StoredRun;
 import traceworks.core.record.RecordTypes;
@@ -25,6 +27,7 @@ import traceworks.core.record.RegisterHandover;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunStart;
 import traceworks.core.record.SealView;
+import traceworks.core.record.StartEntry;
 import traceworks.core.seal.Seal;
 
 import java.io.UncheckedIOException;
@@ -38,7 +41,8 @@ import java.util.function.Consumer;
  * The start use case; {@link RunServices#start} is its contract. It holds the whole start of a run of a loaded
  * package: the refusals before a run exists (a reserved input, the start check, a path or source the record could not
  * tell from a redacted one, a ledger that cannot take an entry), the inputs of an earlier run, the checkout of a
- * source, the run's creation, what {@code run.started} records, the run in the engine, and what is written at its end.
+ * source, the run's creation, what {@code run.started} records, the start entry of the ledger without which no step
+ * runs, the run in the engine, and what is written at its end.
  */
 final class Starting {
 
@@ -114,6 +118,16 @@ final class Starting {
         if (request.inputsFrom() != null) {
             try (StoredRun earlier = store.open(request.inputsFrom())) {
                 inputsFrom = earlier.runId();
+                // The inputs come from the earlier record's first line, and the new record names that run as their
+                // origin: a record that does not verify (its chain, its blobs, its manifest, its ledger entries)
+                // vouches for no inputs
+                VerifyReport verified = Verification.verify(earlier, ledger);
+                if (!verified.ok()) {
+                    throw new RecordDamagedException("Run " + earlier.runId() + " does not verify, so --inputs-from"
+                            + " cannot take its inputs" + (verified.chain().problems().isEmpty() ? ""
+                            : " (" + verified.chain().problems().getFirst() + ")")
+                            + RecordDamagedException.seeVerify(earlier.runId()));
+                }
                 inputs.putAll(recordedInputs(earlier));
             }
         }
@@ -150,15 +164,37 @@ final class Starting {
                     : RegisterFolder.handover(prepared.register());
             RegisterFolder folder = handover == null ? null : new RegisterFolder(run, handover);
             RunRecorder recorder = RunRecorder.start(run.events(), run.blobs(), clock, runId, definition)
-                    .redacting(prepared.redactor()).withScratch(new IdleScratch(run, runtime, runId));
-            RunOutcome outcome;
+                    .redacting(prepared.redactor()).withScratch(new IdleScratch(run, runtime, runId))
+                    .notingTheStartInTheLedger();
+            RunOutcome outcome = null;
+            String unnoted;
             try (RunSession session = new RunSession(run, recorder, actor, listener, asker)) {
                 recorder.runStarted(runStart(pkg, inputs, target, runtime, workspace, checkout, inputsFrom, seal,
                         prepared.modelPicks(), handover));
-                RunOptions options = preparation.options(runId, session, recorder, paths, prepared,
-                        TriggerSource.MANUAL, !request.interactive(),
-                        checkout == null ? null : checkout.checkout().sha(), folder);
-                outcome = active.execute(session, runId, runtime, () -> engine.run(definition, inputs, options));
+                // The ledger first, then the first step: a run that began is named outside its own folder
+                unnoted = noteStart(run);
+                if (unnoted == null) {
+                    RunOptions options = preparation.options(runId, session, recorder, paths, prepared,
+                            TriggerSource.MANUAL, !request.interactive(),
+                            checkout == null ? null : checkout.checkout().sha(), folder);
+                    outcome = active.execute(session, runId, runtime, () -> engine.run(definition, inputs, options));
+                } else {
+                    // A record with events is never removed: the run ends here, FAILED, without a step
+                    recorder.emit(new RunFinished(RunStatus.FAILED, Map.of(), unnoted));
+                }
+            }
+            if (unnoted != null) {
+                RunRefusedException refusal = new RunRefusedException(unnoted + "; its record is " + run.location()
+                        + ", and traceworks resume " + runId + " writes its entries once the ledger can be written");
+                try {
+                    if (checkout != null) {
+                        checkouts.afterRun(run, RunStatus.FAILED);
+                    }
+                    outputs.finish(run, pkg.catalogJson());
+                } catch (RuntimeException e) {
+                    refusal.addSuppressed(e);   // the ledger that took no start will hardly take the end
+                }
+                throw refusal;
             }
             RunResult.KeptCheckout kept = checkout == null ? null : checkouts.afterRun(run, outcome.status());
             RegisterOutcome register = outputs.finish(run, pkg.catalogJson());
@@ -178,6 +214,23 @@ final class Starting {
         } catch (RuntimeException e) {
             throw new RunRefusedException("The ledger cannot take an entry, so the run is not started: "
                     + e.getMessage());
+        }
+    }
+
+    /**
+     * Notes the start of the run in the ledger, from the {@code run.started} line its record now holds: the run id,
+     * the time, the hash of the line, the workflow, the package digest and, for an audit, the register's head the
+     * run read ({@link StartEntry}).
+     *
+     * @return {@code null} when the ledger took the entry; else why it did not: the run must not go on
+     */
+    private String noteStart(StoredRun run) {
+        try {
+            ledger.recordStart(run.runId(), StartEntry.of(run.events().readAll().getFirst()).toJson());
+            return null;
+        } catch (RuntimeException e) {
+            return "The ledger could not note the start of run " + run.runId() + ", so no step ran and the run ended"
+                    + " FAILED: " + e.getMessage() + (e.getCause() == null ? "" : " (" + e.getCause() + ")");
         }
     }
 
@@ -238,7 +291,9 @@ final class Starting {
             throw new RunRefusedException("Run " + earlier.runId() + " has no run.started, so its inputs are not known");
         }
         BlobRef ref = events.getFirst().blob("inputs");
-        byte[] bytes = ref == null ? null : earlier.blobs().get(ref.sha256()).orElse(null);
+        // Checked against the name and the size the record gives: the new run names this run as the origin of its
+        // inputs, so they must be what its record says, as for a resume
+        byte[] bytes = ref == null ? null : RunRecords.checkedContent(earlier, ref, "inputs").orElse(null);
         if (bytes == null) {
             throw new RunRefusedException("The inputs of run " + earlier.runId() + " are deleted from its record, so"
                     + " --inputs-from cannot take them");
@@ -257,7 +312,7 @@ final class Starting {
                 runtime == null ? null : new RunStart.Runtime(runtime.name(), runtime.version()),
                 settings.outputLimitMib(), settings.aiImages(), workspace, checkout == null ? null : checkout.checkout().source(),
                 checkout == null ? null : checkout.checkout().sha(), settings.runOutputBudgetMib(), inputsFrom,
-                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover);
+                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover, settings.localModels());
     }
 
     /** The seal as {@code run.started} records it; {@code null} for a package that is not sealed. */

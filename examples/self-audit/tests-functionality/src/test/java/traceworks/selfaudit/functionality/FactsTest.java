@@ -116,6 +116,55 @@ class FactsTest {
     }
 
     @Test
+    void anOptionOfAnotherProgram_namedWithAWord_isNoFindingWhereTheWordStandsRightBeforeIt() {
+        fixture.replace("docs/cli.md", "follows it.", """
+                follows it. A Dockerfile may use `COPY --from=`, "COPY" `--from=x`,
+                [RUN --mount=...,from=] or `RUN
+                --mount=x` across a line break, which is not right before it.
+                """);
+        fixture.rule("foreign_option from COPY");
+        fixture.rule("foreign_option mount RUN");
+
+        fixture.facts();
+
+        // The last --mount has no RUN in its own line
+        assertThat(fixture.findings()).containsExactly("unknown-option-in-docs show/watch --mount");
+    }
+
+    /** Each text names the option once, after the word but not right after it: still a finding. */
+    @Test
+    void anOptionOfAnotherProgram_namedWithAWord_isStillUnknownWhereTheWordDoesNotStandRightBeforeIt() {
+        List<String> texts = List.of(
+                // A table row is one line: RUN as a placeholder earlier in the row
+                "| `--input RUN` | the inputs of run RUN | `tool show --mount x` |",
+                // The word earlier in the sentence, before another program's option
+                "unlike `COPY --from=`, `tool resume --from 3` starts later",
+                "while RUNNING, `--mount x`",
+                "a DRY_RUN --mount x");
+        for (int i = 0; i < texts.size(); i++) {
+            Fixture each = new Fixture(temp.resolve("case-" + i));
+            each.replace("docs/cli.md", "follows it.", "follows it. " + texts.get(i));
+            each.rule("foreign_option from COPY");
+            each.rule("foreign_option mount RUN");
+
+            each.facts();
+
+            assertThat(each.findings()).as(texts.get(i)).singleElement()
+                    .satisfies(f -> assertThat(f).startsWith("unknown-option-in-docs show/watch --"));
+        }
+    }
+
+    @Test
+    void aForeignOptionWithMoreThanOneWord_isRefused() {
+        fixture.rule("foreign_option from COPY and more");
+
+        Fixture.Ran ran = fixture.facts();
+
+        assertThat(ran.code()).isNotZero();
+        assertThat(ran.err()).contains("'foreign_option' takes an option's name, or the name and one word");
+    }
+
+    @Test
     void anExitCodeOnOneSideOnly_isAMismatch_bothWays() {
         fixture.replace(Fixture.SOURCES + "ExitCodes.java", "USAGE = 2;", "USAGE = 2;\n    public static final int"
                 + " FAILED = 3;\n    static final String NAME = \"7\";\n    // public static final int GONE = 9;");

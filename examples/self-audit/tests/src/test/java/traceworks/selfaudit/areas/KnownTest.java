@@ -34,7 +34,9 @@ class KnownTest {
         assertThat(rows).hasSize(5);
         assertThat(rows.get(0)).isEqualTo(new Row("OPEN", "HIGH", "path_check", "a/Mount.java#Mount.check(Path)",
                 "path_check finding in a/Mount.java", "report_findings_verified: a/Mount.java:11: if (a ¦¦ b) {", "",
-                "HIGH"));
+                "HIGH", true));
+        assertThat(rows).extracting(Row::whole).as("the last subject was cut by the block")
+                .containsExactly(true, true, true, true, false);
         assertThat(rows.get(3).decidedOn()).as("no cell: decided on the severity the row shows").isEqualTo("LOW");
         assertThat(Known.parse("DISMISSED | CRITICAL | other | a/B.java#B.m() | t | Evidence: e | Disposition: no"
                 + " | Decided on: LOW, not on CRITICAL")).singleElement().satisfies(row -> {
@@ -54,6 +56,60 @@ class KnownTest {
         assertThat(rows.get(4).note()).isEmpty();
         assertThat(rows).extracting(Row::asked).containsExactly(true, true, true, false, false);
         assertThat(rows).extracting(Row::decided).containsExactly(false, false, false, true, true);
+    }
+
+    /**
+     * The file of the register folder holds every finding whole. A subject of any length is the whole subject, so a
+     * finding with a long one is sorted to its area, or found to be an orphan, where the block's cut row was neither.
+     */
+    @Test
+    void parseJsonl_readsTheFindingsOfTheRegisterFolder_withTheirWholeSubject_andTheDecisionsSeverity() {
+        String subject = "a/Long.java#" + "Long.member(String, int), ".repeat(15) + "Long.last()";
+        String cutByTheBlock = subject.substring(0, 299) + "…";
+        List<Row> rows = Known.parseJsonl("{\"status\":\"OPEN\",\"severity\":\"HIGH\",\"rule_key\":\"path_check\","
+                + "\"subject\":\"" + subject + "\",\"title\":\"t\",\"evidence\":\"e1\\n  e2\",\"disposition\":null}\n\n"
+                + "{\"status\":\"DISMISSED\",\"severity\":\"CRITICAL\",\"rule_key\":\"redos\",\"subject\":\"a/X.java#X.m(A|B)\","
+                + "\"title\":\"t\",\"evidence\":null,\"disposition\":{\"kind\":\"DISMISSED\",\"note\":\"not\\nours\","
+                + "\"severity\":\"LOW\"}}\n");
+
+        assertThat(rows).containsExactly(
+                new Row("OPEN", "HIGH", "path_check", subject, "t", "e1 e2", "", "HIGH", true),
+                new Row("DISMISSED", "CRITICAL", "redos", "a/X.java#X.m(A|B)", "t", "", "not ours", "LOW", true));
+        assertThat(Known.orphans(rows, null, Set.of("a/Other.java#O.m()")))
+                .containsExactly(Map.of("ruleKey", "path_check", "subject", subject));
+        assertThat(Known.orphans(rows, null, Set.of(subject))).as("its area is there").isEmpty();
+        assertThat(Known.unowned(rows, null, Set.of())).as("nothing is cut, so nothing is left for a person").isEmpty();
+        Map<String, Object> item = new LinkedHashMap<>();
+        Known.attach(item, subject, rows, null);
+        assertThat((String) item.get("known_text")).isEqualTo("K1 | path_check | HIGH | e1 e2");
+        Map<String, Object> decided = new LinkedHashMap<>();
+        Known.attach(decided, "a/X.java#X.m(A|B)", rows, null);
+        assertThat(Known.decided(decided, "redos", "a/X.java#X.m(A|B)")).as("the subject as the file has it")
+                .isEqualTo(Map.of("rule", "redos", "subject", "a/X.java#X.m(A|B)", "status", "DISMISSED",
+                        "severity", "LOW"));
+
+        // What the block made of the same finding: a subject no area equals, so neither asked about nor gone
+        List<Row> block = Known.parse("OPEN | HIGH | path_check | " + cutByTheBlock + " | t | Evidence: e");
+        assertThat(Known.orphans(block, null, Set.of())).isEmpty();
+        assertThat(Known.unowned(block, null, Set.of(subject))).hasSize(1);
+
+        assertThat(Known.parseJsonl("")).isEmpty();
+        for (String line : List.of("[1]", "{\"status\":\"RESOLVED\",\"rule_key\":\"r\",\"subject\":\"s\"}",
+                "{\"status\":\"OPEN\",\"subject\":\"s\"}", "{\"status\":\"OPEN\",\"rule_key\":\"r\"}")) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> Known.parseJsonl(line))
+                    .hasMessage("a line of the register's findings is no finding");
+        }
+    }
+
+    /** Why an orphan is gone: no source file has its path, or the file is read and has no such area. */
+    @Test
+    void goneReason_isTheFile_whenNoFileThatWasReadStartsTheSubject_andTheMemberOtherwise() {
+        List<String> files = List.of("a/Mount.java", "a/Run.java");
+
+        assertThat(Known.goneReason("a/Mount.java#Mount.old()", files)).isEqualTo("no area has this subject any more");
+        assertThat(Known.goneReason("old/a/Mount.java#Mount.check(Path)", files)).isEqualTo("the file is gone");
+        assertThat(Known.goneReason("a/Mount.javax#M.m()", files)).isEqualTo("the file is gone");
+        assertThat(Known.goneReason("a/Mount.java", files)).as("no subject of an area").isEqualTo("the file is gone");
     }
 
     @Test

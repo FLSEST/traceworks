@@ -107,6 +107,47 @@ public record WorkflowOutline(String description, List<Block> blocks) {
     }
 
     /**
+     * The blocks of the case a {@code switch} ran, read from the recorded definition: the case whose {@code value}
+     * is {@code matchedCase} as the step's metadata names it, or the {@code default} blocks for {@code default}.
+     *
+     * @param position the position of the switch in the definition
+     * @return its blocks in order, each with its position in the case; empty when the definition holds no such case
+     *         (no case matched, the block there is no switch, the bytes are no definition)
+     */
+    public static List<Block> caseBlocks(byte[] workflowJson, int position, String matchedCase) {
+        JsonNode root;
+        try {
+            root = JSON.readTree(workflowJson);
+        } catch (IOException e) {
+            return List.of();
+        }
+        JsonNode block = root == null ? null : root.path("blocks").path(position);
+        if (block == null || matchedCase == null || !"switch".equals(block.path("type").asText())) {
+            return List.of();
+        }
+        JsonNode config = block.path("config");
+        JsonNode nested = JSON.createArrayNode();
+        if ("default".equals(matchedCase) && config.path("default").isArray()) {
+            nested = config.path("default");
+        }
+        for (JsonNode entry : config.path("cases")) {
+            // The first case of that value is the one the switch ran; a case with the value "default" wins over the
+            // default blocks, as it does in the run
+            if (matchedCase.equals(entry.path("value").asText(null)) && entry.path("blocks").isArray()) {
+                nested = entry.path("blocks");
+                break;
+            }
+        }
+        List<Block> blocks = new ArrayList<>();
+        for (int i = 0; i < nested.size(); i++) {
+            JsonNode inner = nested.get(i).path("config");
+            blocks.add(new Block(i, text(nested.get(i), "name"), text(nested.get(i), "type"), text(inner, "provider"),
+                    model(inner), what(inner), web(inner)));
+        }
+        return blocks;
+    }
+
+    /**
      * The model the block names; for a block that refers to a model choice instead ({@code model_choice}), the words
      * {@code model choice <name>}: the definition does not say which option a run picks.
      */

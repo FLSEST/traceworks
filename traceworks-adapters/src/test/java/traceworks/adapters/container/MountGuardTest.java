@@ -36,7 +36,10 @@ class MountGuardTest {
 
     @TempDir
     Path home;
-    /** Somewhere outside the home: the ordinary host directories a step mounts. */
+    /**
+     * Somewhere outside the home: the ordinary host directories a step mounts. The operator of these tests lists it
+     * in {@code writable_mounts}, so a writable mount of a folder in it is refused only by the rule a test is about.
+     */
     @TempDir
     Path outside;
 
@@ -52,8 +55,19 @@ class MountGuardTest {
         scratch = Files.createDirectories(traceworksHome.resolve("runs/run-1/scratch"));
         workspace = Files.createDirectories(home.resolve("project"));
         packageDirectory = Files.createDirectories(home.resolve("packages/hello"));
-        context = new Context(home, traceworksHome, scratch.toString(), workspace.toString(), false,
-                packageDirectory.toString(), List.of());
+        context = new Context(home, listing(outside), scratch.toString(), workspace.toString(), false,
+                packageDirectory.toString(), List.of(), null);
+    }
+
+    /** The home's layout with {@code roots} as its {@code writable_mounts}. */
+    private HomeLayout listing(Path... roots) {
+        return HomeLayout.of(traceworksHome).withWritableMounts(List.of(roots));
+    }
+
+    /** {@link #context} of an operator who lists {@code roots}, and only them, in {@code writable_mounts}. */
+    private Context withRoots(Path... roots) {
+        return new Context(home, listing(roots), scratch.toString(), workspace.toString(), false,
+                packageDirectory.toString(), List.of(), null);
     }
 
     private Optional<String> check(String host, String container, boolean readOnly) {
@@ -125,7 +139,7 @@ class MountGuardTest {
         assertThat(check(home + "/documents/./../.ssh", "/mnt", true))
                 .hasValueSatisfying(r -> assertThat(r).contains("~/.ssh"));
         Files.createDirectories(home.resolve("documents/cv"));
-        assertThat(check(home + "/documents/cv", "/data", false)).isEmpty();
+        assertThat(check(home + "/documents/cv", "/data", true)).isEmpty();
     }
 
     @Test
@@ -159,14 +173,166 @@ class MountGuardTest {
     }
 
     @Test
-    void folderBelowHome_isAllowed_andMountedWithItsRealPath() throws IOException {
+    void folderBelowHome_isAllowedReadOnly_andMountedWithItsRealPath() throws IOException {
         Path docs = Files.createDirectories(home.resolve("documents"));
         Path link = Files.createSymbolicLink(home.resolve("docs-link"), docs);
 
-        assertThat(check("~/documents", "/docs", false)).isEmpty();
+        assertThat(check("~/documents", "/docs", true)).isEmpty();
         assertThat(check(link.toString(), "/docs2", true)).isEmpty();
         assertThat(MountGuard.realHostPath("~/documents", home)).isEqualTo(docs.toRealPath().toString());
         assertThat(MountGuard.realHostPath(link.toString(), home)).isEqualTo(docs.toRealPath().toString());
+    }
+
+    // --- writable mounts: only in or below a folder the operator lists (writable_mounts) ---
+
+    /** Without the setting no package mounts a host path writable, wherever it lies; read-only is untouched. */
+    @Test
+    void aWritableMount_isRefusedWithoutAListedFolder_whereverItLies_andTheRefusalNamesTheLineToAdd()
+            throws IOException {
+        Path docs = Files.createDirectories(home.resolve("documents"));
+        Path data = Files.createDirectories(outside.resolve("data"));
+        Context none = withRoots();
+
+        for (Path host : List.of(docs, data)) {
+            assertThat(MountGuard.check(new Mount(host.toString(), "/x", false), none)).as(host.toString())
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts")
+                            .contains(traceworksHome.resolve("traceworks.json").toString())
+                            .contains("\"writable_mounts\": [\"" + MountGuard.real(host) + "\"]"));
+            assertThat(MountGuard.check(new Mount(host.toString(), "/x", true), none)).as(host + ", read-only")
+                    .isEmpty();
+        }
+        assertThat(MountGuard.check(new Mount("~/documents", "/x", false), none)).as("~ is the home").isPresent();
+    }
+
+    /** The line to add keeps what the list already holds, and names the folder of a file. */
+    @Test
+    void theRefusalOfAWritableMount_namesTheWholeList_andTheFolderOfAFile() throws IOException {
+        Path listed = Files.createDirectories(outside.resolve("listed"));
+        Path file = Files.writeString(Files.createDirectories(outside.resolve("other")).resolve("notes.txt"), "x");
+
+        assertThat(MountGuard.check(new Mount(file.toString(), "/x", false), withRoots(listed)))
+                .hasValueSatisfying(reason -> assertThat(reason).contains("\"writable_mounts\": [\"" + listed
+                        + "\", \"" + MountGuard.real(file.getParent()) + "\"]"));
+    }
+
+    @Test
+    void aWritableMount_inOrBelowAListedFolder_isAllowed_andMountedWithItsRealPath() throws IOException {
+        Path out = Files.createDirectories(home.resolve("out"));
+        Path deep = Files.createDirectories(out.resolve("reports/2026"));
+        Path file = Files.writeString(out.resolve("result.json"), "{}");
+        Path beside = Files.createDirectories(home.resolve("out-of-it"));
+        Context listed = withRoots(out);
+
+        for (String host : List.of("~/out", out.toString(), deep.toString(), file.toString())) {
+            MountGuard.Judged judged = MountGuard.judge(new Mount(host, "/x", false), listed);
+            assertThat(judged.refusal()).as(host).isEmpty();
+            assertThat(judged.realPath()).isEqualTo(Path.of(MountGuard.expandHome(host, home)).toRealPath().toString());
+        }
+        assertThat(MountGuard.check(new Mount(beside.toString(), "/x", false), listed)).as("a name that only begins"
+                + " like the folder").hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts"));
+        assertThat(MountGuard.check(new Mount(home.resolve("out/..").toString() + "/out-of-it", "/x", false), listed))
+                .as("out of the folder with ..").isPresent();
+    }
+
+    /** A link in a listed folder that leads out of it lists nothing; what counts is where the mount really lies. */
+    @Test
+    void aWritableMount_isJudgedByItsRealPath_andSoIsTheListedFolder() throws IOException {
+        Path out = Files.createDirectories(home.resolve("out"));
+        Path bin = Files.createDirectories(home.resolve(".local/bin"));
+        Path wayOut = Files.createSymbolicLink(out.resolve("bin"), bin);
+        Path wayIn = Files.createSymbolicLink(home.resolve("to-out"), out);
+        Path listedLink = Files.createSymbolicLink(home.resolve("listed"), out);
+
+        assertThat(MountGuard.check(new Mount(wayOut.toString(), "/x", false), withRoots(out)))
+                .as("a link in the folder that leaves it")
+                .hasValueSatisfying(reason -> assertThat(reason).contains(MountGuard.real(bin).toString()));
+        assertThat(MountGuard.check(new Mount(wayIn.toString(), "/x", false), withRoots(out)))
+                .as("a link from outside into the folder").isEmpty();
+        assertThat(MountGuard.check(new Mount(out.toString(), "/x", false), withRoots(listedLink)))
+                .as("the listed folder is a link").isEmpty();
+    }
+
+    /** A listed folder allows a writable mount; it lifts no other refusal. */
+    @Test
+    void aListedFolder_isNoWayAroundTheOtherRefusals() throws IOException {
+        Path work = Files.createDirectories(home.resolve("work"));
+        Path copyOfAHome = Files.createDirectories(work.resolve("backup"));
+        Files.createDirectories(copyOfAHome.resolve(".ssh"));
+        Path sockets = Files.createDirectories(work.resolve("sockets"));
+        try (ServerSocketChannel server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+            server.bind(UnixDomainSocketAddress.of(sockets.resolve("s")));
+
+            Context listed = new Context(home, listing(work, traceworksHome, packageDirectory.getParent(), workspace),
+                    scratch.toString(), workspace.toString(), false, packageDirectory.toString(), List.of(), null);
+
+            assertThat(MountGuard.check(new Mount(copyOfAHome.toString(), "/x", false), listed))
+                    .as("a folder with a credential store of its own").isPresent()
+                    .hasValueSatisfying(reason -> assertThat(reason).doesNotContain("writable_mounts"));
+            assertThat(MountGuard.check(new Mount(sockets.toString(), "/x", false), listed)).as("a socket")
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("socket"));
+            assertThat(MountGuard.check(new Mount(traceworksHome.resolve("runs").toString(), "/x", false), listed))
+                    .as("the Traceworks home").hasValueSatisfying(reason -> assertThat(reason).contains("Traceworks home"));
+            assertThat(MountGuard.check(new Mount(packageDirectory.toString(), "/x", false), listed)).as("the package")
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("package"));
+            assertThat(MountGuard.check(new Mount(workspace.toString(), "/x", false), listed))
+                    .as("the read-only workspace")
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("workspace_writable"));
+            assertThat(MountGuard.check(new Mount(work.resolve("missing").toString(), "/x", false), listed))
+                    .as("a path that does not exist")
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("does not exist"));
+            assertThat(MountGuard.check(new Mount(Files.createDirectories(work.resolve("fine")).toString(), "/x",
+                    false), listed)).isEmpty();
+        }
+    }
+
+    /**
+     * The setting refuses the home directory, a folder that holds it and {@code /} when the file is read
+     * ({@code HomeLayoutTest}). The guard counts none of them either, whoever built the layout.
+     */
+    @Test
+    void aListedFolder_thatIsTheHomeOrHoldsIt_listsNothing() throws IOException {
+        Path startup = Files.writeString(home.resolve(".bashrc"), "# the operator's\n");
+        Path docs = Files.createDirectories(home.resolve("documents"));
+
+        for (Path root : List.of(home, home.getParent(), Path.of("/"), Path.of("relative"))) {
+            Context listed = withRoots(root);
+            assertThat(MountGuard.check(new Mount(startup.toString(), "/x", false), listed)).as(root.toString())
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts"));
+            assertThat(MountGuard.check(new Mount(docs.toString(), "/x", false), listed)).as(root.toString())
+                    .hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts"));
+        }
+    }
+
+    /** What Traceworks itself manages needs no entry: the folder a tool step's findings are written to. */
+    @Test
+    void theOutputFolderTheEngineMakesForAToolStep_needsNoListedFolder() throws IOException {
+        Path output = Files.createDirectories(outside.resolve("traceworks-tool-1"));
+        Context none = withRoots();
+
+        assertThat(MountGuard.check(new Mount(output.toString(), "/out", false, false, true), none)).isEmpty();
+        assertThat(MountGuard.check(new Mount(output.toString(), "/out", false), none))
+                .as("a mounts entry of the same folder is a package's").isPresent();
+        assertThat(MountGuard.check(new Mount(home.toString(), "/out", false, false, true), none))
+                .as("the other refusals hold for it").isPresent();
+    }
+
+    /** The start check asks the same question of a mount a workflow writes out, before any step runs. */
+    @Test
+    void writableMountRefusal_isTheRuleOfTheListedFolders_forAHostPathAsAWorkflowWritesIt() throws IOException {
+        Path out = Files.createDirectories(home.resolve("out"));
+        Files.createDirectories(home.resolve("documents"));
+
+        assertThat(MountGuard.writableMountRefusal("~/out", home, listing(out))).isEmpty();
+        assertThat(MountGuard.writableMountRefusal(" " + out + "/new ", home, listing(out))).isEmpty();
+        assertThat(MountGuard.writableMountRefusal("~/documents", home, listing(out)))
+                .hasValueSatisfying(reason -> assertThat(reason).contains("\"writable_mounts\": [\"" + out + "\", \""
+                        + MountGuard.real(home.resolve("documents")) + "\"]"));
+        assertThat(MountGuard.writableMountRefusal("a-volume", home, listing(out)))
+                .as("no host path: the step refuses it for that").isEmpty();
+        assertThat(MountGuard.writableMountRefusal("~/not-made-yet", home, listing(out)))
+                .as("a folder that does not exist yet is the folder to list, not the one that holds it")
+                .hasValueSatisfying(reason -> assertThat(reason).contains("\"" + MountGuard.real(home)
+                        .resolve("not-made-yet") + "\"]"));
     }
 
     // --- forbidden paths ---
@@ -290,8 +456,8 @@ class MountGuardTest {
         Path cache = Files.createDirectories(traceworksHome.resolve("cache/tools/aquasec_trivy"));
         Path otherScratch = Files.createDirectories(traceworksHome.resolve("runs/run-2/scratch"));
 
-        assertThat(check(cache.toString(), "/cache", false)).isEmpty();
-        assertThat(check(traceworksHome.resolve("cache/tools").toString(), "/cache", false)).isEmpty();
+        assertThat(MountGuard.check(new Mount(cache.toString(), "/cache", false, true), context))
+                .as("the cache folder a tool step mounts for its image").isEmpty();
         assertThat(check(scratch.toString(), "/out", false)).as("the run's own scratch").isEmpty();
         assertThat(check(Files.createDirectories(scratch.resolve("reports")).toString(), "/out", false)).isEmpty();
         assertThat(check(otherScratch.toString(), "/out", true)).as("another run's scratch")
@@ -301,6 +467,96 @@ class MountGuardTest {
         assertThat(check(Files.createDirectories(traceworksHome.resolve("cache/toolsx")).toString(), "/cache", true))
                 .hasValueSatisfying(r -> assertThat(r).contains("Traceworks home"));
         assertThat(check(traceworksHome.getParent().toString(), "/x", true)).isPresent();
+    }
+
+    /**
+     * The tool caches are kept per image, and a later run of another package executes or trusts what is in them (a
+     * Maven repository, a scanner's database). So only the folder a tool step mounts for its own image
+     * ({@code cache_dir}) passes: a workflow's own {@code mounts} entry names neither the cache root nor a folder in
+     * it, read-only or not, directly or through a link.
+     */
+    @Test
+    void theToolCaches_areNoMountOfAWorkflow_onlyTheCacheFolderOfAToolStep() throws IOException {
+        Path root = Files.createDirectories(traceworksHome.resolve("cache/tools"));
+        Path other = Files.createDirectories(root.resolve("aquasec_trivy"));
+        Path link = Files.createSymbolicLink(scratch.resolve("caches"), root);
+
+        for (Path named : List.of(root, other, link)) {
+            for (boolean readOnly : List.of(true, false)) {
+                assertThat(check(named.toString(), "/c", readOnly)).as(named + " readOnly=" + readOnly)
+                        .hasValueSatisfying(r -> assertThat(r).contains("Traceworks home").contains("cache_dir"));
+            }
+        }
+        assertThat(MountGuard.check(new Mount(other.toString(), "/cache", false, true), context)).isEmpty();
+        assertThat(MountGuard.check(new Mount(root.toString(), "/cache", false, true), context))
+                .as("the cache root is no image's folder").isPresent();
+        Path otherScratch = Files.createDirectories(traceworksHome.resolve("runs/run-2/scratch"));
+        assertThat(MountGuard.check(new Mount(otherScratch.toString(), "/cache", false, true), context))
+                .as("a cache mount outside the tool caches is judged like any mount").isPresent();
+    }
+
+    /**
+     * {@code /dev} holds the terminals of the operator's session ({@code /dev/pts}), shared memory
+     * ({@code /dev/shm}) and device nodes: a step that opens one talks to the host, which read-only does not cut.
+     */
+    @Test
+    void devAndWhatIsInIt_isRefused_onEitherSide() {
+        for (String host : List.of("/dev", "/dev/pts", "/dev/shm", "/dev/null", "/tmp/../dev/pts")) {
+            assertThat(check(host, "/x", true)).as(host)
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        }
+        assertThat(check(outside.toString(), "/dev/shm", true)).as("on the container side")
+                .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+    }
+
+    /** A named pipe is a line to whatever process holds its other end, as a socket is: no regular file or folder. */
+    @Test
+    void aNamedPipe_isRefused_alsoThroughALink() throws Exception {
+        Path pipe = outside.resolve("pipe");
+        assertThat(new ProcessBuilder("mkfifo", pipe.toString()).inheritIO().start().waitFor()).isZero();
+        Path link = Files.createSymbolicLink(outside.resolve("pipe-link"), pipe);
+
+        assertThat(check(pipe.toString(), "/p", true)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+        assertThat(check(link.toString(), "/p", true)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+    }
+
+    /**
+     * A folder that directly holds a named pipe is refused like one that directly holds a socket, by the same rule
+     * of one level, links not followed.
+     */
+    @Test
+    void aFolderDirectlyHoldingANamedPipe_isRefused_namingIt() throws Exception {
+        Path folder = Files.createDirectories(outside.resolve("queue/in"));
+        Path pipe = folder.resolve("requests");
+        assertThat(new ProcessBuilder("mkfifo", pipe.toString()).inheritIO().start().waitFor()).isZero();
+
+        assertThat(check(folder)).hasValueSatisfying(r -> assertThat(r).contains("named pipe").contains(pipe.toString()));
+        assertThat(check(outside.resolve("queue"))).as("two levels down is not looked at").isEmpty();
+        Path links = Files.createDirectories(outside.resolve("pipe-links"));
+        Files.createSymbolicLink(links.resolve("to-pipe"), pipe);
+        assertThat(check(links)).as("a link is not followed").isEmpty();
+    }
+
+    /**
+     * A writable mount of a file the host runs later (a shell's startup file, {@code ~/.local/bin}, a repository's
+     * hooks) lets a step leave commands that run outside every container, as the operator. A list of such files
+     * could not be complete, so every writable mount is refused unless it lies in a folder the operator lists
+     * ({@code writable_mounts}); a file directly in the home has no folder that can be listed.
+     */
+    @Test
+    void aWritableMountOfAFileTheHostRuns_isRefused() throws IOException {
+        Path startup = Files.writeString(home.resolve(".bashrc"), "# the operator's\n");
+        Path bin = Files.createDirectories(home.resolve(".local/bin"));
+        Path hooks = Files.createDirectories(outside.resolve("repository/.git/hooks"));
+
+        assertThat(check(startup.toString(), "/x", false)).as("~/.bashrc, writable")
+                .hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts")
+                        .contains("home directory").doesNotContain("\"writable_mounts\": ["));
+        assertThat(check(bin.toString(), "/x", false)).as("~/.local/bin, writable")
+                .hasValueSatisfying(reason -> assertThat(reason).contains("writable_mounts"));
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/x", false), withRoots()))
+                .as("the hooks of a repository").isPresent();
+        assertThat(check(startup.toString(), "/x", true)).as("read-only").isEmpty();
     }
 
     /** The operator's Traceworks home may be a link: a mount is judged against its real path. */
@@ -462,17 +718,135 @@ class MountGuardTest {
                 .hasValueSatisfying(r -> assertThat(r).contains("Traceworks home"));
     }
 
-    /** With {@code workspace_writable} the workspace is writable anyway; the package never is. */
-    @Test
-    void writableMountOfTheWorkspace_isAllowed_whileTheWorkspaceIsWritable() throws IOException {
-        Path src = Files.createDirectories(workspace.resolve("src"));
-        Context writable = new Context(home, traceworksHome, scratch.toString(), workspace.toString(), true,
-                packageDirectory.toString(), List.of());
+    /** A context whose workspace is mounted writable, of an operator who lists {@code roots}. */
+    private Context writableWorkspace(Path... roots) {
+        return new Context(home, listing(roots), scratch.toString(), workspace.toString(), true,
+                packageDirectory.toString(), List.of(), null);
+    }
 
-        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writable)).isEmpty();
-        assertThat(MountGuard.check(new Mount(workspace.toString(), "/data", false), writable)).isEmpty();
-        assertThat(MountGuard.check(new Mount(packageDirectory.toString(), "/data", false), writable))
+    /**
+     * With {@code workspace_writable} the step writes the workspace anyway: a writable mount of the workspace or of
+     * a folder in it shows the step nothing more to write, and needs no listed folder. By the real path: a link in
+     * the workspace that leads out of it is a mount of where it leads. A folder that holds the workspace is more
+     * than the workspace, and the package never is writable.
+     */
+    @Test
+    void writableMountInAWritableWorkspace_needsNoListedFolder_andOneAroundItDoes() throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path src = Files.createDirectories(repository.resolve("src"));
+        Path elsewhere = Files.createDirectories(outside.resolve("elsewhere"));
+        Path out = Files.createSymbolicLink(repository.resolve("out"), elsewhere);
+        Context writable = new Context(home, listing(), scratch.toString(), repository.toString(), true,
+                packageDirectory.toString(), List.of(), null);
+
+        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writable)).as("in it").isEmpty();
+        assertThat(MountGuard.check(new Mount(repository.toString(), "/data", false), writable)).as("itself")
+                .isEmpty();
+        assertThat(MountGuard.check(new Mount(out.toString(), "/data", false), writable)).as("a link out of it")
+                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts").contains(elsewhere.toString()));
+        assertThat(MountGuard.check(new Mount(repository.getParent().toString(), "/data", false), writable))
+                .as("a folder that holds it").hasValueSatisfying(r -> assertThat(r).contains("writable_mounts"));
+        assertThat(MountGuard.check(new Mount(packageDirectory.toString(), "/data", false),
+                writableWorkspace(packageDirectory.getParent())))
                 .hasValueSatisfying(r -> assertThat(r).contains("package").doesNotContain("workspace_writable"));
+    }
+
+    /** While the workspace is read-only for the step, no listed folder makes a mount of it writable. */
+    @Test
+    void writableMountInAReadOnlyWorkspace_isRefused_alsoInAListedFolder() throws IOException {
+        Path src = Files.createDirectories(workspace.resolve("src"));
+
+        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), withRoots(workspace)))
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable").contains("read-only"));
+    }
+
+    /**
+     * A writable workspace is mounted with its {@code .git} read-only as a whole. A writable mount of the step's
+     * own that is that {@code .git}, lies in it or holds it would show the repository writable at another place, so
+     * it is refused, in a listed folder too, and the refusal names the setting that opens the repository.
+     */
+    @Test
+    void writableMountInOrAroundTheGitOfAWritableWorkspace_isRefused() throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path src = Files.createDirectories(repository.resolve("src"));
+        Path hooks = Files.createDirectories(repository.resolve(".git/hooks"));
+        Path toHooks = Files.createSymbolicLink(outside.resolve("to-hooks"), hooks);
+        Context writable = new Context(home, listing(outside), scratch.toString(), repository.toString(), true,
+                packageDirectory.toString(), List.of(), null);
+
+        for (Path host : List.of(repository, repository.resolve(".git"), hooks, toHooks, repository.getParent())) {
+            assertThat(MountGuard.check(new Mount(host.toString(), "/data", false), writable)).as(host.toString())
+                    .hasValueSatisfying(r -> assertThat(r).contains(".git").contains("read-only")
+                            .contains("workspace_git_writable"));
+        }
+        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writable)).as("beside it").isEmpty();
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/data", true), writable)).as("read-only").isEmpty();
+        Path other = Files.createDirectories(outside.resolve("repositories/other/.git/hooks"));
+        assertThat(MountGuard.check(new Mount(other.toString(), "/data", false), writable))
+                .as("another repository in a listed folder is the operator's word").isEmpty();
+    }
+
+    @Test
+    void writableMountOfAWritableWorkspace_isRefused_whenItsGitIsAFile_andAllowedWithoutOne() throws IOException {
+        Context writable = writableWorkspace();
+
+        assertThat(MountGuard.check(new Mount(workspace.toString(), "/data", false), writable)).as("no .git")
+                .isEmpty();
+        Path file = Files.writeString(workspace.resolve(".git"), "gitdir: /elsewhere/.git/worktrees/project\n");
+        assertThat(MountGuard.check(new Mount(workspace.toString(), "/data", false), writable)).as("a .git file")
+                .hasValueSatisfying(r -> assertThat(r).contains(".git"));
+        assertThat(MountGuard.check(new Mount(file.toString(), "/data", false), writable)).as("the file itself")
+                .hasValueSatisfying(r -> assertThat(r).contains(".git"));
+    }
+
+    /**
+     * Where the operator opened the {@code .git} of a writable workspace ({@code workspace_git_writable}), a step
+     * writes it through the workspace, so a writable mount in it is a mount in the workspace like any other: no
+     * refusal for the {@code .git}, and no listed folder asked. A folder that holds the workspace still needs one.
+     */
+    @Test
+    void writableMountInTheGitOfAWritableWorkspace_isAMountInTheWorkspace_whereTheOperatorOpenedIt()
+            throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path hooks = Files.createDirectories(repository.resolve(".git/hooks"));
+        Context opened = new Context(home, listing().withWorkspaceGitWritable(true), scratch.toString(),
+                repository.toString(), true, packageDirectory.toString(), List.of(), null);
+        Context openedReadOnly = new Context(home, listing(outside).withWorkspaceGitWritable(true),
+                scratch.toString(), repository.toString(), false, packageDirectory.toString(), List.of(), null);
+
+        assertThat(opened.workspaceGitWritable()).isTrue();
+        for (Path host : List.of(repository, repository.resolve(".git"), hooks)) {
+            assertThat(MountGuard.check(new Mount(host.toString(), "/data", false), opened)).as(host.toString())
+                    .isEmpty();
+        }
+        assertThat(MountGuard.check(new Mount(repository.getParent().toString(), "/data", false), opened))
+                .as("a folder that holds the workspace").hasValueSatisfying(r -> assertThat(r)
+                        .contains("writable_mounts").doesNotContain("workspace_git_writable"));
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/data", false), openedReadOnly))
+                .as("the setting opens nothing of a workspace the step only reads")
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable"));
+    }
+
+    /**
+     * The run's own checkout of its source is a run's data, in which Traceworks runs no git once a step could have
+     * written it: its {@code .git} is writable with the rest of it, without the operator's setting, and a writable
+     * mount in it is refused for nothing. A workspace of the operator's own is not such a checkout.
+     */
+    @Test
+    void theGitOfTheRunsOwnCheckout_isWritableWithTheCheckout_withoutTheSetting() throws IOException {
+        Path checkout = Files.createDirectories(traceworksHome.resolve("workspaces/run-1"));
+        Path hooks = Files.createDirectories(checkout.resolve(".git/hooks"));
+        Context writable = Context.of(home, traceworksHome, runIn("run-1", checkout, false), List.of());
+        Context readOnly = Context.of(home, traceworksHome, runIn("run-1", checkout, true), List.of());
+
+        assertThat(writable.workspaceGitWritable()).isTrue();
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/hooks", false), writable)).isEmpty();
+        assertThat(MountGuard.check(new Mount(checkout.toString(), "/again", false), writable)).isEmpty();
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/hooks", false), readOnly))
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable"));
+        assertThat(writableWorkspace().workspaceGitWritable()).as("the operator's own workspace").isFalse();
+        assertThat(Context.of(home, traceworksHome, runIn("run-2", workspace, false), List.of())
+                .workspaceGitWritable()).as("the operator's own workspace, of a run").isFalse();
     }
 
     /** A writable mount of the workspace or the package would undo its read-only standard mount. */
@@ -780,7 +1154,7 @@ class MountGuardTest {
     // --- the files the seal settings name: allowed_signers and signing_key, where the operator put them ---
 
     private Context withSealFiles(Path signers, Path key) {
-        HomeLayout layout = HomeLayout.of(traceworksHome).withSealFiles(key, signers);
+        HomeLayout layout = listing(outside).withSealFiles(key, signers);
         return new Context(home, layout, scratch.toString(), workspace.toString(), false, packageDirectory.toString(),
                 List.of(), null);
     }

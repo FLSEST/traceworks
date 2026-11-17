@@ -210,8 +210,8 @@ class RunRecorderCheckpointTest {
         }
 
         @Override
-        public java.util.Optional<byte[]> get(String sha256) {
-            return store.get(sha256);
+        public java.util.Optional<byte[]> getUnverified(String sha256) {
+            return store.getUnverified(sha256);
         }
 
         synchronized List<String> stored() {

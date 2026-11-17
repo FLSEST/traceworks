@@ -8,7 +8,8 @@ import java.time.Instant;
  * a note), or to reopen it. The transitions are checked (docs/workflow-format.md): a decision carries who, when and
  * why. A
  * decision keeps the severity the finding had when it was made: that is what it covers
- * ({@link DecisionOnHigherSeverity}).
+ * ({@link DecisionOnHigherSeverity}). Who is the actor that ran the command, and the agent that acted under that
+ * actor when it named itself ({@link DecisionAgent}).
  */
 public final class Disposition {
 
@@ -24,6 +25,16 @@ public final class Disposition {
      * @throws IllegalStateException    for a finding that is not open or awaiting verification
      */
     public static Finding accept(Finding finding, String note, String actor, Instant at, Instant until) {
+        return accept(finding, note, actor, at, until, null);
+    }
+
+    /**
+     * As {@link #accept(Finding, String, String, Instant, Instant)}, by an agent under the actor.
+     *
+     * @param agent the name the agent gave itself ({@link DecisionAgent}); {@code null} for none
+     */
+    public static Finding accept(Finding finding, String note, String actor, Instant at, Instant until,
+                                 String agent) {
         requireNote(note, "accept");
         requireFrom(finding, FindingStatus.ACCEPTED_RISK, FindingStatus.OPEN, FindingStatus.AWAITING_VERIFICATION);
         Instant review = until == null ? at.plus(MAX_UNTIL) : until;
@@ -35,15 +46,20 @@ public final class Disposition {
                     + " days ahead, which is as far as an acceptance reaches");
         }
         return with(finding, FindingStatus.ACCEPTED_RISK, new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK,
-                note.strip(), actor, at, review, finding.evidence(), finding.severity()));
+                note.strip(), actor, at, review, finding.evidence(), finding.severity(), agent));
     }
 
     /** @throws IllegalArgumentException for a missing note; {@link IllegalStateException} as {@link #accept} */
     public static Finding dismiss(Finding finding, String note, String actor, Instant at) {
+        return dismiss(finding, note, actor, at, null);
+    }
+
+    /** As {@link #dismiss(Finding, String, String, Instant)}, by an agent under the actor; {@code null} for none. */
+    public static Finding dismiss(Finding finding, String note, String actor, Instant at, String agent) {
         requireNote(note, "dismiss");
         requireFrom(finding, FindingStatus.DISMISSED, FindingStatus.OPEN, FindingStatus.AWAITING_VERIFICATION);
         return with(finding, FindingStatus.DISMISSED, new Finding.DispositionRecord(FindingStatus.DISMISSED,
-                note.strip(), actor, at, null, null, finding.severity()));
+                note.strip(), actor, at, null, null, finding.severity(), agent));
     }
 
     /**

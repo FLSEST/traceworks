@@ -46,18 +46,34 @@ import java.util.Optional;
  *       A login inside a mount is not covered with an empty tmpfs; Traceworks refuses the mount
  *       instead. The same holds for a rootless runtime's {@linkplain HostSecrets#HOME_STORAGE storage} below the
  *       home;</li>
- *   <li>the Traceworks home and anything in it, except {@code <home>/cache/tools/} (the tool caches), the run's
- *       own scratch directory and the run's own checkout of its source ({@code <home>/workspaces/<run-id>}, its
- *       workspace, where the workspace's rules apply), and a folder that holds the Traceworks home;</li>
+ *   <li>the Traceworks home and anything in it, except the run's own scratch directory, the run's own checkout of
+ *       its source ({@code <home>/workspaces/<run-id>}, its workspace, where the workspace's rules apply) and the
+ *       one folder below {@code <home>/cache/tools/} that a tool step mounts for its image
+ *       ({@link Mount#toolCache()}; a workflow's own {@code mounts} entry names no tool cache), and a folder that
+ *       holds the Traceworks home;</li>
  *   <li>a writable mount in or around the run's package, and in or around its workspace while the workspace is
  *       mounted read-only (without {@code workspace_writable}): it would undo their read-only mounts. A read-only
  *       one shows what the step sees anyway;</li>
+ *   <li>a writable mount that is, lies in or holds the {@code .git} of a workspace that is mounted writable: the
+ *       run mounts that {@code .git} read-only ({@link WorkspaceGit}), and the mount would show it writable at
+ *       another place. Not where a step may write that {@code .git}
+ *       ({@link Context#workspaceGitWritable()}: the operator's {@code workspace_git_writable}, or the run's own
+ *       checkout of its source);</li>
+ *   <li>every other writable mount that lies in no folder the operator listed ({@code writable_mounts} in
+ *       {@code traceworks.json}), wherever it lies: what a step writes on the host can be a file the host runs
+ *       later. Without the setting no package mounts a host path writable. What the step writes anyway needs
+ *       no entry: the run's scratch directory, the cache folder and the output folder of a tool step, and the
+ *       workspace or a folder in it while the step may write its workspace (a folder that holds the workspace
+ *       does need one). A listed folder lifts no other refusal of this list;</li>
  *   <li>a path that cannot be resolved, for any reason (it does not exist, a directory on the way cannot be read):
  *       the check fails closed, since a rootful runtime mounts it anyway and in the container the host's parent
  *       directories no longer guard it;</li>
  *   <li>a socket file, also through a link, and a folder that directly holds one (one level, links not followed):
  *       a line to a process on the host (tmux, screen, an agent), which read-only does not cut. A folder whose
- *       entries, or a file whose type, cannot be read is refused as well.</li>
+ *       entries, or a file whose type, cannot be read is refused as well;</li>
+ *   <li>{@code /dev} and everything in it (the terminals of the operator's session, shared memory, device nodes),
+ *       and, by the rule of the sockets, a device node or a named pipe and a folder that directly holds one (one
+ *       level, links not followed); one that lies deeper in a mounted folder is not looked for.</li>
  * </ul>
  *
  * <p>Every check reads the real path, with {@code ..} and symbolic links resolved, so {@code /tmp/../etc} or a link
@@ -84,7 +100,8 @@ public final class MountGuard {
             "/etc",
             "/root",
             "/proc",
-            "/sys");
+            "/sys",
+            "/dev");
 
     /**
      * The credential stores whose presence marks a folder as a copy of a home wherever it lies: a mount that has one
@@ -105,9 +122,12 @@ public final class MountGuard {
     private static final String ENDS_IN_WHITE_SPACE = "its path begins or ends with white space, which a mount"
             + " cannot name reliably: rename the directory";
 
-    /** The file type bits of {@code unix:mode}, and the type of a socket ({@code stat.h}). */
+    /** The file type bits of {@code unix:mode}, and the types of a socket, a named pipe and a device ({@code stat.h}). */
     private static final int S_IFMT = 0170000;
     private static final int S_IFSOCK = 0140000;
+    private static final int S_IFIFO = 0010000;
+    private static final int S_IFCHR = 0020000;
+    private static final int S_IFBLK = 0060000;
 
     private MountGuard() {
     }
@@ -147,6 +167,18 @@ public final class MountGuard {
         /** The Traceworks home. */
         public Path traceworksHome() {
             return layout.home();
+        }
+
+        /**
+         * Whether a step that may write the workspace may write its top-level {@code .git} as well; otherwise the
+         * container gets that {@code .git} read-only ({@link WorkspaceGit}). It may where the operator said so
+         * ({@code workspace_git_writable}), and in the run's own checkout of its source: a checkout is a run's
+         * data and no repository of the operator's, and Traceworks points no git at one that exists (it is cloned
+         * into a folder that must not exist, removed file by file, and neither a package nor a source is read
+         * from the checkouts: {@code adapters.pkg.CheckoutsDirectory}).
+         */
+        public boolean workspaceGitWritable() {
+            return layout.workspaceGitWritable() || present(checkout);
         }
 
         /** {@link #of(Path, HomeLayout, ContainerRun, List)} for a home whose places are its fixed folders. */
@@ -265,12 +297,12 @@ public final class MountGuard {
         IOException why = unresolved;
         Optional<String> refusal = sessionRefusal(real, context)
                 .or(() -> homeRefusal(real, context.home(), true, "mount a directory below it"))
-                .or(() -> traceworksHomeRefusal(real, context))
+                .or(() -> traceworksHomeRefusal(real, context, mount.toolCache()))
                 // After the home, as for a run's directory, so the home is named as the home; and whatever the
                 // rule of the Traceworks home lets through (its tool cache, the run's scratch) is still asked here
                 .or(() -> sealFilesRefusal(real, context.layout()))
                 .or(() -> uncoveredGitRefusal(real, context))
-                .or(() -> mount.readOnly() ? Optional.empty() : writableRefusal(real, context))
+                .or(() -> mount.readOnly() ? Optional.empty() : writableRefusal(mount, real, context))
                 .or(() -> mounted == null ? Optional.of(unresolvedRefusal(why)) : socketRefusal(mounted));
         return new Judged(refusal, refusal.isPresent() ? null : mounted.toString());
     }
@@ -348,7 +380,7 @@ public final class MountGuard {
                 return Checked.refused(ENDS_IN_WHITE_SPACE);
             }
             // As given and as its real path, so a link to /etc counts as /etc
-            String forbidden = forbiddenHostSegment(directory.toString());
+            String forbidden = forbiddenRunDirectory(directory.toString());
             if (forbidden != null) {
                 return Checked.refused("forbidden path " + forbidden);
             }
@@ -358,7 +390,7 @@ public final class MountGuard {
             }
             // And the path that is mounted: toRealPath resolves link/.. to the link target's parent, where the
             // lexical normalization above stays in the folder that holds the link
-            forbidden = forbiddenHostSegment(real.toString());
+            forbidden = forbiddenRunDirectory(real.toString());
             if (forbidden != null) {
                 return Checked.refused("forbidden path " + forbidden);
             }
@@ -516,7 +548,7 @@ public final class MountGuard {
 
     /**
      * Fail closed: neither the path nor, for a folder, one of its direct entries (links not followed) may be a
-     * socket. Whatever cannot be read is refused: a rootful runtime would mount it anyway, and in the container the
+     * socket, a named pipe or a device node. Whatever cannot be read is refused: a rootful runtime would mount it anyway, and in the container the
      * host's parent directories no longer guard it.
      *
      * @param real the real path the mount resolved to; it is not resolved again here
@@ -525,6 +557,10 @@ public final class MountGuard {
         try {
             if (isSocket(real)) {
                 return Optional.of("it is a socket: a line to a process on the host, which read-only does not cut");
+            }
+            if (isDeviceOrPipe(real)) {
+                return Optional.of("it is a device or a named pipe: a line to the host or to a process on it, which"
+                        + " read-only does not cut");
             }
             if (!Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
                 return Optional.empty();
@@ -536,6 +572,10 @@ public final class MountGuard {
             for (Path entry : entries) {
                 if (isSocket(entry)) {
                     return Optional.of("it holds the socket " + entry + ": a line to a process on the host");
+                }
+                if (isDeviceOrPipe(entry)) {
+                    return Optional.of("it holds the device or named pipe " + entry + ": a line to the host or to a"
+                            + " process on it");
                 }
             }
         } catch (IOException | DirectoryIteratorException e) {
@@ -598,16 +638,36 @@ public final class MountGuard {
     }
 
     /**
-     * The Traceworks home: refused but for the tool caches, the run's own scratch directory and the run's own checkout
-     * of its source, which is its workspace: a mount in that one follows the rules of a mount in a workspace
-     * ({@link #writableRefusal}).
+     * Whether the file at {@code path} itself is a character or block device or a named pipe; {@code false} where
+     * the file system does not tell.
+     *
+     * @throws IOException if its attributes cannot be read
      */
-    private static Optional<String> traceworksHomeRefusal(Path real, Context context) {
+    private static boolean isDeviceOrPipe(Path path) throws IOException {
+        try {
+            int type = (Integer) Files.getAttribute(path, "unix:mode", LinkOption.NOFOLLOW_LINKS) & S_IFMT;
+            return type == S_IFIFO || type == S_IFCHR || type == S_IFBLK;
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            return false;   // isSocket has refused everything there that is no file, folder or link
+        }
+    }
+
+    /**
+     * The Traceworks home: refused but for the run's own scratch directory, the run's own checkout of its source,
+     * which is its workspace (a mount in that one follows the rules of a mount in a workspace,
+     * {@link #writableRefusal}), and a folder below the tool caches when the engine mounts it as the cache of a tool
+     * step's image. The tool caches are kept per image and later runs of other packages execute or trust what is in
+     * them, so a workflow's own mount names neither their root nor a folder in it.
+     *
+     * @param toolCache whether the mount is a tool step's cache folder ({@link Mount#toolCache()})
+     */
+    private static Optional<String> traceworksHomeRefusal(Path real, Context context, boolean toolCache) {
         Path traceworksHome = real(context.traceworksHome());
         if (traceworksHome.startsWith(real)) {
             return Optional.of("it is or contains the Traceworks home " + context.traceworksHome());
         }
-        if (real.startsWith(real(context.layout().toolCache()))
+        Path caches = real(context.layout().toolCache());
+        if (toolCache && real.startsWith(caches) && !real.equals(caches)
                 || present(context.scratch()) && real.startsWith(real(Path.of(context.scratch())))
                 || present(context.checkout()) && real.startsWith(real(Path.of(context.checkout())))) {
             return Optional.empty();
@@ -616,13 +676,19 @@ public final class MountGuard {
             // The records may lie elsewhere through a link (runs on another disk): their real paths count too
             return recordsRefusal(real, context.layout());
         }
-        return Optional.of("it lies in the Traceworks home " + context.traceworksHome() + "; only "
-                + context.layout().toolCache() + "/, the run's own scratch directory and the run's"
-                + " own checkout of its source may be mounted from there");
+        return Optional.of("it lies in the Traceworks home " + context.traceworksHome() + "; only the run's own"
+                + " scratch directory and the run's own checkout of its source may be mounted from there, and a tool"
+                + " step gets the cache folder of its image with cache_dir");
     }
 
-    /** A writable mount in or around the package, or the read-only workspace, would undo its read-only mount. */
-    private static Optional<String> writableRefusal(Path real, Context context) {
+    /**
+     * Why a writable mount is refused: one in or around the package, or the read-only workspace, would undo its
+     * read-only mount, whatever the operator listed; one in or around the {@code .git} of a writable workspace
+     * would undo the read-only mount of that {@code .git} ({@link WorkspaceGit}), unless a step may write it
+     * ({@link Context#workspaceGitWritable()}); and any other needs a folder the operator listed
+     * ({@link #unlistedRefusal}), unless the step writes the folder anyway ({@link #writtenAnyway}).
+     */
+    private static Optional<String> writableRefusal(Mount mount, Path real, Context context) {
         if (!context.writableWorkspace() && overlaps(real, context.workspace())) {
             return Optional.of("a writable mount of the workspace would get around its read-only mount; set"
                     + " workspace_writable: true or mount it :ro");
@@ -630,7 +696,123 @@ public final class MountGuard {
         if (overlaps(real, context.packageDirectory())) {
             return Optional.of("a writable mount of the package would get around its read-only mount; mount it :ro");
         }
-        return Optional.empty();
+        if (context.writableWorkspace() && !context.workspaceGitWritable() && present(context.workspace())
+                && WorkspaceGit.isInOrHolds(real, real(Path.of(context.workspace())))) {
+            return Optional.of("it is, lies in or holds the .git of the workspace, which a step sees read-only: a"
+                    + " writable mount would show it writable at another place; mount a folder of the workspace"
+                    + " beside it or mount it :ro, or, if every package you run may write that repository, set \""
+                    + HomeLayout.WORKSPACE_GIT_WRITABLE + "\": true in "
+                    + context.layout().home().resolve("traceworks.json"));
+        }
+        return writtenAnyway(mount, real, context) ? Optional.empty()
+                : unlistedRefusal(real, context.home(), context.layout());
+    }
+
+    /**
+     * Whether the step writes the folder of a writable mount anyway, so that no listed folder is asked of it. What
+     * Traceworks manages itself: the folder the engine made for a tool step's output ({@link Mount#toolOutput()}),
+     * the cache folder of a tool step's image ({@link Mount#toolCache()}, below the tool caches) and the run's own
+     * scratch directory. And the workspace, or a folder in it by its real path, while the step may write its
+     * workspace: the mount shows the step nothing that its workspace mount does not let it write, and the run's
+     * own checkout of its source is such a workspace. A folder that holds the workspace is more than the workspace
+     * and needs a listed folder. Every other rule of the guard was asked of the mount before this one: the
+     * package and the {@code .git} of the workspace, where a step only reads them, are refused there.
+     */
+    private static boolean writtenAnyway(Mount mount, Path real, Context context) {
+        if (mount.toolOutput()) {
+            return true;
+        }
+        Path caches = real(context.layout().toolCache());
+        if (mount.toolCache() && real.startsWith(caches) && !real.equals(caches)) {
+            return true;
+        }
+        if (present(context.scratch()) && real.startsWith(real(Path.of(context.scratch())))) {
+            return true;
+        }
+        return context.writableWorkspace() && present(context.workspace())
+                && real.startsWith(real(Path.of(context.workspace())));
+    }
+
+    /**
+     * Why a writable mount of {@code real} is refused for lying in no folder the operator listed
+     * ({@code writable_mounts}, {@link HomeLayout#writableMounts()}); empty when it is one of them or lies below
+     * one. A step runs as the operator, so what it writes on the host can be a file the host runs later, outside
+     * every container (a shell's startup file, a folder on the {@code PATH}, the hooks of a repository), and no
+     * list of such files could be complete: the operator says where packages may write. Both sides are compared by
+     * their real paths. A listed folder that is {@code /}, the operator's home directory or a folder that holds it
+     * counts for nothing, whoever built the layout; the setting refuses it when the file is read.
+     *
+     * <p>The refusal names the line that would allow the mount: the list with the folder of the mount added.
+     */
+    private static Optional<String> unlistedRefusal(Path real, Path home, HomeLayout layout) {
+        Path realHome = real(home);
+        for (Path listed : layout.writableMounts()) {
+            if (!listed.isAbsolute()) {
+                continue;
+            }
+            Path folder = real(listed);
+            if (folder.getNameCount() > 0 && !realHome.startsWith(folder) && real.startsWith(folder)) {
+                return Optional.empty();
+            }
+        }
+        Path file = layout.home().resolve("traceworks.json");
+        String why = "a package may mount a host path writable only in or below a folder that writable_mounts in "
+                + file + " lists, and " + real + " lies in none";
+        // The folder of a file; a path that does not exist yet is taken for the folder it is meant to become
+        boolean aFile = Files.exists(real, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(real);
+        Path folder = aFile && real.getParent() != null ? real.getParent() : real;
+        if (folder.getNameCount() == 0 || realHome.startsWith(folder)) {
+            return Optional.of(why + "; its folder " + folder + " is your home directory or holds it, which"
+                    + " writable_mounts cannot list: move it into a folder of its own, or mount it :ro");
+        }
+        List<String> entries = new ArrayList<>();
+        layout.writableMounts().forEach(listed -> entries.add(quoted(listed.toString())));
+        entries.add(quoted(folder.toString()));
+        return Optional.of(why + "; mount it :ro, or, if every package you run may write that folder, allow it"
+                + " with this line in " + file + ": \"" + HomeLayout.WRITABLE_MOUNTS + "\": ["
+                + String.join(", ", entries) + "]");
+    }
+
+    /** {@code text} as a JSON string. */
+    private static String quoted(String text) {
+        return '"' + text.replace("\\", "\\\\").replace("\"", "\\\"") + '"';
+    }
+
+    /**
+     * Why a mount that a workflow writes out as writable, with the host side {@code hostPath}, would be refused for
+     * lying in no folder the operator listed; empty when a listed folder holds it, and for a host side that is no
+     * absolute path after {@code ~} is expanded, which the step refuses for that. The question the start check of
+     * a run asks before any step runs: only the rule of the listed folders, of which a workflow's own text can
+     * name nothing that Traceworks manages. Every rule is asked again, of the real path, when the step runs
+     * ({@link #judge}).
+     */
+    public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout) {
+        return writableMountRefusal(hostPath, home, layout, null);
+    }
+
+    /**
+     * {@link #writableMountRefusal(String, Path, HomeLayout)} for the mount of a step that may write its workspace:
+     * empty as well when the real path of the host side is {@code writableWorkspace} or lies in it, as the step's
+     * own check has it ({@link #writtenAnyway}).
+     *
+     * @param writableWorkspace the run's workspace when the step that declares the mount may write it;
+     *                          {@code null} or blank otherwise
+     */
+    public static Optional<String> writableMountRefusal(String hostPath, Path home, HomeLayout layout,
+                                                        String writableWorkspace) {
+        String host = expandHome(hostPath.strip(), home);
+        if (!host.startsWith("/")) {
+            return Optional.empty();
+        }
+        try {
+            Path real = real(Path.of(host));
+            if (present(writableWorkspace) && real.startsWith(real(Path.of(writableWorkspace)))) {
+                return Optional.empty();
+            }
+            return unlistedRefusal(real, home, layout);
+        } catch (InvalidPathException e) {
+            return Optional.empty();
+        }
     }
 
     private static boolean overlaps(Path real, String directory) {
@@ -670,6 +852,26 @@ public final class MountGuard {
             }
         }
         return null;
+    }
+
+    /** The memory disk, where a folder may be a run's workspace or package although it lies in {@code /dev}. */
+    private static final String MEMORY_DISK = "/dev/shm";
+
+    /**
+     * {@link #forbiddenHostSegment} for one of a run's own directories, with one exception: a folder in
+     * {@value #MEMORY_DISK} is allowed, as given and as its real path. A memory disk is a common place for a
+     * build, and the operator chose the directory; {@code /dev} is forbidden because of what a workflow's own
+     * mount could reach there (the terminals, the shared memory of other programs), and a step's mount from
+     * {@code /dev} stays refused. {@value #MEMORY_DISK} itself and the rest of {@code /dev} stay forbidden here too.
+     */
+    private static String forbiddenRunDirectory(String directory) {
+        String forbidden = forbiddenHostSegment(directory);
+        if (!"/dev".equals(forbidden)) {
+            return forbidden;   // "/dev" is the last of the list: it is named only when no other path matches
+        }
+        String normalized = normalized(directory.strip());
+        String real = real(Path.of(normalized)).toString();
+        return normalized.startsWith(MEMORY_DISK + "/") && real.startsWith(MEMORY_DISK + "/") ? null : forbidden;
     }
 
     /** As given or with symbolic links resolved: {@code /var/run/docker.sock} is {@code /run/docker.sock}. */

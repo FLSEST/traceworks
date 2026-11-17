@@ -56,7 +56,9 @@ public final class StateJson {
      * {@code state.json}: what a script reads from {@code findings <key> list --json}. The text is ASCII only. The
      * severity a decision was made on is named wherever the finding has another one now ({@code disposition.severity}),
      * and a decision that is no longer in force says so ({@code disposition.in_force: false}, absent while it is in
-     * force), so a script need not compare the status with the kind.
+     * force), so a script need not compare the status with the kind. A decision an agent made names it
+     * ({@code disposition.agent}, absent for a decision that named none), here as in {@code state.json} and in the
+     * files of a run.
      */
     public static String findings(List<Finding> findings) {
         try {
@@ -148,6 +150,11 @@ public final class StateJson {
         if (f.item() != null) {
             map.put("item", f.item());   // only when named, see write
         }
+        if (f.disposition() != null && f.disposition().agent() != null) {
+            // Only for a decision an agent made: a decision without one keeps the bytes it always had, and a reader
+            // without the key knows that no agent was named
+            ((Map<String, Object>) map.get("disposition")).put("agent", f.disposition().agent());
+        }
         if (namesDecidedSeverity && f.decidedOnOtherSeverity() != null) {
             // Only where the decision was made on another severity than the finding has now: every other state keeps
             // the bytes it always had, and a reader without the key knows that the decision covers the severity shown
@@ -197,7 +204,7 @@ public final class StateJson {
             Finding.DispositionRecord disposition = d == null || d.isNull() ? null : new Finding.DispositionRecord(
                     FindingStatus.valueOf(d.path("kind").asText()), text(d, "note"), text(d, "actor"),
                     instant(d, "at"), instant(d, "until"), text(d, "evidence"),
-                    Severity.parse(text(d, "severity")).orElse(null));
+                    Severity.parse(text(d, "severity")).orElse(null), text(d, "agent"));
             namesDecidedSeverity |= disposition != null && disposition.severity() != null;
             findings.add(new Finding(f.path("id").asText(), f.path("rule_key").asText(), f.path("subject").asText(),
                     Severity.valueOf(f.path("severity").asText()), f.path("title").asText(), text(f, "description"),

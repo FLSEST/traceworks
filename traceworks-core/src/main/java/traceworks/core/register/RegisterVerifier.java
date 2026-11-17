@@ -60,7 +60,7 @@ public final class RegisterVerifier {
                     continue;
                 }
                 String sha = field.getValue().asText();
-                Optional<byte[]> content = blobs.get(sha);
+                Optional<byte[]> content = blobs.getUnverified(sha);
                 if (content.isEmpty()) {
                     deleted.add(sha);
                     problems.add(where + ": the blob " + field.getKey() + " " + sha + " is deleted");
@@ -75,7 +75,7 @@ public final class RegisterVerifier {
                     state = RegisterReplay.apply(state, event, blobs);
                     String recorded = event.text("state_blob");
                     if (recorded != null) {
-                        Optional<byte[]> stateBlob = blobs.get(recorded);
+                        Optional<byte[]> stateBlob = blobs.getUnverified(recorded);
                         if (stateBlob.isPresent() && !Arrays.equals(stateBlob.get(), StateJson.write(state))) {
                             problems.add(where + ": the recorded state differs from the fold of the log up to here");
                         }

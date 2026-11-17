@@ -1,0 +1,27 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a91",
+  "name": "IT interrupt-retry",
+  "description": "A retry of two attempts whose command adds a line to a file in the scratch directory and passes at its fourth start ever; the second start waits for a file of the test. For an interrupt inside the second attempt: a resume that went on counting attempts would have none left.",
+  "blocks": [
+    {
+      "type": "retry",
+      "name": "flaky",
+      "config": {
+        "execution_mode": "shell",
+        "max_retries": 1,
+        "delay": 0,
+        "timeout_seconds": 120,
+        "command": "echo attempt >> \"{{ scratch_dir }}/attempts.txt\"; n=$(wc -l < \"{{ scratch_dir }}/attempts.txt\"); if [ $n -eq 2 ]; then w=0; while [ ! -e \"{{ project_path }}/go\" ] && [ $w -lt 900 ]; do sleep 0.1; w=$((w + 1)); done; test -e \"{{ project_path }}/go\" || exit 9; fi; if [ $n -lt 4 ]; then echo attempt $n fails; exit 1; fi; echo attempt $n passes"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo attempts: $(wc -l < \"{{ scratch_dir }}/attempts.txt\")"
+      }
+    }
+  ]
+}

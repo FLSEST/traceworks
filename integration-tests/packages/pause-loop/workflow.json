@@ -3,7 +3,7 @@
   "format_version": 1,
   "id": "4f0836fd-9da5-4024-acd4-9f8e823bb3e8",
   "name": "IT pause-loop",
-  "description": "A loop of four slow items, each of which notes its start in the workspace, then one more step: for a pause, a cancel and an interrupt inside the loop.",
+  "description": "A loop of four items, each of which notes its start in the workspace and then waits until the test puts the file go-<item> there, then one more step: for a pause, a cancel and an interrupt inside the loop.",
   "blocks": [
     {
       "type": "foreach",
@@ -11,7 +11,8 @@
       "config": {
         "execution_mode": "shell",
         "items": ["one", "two", "three", "four"],
-        "command": "echo {{ item }} >> /workspace/ran.txt; sleep 4; echo did {{ item }}",
+        "command": "echo {{ item }} >> /workspace/ran.txt; n=0; while [ ! -e /workspace/go-{{ item }} ] && [ $n -lt 900 ]; do sleep 0.1; n=$((n + 1)); done; test -e /workspace/go-{{ item }} && echo did {{ item }}",
+        "timeout_seconds": 120,
         "workspace_writable": true
       }
     },

@@ -54,6 +54,17 @@
             </resource>
         </resources>
         <plugins>
+            <!-- The jar is made anew in every build. Shading replaces it with the jar that holds the other modules
+                 too, so a build without clean would find it "up to date" whenever this module's own classes did not
+                 change, and shade it again: the classes of core and adapters of the build before would win over the
+                 new ones. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <forceCreation>true</forceCreation>
+                </configuration>
+            </plugin>
             <!-- One runnable jar with Jackson and the two modules inside. Shading adds no dependency: the enforcer rule
                  in the parent still sees the same ones. The reduced pom, signature files and module descriptors are
                  left out, which keeps the build output free of warnings. -->

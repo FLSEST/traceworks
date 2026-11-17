@@ -1,11 +1,15 @@
 package traceworks.adapters.host;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -126,5 +130,160 @@ class BoundedOutputTest {
 
         assertThat(output.text()).isEqualTo("a");
         assertThat(output.exceeded()).isFalse();
+    }
+
+    /**
+     * A process ends while the reader is between two reads, and a child it left behind writes afterwards. The JDK
+     * closes the stream of a process at its end with what is in the pipe at that instant, unless a thread holds the
+     * stream; the reader holds it from before {@code drain} returns, so the child's line is read.
+     *
+     * <p>The shell waits for the end of its stdin, which comes after {@code drain}. The test holds the output, so the
+     * reader stops after its first read, where it keeps the bytes, until the shell has ended and the child has
+     * written.
+     */
+    @Test
+    void aProcessThatEndsBetweenTwoReads_isReadToTheEndOfItsOutput(@TempDir Path dir) throws Exception {
+        Path written = dir.resolve("late-written");
+        Process process = new ProcessBuilder("/bin/sh", "-c",
+                "read go; (trap '' PIPE; sleep 0.2; echo late; touch \"$0\") 2>/dev/null & echo first",
+                written.toString())
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024);
+
+        Thread reader;
+        synchronized (output) {
+            reader = output.drain(process.getInputStream(), "test-output");
+            process.getOutputStream().close();
+            assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (!Files.exists(written) && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(written).as("the child wrote its line").exists();
+        }
+        reader.join(10_000);
+
+        // Protects the platforms where the stream of a process is the JDK's ProcessPipeInputStream, whose
+        // processExited() is synchronized on the stream: Linux and macOS with a JDK 21. Elsewhere this fails too,
+        // which is the point: the reading then has the old loss.
+        assertThat(reader.isAlive()).isFalse();
+        assertThat(output.text())
+                .as("what a child wrote after its process ended. Without it, the JDK closed the stream at the end of "
+                        + "the process although the reader held it: the JDK's locking of a process stream may have "
+                        + "changed, and the reader relies on it (the javadoc of BoundedOutput#drain says how)")
+                .isEqualTo("first\nlate\n");
+    }
+
+    /**
+     * A child the process left behind keeps writing. The reading has a bound: after it the stream is closed, the
+     * reader ends with the child's next write, nothing more is kept, and the child finds its output closed.
+     */
+    @Test
+    void end_afterItsBound_closesTheStream_soTheReaderEndsAndNothingMoreIsKept(@TempDir Path dir) throws Exception {
+        Path closed = dir.resolve("found-its-output-closed");
+        Process process = new ProcessBuilder("/bin/sh", "-c",
+                // "first" is printed before the child starts: started first, the child could print ahead of it
+                "read go; echo first; (trap '' PIPE; while echo tick; do sleep 0.05; done; touch \"$0\") 2>/dev/null &",
+                closed.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024 * 1024);
+        Thread reader = output.drain(process.getInputStream(), "test-output");
+        process.getOutputStream().close();
+        assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+
+        long before = System.nanoTime();
+        output.end(300);
+        long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before);
+        String kept = output.text();
+
+        assertThat(waited).as("the bound, not the child's life, which has no end").isBetween(300L, 30_000L);
+        assertThat(output.cut()).as("the reading ended at the bound").isTrue();
+        assertThat(kept).startsWith("first\ntick\n");
+        reader.join(10_000);
+        assertThat(reader.isAlive()).as("the reader still runs").isFalse();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(closed) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(closed).as("the child found its output closed").exists();
+        assertThat(output.text()).as("nothing was kept after the bound").isEqualTo(kept);
+    }
+
+    /** A stream that ends within the bound is read whole, and the wait ends with it. */
+    @Test
+    void end_ofAStreamThatEndsInTime_keepsAllOfIt() throws InterruptedException {
+        BoundedOutput output = new BoundedOutput(8);
+        output.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+
+        output.end(5000);
+
+        assertThat(output.text()).isEqualTo("abc");
+        assertThat(output.cut()).as("read to its end").isFalse();
+    }
+
+    /** A stream that goes beyond the limit and ends is not cut at the bound: the limit is another matter. */
+    @Test
+    void end_ofAStreamBeyondTheLimitThatEnds_isNotCut() throws InterruptedException {
+        BoundedOutput output = new BoundedOutput(2);
+        output.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+
+        output.end(5000);
+
+        assertThat(output.exceeded()).isTrue();
+        assertThat(output.cut()).isFalse();
+    }
+
+    /** A reading that is ended at once, as after an interrupted wait, is cut; one that reached its end is not. */
+    @Test
+    void endNow_cutsAStreamThatHasNotEnded_andNotOneThatHas() throws Exception {
+        Process process = new ProcessBuilder("/bin/sh", "-c", "echo first; exec sleep 300")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            BoundedOutput open = new BoundedOutput(1024);
+            open.drain(process.getInputStream(), "test-output");
+            BoundedOutput ended = new BoundedOutput(8);
+            ended.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+            ended.end(30_000);
+
+            assertThat(open.endNow()).isTrue();
+            assertThat(open.cut()).isTrue();
+            assertThat(ended.endNow()).isFalse();
+            assertThat(ended.cut()).isFalse();
+            assertThat(new BoundedOutput(8).endNow()).as("nothing is read yet").isFalse();
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    /**
+     * The limit of the mark: a child that holds the output and never writes. The close does not wake a read that
+     * waits, so the reader stays until the child ends; the wait still ends at the bound, the cut is marked then, and
+     * what came before is kept.
+     */
+    @Test
+    void end_ofAStreamAHolderNeverWritesTo_isCutAtTheBound_thoughItsReaderStays() throws Exception {
+        Process process = new ProcessBuilder("/bin/sh", "-c", "read go; sleep 300 & echo $!")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024);
+        Thread reader = output.drain(process.getInputStream(), "test-output");
+        process.getOutputStream().close();
+        assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+        try {
+            long before = System.nanoTime();
+            output.end(300);
+            long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before);
+
+            assertThat(waited).as("the bound, not the holder's life of 300 s").isBetween(300L, 30_000L);
+            assertThat(output.cut()).as("marked at the bound").isTrue();
+            assertThat(output.text()).as("the holder's pid, written before").matches("\\d+\n");
+            assertThat(reader.isAlive()).as("the reader waits for the holder").isTrue();
+        } finally {
+            // The holder's pid, if it came: a failure above must not be hidden by one here
+            String pid = output.text().strip();
+            if (pid.matches("\\d+")) {
+                ProcessHandle.of(Long.parseLong(pid)).ifPresent(ProcessHandle::destroyForcibly);
+            }
+        }
+        reader.join(10_000);
+        assertThat(reader.isAlive()).as("the reader ends with the holder").isFalse();
     }
 }

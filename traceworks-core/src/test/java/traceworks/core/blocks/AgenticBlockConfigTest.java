@@ -179,6 +179,86 @@ class AgenticBlockConfigTest {
                 .satisfies(record -> assertThat(record.getMessage()).startsWith("Auto-aligning"));
     }
 
+    /** What {@code from} logs for {@code config}, with the config it made. */
+    private AgenticBlockConfig from(Map<String, Object> config, List<LogRecord> logged) {
+        Logger logger = Logger.getLogger(AgenticBlockConfig.class.getName());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                logged.add(record);
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        Level previousLevel = logger.getLevel();
+        logger.setLevel(Level.ALL);
+        logger.addHandler(handler);
+        try {
+            return AgenticBlockConfig.from(config, buildContext());
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+        }
+    }
+
+    /**
+     * A total timeout below one iteration (REASON + ACT + overhead: 30*2 + 60 = 120) is raised to room for every
+     * iteration, and the warning names the old value, the new one and the iteration's.
+     */
+    @Test
+    void from_totalTimeoutBelowOneIteration_isRaisedToRoomForEveryIteration_andSaysSo() {
+        List<LogRecord> logged = new ArrayList<>();
+
+        AgenticBlockConfig cfg = from(Map.of("goal", "g", "tools", "read", "timeout_seconds", 30,
+                "total_timeout_seconds", 100, "max_iterations", 4), logged);
+
+        assertThat(cfg.totalTimeoutSeconds()).isEqualTo(480);
+        assertThat(cfg.iterationTimeoutSeconds()).as("the default leaves room").isEqualTo(300);
+        assertThat(logged).singleElement().satisfies(record -> {
+            assertThat(record.getLevel()).isEqualTo(Level.WARNING);
+            assertThat(record.getMessage()).startsWith("Auto-aligning total_timeout_seconds");
+            assertThat(record.getParameters()).containsExactly(100, 480, 120);
+        });
+    }
+
+    /** A total timeout of exactly one iteration fits it: it stays, and nothing is logged. */
+    @Test
+    void from_totalTimeoutOfExactlyOneIteration_staysAsItIs() {
+        List<LogRecord> logged = new ArrayList<>();
+
+        AgenticBlockConfig cfg = from(Map.of("goal", "g", "tools", "read", "timeout_seconds", 30,
+                "total_timeout_seconds", 120, "max_iterations", 4), logged);
+
+        assertThat(cfg.totalTimeoutSeconds()).isEqualTo(120);
+        assertThat(logged).isEmpty();
+    }
+
+    /**
+     * No model is handed the path of the register folder: a goal or success criteria that name
+     * {@code {{ register_dir }}} are refused, also in a run that has the folder.
+     */
+    @Test
+    void from_goalOrSuccessCriteriaThatNameTheRegisterFolder_areRefused() {
+        ExecutionContext ctx = buildContext();
+        ctx.setVariable("register_dir", "/home/op/.traceworks/registers/security");
+
+        assertThatThrownBy(() -> AgenticBlockConfig.from(
+                Map.of("goal", "Read {{ register_dir }}/state.json", "tools", "read"), ctx))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .hasMessageContaining("{{ register_dir }} stands in the prompt of an AI step");
+        assertThatThrownBy(() -> AgenticBlockConfig.from(
+                Map.of("goal", "Judge the findings", "tools", "read",
+                        "success_criteria", "{{register_dir}}/report.html exists"), ctx))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .hasMessageContaining("{{ register_dir }} stands in the prompt of an AI step");
+    }
+
     @Test
     void from_resolvesTemplateVariables() {
         ExecutionContext ctx = buildContext();

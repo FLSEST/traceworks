@@ -1,0 +1,30 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a61",
+  "name": "IT combo-failures fails-late",
+  "description": "A good step, then a step that fails, then one that must not run.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "good",
+      "config": {
+        "command": "echo good step"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "bad",
+      "config": {
+        "command": "echo bad step; exit 4"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "never",
+      "config": {
+        "command": "echo the child went past a failed step"
+      }
+    }
+  ]
+}

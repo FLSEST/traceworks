@@ -56,6 +56,18 @@ hash() {
 sleep_for=$(marker_value sleep)
 [ -n "$sleep_for" ] && sleep "$sleep_for"
 
+# [fake:wait=NAME]: notes in the scratch directory that the call waits, then waits until the file NAME is in the
+# workspace, which the test puts there; after two minutes it goes on by itself, so a failed test ends
+wait_for=$(marker_value wait)
+if [ -n "$wait_for" ]; then
+  : > "/scratch/fake-waiting-$wait_for"
+  waited=0
+  while [ ! -e "/workspace/$wait_for" ] && [ "$waited" -lt 600 ]; do
+    sleep 0.2
+    waited=$((waited + 1))
+  done
+fi
+
 exit_code=$(marker_value exit)
 if [ -n "$exit_code" ]; then
   echo "fake-pi: exiting with $exit_code on request" >&2

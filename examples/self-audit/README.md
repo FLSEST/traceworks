@@ -1,6 +1,6 @@
 # The self-audits: Traceworks checks itself
 
-Five workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
+Six workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
 (deterministic steps first, an AI only where a judgement is needed, every claim checked, findings kept across runs),
 and they are how this repository is kept in shape. None of them needs anything the tool does not give every
 workflow.
@@ -8,6 +8,7 @@ workflow.
 | Package | The question | Measured by a tool | Judged by an AI | Register |
 |---|---|---|---|---|
 | [`security`](security/README.md) | Does an untrusted workflow, model or file get past a guarantee of `docs/security.md`? | the areas where it could: call sites found by resolved type | one verdict per area | `security` |
+| [`security-changes`](security-changes/README.md) | The same question, asked only of what changed since a commit and of what is one call away | the changed lines (git), the areas they lie in, and the neighbours by resolved call | one verdict per changed or neighbouring area | `security-changes` |
 | [`architecture`](architecture/README.md) | Do the sources keep to `docs/architecture.md`? | package graph, layer rules, direct I/O, size, complexity | fine, split or move, per candidate file | `architecture` |
 | [`build`](build/README.md) | Is the build reproducible and are the dependencies in order? | Maven and image facts | nothing | none |
 | [`functionality`](functionality/README.md) | Does the tool do what its documentation says? | commands, options, exit codes and examples, docs against code | one verdict per docs section | `functionality` |
@@ -80,6 +81,18 @@ copied run that shows the gap). A testing finding names a change of one line: ap
 means the gap is real, and the fix is the test that goes red; red means the finding is wrong, and it is dismissed
 with the name of the test that caught the change.
 
+When an agent does the triage, it says so. An agent that works with your user is your user to the machine, and
+its decision would read as yours. It names itself with `--agent`, or its harness sets `TRACEWORKS_AGENT` once:
+
+```bash
+traceworks findings security dismiss <id> --note "RunPaths refuses this mount before the call" --agent claude-code
+export TRACEWORKS_AGENT=claude-code     # or once, in the environment the agent's commands run in
+```
+
+The register then records the decision as made `by <you> through the agent claude-code`, in its log, in `show`,
+`list` and `report.html`, and in the files the next run gets. The name is what the agent says, unsigned: an agent
+that leaves it out is recorded as you ([docs/registers.md](../../docs/registers.md), "Who decided").
+
 A finding that holds and gets fixed needs no decision: it stays open, and the next run resolves it: a measured one
 because the snapshot no longer states it, a judged one because the run was asked about it and answered "gone". A round ends
 when the register shows the fixed findings as resolved. How many findings triage refuted is the
@@ -99,7 +112,8 @@ full snapshot that does not state a finding resolved it. So the register tells t
 - **A judged finding** (a security finding, a split or move verdict, a contradiction, an uncaught change) stays
   open until a run says explicitly that it is gone. Silence says nothing.
 
-For that, each run asks. The fact step gets `{{ audit_findings }}`, reads the rows, and writes into each item of the
+For that, each run asks. The fact step gets what the register knows (`{{ audit_findings }}`, or in `security` and
+`security-changes` the file `findings.jsonl` of the register folder, which cuts nothing), reads the rows, and writes into each item of the
 loop the open findings that belong to it (and the ones a person decided), so a prompt holds only its own. The
 verdict has to answer for each open finding: **it still holds**, with the line as it is now, or **it is gone**,
 with a reason. The report step treats "holds" like a new finding (the quote is checked, then the finding is stated
@@ -108,6 +122,17 @@ usable answer is neither: the report lists it, the gate does not go green, and t
 the silent report (`findings <topic> show <id>` prints the count). "Gone" is not taken from an answer that also
 held a finding that did not verify: the item is not judged then, and were the finding resolved, the register would
 call the item decided by its earlier verdict and no run would ask again.
+
+Two things keep a person from findings that cost time for nothing, both in `security` and `security-changes`
+([security/README.md](security/README.md), "What the judge is told" and "How a finding leaves the register"):
+
+- **The judge knows the stated limits.** A behaviour the documents state as not protected is no finding; code that
+  does more than the limit says is one, and in doubt it is a finding with the limit quoted. A model that calls a known finding covered by a limit closes only a low one; a medium or high one stays open, with the limit as its note, for a person. The limits are a file
+  of the package, pinned to `docs/security.md` by a test.
+- **A finding whose code is gone is named gone by measurement.** When no source file has the path of its subject
+  any more, or no area of its file has any of its members, the fact step names it gone without asking a model, and the
+  report counts it with its reason. A finding whose members an area of its file still has is asked about there; a member renamed alone is an area of the same run, so a
+  defect that is still there is reported under its new name.
 
 | Status in the register | Asked about in the next run? | Leaves that status when |
 |---|---|---|
@@ -235,11 +260,47 @@ report a partial snapshot that the register rejects: the envelope lists the item
 takes the verdicts of the other items, and the item keeps what the register knew of it. On 2026-11-13 one failed
 call of 116 had thrown a security run of two hours away.
 
+## The short check beside the long audit
+
+`security` judges every area of the sources, and a first run of it takes about 110 calls. After that its register
+keeps it short: a run judges what changed, by the digest of each area. It still looks at the whole project every
+time, and it sees a change only where the changed lines lie in an area.
+
+[`security-changes`](security-changes/README.md) is the check for the time between two long audits, after a day's
+work or before a merge. It compares the files of the workspace with a base commit (`--input since=<commit|tag|date>`, or
+without the input the commit of the last run of the check). The tool that compiles the files decides what changed,
+from content: git hands it the trees and the blobs it asks for by id and never sees a path of the workspace, since
+a workspace can make git's diff say less. It maps the changed lines to the areas the same finder produces, and adds the
+areas one call away from a changed member, in both directions and through an interface to every implementation:
+a helper that no rule points at brings in the areas that call it. The model judges only those, each with the
+changed code it is connected with in its prompt. Without a base the run refuses, and so it does for a base that is the workspace commit itself or
+that would leave commits after the last run unjudged (`skip=yes` goes on knowingly, and the gate is not GREEN
+then).
+
+```bash
+traceworks run examples/self-audit/security-changes --input since=v0.1.0
+traceworks run examples/self-audit/security-changes        # since the workspace commit of the last run of this check
+```
+
+Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
+changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
+keeps the gate from its best word, YELLOW ("nothing found in what changed"); it never says GREEN, which is the full
+audit's word alone; tests and documentation are counted. A changed import or class head
+picks every area of its file and makes the areas that call into it neighbours, the digest of an area holds what
+its calls resolve to, and the base moves only when the run judged everything a run can judge. It
+has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding
+there is asked about in every run until an answer says it is gone or a person decides, whatever the base of the
+run, and an area whose call failed is judged by the next run: the register holds nothing that no run comes back
+to. It does not replace the long audit: a change two calls away, a changed constant and code that was never
+audited before the base are outside it ([security-changes/README.md](security-changes/README.md), "What it does
+not see").
+
 ## Cost
 
 The steps before and after the AI cost seconds. The verdict steps make one call per item, one after the other:
 about 110 for a first run of `security`, 20 for `architecture`, 34 for `functionality` and 30 for `testing` on these
-sources (the last two have a cap in their rule file). A later run calls only for the items that changed or are
+sources (the last two have a cap in their rule file); `security-changes` calls once per changed or neighbouring
+area, and once per area with an open finding. A later run calls only for the items that changed or are
 open; `testing` needs some runs of 30 until every class was judged once.
 
 Which model judges: `security` opens a model choice, `judge`, and a run picks one of its options with

@@ -18,6 +18,7 @@ import traceworks.core.port.AiCli;
 import traceworks.core.port.Clock;
 import traceworks.core.port.CommandRunner;
 import traceworks.core.port.ContainerRuntime;
+import traceworks.core.engine.WritableMounts;
 import traceworks.core.port.HostDirectories;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.RegisterStore;
@@ -228,8 +229,8 @@ final class RunPreparation {
     }
 
     /**
-     * The names whose values a run of {@code pkg} redacts: the secrets it declares and the credentials of the AI
-     * providers it uses.
+     * The names whose values a run of {@code pkg} redacts: the secrets it declares, the credentials of the AI
+     * providers it uses, and the secrets of the model servers of the operator's that its models name.
      */
     List<String> redactedNames(LoadedPackage pkg) {
         return redactedNames(pkg.definition(), resolver(pkg));
@@ -250,6 +251,21 @@ final class RunPreparation {
                 }
             }
         }
+        // The secret of each model server of the operator's that a model of the definition names, whichever option
+        // a run picks: the run redacts it as it redacts a provider's credential
+        WorkflowUses.literalModels(definition, children, WorkflowUses.Picks.EVERY).forEach((provider, models) -> {
+            for (AiCli cli : aiClis) {
+                if (!cli.id().toLowerCase(Locale.ROOT).equals(provider)) {
+                    continue;
+                }
+                for (String model : models) {
+                    cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null, null, null, 1))
+                            .map(use -> use.backend().secret())
+                            .filter(secret -> secret != null && !names.contains(secret))
+                            .ifPresent(names::add);
+                }
+            }
+        });
         return names;
     }
 
@@ -288,6 +304,38 @@ final class RunPreparation {
         }
         marker.appendTail(real);
         return real.toString();
+    }
+
+    /**
+     * The recorded form of what a resume says of the paths it made real ({@link #realPath}): each value it put back
+     * into one of {@code recorded}, as it reads now, with the name that stands for it there. A resume works at the
+     * real paths before its run has a redactor, and routes every refusal, error and seal log line through this.
+     *
+     * @param recorded the paths as the record holds them; one without a replacement adds nothing
+     * @return {@link RecordedForm#NONE} when no path holds a replacement, or the values cannot be read (then no value
+     *         was put back either: {@link #realPath} refuses)
+     */
+    RecordedForm recordedForm(String... recorded) {
+        java.util.Set<String> names = new java.util.TreeSet<>();
+        for (String path : recorded) {
+            if (path != null) {
+                Matcher marker = REPLACEMENT.matcher(path);
+                while (marker.find()) {
+                    names.add(marker.group(1));
+                }
+            }
+        }
+        if (names.isEmpty()) {
+            return RecordedForm.NONE;
+        }
+        Map<String, String> values = new TreeMap<>();
+        try {
+            SecretValues source = values();
+            names.forEach(name -> source.value(name).ifPresent(value -> values.put(name, value)));
+        } catch (RunRefusedException e) {
+            return RecordedForm.NONE;
+        }
+        return new RecordedForm(values);
     }
 
     /**
@@ -429,8 +477,9 @@ final class RunPreparation {
      * What the run needs of this machine: a container run needs a container runtime; with one, every image the run
      * needs must be there (the AI providers' of the workflows it reaches by a literal {@code workflow_id} too) (a host
      * run needs no {@code shell} image, and without a runtime its container steps fail when they run); and the
-     * workspace and the package must be directories a container may mount, and a workspace that a step writes
-     * ({@code workspace_writable: true}) must not lie inside the package, which every step only reads.
+     * workspace and the package must be directories a container may mount, a workspace that a step writes
+     * ({@code workspace_writable: true}) must not lie inside the package, which every step only reads, and a
+     * writable mount that a step writes out ({@link WritableMounts}) must lie in a folder the operator listed.
      *
      * @return the real paths the check judged, which are the ones the run mounts; of a refused directory {@code null}
      */
@@ -457,8 +506,24 @@ final class RunPreparation {
         if (checkedPackage.isRefused()) {
             preflight.refuse("the package " + pkg.directory() + " cannot be mounted: " + checkedPackage.refusal());
         }
+        // A writable mount the workflow writes out: asked here, so that no step runs before the one it refuses. A
+        // step that may write its workspace is asked with the workspace, where its mount needs no listed folder
+        String judgedWorkspace = checkedWorkspace == null ? null : checkedWorkspace.realPath();
+        for (WritableMounts.Written mount : WritableMounts.writtenOut(pkg.definition(), children,
+                target == RunTarget.CONTAINER)) {
+            containers.directories().writableMountRefusal(mount.hostPath(),
+                    mount.workspaceWritable() ? judgedWorkspace : null).ifPresent(reason -> preflight.refuse(
+                    mount.where() + ": the mount " + mount.entry() + " is refused: " + reason));
+        }
         Mounted mounted = new Mounted(checkedWorkspace == null ? null : checkedWorkspace.realPath(),
                 checkedPackage.realPath());
+        if (mounted.workspace() != null && mounted.packageDirectory() != null
+                && RunPaths.within(mounted.workspace(), mounted.packageDirectory() + "/.git")) {
+            // The package's .git is covered wherever a container sees the package; a workspace in it would be no
+            // part of the package's mount, and every step would see it uncovered
+            preflight.refuse("the workspace " + workspace + " lies in the .git of the package " + pkg.directory()
+                    + ", which the package digest leaves out and no step sees: run from a directory outside it");
+        }
         if (mounted.workspace() != null && mounted.packageDirectory() != null
                 && writesTheWorkspace(pkg.definition(), children)
                 && RunPaths.within(mounted.workspace(), mounted.packageDirectory())) {

@@ -47,6 +47,15 @@ import java.util.function.Consumer;
  */
 public final class RunRecorder implements RunEvents {
 
+    /** In {@link #RECORDS}: the end of a command names a cut of its output ({@code output_cut}). */
+    public static final String OUTPUT_CUT = "output_cut";
+    /**
+     * What this version writes into a record only when it happened, so that its absence says that it did not:
+     * {@code records} in {@code run.started} and {@code run.resumed}. A record of a version that did not write
+     * a fact has no such name, and its silence about that fact means nothing.
+     */
+    public static final List<String> RECORDS = List.of(OUTPUT_CUT);
+
     private static final DateTimeFormatter AT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
@@ -61,6 +70,8 @@ public final class RunRecorder implements RunEvents {
     /** Set before the first event; read by every thread that writes ({@link #redacting}). */
     private volatile Redactor redactor = Redactor.none();
 
+    /** Whether {@code run.started} says that the ledger notes the start ({@link #notingTheStartInTheLedger}). */
+    private boolean ledgerStart;
     private int nextSeq;
     private String head;
     private EventFields.Answer nextAnswer;
@@ -125,6 +136,34 @@ public final class RunRecorder implements RunEvents {
         return this;
     }
 
+    /**
+     * Says in {@code run.started} that the ledger notes the start of this run ({@code ledger_start}): the caller
+     * writes the start entry right after the line, and lets no step run without it. A record without the field is
+     * one of a version that noted no start.
+     *
+     * @return this recorder
+     */
+    public RunRecorder notingTheStartInTheLedger() {
+        this.ledgerStart = true;
+        return this;
+    }
+
+    /**
+     * The operator's model servers as {@code run.started} and {@code run.resumed} name them: by backend id, the
+     * URL, the API, the models and the name of the secret ({@code null} for none), never a value.
+     */
+    public static ObjectNode localModels(traceworks.core.port.LocalModels local) {
+        ObjectNode node = Blobs.MAPPER.createObjectNode();
+        for (traceworks.core.port.LocalModels.Backend backend : local.list()) {
+            ObjectNode server = node.putObject(backend.id());
+            server.put("url", backend.url());
+            server.put("api", backend.api());
+            backend.models().forEach(server.putArray("models")::add);
+            server.put("secret", backend.secret());
+        }
+        return node;
+    }
+
     /** Records {@code run.started}. */
     public void runStarted(RunStart start) {
         ObjectNode f = Blobs.MAPPER.createObjectNode();
@@ -153,12 +192,17 @@ public final class RunRecorder implements RunEvents {
             runtime.put("version", start.containerRuntime().version());
         }
         f.put("output_limit_mib", start.outputLimitMib());
+        f.set("records", Blobs.MAPPER.valueToTree(RECORDS));
         f.put("run_output_budget_mib", start.runOutputBudgetMib());
         ObjectNode aiImages = f.putObject("ai_images");
         new TreeMap<>(start.aiImages()).forEach(aiImages::put);
         f.put("ai_network", start.aiNetwork().mode());
         ObjectNode aiHosts = f.putObject("ai_hosts");
         start.aiNetwork().hosts().forEach((cli, hosts) -> hosts.forEach(aiHosts.withArray(cli)::add));
+        if (!start.localModels().isEmpty()) {
+            // Only for a home that declares a model server: every other run.started keeps its bytes
+            f.set("local_models", localModels(start.localModels()));
+        }
         ArrayNode images = f.putArray("images");
         for (ImageFacts image : start.images()) {
             ObjectNode node = images.addObject();
@@ -207,6 +251,9 @@ public final class RunRecorder implements RunEvents {
         if (start.workspaceSource() != null) {
             f.put("workspace_source", start.workspaceSource());
             f.put("workspace_source_sha", start.workspaceSourceSha());
+        }
+        if (ledgerStart) {
+            f.put("ledger_start", true);
         }
         append(RecordTypes.RUN_STARTED, runId, null, f);
     }

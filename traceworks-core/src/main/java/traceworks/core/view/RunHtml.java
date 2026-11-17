@@ -124,12 +124,18 @@ public final class RunHtml {
                             : "<strong class=\"problem\">" + egress.denied() + " denied</strong>")
                     .append("</td></tr>\n");
         }
+        int cuts = view.outputCuts();
+        if (cuts > 0) {
+            out.append("<tr><th>output</th><td><strong class=\"problem\">").append(cuts)
+                    .append(cuts == 1 ? " command" : " commands").append(" whose output was cut</strong>")
+                    .append(" before the end of its stream: it may be incomplete</td></tr>\n");
+        }
     }
 
     private static void workflow(StringBuilder out, RunView view, BlobStore blobs) {
         out.append("<h2>Workflow</h2>\n");
         WorkflowOutline outline = view.definition() == null ? null
-                : blobs.get(view.definition().sha256()).flatMap(WorkflowOutline::of).orElse(null);
+                : blobs.getForDisplay(view.definition().sha256()).flatMap(WorkflowOutline::of).orElse(null);
         if (outline != null && outline.description() != null) {
             out.append("<p>").append(Html.text(outline.description())).append("</p>\n");
         }
@@ -142,6 +148,7 @@ public final class RunHtml {
         row(out, "digest", view.packageDigest());
         row(out, "seal", view.seal() == null ? "unsealed" : view.seal().summary());
         view.modelChoices().forEach(pick -> row(out, "model choice " + pick.choice(), pick.picked()));
+        row(out, "ledger", view.ledgerStartLine());
         if (view.register() != null) {
             row(out, "register", view.register().summary()
                     + (view.register().head() == null ? "" : "; head " + view.register().head()));

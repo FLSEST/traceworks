@@ -36,6 +36,13 @@ public final class RegisterEvents {
      */
     public static final String DECISION_SEVERITY = "decision_severity";
 
+    /**
+     * The feature of {@link #REQUIRES} for a decision an agent made: its line names the agent beside the actor
+     * ({@code agent}), and so does every state after it. A version that does not know it would fold the decision as
+     * the actor's own and show it so; it refuses the log instead.
+     */
+    public static final String DECISION_AGENT = "decision_agent";
+
     private RegisterEvents() {
     }
 }

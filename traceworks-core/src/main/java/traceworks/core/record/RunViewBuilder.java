@@ -33,6 +33,9 @@ final class RunViewBuilder {
         head = EventChain.sha256Hex(events.getLast().raw());
     }
 
+    /** Whether the start and every resume of the run say that they record a cut of an output; child runs share it. */
+    private boolean recordsOutputCut;
+
     static RunView build(List<RecordedEvent> events, boolean writerAlive) {
         if (events.isEmpty()) {
             throw new IllegalArgumentException("A run view needs at least one event");
@@ -86,6 +89,7 @@ final class RunViewBuilder {
         StepAcc step = stepIndex == null ? null : run.steps.get(stepIndex);
         switch (e.type()) {
             case RecordTypes.RUN_STARTED -> {
+                recordsOutputCut = namesOutputCut(e);
                 run.startedAt = e.at();
                 run.workflowId = text(e.fields().path("workflow"), "id");
                 run.workflowName = text(e.fields().path("workflow"), "name");
@@ -101,6 +105,8 @@ final class RunViewBuilder {
                 run.aiNetwork = text(e.fields(), "ai_network");
                 run.seal = seal(e.fields().path("seal"));
                 run.register = register(e.fields().path("register"));
+                run.ledgerStart = e.fields().path("ledger_start").asBoolean(false);
+                run.runStarted = EventChain.sha256Hex(e.raw());
                 for (Map.Entry<String, JsonNode> choice : e.fields().path("model_choices").properties()) {
                     JsonNode pick = choice.getValue();
                     run.modelChoices.add(new ModelPick(choice.getKey(), text(pick, "option"),
@@ -154,7 +160,7 @@ final class RunViewBuilder {
                     step.aiCalls.add(new AiCallView(e.seq(), item(e), text(e.fields(), "provider"),
                             text(e.fields(), "model"), text(e.fields(), "effort"), text(e.fields(), "tools"),
                             text(e.fields(), "web"), webHosts(e.fields()),
-                            e.blob("prompt"), e.blob("system_prompt"), List.of(), null));
+                            e.blob("prompt"), e.blob("system_prompt"), List.of(), null, local(e.fields())));
                 }
             }
             case RecordTypes.AI_TOOL_CALL -> {
@@ -246,6 +252,8 @@ final class RunViewBuilder {
                 run.parkedAnswer = null;
             }
             case RecordTypes.RUN_RESUMED -> {
+                // A version that does not record a cut went on: from here the record cannot say
+                recordsOutputCut &= namesOutputCut(e);
                 run.resumedAfterPark = true;
                 intervention(e, text(e.fields(), "actor"), resumed(e.fields()), null);
             }
@@ -371,10 +379,18 @@ final class RunViewBuilder {
                         text(c, "verdict"), c.path("count").asInt())));
                 step.commands.set(i, candidate.withResult(new CommandView.Result(
                         exit.isInt() ? exit.intValue() : null, e.fields().path("duration_ms").asLong(),
-                        e.fields().path("timed_out").asBoolean(), egress)));
+                        e.fields().path("timed_out").asBoolean(), egress, outputCut(e.fields().path("output_cut")))));
                 return;
             }
         }
+    }
+
+    /** The cut a command's end names; {@code null} without the field, as in every record of an earlier version. */
+    private static traceworks.core.port.CommandRunner.OutputCut outputCut(JsonNode cut) {
+        List<String> streams = new ArrayList<>();
+        cut.path("streams").forEach(stream -> streams.add(stream.asText()));
+        return streams.isEmpty() ? null
+                : new traceworks.core.port.CommandRunner.OutputCut(streams, cut.path("after_ms").asLong());
     }
 
     /** A resume: where it went on, which step runs again, which answer it uses, whether the package changed. */
@@ -465,7 +481,18 @@ final class RunViewBuilder {
                 status == RunStatus.PARKED ? run.parkedAnswer : null, run.checkpoint, run.definition, run.inputs,
                 children, root ? eventCount : run.events, root ? head : null, root ? interventions : List.of(),
                 run.images, run.aiNetwork, run.aiHosts, status == RunStatus.PARKED ? run.parkedBy : null, run.seal,
-                run.modelChoices, run.register);
+                run.modelChoices, run.register, root && run.ledgerStart, root ? run.runStarted : null,
+                recordsOutputCut);
+    }
+
+    /** Whether the writer of a {@code run.started} or {@code run.resumed} says that it records a cut of an output. */
+    private static boolean namesOutputCut(RecordedEvent e) {
+        for (JsonNode name : e.fields().path("records")) {
+            if (RunRecorder.OUTPUT_CUT.equals(name.asText())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** What the register handed the run, as {@code run.started} records it; {@code null} when it records none. */
@@ -572,6 +599,13 @@ final class RunViewBuilder {
 
     // ---- accumulators ----
 
+    /** The model server of the operator's an {@code ai.request} names; {@code null} for a call to the provider. */
+    private static AiCallView.Local local(JsonNode fields) {
+        JsonNode local = fields.path("local");
+        return local.isObject() ? new AiCallView.Local(text(local, "backend"), text(local, "url"),
+                text(local, "api")) : null;
+    }
+
     private static final class RunAcc {
         String aiNetwork;
         final Map<String, List<String>> aiHosts = new TreeMap<>();
@@ -587,6 +621,8 @@ final class RunViewBuilder {
         String packageDigest;
         SealView seal;
         RegisterHandover register;
+        boolean ledgerStart;
+        String runStarted;
         final List<ModelPick> modelChoices = new ArrayList<>();
         String packageCommit;
         final List<ImageFacts> images = new ArrayList<>();

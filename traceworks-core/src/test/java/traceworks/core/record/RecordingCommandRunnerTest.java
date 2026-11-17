@@ -187,6 +187,28 @@ class RecordingCommandRunnerTest {
         assertThat(ofType("step.command.finished").get(1).get("egress")).as("asked for nothing").isEmpty();
     }
 
+    /**
+     * A command whose output was not read to its end, because something it left behind still held it at the bound:
+     * its end names the streams and the bound. Any other end has no such field.
+     */
+    @Test
+    void anOutputCutAtTheBound_isInTheCommandsEnd_andOnlyThen() throws Exception {
+        CommandRunner cut = request -> new CommandResult(0, "out", "", 5009, false)
+                .withOutputCut(new CommandRunner.OutputCut(List.of("stdout"), 5000));
+        CommandRunner whole = request -> new CommandResult(0, "out", "", 9, false);
+
+        CommandResult result = recorder.recording(cut).run(new CommandRequest("a", "/w", 30, null, null, null, false));
+        recorder.recording(whole).run(new CommandRequest("b", "/w", 30, null, null, null, false));
+
+        assertThat(result.outputCut()).as("the caller gets it too").isNotNull();
+        JsonNode finished = ofType("step.command.finished").getFirst();
+        assertThat(fieldNames(finished)).as("the order of docs/events.md").containsSubsequence("timed_out",
+                "truncated", "output_cut");
+        assertThat(finished.get("output_cut")).isEqualTo(JSON.readTree("{\"streams\":[\"stdout\"],\"after_ms\":5000}"));
+        assertThat(finished.get("exit_code").asInt()).as("a mark, not a failure").isZero();
+        assertThat(ofType("step.command.finished").get(1).has("output_cut")).as("read to its end").isFalse();
+    }
+
     /** A command with open network or none has no hosts and no connections to name. */
     @Test
     void openAndNoNetwork_nameNoHostsAndNoConnections() throws Exception {

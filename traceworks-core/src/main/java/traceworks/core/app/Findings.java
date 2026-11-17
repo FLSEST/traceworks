@@ -4,6 +4,7 @@ import traceworks.core.port.Clock;
 import traceworks.core.port.Ledger;
 import traceworks.core.port.RegisterStore;
 import traceworks.core.record.ChainReport;
+import traceworks.core.register.DecisionAgent;
 import traceworks.core.register.Disposition;
 import traceworks.core.register.Finding;
 import traceworks.core.register.FindingStatus;
@@ -37,7 +38,9 @@ public final class Findings {
     }
 
     /**
-     * @param actor  who decides, recorded with every disposition
+     * @param actor  who runs the command that decides, recorded with every disposition; an agent that decides
+     *               under that actor is named with the decision itself ({@link #dismiss(String, String, String,
+     *               String)})
      * @param ledger anchors the register's head after every write, and is asked by {@code verify}; {@code null} for
      *               none
      */
@@ -85,20 +88,49 @@ public final class Findings {
      *                             of range; nothing is recorded then
      */
     public Finding accept(String key, String reference, String note, Instant until) {
-        return decide(key, reference, FindingStatus.ACCEPTED_RISK, note, until);
+        return accept(key, reference, note, until, null);
+    }
+
+    /**
+     * As {@link #accept(String, String, String, Instant)}, decided by an agent under the actor.
+     *
+     * @param agent the name the agent gave itself ({@link DecisionAgent}), recorded beside the actor; {@code null}
+     *              for a decision that names none
+     * @throws RunRefusedException also if the name is blank or beyond its bounds; nothing is recorded then
+     */
+    public Finding accept(String key, String reference, String note, Instant until, String agent) {
+        return decide(key, reference, FindingStatus.ACCEPTED_RISK, note, until, agent);
     }
 
     /** Dismisses a finding with a note; it never comes up for review. */
     public Finding dismiss(String key, String reference, String note) {
-        return decide(key, reference, FindingStatus.DISMISSED, note, null);
+        return dismiss(key, reference, note, null);
+    }
+
+    /** As {@link #dismiss(String, String, String)}, decided by an agent under the actor; {@code null} for none. */
+    public Finding dismiss(String key, String reference, String note, String agent) {
+        return decide(key, reference, FindingStatus.DISMISSED, note, null, agent);
     }
 
     /** Opens an accepted, dismissed or resolved finding again; the note is optional. */
     public Finding reopen(String key, String reference, String note) {
-        return decide(key, reference, FindingStatus.OPEN, note, null);
+        return reopen(key, reference, note, null);
     }
 
-    private Finding decide(String key, String reference, FindingStatus kind, String note, Instant until) {
+    /** As {@link #reopen(String, String, String)}, decided by an agent under the actor; {@code null} for none. */
+    public Finding reopen(String key, String reference, String note, String agent) {
+        return decide(key, reference, FindingStatus.OPEN, note, null, agent);
+    }
+
+    private Finding decide(String key, String reference, FindingStatus kind, String note, Instant until,
+                           String named) {
+        // Before the register is opened: a name that is none must not reach a line, whoever calls
+        String agent;
+        try {
+            agent = named == null ? null : DecisionAgent.checked(named, "The agent of a decision");
+        } catch (IllegalArgumentException e) {
+            throw new RunRefusedException(e.getMessage());
+        }
         try (RegisterStore.Opened opened = store.openForWrite(requireKnown(key))) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             RegisterState state = RegisterReplay.replay(key, log.read(), opened.blobs());
@@ -107,8 +139,8 @@ public final class Findings {
             Finding after;
             try {
                 after = switch (kind) {
-                    case ACCEPTED_RISK -> Disposition.accept(finding, note, actor, at, until);
-                    case DISMISSED -> Disposition.dismiss(finding, note, actor, at);
+                    case ACCEPTED_RISK -> Disposition.accept(finding, note, actor, at, until, agent);
+                    case DISMISSED -> Disposition.dismiss(finding, note, actor, at, agent);
                     default -> Disposition.reopen(finding, note, actor, at);
                 };
             } catch (IllegalArgumentException | IllegalStateException e) {
@@ -120,11 +152,12 @@ public final class Findings {
                 findings.add(f.id().equals(after.id()) ? after : f);
             }
             // Only now, when the decision is taken: a refused one writes nothing, this line neither
-            anchorNote = Registers.anchorsBefore(ledger, opened, log);
+            anchorNote = RegisterWrites.anchorsBefore(ledger, opened, log);
             RegisterState next = new RegisterWriter(log, opened.blobs()).disposition(state.with(findings), after,
-                    kind, note, actor, at, after.disposition() == null ? null : after.disposition().until());
-            Registers.writeDerived(opened, log, next);
-            unanchored = Registers.anchor(ledger, opened, log);
+                    kind, note, actor, agent, at,
+                    after.disposition() == null ? null : after.disposition().until());
+            RegisterWrites.writeDerived(opened, log, next);
+            unanchored = RegisterWrites.anchor(ledger, opened, log);
             return after;
         }
     }
@@ -169,10 +202,10 @@ public final class Findings {
         try (RegisterStore.Opened opened = store.openForWrite(requireKnown(key))) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             RegisterState state = RegisterReplay.replay(key, log.read(), opened.blobs());
-            anchorNote = Registers.anchorsBefore(ledger, opened, log);
-            Registers.writeDerived(opened, log, state);
+            anchorNote = RegisterWrites.anchorsBefore(ledger, opened, log);
+            RegisterWrites.writeDerived(opened, log, state);
             // Anchors a head the ledger could not take when it was written; an anchor the ledger holds stays
-            unanchored = Registers.anchor(ledger, opened, log);
+            unanchored = RegisterWrites.anchor(ledger, opened, log);
             return opened.location();
         }
     }

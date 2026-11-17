@@ -855,6 +855,19 @@ class ExecutionContextTest {
                 .isInstanceOf(ShellLineRefusedException.class);
     }
 
+    /** The prompt flag is its own mark: it outlives the end of the block and taints the next output recorded. */
+    @Test
+    void platformPrompt_flagSurvivesTheEndOfTheBlock_andTaintsTheNextRecordedOutput() {
+        context.setUntrustedPlatformVariable("previous_report", "report");
+
+        context.resolvePromptTemplate("Rate: {{ previous_report }}");
+        context.blockEnded();
+        context.recordOutput("late", "a | b");
+
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ block.late.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+    }
+
     /** Sub-workflow hand-over and resume carry the tainted output via {@code __untrusted_outputs}. */
     @Test
     void exportTaint_afterAPlatformPrompt_carriesTheTaintedOutput() {
@@ -1035,6 +1048,116 @@ class ExecutionContextTest {
         assertThat(context.hasUntrustedInput()).isTrue();
         assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
                 .isInstanceOf(ShellLineRefusedException.class);
+    }
+
+    /** A handed-over taint name of a block protects the output of that block, and of no other. */
+    @Test
+    void markOutputUntrusted_blockName_protectsTheOutputOfThatBlockOnly() {
+        context.setBlockOutput("scan", "x; id");
+        context.setBlockOutput("lint", "ok");
+        context.markOutputUntrusted("scan");
+
+        assertThat(context.hasUntrustedInput()).isTrue();
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.scan.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(context.resolveShellTemplate("echo {{ block.lint.output }}", false)).isEqualTo("echo ok");
+    }
+
+    // ── Model text: outputs a parent run or an earlier segment marked as text a model wrote ──
+
+    /** A handed-over name of a block whose output is model text protects that output; the run stays untainted. */
+    @Test
+    void markOutputModelText_blockName_protectsTheOutputOfThatBlockOnly_andIsNoUntrustedInput() {
+        context.setPreviousOutput("plain");
+        context.setBlockOutput("ask", "$(touch pwned)");
+        context.markOutputModelText("ask");
+
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.ask.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(context.resolveShellTemplate("echo {{ previous_output }}", false)).isEqualTo("echo plain");
+        assertThat(context.hasUntrustedInput()).as("model text is no untrusted input").isFalse();
+    }
+
+    @Test
+    void markOutputModelText_previousOutput_protectsThePreviousOutputOnly() {
+        context.setPreviousOutput("$(touch pwned)");
+        context.setBlockOutput("build", "ok");
+        context.markOutputModelText(ExecutionContext.PREVIOUS_OUTPUT_NAME);
+
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(context.resolveShellTemplate("echo {{ block.build.output }}", false)).isEqualTo("echo ok");
+        assertThat(context.hasUntrustedInput()).isFalse();
+    }
+
+    /** The two kinds of protected outputs add up: model text of one block does not hide a tainted previous output. */
+    @Test
+    void aTaintedPreviousOutput_staysProtected_whenOnlyABlockOutputIsModelText() {
+        context.setPreviousOutput("x; id");
+        context.setBlockOutput("ask", "$(touch pwned)");
+        context.markOutputUntrusted(ExecutionContext.PREVIOUS_OUTPUT_NAME);
+        context.markOutputModelText("ask");
+
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.ask.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+    }
+
+    /**
+     * Platform data that went into a block by any template, not only its prompt, taints the output the block
+     * records: the block may have copied it there.
+     */
+    @Test
+    void recordOutput_ofABlockThatTookPlatformDataOutsideAPrompt_isTainted() {
+        context.setUntrustedPlatformVariable("open_todos", "x; id");
+        assertThat(context.resolveTemplate("{{ open_todos }}")).isEqualTo("x; id");
+        assertThat(context.hasUntrustedInput()).as("before the output is recorded").isFalse();
+
+        context.recordOutput("list", "x; id");
+
+        assertThat(context.hasUntrustedInput()).isTrue();
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.list.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ previous_output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+    }
+
+    /**
+     * Model text a parent handed over, in a run that asked no model itself: the output of the block it went into is
+     * model text, and from there on the run counts as one that holds model text.
+     */
+    @Test
+    void recordOutput_ofABlockThatTookHandedOverModelText_isModelText_andSoIsWhatTheRunRecordsLater() {
+        context.setModelVariable("handed", "$(touch pwned)");
+        assertThat(context.modelAsked()).isFalse();
+        context.resolveTemplate("{{ handed }}");
+
+        context.recordOutput("use", "$(touch pwned)");
+        context.blockEnded();
+
+        assertThat(context.modelAsked()).isTrue();
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.use.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        context.recordOutput("next", "more");
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.next.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(context.hasUntrustedInput()).as("model text is no untrusted input").isFalse();
+    }
+
+    /** A child workflow that ended tainted taints the output of the block that ran it, which hands the child's on. */
+    @Test
+    void childWasTainted_taintsTheOutputTheBlockRecords() {
+        context.childWasTainted();
+        assertThat(context.hasUntrustedInput()).as("before the output is recorded").isFalse();
+
+        context.recordOutput("sub", "x; id");
+
+        assertThat(context.hasUntrustedInput()).isTrue();
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ block.sub.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+        assertThat(context.exportTaint()).containsEntry(ExecutionContext.UNTRUSTED_OUTPUTS_VARIABLE,
+                List.of(ExecutionContext.PREVIOUS_OUTPUT_NAME, "sub"));
     }
 
     @Test

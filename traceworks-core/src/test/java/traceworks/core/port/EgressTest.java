@@ -59,6 +59,27 @@ class EgressTest {
         assertThat(Egress.hostProblem("API.example:443")).as("upper case is the same host").isNull();
     }
 
+    /** A model server of the operator's: the one host, and whether the proxy forwards plain HTTP to it. */
+    @Test
+    void aServer_isTheOnlyHost_andAPlainTargetWhenItSpeaksHttp() {
+        Egress http = Egress.server("LLM.internal:8080", true);
+        Egress https = Egress.server("llm.example.org:443", false);
+
+        assertThat(http.hosts()).containsExactly("llm.internal:8080");
+        assertThat(http.plain()).containsExactly("llm.internal:8080");
+        assertThat(http.restricted()).isTrue();
+        assertThat(https.plain()).isEmpty();
+        assertThat(Egress.hosts(List.of("api.example:443")).plain()).as("no host of a provider is a plain target")
+                .isEmpty();
+        assertThat(http).isNotEqualTo(Egress.hosts(List.of("llm.internal:8080")));
+        assertThatThrownBy(() -> new Egress(Egress.Mode.HOSTS, List.of("a.example:443"), List.of("b.example:80")))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("is not one of the egress hosts");
+        assertThatThrownBy(() -> new Egress(Egress.Mode.HOSTS, List.of("*", "a.example:443"), List.of("*")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Egress(Egress.Mode.OPEN, List.of(), List.of("a.example:80")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     /** The star of a step's web_hosts is one of the hosts, next to the names; no operator setting can bring it. */
     @Test
     void theStar_isAHostAmongTheOthers_butNoHostAnOperatorCanName() {

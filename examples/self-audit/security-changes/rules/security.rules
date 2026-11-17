@@ -1,0 +1,123 @@
+# The rules of the security self-audit: which code an AI step judges against the threat model (docs/security.md).
+# A rule points at areas; it decides nothing. The format is described in the package's README.md.
+
+rule process_start
+  why  Starts a process. Check that a workflow cannot widen the argument list, that no shell string is built from data, and that the process gets only the environment it should.
+  new  java.lang.ProcessBuilder
+  call java.lang.ProcessBuilder#command
+  call java.lang.Runtime#exec
+  literal ^(/bin/)?(ba)?sh$
+
+rule container_flag
+  why  Builds the arguments of a container run. Check that the secure defaults (no network, read-only root, dropped capabilities, no new privileges, the user, the limits) cannot be dropped or overridden by a workflow, and that mounts are checked.
+  literal ^--(privileged|cap-add|cap-drop|security-opt|network|read-only|pids-limit|memory|cpus|user|userns|volume|mount|tmpfs|pull|env|env-file|device|ipc|pid|entrypoint|workdir)(=|$)
+  literal ^-[ev]$
+  in   traceworks.adapters
+
+rule path_check
+  why  Checks or builds a path. Check that the check judges the real path that is used (symbolic links, ".." after a link, a race between check and use) and that a path from a workflow cannot leave the directory it is meant for.
+  call java.nio.file.Path#startsWith
+  call java.nio.file.Path#normalize
+  call java.nio.file.Path#toRealPath
+  call java.nio.file.Path#resolve nonconstant
+  call java.nio.file.Files#isSymbolicLink
+  call java.nio.file.Files#readSymbolicLink
+  call java.nio.file.Files#createSymbolicLink
+  call java.nio.file.attribute.BasicFileAttributes#isSymbolicLink
+  call java.io.File#getCanonicalPath
+  call java.io.File#getCanonicalFile
+
+rule env_pass
+  why  Reads or passes environment variables. Check that secrets reach only the step that declares them, that a host command gets the short allowlist, and that nothing from the operator's environment leaks into a container.
+  call java.lang.ProcessBuilder#environment
+  call java.lang.System#getenv
+  literal ^(-e|--env|--env-file)$
+
+rule redaction
+  why  Redacts secrets. Check that every value written to the record, a blob, the terminal or a report passes the redactor, and that a secret split across chunks or encoded cannot pass.
+  new  traceworks.core.record.Redactor
+  call traceworks.core.record.Redactor#*
+
+rule terminal_output
+  why  Prints data to the terminal. Check that text from a workflow, a step or a model cannot carry control or escape sequences to the terminal.
+  call java.io.PrintStream#print nonconstant
+  call java.io.PrintStream#println nonconstant
+  call java.io.PrintStream#printf nonconstant
+  call java.io.PrintStream#format nonconstant
+  call java.io.PrintStream#write nonconstant
+  call java.io.PrintWriter#print nonconstant
+  call java.io.PrintWriter#println nonconstant
+  call java.io.PrintWriter#printf nonconstant
+  in   traceworks.cli
+
+rule html_render
+  why  Builds the HTML of run.html. Check that every value from the record is escaped for its place (text, attribute, URL, script), that no URL scheme other than the expected ones gets through, and that the page runs no script from the record.
+  call java.lang.StringBuilder#append nonconstant
+  literal <script|javascript:|href=|src=|style=|\son[a-z]+=
+  in   traceworks.core.view
+
+rule parser
+  why  Parses input that may come from a workflow, a record or a model. Check that no polymorphic typing, no XML external entity and no unbounded nesting or size is accepted.
+  call com.fasterxml.jackson.databind.ObjectMapper#readValue
+  call com.fasterxml.jackson.databind.ObjectMapper#readTree
+  call com.fasterxml.jackson.databind.ObjectMapper#activateDefaultTyping
+  call com.fasterxml.jackson.databind.ObjectMapper#enableDefaultTyping
+  new  java.io.ObjectInputStream
+  call javax.xml.parsers.DocumentBuilderFactory#newInstance
+  call javax.xml.parsers.SAXParserFactory#newInstance
+  call javax.xml.stream.XMLInputFactory#newInstance
+  call javax.xml.transform.TransformerFactory#newInstance
+  new  java.util.zip.ZipInputStream
+  new  java.util.zip.ZipFile
+  new  java.util.jar.JarFile
+
+rule git_call
+  why  Calls git. Check that a source URL or a ref from a user cannot become an option, that no hook, fsmonitor or protocol of the checked-out repository runs, and that the clone stays where it should.
+  literal ^git$
+  literal ^(clone|fetch|checkout|worktree)$
+  literal core\.hooksPath|core\.fsmonitor|^protocol\.|^GIT_[A-Z_]+$
+
+rule integrity
+  why  Hashes or signs what the record and the ledger rely on. Check that the hash covers every byte it vouches for, that a comparison cannot be fooled, and that a signature check verifies the signer.
+  call java.security.MessageDigest#getInstance
+  call java.security.MessageDigest#isEqual
+  literal ^SHA-256$
+  literal ^ssh-keygen$
+  literal ^-Y$
+
+rule temp_file
+  why  Creates temporary files or sets file permissions. Check that the file is created with tight permissions, in a place others cannot replace, and removed again.
+  call java.nio.file.Files#createTempFile
+  call java.nio.file.Files#createTempDirectory
+  call java.nio.file.Files#setPosixFilePermissions
+  call java.io.File#createTempFile
+  call java.io.File#deleteOnExit
+  call java.io.File#setReadable
+  call java.io.File#setWritable
+  call java.io.File#setExecutable
+
+rule redos
+  why  Compiles a regular expression from data, or one that may backtrack badly. Check that input from a workflow or a model cannot make it run for long.
+  call java.util.regex.Pattern#compile nonconstant 0
+  call java.util.regex.Pattern#compile constant \.[*+].*\.[*+]|\([^)]*[*+][^)]*\)[*+{]
+  call java.util.regex.Pattern#matches nonconstant 0
+  call java.lang.String#matches nonconstant 0
+  call java.lang.String#replaceAll nonconstant 0
+  call java.lang.String#replaceFirst nonconstant 0
+  call java.lang.String#split nonconstant 0
+
+rule network
+  why  Opens a network connection. Traceworks itself only reaches a git source; check that nothing else connects and that the target is the one the user gave.
+  new  java.net.Socket
+  new  java.net.ServerSocket
+  call java.net.URL#openConnection
+  call java.net.URL#openStream
+  call java.net.http.HttpClient#send
+  call java.net.http.HttpClient#sendAsync
+
+rule reflection
+  why  Loads or calls code by name. Check that no name comes from a workflow, a record or a model.
+  call java.lang.Class#forName
+  call java.lang.reflect.Method#invoke
+  call java.lang.reflect.Constructor#newInstance
+  call java.lang.ClassLoader#loadClass

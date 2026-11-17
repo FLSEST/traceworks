@@ -10,6 +10,8 @@ import traceworks.core.engine.BlockTypeRegistry;
 import traceworks.core.engine.EventLogException;
 import traceworks.core.engine.WorkflowEngine;
 import traceworks.core.port.AiCli;
+import traceworks.core.port.BlobStore;
+import traceworks.core.port.LocalModels;
 import traceworks.core.port.AiProviders;
 import traceworks.core.port.Clock;
 import traceworks.core.port.CommandRunner;
@@ -177,7 +179,8 @@ public final class RunServices {
                 checkouts);
         StoredRunPackage storedPackage = new StoredRunPackage(packages, preparation);
         this.resuming = new Resuming(clock, actor, settings.allowHostExecution(), settings.outputLimitMib(),
-                settings.runOutputBudgetMib(), settings.aiImages(), settings.aiNetwork(), storedPackage,
+                settings.runOutputBudgetMib(), settings.aiImages(), settings.aiNetwork(), settings.localModels(),
+                storedPackage,
                 containers.runtime(), checkouts, outputs, engine, preparation, active, cancelling, sealAdmission);
         this.pausing = new Pausing(clock, ids, actor, answerWait);
         this.answering = new Answering(clock, ids, actor, answerWait, settings.allowHostExecution(),
@@ -307,6 +310,41 @@ public final class RunServices {
     }
 
     /**
+     * The ledger against the runs folder of this home: the runs the ledger saw start that it never saw end, each with
+     * what its folder says, and the runs the ledger names whose folder is gone ({@link LedgerReport}). Read-only.
+     *
+     * @throws RecordDamagedException if the ledger exists and cannot be read
+     */
+    public LedgerReport ledgerReport() {
+        return ledgerReport(true);
+    }
+
+    /**
+     * {@link #ledgerReport()}, with or without verifying the record of every ended run against its end entry.
+     *
+     * @param records whether to read and verify every record and every blob of the home
+     */
+    public LedgerReport ledgerReport(boolean records) {
+        return LedgerReport.of(ledger, store, clock, records);
+    }
+
+    /**
+     * Acknowledges the problem {@link #ledgerReport} names of one run, on the record: one more entry of that run in
+     * the ledger with this process's actor, the time, what the check said and the note. The check then lists the
+     * run as acknowledged, for good, and no longer fails for that problem; a problem of another kind fails again.
+     *
+     * @param runRef the run id, or a prefix of at least four characters that one reported run has
+     * @param note   why this is no lost run; required
+     * @return the report after it
+     * @throws RunRefusedException    if the note is empty, the check reports nothing of that run, or the ledger
+     *                                cannot take the entry
+     * @throws RecordDamagedException if the ledger cannot be read
+     */
+    public LedgerReport acknowledge(String runRef, String note) {
+        return LedgerReport.acknowledge(ledger, store, clock, actor, runRef, note);
+    }
+
+    /**
      * Compares two finished runs from their records, read-only: header, inputs, steps and AI calls, and for two audit
      * runs the findings of their register between them ({@link traceworks.core.compare.RunComparer}
      * says what is matched and what counts).
@@ -334,10 +372,13 @@ public final class RunServices {
         }
     }
 
-    /** The content of a blob of a run, such as an output or a question; empty when the blob was deleted. */
+    /**
+     * The content of a blob of a run, such as an output or a question, for a view; empty when the blob was deleted, a
+     * mark in its place when it does not match its name ({@link BlobStore#getForDisplay}).
+     */
     public Optional<byte[]> content(String runRef, String sha256) {
         try (StoredRun run = store.open(runRef)) {
-            return run.blobs().get(sha256);
+            return run.blobs().getForDisplay(sha256);
         }
     }
 
@@ -457,7 +498,23 @@ public final class RunServices {
      */
     public WorkflowDescription describe(Path packageLocation) {
         LoadedPackage pkg = load(packageLocation);
-        return WorkflowDescriber.describe(pkg, new PackageWorkflowResolver(pkg, settings.packagePath(), packages));
+        return WorkflowDescriber.describe(pkg, new PackageWorkflowResolver(pkg, settings.packagePath(), packages),
+                this::localServer, host -> containers.directories().writableMountRefusal(host).isPresent(),
+                containers.directories().workspaceGitWritable());
+    }
+
+    /**
+     * The model server of the operator's that a step of {@code provider} with {@code model} runs against, as the
+     * provider's CLI tells it; {@code null} for a step that goes to the provider.
+     */
+    private LocalModels.Use localServer(String provider, String model) {
+        for (AiCli cli : aiClis) {
+            if (cli.id().equalsIgnoreCase(provider)) {
+                return cli.local(new AiCli.AiCall(AiCli.AiCall.Kind.ACTION, "", null, model, null, null, null, 1))
+                        .orElse(null);
+            }
+        }
+        return null;
     }
 
     /** The findings use case: what the registers of this home hold. */
@@ -512,6 +569,8 @@ public final class RunServices {
             settings.aiNetwork().hosts().forEach((cli, hosts) -> notes.add("ai_hosts: the containers of " + cli
                     + " also reach " + String.join(", ", hosts)));
         }
+        settings.localModels().list().forEach(backend -> notes.add("local_models: a step with the model "
+                + backend.id() + "/<model> runs against " + backend.url() + " and reaches nothing else"));
         return notes;
     }
 

@@ -5,10 +5,12 @@ import traceworks.core.ai.ReasoningEffort;
 import traceworks.core.ai.ToolPolicy;
 import traceworks.core.port.AiCli;
 import traceworks.core.port.CommandRunner.CommandResult;
+import traceworks.core.port.LocalModels;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeSet;
 
 /**
@@ -20,7 +22,7 @@ import java.util.TreeSet;
  * <pre>
  * pi -p --no-session --no-context-files --mode json
  *   --offline --no-extensions --no-mcp --no-approve --no-skills --no-prompt-templates --no-themes
- *   [--provider B --model M] --thinking T
+ *   [--provider B --model M] --thinking T          (a local server: --provider traceworks-local --model M)
  *   reason: --system-prompt F|"" --append-system-prompt ""
  *   action: --system-prompt ""   --append-system-prompt F|""
  *   then the tools of the call's policy
@@ -31,6 +33,12 @@ import java.util.TreeSet;
  *       ({@code openrouter/meta-llama/llama-3.3-70b-instruct} goes to {@code openrouter}); without a slash the
  *       backend is {@value #DEFAULT_BACKEND}; without a model Pi takes the first backend it
  *       has a credential for, and it has that of {@value #DEFAULT_BACKEND} only ({@link #credentialNames}).</li>
+ *   <li><b>A model server of the operator's</b> ({@link LocalModels}, {@code local_models} in
+ *       {@code traceworks.json}): a model whose backend is one the operator declared goes to that server and to no
+ *       provider. Pi gets the server as a provider of its own configuration, which Traceworks writes
+ *       ({@link PiModelsLaunch}), and is called with {@code --provider traceworks-local --model <model>}; the call
+ *       gets no credential of a provider, only the server's secret when it has one, and its only host is the
+ *       server. A model the server does not list is refused. Every option above stays.</li>
  *   <li><b>Thinking</b>: a valid effort wins; else a level after the model's
  *       last {@code :} ({@code sonnet:high}), which Pi itself reads there but an explicit {@code --thinking}
  *       overrides; else a reasoning call maps its turn limit (1 {@code low}, up to 3 {@code medium}, more
@@ -102,9 +110,31 @@ public final class PiCli implements AiCli {
     private static final List<String> WRITE_TOOLS = List.of("edit", "write");
     private static final String SHELL_TOOL = "bash";
 
+    /** The model servers of the operator's own; {@link LocalModels#NONE} without the setting. */
+    private final LocalModels localModels;
+
+    /** A Pi that knows no model server of the operator's. */
+    public PiCli() {
+        this(LocalModels.NONE);
+    }
+
+    /**
+     * @param localModels the operator's {@code local_models}: a model that names one of these backends runs against
+     *                    its server
+     */
+    public PiCli(LocalModels localModels) {
+        this.localModels = localModels == null ? LocalModels.NONE : localModels;
+    }
+
     @Override
     public String id() {
         return "PI";
+    }
+
+    /** The server of the operator's the call's model names, by the backend before its first slash. */
+    @Override
+    public Optional<LocalModels.Use> local(AiCall call) {
+        return localModels.of(call.model());
     }
 
     @Override
@@ -143,14 +173,28 @@ public final class PiCli implements AiCli {
      */
     @Override
     public List<String> credentialNames(AiCall call) {
+        Optional<LocalModels.Use> local = local(call);
+        if (local.isPresent()) {
+            // A server of the operator's: its own secret, if it has one, and no credential of a provider
+            String problem = local.get().problem();
+            if (problem != null) {
+                throw new IllegalArgumentException(problem);
+            }
+            String secret = local.get().backend().secret();
+            return secret == null ? List.of() : List.of(secret);
+        }
         String backend = backendAndModel(call.model())[0];
         List<String> names = BACKEND_CREDENTIALS.get(backend);
         if (names == null) {
+            // What to do comes first: a view may cut a long line
             throw new IllegalArgumentException("The Pi model " + call.model() + " names the backend " + backend
-                    + ", and Traceworks cannot tell which credential that backend takes, so the call gets none; name"
-                    + " the model as <backend>/<model> with one of the backends "
+                    + ", which is no backend of a provider ("
                     + String.join(", ", new TreeSet<>(BACKEND_CREDENTIALS.keySet()))
-                    + " (a model without a backend goes to " + DEFAULT_BACKEND + ")");
+                    + ") and no model server that " + LocalModels.SETTING + " in traceworks.json declares"
+                    + (localModels.isEmpty() ? " (it declares none)"
+                    : " (it declares " + String.join(", ", localModels.ids()) + ")")
+                    + "; Traceworks cannot tell which credential the backend takes, so the call gets none and does"
+                    + " not run. A model without a backend goes to " + DEFAULT_BACKEND);
         }
         return names;
     }
@@ -161,9 +205,16 @@ public final class PiCli implements AiCli {
         return backendAndModel(call.model())[0];
     }
 
-    /** The API host of the backend of the call's model, as {@link #invocation} names that backend; none if unknown. */
+    /**
+     * The API host of the backend of the call's model, as {@link #invocation} names that backend; none if unknown.
+     * Of a call to a server of the operator's, that server and nothing else.
+     */
     @Override
     public List<String> hosts(AiCall call) {
+        Optional<LocalModels.Use> local = local(call);
+        if (local.isPresent()) {
+            return List.of(local.get().backend().host());
+        }
         String host = BACKEND_HOSTS.get(backendAndModel(call.model())[0]);
         return host == null ? List.of() : List.of(host);
     }
@@ -178,8 +229,9 @@ public final class PiCli implements AiCli {
     }
 
     /**
-     * @throws IllegalArgumentException for a system prompt over 95 KiB, for a call with web, and for a model Pi
-     *                                  could read as something else ({@link ModelArgument})
+     * @throws IllegalArgumentException for a system prompt over 95 KiB, for a call with web, for a model Pi
+     *                                  could read as something else ({@link ModelArgument}), and for a model that
+     *                                  the server of the operator's it names does not list
      */
     @Override
     public AiInvocation invocation(AiCall call) {
@@ -193,7 +245,16 @@ public final class PiCli implements AiCli {
         List<String> cli = new ArrayList<>(List.of("sh", "-c", STREAM_FILTER, "sh", "pi", "-p", "--no-session",
                 "--no-context-files", "--mode", "json", "--offline", "--no-extensions", "--no-mcp", "--no-approve",
                 "--no-skills", "--no-prompt-templates", "--no-themes"));
-        addBackendAndModel(cli, call.model());
+        Optional<LocalModels.Use> local = local(call);
+        if (local.isPresent()) {
+            String problem = local.get().problem();
+            if (problem != null) {
+                throw new IllegalArgumentException(problem);
+            }
+            cli.addAll(List.of("--provider", PiModelsLaunch.PROVIDER, "--model", local.get().model()));
+        } else {
+            addBackendAndModel(cli, call.model());
+        }
         cli.addAll(List.of("--thinking", thinking(call)));
         boolean reason = call.kind() == AiCall.Kind.REASON;
         List<String> replace = reason ? launch.option("--system-prompt") : List.of();
@@ -201,7 +262,8 @@ public final class PiCli implements AiCli {
         cli.addAll(replace.isEmpty() ? List.of("--system-prompt", "") : replace);
         cli.addAll(append.isEmpty() ? List.of("--append-system-prompt", "") : append);
         cli.addAll(toolFlags);
-        return launch.invocation(cli, Map.of(), call.prompt());
+        AiInvocation invocation = launch.invocation(cli, Map.of(), call.prompt());
+        return local.isPresent() ? PiModelsLaunch.invocation(local.get(), invocation) : invocation;
     }
 
     /** {@code --provider} and {@code --model} of {@code backend/model}; nothing without a model. */

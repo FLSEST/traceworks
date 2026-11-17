@@ -204,6 +204,7 @@ class ContainerToolStepTest {
 
         Mount output = mountAt(seen.get(), "/out");
         assertThat(output.readOnly()).isFalse();
+        assertThat(output.toolOutput()).as("the engine made it: no listed folder is asked of it").isTrue();
         assertThat(Path.of(output.hostPath()).getFileName().toString()).startsWith("traceworks-tool-");
         assertThat(Files.exists(Path.of(output.hostPath()))).isFalse();
     }
@@ -250,7 +251,7 @@ class ContainerToolStepTest {
         Mount cache = mountAt(captor.getValue(), "/cache");
         String folder = ContainerToolStep.cacheSlug("registry:5000/aquasec/trivy:0.70.0");
         assertThat(folder).startsWith("registry_5000_aquasec_trivy__");
-        assertThat(cache).isEqualTo(new Mount(cacheRoot.resolve(folder).toString(), "/cache", false));
+        assertThat(cache).isEqualTo(new Mount(cacheRoot.resolve(folder).toString(), "/cache", false, true));
         assertThat(cacheRoot.resolve(folder)).isDirectory();
     }
 
@@ -308,7 +309,7 @@ class ContainerToolStepTest {
         ArgumentCaptor<CommandRequest> captor = ArgumentCaptor.forClass(CommandRequest.class);
         verify(commands).run(captor.capture());
         Path dir = cacheRoot.resolve("traceworks-pkg_9e3938e6-1_tool");
-        assertThat(mountAt(captor.getValue(), "/cache")).isEqualTo(new Mount(dir.toString(), "/cache", false));
+        assertThat(mountAt(captor.getValue(), "/cache")).isEqualTo(new Mount(dir.toString(), "/cache", false, true));
         assertThat(dir).isDirectory();
     }
 

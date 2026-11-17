@@ -507,4 +507,122 @@ class MainTest {
         assertThat(work.resolve("areas.jsonl")).doesNotExist();
         assertThat(work.resolve("areas-summary.json")).doesNotExist();
     }
+
+    // ---- what the register knows, as the file of the register folder: nothing cut, nothing left out ----
+
+    private static String registerFinding(String status, String severity, String rule, String subject, String evidence) {
+        Map<String, Object> finding = new java.util.LinkedHashMap<>();
+        finding.put("status", status);
+        finding.put("severity", severity);
+        finding.put("rule_key", rule);
+        finding.put("subject", subject);
+        finding.put("title", "t");
+        finding.put("evidence", evidence);
+        finding.put("disposition", null);
+        return Json.write(finding) + "\n";
+    }
+
+    private Map<?, ?> summary() throws IOException {
+        return (Map<?, ?>) Json.parse(Files.readString(work.resolve("areas-summary.json")));
+    }
+
+    /**
+     * A known finding whose code is gone is named gone by measurement, with the reason: its file is no source file
+     * any more, or the file has no area with its members. One whose area is still there is asked about. The subject
+     * of the first is longer than the 300 characters {@code {{ audit_findings }}} shows of one: the block cut it, and
+     * a cut subject can be compared with nothing, so such a finding stayed open in every run.
+     */
+    @Test
+    void find_namesAKnownFindingGone_whenItsFileOrItsMemberIsGone_andAsksAboutOneWhoseAreaIsThere() throws IOException {
+        Path rules = project();
+        String renamed = "app/src/main/java/io/github/old/p/A.java#" + "A.aVeryLongMemberName(String, String), ".repeat(9)
+                + "A.run(String)";
+        assertThat(renamed.length()).isGreaterThan(300);
+        String removed = "app/src/main/java/p/A.java#A.removed()";
+        Path known = Files.writeString(work.resolve("findings.jsonl"),
+                registerFinding("OPEN", "HIGH", "process_start", renamed, "old")
+                        + registerFinding("OPEN", "MEDIUM", "path_check", removed, "old")
+                        + registerFinding("OPEN", "HIGH", "process_start", A, "report_findings_verified:\n  x")
+                        + registerFinding("DISMISSED", "LOW", "process_start", "gone/Decided.java#D.m()", "e"));
+
+        assertThat(run("", find(rules, "--known-file", known.toString()))).as(err.toString()).isZero();
+
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(
+                Map.of("ruleKey", "process_start", "subject", renamed, "reason", "the file is gone"),
+                Map.of("ruleKey", "path_check", "subject", removed, "reason", "no area has this subject any more")));
+        assertThat(summary().get("knownUnowned")).isEqualTo(List.of());
+        assertThat(summary().get("knownMissing")).isEqualTo(0L);
+        assertThat((String) areaLines().getFirst().get("known_text")).as("one line a finding")
+                .isEqualTo("K1 | process_start | HIGH | report_findings_verified: x");
+
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        out.reset();
+        assertThat(run("[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[],\"known\":[{\"id\":\"K1\","
+                + "\"status\":\"gone\",\"reason\":\"Fixed.\"}]}\n[" + lines.get(1)
+                + "]: {\"area\":\"A002\",\"findings\":[]}", "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).isZero();
+        assertThat(out()).contains("FACT report_known_gone: 3\n", "FACT report_known_gone_file: 1\n",
+                "FACT report_known_gone_subject: 1\n", "FACT report_known_gone_answered: 1\n");
+        assertThat(Files.readString(work.resolve("report.md"))).contains("## Earlier findings that are gone (3)",
+                "| The file is gone | 1 |", "| No area has this subject any more | 1 |", "| The judge answered that it is gone | 1 |",
+                "- process_start `" + renamed + "`: the file is gone\n",
+                "- path_check `" + removed + "`: no area has this subject any more\n",
+                "- process_start `" + A + "`: Fixed.\n");
+    }
+
+    /**
+     * A known finding whose subject is no area's but whose members overlap an area of the same file is not named
+     * gone: the area regrouped, and the defect may still be there. It is handed to that area as a known finding, so
+     * the judge must answer for it. "Holds" states it under the area's subject and names the old subject gone; no
+     * answer keeps it open. Only a finding whose members no area of the file has is named gone without a model.
+     */
+    @Test
+    void find_handsAKnownFindingWhoseMembersOverlapAnArea_toThatArea_insteadOfNamingItGone() throws IOException {
+        Path rules = project();
+        String regrouped = "app/src/main/java/p/A.java#A.run(String), A.helper(Map<String, List<String>>)";
+        String renamed = "app/src/main/java/p/A.java#A.renamed()";
+        Path known = Files.writeString(work.resolve("findings.jsonl"),
+                registerFinding("OPEN", "HIGH", "process_start", regrouped, "old evidence")
+                        + registerFinding("OPEN", "MEDIUM", "process_start", renamed, "e"));
+
+        assertThat(run("", find(rules, "--known-file", known.toString()))).as(err.toString()).isZero();
+
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(
+                Map.of("ruleKey", "process_start", "subject", renamed, "reason", "no area has this subject any more")));
+        assertThat(areaLines().getFirst().get("known")).isEqualTo(List.of(Map.of("id", "K1", "rule", "process_start",
+                "subject", regrouped, "severity", "HIGH", "evidence", "old evidence")));
+        assertThat((String) areaLines().getFirst().get("known_text")).isEqualTo("K1 | process_start | HIGH | old evidence");
+
+        List<String> lines = Files.readAllLines(work.resolve("areas.jsonl"));
+        out.reset();
+        assertThat(run("[" + lines.get(0) + "]: {\"area\":\"A001\",\"findings\":[],\"known\":[{\"id\":\"K1\","
+                + "\"status\":\"holds\",\"severity\":\"high\",\"line\":4,\"quote\":\"new ProcessBuilder(c).start();\","
+                + "\"issue\":\"i\",\"fix\":\"f\"}]}\n[" + lines.get(1) + "]: {\"area\":\"A002\",\"findings\":[]}",
+                "report", "--areas", work.resolve("areas.jsonl").toString(), "--summary",
+                work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
+                work.resolve("report.md").toString())).as(err.toString()).isZero();
+        String envelope = out().lines().filter(l -> l.startsWith("<!-- traceworks:audit-result:v1 ")).findFirst()
+                .orElseThrow();
+        Map<?, ?> result = (Map<?, ?>) Json.parse(envelope.substring("<!-- traceworks:audit-result:v1 ".length(),
+                envelope.length() - " -->".length()));
+        assertThat(String.valueOf(result.get("findings"))).contains("subject=" + A).doesNotContain(regrouped);
+        assertThat(String.valueOf(result.get("gone"))).contains(regrouped, renamed);
+        assertThat(Files.readString(work.resolve("report.md")))
+                .contains("- process_start `" + regrouped + "`: restated under `" + A + "`\n");
+    }
+
+    /** The file is the register's own: a line that is no finding is refused, and the two forms do not go together. */
+    @Test
+    void find_refusesAKnownFileThatHoldsNoFindings_andTheBlockBesideTheFile() throws IOException {
+        Path rules = project();
+        Path known = Files.writeString(work.resolve("findings.jsonl"), "{\"status\":\"OPEN\"}\n");
+
+        assertThat(run("", find(rules, "--known-file", known.toString()))).isEqualTo(1);
+        assertThat(err.toString()).contains("areas: a line of the register's findings is no finding");
+        assertThat(run("", find(rules, "--known-file", known.toString(), "--known", known.toString()))).isEqualTo(2);
+        assertThat(err.toString()).contains("--known and --known-file do not go together");
+        Files.writeString(known, "");
+        assertThat(run("", find(rules, "--known-file", known.toString()))).as("a register that knows nothing").isZero();
+    }
 }

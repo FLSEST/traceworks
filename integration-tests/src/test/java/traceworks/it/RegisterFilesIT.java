@@ -2,6 +2,7 @@ package traceworks.it;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
+import java.util.List;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -135,6 +136,61 @@ class RegisterFilesIT extends IntegrationTest {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    /**
+     * An audit whose loop and whose child workflow read the register folder (package {@code combo-register};
+     * docs/registers.md, "The register folder of a run"): the items of a {@code foreach} and the step of a child run
+     * see the folder of the audit run, read-only, and the second run finds there what the first one reported. A
+     * child of an audit run has {@code {{ register_dir }}} whatever its own metadata say.
+     */
+    @Test
+    void anAuditBuiltByALoopAndAChild_feedsItsRegister() throws IOException {
+        file("a.txt");
+        file("b.txt");
+
+        Result first = traceworks.run("combo-register");
+
+        // Exit 0: the two steps that try to write the folder fail with on_failure: continue
+        assertThat(first.code()).as(first.describe()).isZero();
+        assertThat(first.out()).contains("register combo-register: 2 new, 0 resolved, 0 reopened, 2 open now");
+        RunFolder before = traceworks.folder(first);
+        assertThat(before.output("per_file")).as("nothing known yet, per item of the loop")
+                .isEqualTo("[a.txt]: known: 0\n[b.txt]: known: 0");
+        assertThat(before.output("child_reads")).as("the child sees the folder, with every file, all empty")
+                .isEqualTo("findings: 0\nfindings.jsonl items.jsonl previous-report.md resolved.jsonl");
+
+        Result second = traceworks.run("combo-register");
+
+        assertThat(second.code()).as(second.describe()).isZero();
+        assertThat(second.out()).contains("register combo-register: 0 new, 0 resolved, 0 reopened, 2 open now");
+        RunFolder folder = traceworks.folder(second);
+        // What the first run reported, in the loop and in the child: a child that got no folder, or an empty one of
+        // its own, would count 0 again (or fail its step: "this run has none")
+        assertThat(folder.output("per_file")).isEqualTo("[a.txt]: known: 1\n[b.txt]: known: 1");
+        assertThat(folder.output("child_reads")).startsWith("findings: 2\n");
+
+        for (RunFolder run : List.of(before, folder)) {
+            // No item of a loop and no child can change the folder: the mount is read-only for both
+            assertThat(run.stepStatus("loop_writes")).isEqualTo("FAILED");
+            assertThat(run.output("loop_writes")).contains("Read-only file system");
+            assertThat(run.stepStatus("child_writes")).isEqualTo("FAILED");
+            assertThat(run.output("child_writes")).contains("Read-only file system");
+            Path register = run.dir().resolve("register");
+            assertThat(register.resolve("probe-of-the-loop")).doesNotExist();
+            assertThat(register.resolve("probe-of-the-child")).doesNotExist();
+            // The record of the child's command names the mount: the folder of the audit run, read-only
+            String child = run.metadata("child_reads").path("subRunId").asText();
+            JsonNode mount = null;
+            for (JsonNode candidate : run.eventsOf(child, "step.command").getFirst().path("mounts")) {
+                if ("/register".equals(candidate.path("container").asText())) {
+                    mount = candidate;
+                }
+            }
+            assertThat(mount).as("the child's container got the register folder").isNotNull();
+            assertThat(mount.path("read_only").asBoolean()).isTrue();
+            assertThat(Path.of(mount.path("host").asText()).toRealPath()).isEqualTo(register.toRealPath());
         }
     }
 }

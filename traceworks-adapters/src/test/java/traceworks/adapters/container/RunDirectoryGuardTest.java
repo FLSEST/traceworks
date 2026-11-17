@@ -170,6 +170,53 @@ class RunDirectoryGuardTest {
                 .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /var/"));
     }
 
+    /**
+     * {@code /dev} is refused as a run's directory like the other system paths, but for a folder in
+     * {@code /dev/shm}: a memory disk is an honest place for a build's workspace or a package. What stays refused
+     * is {@code /dev/shm} itself, which holds the shared memory of other programs, the rest of {@code /dev}, and a
+     * path that only passes through {@code /dev/shm}.
+     */
+    @Test
+    void aFolderInTheMemoryDisk_isAllowedAsARunDirectory_theRestOfDevIsNot() throws IOException {
+        Path shm = Path.of("/dev/shm");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isDirectory(shm) && Files.isWritable(shm)
+                && shm.toRealPath().equals(shm), "no /dev/shm to write here");
+        Path build = Files.createTempDirectory(shm, "traceworks-test-");
+        try {
+            Path work = Files.createDirectories(build.resolve("work"));
+            assertThat(refusal(build)).as("a folder in /dev/shm").isEmpty();
+            assertThat(refusal(work)).as("a folder deeper in /dev/shm").isEmpty();
+            assertThat(guard.check(work).realPath()).isEqualTo(work.toString());
+            assertThat(refusal(build.resolve("../../pts"))).as("through /dev/shm into /dev")
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+            Path link = Files.createSymbolicLink(build.resolve("terminals"), Path.of("/dev/pts"));
+            assertThat(refusal(link)).as("a link in /dev/shm to /dev/pts")
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        } finally {
+            Files.deleteIfExists(build.resolve("terminals"));
+            Files.deleteIfExists(build.resolve("work"));
+            Files.deleteIfExists(build);
+        }
+        for (String refused : List.of("/dev", "/dev/shm", "/dev/pts", "/dev/shm/../pts")) {
+            assertThat(refusal(Path.of(refused))).as(refused)
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        }
+    }
+
+    /**
+     * A named pipe or a device node directly in a run's directory is a line to a process or to the host, as a
+     * socket there is: the directory is refused, by the same one-level rule.
+     */
+    @Test
+    void aDirectoryThatDirectlyHoldsANamedPipe_isRefused() throws Exception {
+        Path project = Files.createDirectories(outside.resolve("project/sub"));
+        assertThat(new ProcessBuilder("mkfifo", project.resolve("pipe").toString()).inheritIO().start().waitFor())
+                .isZero();
+
+        assertThat(refusal(project)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+        assertThat(refusal(project.getParent())).as("two levels down is not looked at").isEmpty();
+    }
+
     /** The storage of a runtime holds the images and containers later runs use. */
     @Test
     void theRuntimesStorage_isRefused() throws IOException {
@@ -347,6 +394,54 @@ class RunDirectoryGuardTest {
             assertThat(linked.check(refused).refusal()).as(refused.toString()).isNotNull()
                     .contains("what runs leave behind");
         }
+    }
+
+    /**
+     * What the start check of a run asks of a writable mount a workflow writes out: the home's
+     * {@code writable_mounts}, by the real path, as the mount check asks it again when the step runs.
+     */
+    @Test
+    void aWritableMountAWorkflowWritesOut_isRefused_unlessAListedFolderHoldsIt() throws IOException {
+        Path out = Files.createDirectories(home.resolve("out"));
+        Files.createDirectories(home.resolve("documents"));
+        RunDirectoryGuard listing = new RunDirectoryGuard(traceworks.adapters.config.HomeLayout.of(traceworksHome)
+                .withWritableMounts(List.of(out)), home, Map.of());
+
+        assertThat(guard.writableMountRefusal("~/out")).as("without the setting")
+                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts",
+                        traceworksHome.resolve("traceworks.json").toString()));
+        assertThat(listing.writableMountRefusal("~/out")).isEmpty();
+        assertThat(listing.writableMountRefusal(out.resolve("reports").toString())).isEmpty();
+        assertThat(listing.writableMountRefusal("~/documents")).isPresent();
+        assertThat(listing.writableMountRefusal(out + "/../documents")).as("by the real path").isPresent();
+    }
+
+    /**
+     * The same question for the mount of a step that may write its workspace: the workspace and a folder in it,
+     * by the real path, need no listed folder, since the step writes them anyway. A folder that holds the
+     * workspace, a folder beside it and a link that leads out of it do; and without a writable workspace the
+     * question is the one above.
+     */
+    @Test
+    void aWritableMountAWorkflowWritesOut_needsNoListedFolder_inTheWorkspaceItsStepMayWrite() throws IOException {
+        Path project = Files.createDirectories(home.resolve("work/project"));
+        Path documents = Files.createDirectories(home.resolve("documents"));
+        Files.createSymbolicLink(project.resolve("link-out"), documents);
+        String workspace = project.toRealPath().toString();
+        String outside = documents.toRealPath().toString();
+
+        assertThat(guard.writableMountRefusal("~/work/project", workspace)).as("the workspace").isEmpty();
+        assertThat(guard.writableMountRefusal("~/work/project/out/new", workspace)).as("in it").isEmpty();
+        assertThat(guard.writableMountRefusal("~/work/project/../project/out", workspace)).as("by the real path")
+                .isEmpty();
+        assertThat(guard.writableMountRefusal("~/work", workspace)).as("a folder that holds it")
+                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts"));
+        assertThat(guard.writableMountRefusal("~/work/project-2", workspace)).as("beside it").isPresent();
+        assertThat(guard.writableMountRefusal("~/work/project/link-out", workspace)).as("a link out of it")
+                .hasValueSatisfying(r -> assertThat(r).contains(outside));
+        assertThat(guard.writableMountRefusal("~/work/project/out", null)).as("a step that only reads its workspace")
+                .isPresent();
+        assertThat(guard.writableMountRefusal("~/work/project/out", " ")).isPresent();
     }
 
     @Test

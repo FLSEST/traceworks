@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a11",
+  "name": "IT combo-model-text receive",
+  "description": "Gets what its parent's last step put out, text a model wrote, as a value and prints it as it is.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "receive",
+      "config": {
+        "values": {
+          "HANDED": "{{ previous_output }}"
+        },
+        "command": "printf '%s\\n' \"$HANDED\""
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a50",
+  "name": "IT combo-approval",
+  "description": "A foreach, a child workflow and a switch case, each adding a line to a file in the scratch directory, then an approval, then a step that reads every output and the file. The input approval_mode=auto answers the approval without asking, for a twin run that does not park.",
+  "default_context": {
+    "mode": "fast",
+    "approval_mode": "ask"
+  },
+  "blocks": [
+    {
+      "type": "foreach",
+      "name": "gather",
+      "config": {
+        "execution_mode": "shell",
+        "items": [
+          "a",
+          "b"
+        ],
+        "command": "echo item {{ item }} >> \"{{ scratch_dir }}/trail.txt\"; echo gathered {{ item }}"
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "child",
+      "config": {
+        "workflow_id": "./child"
+      }
+    },
+    {
+      "type": "switch",
+      "name": "route",
+      "config": {
+        "expression": "{{ mode }}",
+        "cases": [
+          {
+            "value": "fast",
+            "blocks": [
+              {
+                "type": "shell",
+                "name": "case_fast",
+                "config": {
+                  "command": "echo case fast >> \"{{ scratch_dir }}/trail.txt\"; echo routed fast"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "approval",
+      "name": "release",
+      "config": {
+        "question": "Release what the steps gathered?",
+        "options": [
+          "Yes",
+          "No"
+        ],
+        "on_no": "fail",
+        "mode": "{{ approval_mode }}",
+        "auto_answer": "Yes"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "final",
+      "config": {
+        "values": {
+          "GATHERED": "{{ block.gather.output }}",
+          "CHILD": "{{ block.child.output }}",
+          "ROUTED": "{{ block.route.output }}",
+          "ANSWER": "{{ approval_answer }}"
+        },
+        "command": "printf 'gathered=%s\\nchild=%s\\nrouted=%s\\nanswer=%s\\n' \"$GATHERED\" \"$CHILD\" \"$ROUTED\" \"$ANSWER\"; cat \"{{ scratch_dir }}/trail.txt\""
+      }
+    }
+  ]
+}

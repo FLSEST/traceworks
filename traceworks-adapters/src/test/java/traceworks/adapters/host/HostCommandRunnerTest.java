@@ -705,6 +705,123 @@ class HostCommandRunnerTest {
         assertThat(result.durationMs()).isLessThan(4_000);
     }
 
+    /**
+     * A command gets SIGTERM first, so that it can clean up, and the runner waits for its end within the grace
+     * before it returns: what the command leaves behind is there when the step's result is.
+     */
+    @Test
+    void run_timeout_waitsForACommandThatCleansUpOnSigterm_beforeItReturns(@TempDir Path dir) {
+        Path started = dir.resolve("started");
+        Path cleanedUp = dir.resolve("cleaned-up");
+
+        CommandResult result = run("exec >/dev/null 2>&1; trap 'trap \"\" TERM; sleep 1; touch \"" + cleanedUp
+                + "\"; exit 0' TERM; sleep 60 & touch '" + started + "'; wait", 1);
+
+        assertThat(started).as("the command ran").exists();
+        assertThat(result.timedOut()).isTrue();
+        assertThat(cleanedUp).as("the command had ended when the runner returned").exists();
+    }
+
+    /**
+     * After a timeout the result holds the output to its end, also what a process of the command writes while it
+     * ends on SIGTERM: here a child that prints a line a moment after the command itself is gone.
+     */
+    @Test
+    void run_timeout_keepsWhatTheCommandsChildrenPrintWhileTheyEnd() {
+        CommandResult result = run("( trap 'sleep 0.4; echo cleaned-up; exit 0' TERM; sleep 60 & wait ) & "
+                + "echo started; exec sleep 60", 1);
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.stdout()).isEqualTo("started\ncleaned-up\n");
+    }
+
+    /**
+     * The result of a command that ended by itself holds its output to the end, not what the reader happened to have
+     * at that moment: here the last two lines are written after the command's end, by a child it left behind. The
+     * command ends right after its own last line, when the reader may be between two reads, and the child's lines come
+     * apart: the JDK would close the stream at the command's end, or after the next read (BoundedOutput#drain).
+     */
+    @Test
+    void run_readsTheOutputToItsEnd_beforeItReturnsTheResult() {
+        CommandResult result = run("(sleep 0.4; echo late; sleep 0.2; echo later) & echo early", 30);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).isEqualTo("early\nlate\nlater\n");
+        assertThat(result.outputCut()).as("read to its end: no cut").isNull();
+    }
+
+    /**
+     * A process the command left behind that never stops writing is read for the bound after the command's end, not
+     * for its life: the result comes then, with what was written until then, and the process finds its output closed.
+     */
+    @Test
+    void run_ofACommandThatLeavesAWriterBehind_returnsAfterTheBound_andTheWriterFindsItsOutputClosed(
+            @TempDir Path dir) throws Exception {
+        Path closed = dir.resolve("found-its-output-closed");
+        long start = System.nanoTime();
+
+        // "early" is printed before the writer starts: started first, the writer could print ahead of it
+        CommandResult result = run("echo early; (trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null; "
+                + "touch '" + closed + "') &", 30);
+
+        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).startsWith("early\ntick\n");
+        assertThat(result.outputCut()).as("the result says that the reading ended at the bound").isEqualTo(
+                new traceworks.core.port.CommandRunner.OutputCut(List.of(CommandResult.STDOUT),
+                        HostCommandRunner.AFTER_END_MILLIS));
+        assertThat(millis).as("the bound, not the writer's life, which has no end")
+                .isBetween(HostCommandRunner.AFTER_END_MILLIS, 30_000L);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!Files.exists(closed) && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertThat(closed).as("the writer found its output closed").exists();
+    }
+
+    /**
+     * The same for output that goes through a process substitution, which bash does not wait for: the line arrives
+     * after bash has ended.
+     */
+    @Test
+    void run_readsWhatAProcessSubstitutionWritesAfterTheCommandEnded() {
+        CommandResult result = run("exec > >(sleep 0.2; cat); echo through", 30);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.stdout()).isEqualTo("through\n");
+    }
+
+    /**
+     * An interrupt of the step's thread ends the wait and the command: exit code 130 with {@code Command
+     * interrupted}, and the interrupt flag stays set for the caller.
+     */
+    @Test
+    void run_interrupted_endsTheCommand_withExitCode130_andKeepsTheInterruptFlag(@TempDir Path dir) throws Exception {
+        Path started = dir.resolve("started");
+        Path pid = dir.resolve("pid");
+        AtomicReference<CommandResult> result = new AtomicReference<>();
+        AtomicReference<Boolean> interruptedAfterReturn = new AtomicReference<>();
+
+        Thread worker = Thread.ofPlatform().start(() -> {
+            result.set(run("echo $$ > '" + pid + "'; touch '" + started + "'; exec sleep 30", 60));
+            interruptedAfterReturn.set(Thread.currentThread().isInterrupted());
+        });
+        awaitFile(started);
+        worker.interrupt();
+        worker.join(15_000);
+
+        assertThat(worker.isAlive()).as("still waiting after the interrupt").isFalse();
+        assertThat(result.get()).as("the result of the interrupted run").isNotNull();
+        assertThat(result.get().exitCode()).isEqualTo(130);
+        assertThat(result.get().stdout()).isEqualTo("Command interrupted");
+        assertThat(result.get().outputCut()).as("the output was not read to its end, and the result says so")
+                .isEqualTo(new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), 0));
+        assertThat(result.get().timedOut()).isFalse();
+        assertThat(interruptedAfterReturn.get()).as("interrupt flag still set for the caller").isTrue();
+        assertThat(BackgroundChild.endsWithin(Long.parseLong(Files.readString(pid).trim()), Duration.ofSeconds(5)))
+                .as("the command was ended").isTrue();
+    }
+
     // --- cancel ---
 
     /**
@@ -743,6 +860,50 @@ class HostCommandRunnerTest {
         assertThat(tracker.started()).hasSize(1);
         assertThat(tracker.finished()).hasSize(1);
         assertThat(tracker.finished().getFirst()).isSameAs(tracker.started().getFirst());
+    }
+
+    /**
+     * A writer that is out of reach of the stop (its parent had ended) holds the output after a cancel: the bound is
+     * the one after a stop, as after a timeout, not the one after a command that ended by itself.
+     */
+    @Test
+    void run_cancelled_readsTheOutputForTheBoundAfterAStop_andMarksTheCut(@TempDir Path dir) throws Exception {
+        ExecutionContext context = ExecutionContext.builder().workflowRunId("run-1").build();
+        Path started = dir.resolve("started");
+        AtomicReference<CommandResult> result = new AtomicReference<>();
+
+        Thread run = Thread.ofVirtual().start(() -> result.set(ProcessTracking.bind(context.processTracker(),
+                () -> run("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); touch '" + started + "'; sleep 30", 20))));
+        awaitFile(started);
+        context.cancel();
+        run.join(30_000);
+
+        assertThat(run.isAlive()).as("command still running after the cancel").isFalse();
+        assertThat(result.get().outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
+    }
+
+    /** The same after a timeout: the command is timed out as ever, and the cut is marked with the bound after a stop. */
+    @Test
+    void run_timeout_withAWriterOutOfReach_isTimedOut_andMarksTheCutAfterTheShorterBound() {
+        CommandResult result = run("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); sleep 60", 1);
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.exitCode()).isEqualTo(124);
+        assertThat(result.stdout()).startsWith("tick\n");
+        assertThat(result.outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
+    }
+
+    /** And after an output beyond the limit: both are named, the limit as truncated and the bound as the cut. */
+    @Test
+    void run_outputBeyondTheLimit_withAWriterOutOfReach_namesTheLimitAndTheCut() {
+        CommandResult result = limitedTo(64 * 1024).run(shell("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); exec yes", null, 120));
+
+        assertThat(result.exitCode()).isEqualTo(CommandRunner.OUTPUT_LIMIT_EXIT_CODE);
+        assertThat(result.truncatedStreams()).containsExactly("stdout");
+        assertThat(result.outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
     }
 
     @Test

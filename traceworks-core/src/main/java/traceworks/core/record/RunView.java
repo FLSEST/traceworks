@@ -47,6 +47,14 @@ import java.util.Map;
  * @param register        what the register of an audit workflow handed the run at its start, as {@code run.started}
  *                        recorded it: the head of the register's log and the files of the run's register folder;
  *                        {@code null} for a workflow that is no audit and a record of an earlier version
+ * @param ledgerStart     whether {@code run.started} says that the ledger noted the start of the run
+ *                        ({@code ledger_start}); not for a record of a version that noted no start, and not for a
+ *                        child run, which has no entry of its own
+ * @param runStarted      the SHA-256 of the {@code run.started} line, which the start entry of the ledger and the
+ *                        manifest name; {@code null} for a child run
+ * @param recordsOutputCut whether the record can name a cut of an output ({@code output_cut}): its
+ *                        {@code run.started} and every {@code run.resumed} say so in {@code records}. Not for a
+ *                        record an earlier version wrote or resumed, whose silence about a cut says nothing
  */
 public record RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                       String packageCommit, Boolean packageDirty,
@@ -56,7 +64,33 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
-                      List<ModelPick> modelChoices, RegisterHandover register) {
+                      List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                      String runStarted, boolean recordsOutputCut) {
+
+    /**
+     * A view of a run whose record does not say that the ledger noted its start, nor whether it names a cut of an
+     * output: an earlier version wrote it.
+     */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices, RegisterHandover register) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, register, false, null, false);
+    }
+
+    /** One line about the start entry: whether the record says the ledger noted the start of the run. */
+    public String ledgerStartLine() {
+        return ledgerStart ? "start noted in the ledger: yes (traceworks verify compares the entry)"
+                : "start noted in the ledger: no (recorded by a version that noted no start)";
+    }
 
     /** A view of a run of a workflow that is no audit. */
     public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
@@ -159,6 +193,40 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
      * @param denied      those that were denied: an observation, which fails no step and changes no gate
      */
     public record Egress(int commands, int connections, int denied) {}
+
+    /**
+     * How many commands of the run have an output whose reading ended at its bound, child runs and earlier attempts
+     * of a step included: an observation, which fails no step and changes no gate.
+     */
+    public int outputCuts() {
+        int cuts = 0;
+        for (StepView step : steps) {
+            cuts += cuts(step.commands());
+            for (var attempt : step.earlierAttempts()) {
+                cuts += cuts(attempt.commands());
+            }
+        }
+        for (RunView child : children.values()) {
+            cuts += child.outputCuts();
+        }
+        return cuts;
+    }
+
+    private static int cuts(List<CommandView> commands) {
+        return (int) commands.stream().filter(command -> command.outputCut() != null).count();
+    }
+
+    /**
+     * How many of {@link #outputCuts()} are commands of the latest attempt of a step of this run: the ones
+     * {@code show} marks under their step. The others are of earlier attempts and of child runs.
+     */
+    public int outputCutsOfLatestAttempts() {
+        int cuts = 0;
+        for (StepView step : steps) {
+            cuts += cuts(step.commands());
+        }
+        return cuts;
+    }
 
     /** The egress of the whole run. */
     public Egress egress() {
