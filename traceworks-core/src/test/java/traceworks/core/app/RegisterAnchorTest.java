@@ -198,6 +198,31 @@ class RegisterAnchorTest {
             }
 
             @Override
+            public String recordStart(String runId, byte[] startJson) {
+                return fixture.ledger.recordStart(runId, startJson);
+            }
+
+            @Override
+            public java.util.Optional<byte[]> findStart(String runId) {
+                return fixture.ledger.findStart(runId);
+            }
+
+            @Override
+            public traceworks.core.port.LedgerRuns runs() {
+                return fixture.ledger.runs();
+            }
+
+            @Override
+            public void acknowledge(String runId, byte[] line) {
+                fixture.ledger.acknowledge(runId, line);
+            }
+
+            @Override
+            public List<String> changes(String runId) {
+                return fixture.ledger.changes(runId);
+            }
+
+            @Override
             public List<RegisterAnchor> registerAnchors(String key) {
                 throw new IllegalStateException("git show failed: no git");
             }
@@ -224,6 +249,31 @@ class RegisterAnchorTest {
             @Override
             public java.util.Optional<byte[]> find(String runId) {
                 return fixture.ledger.find(runId);
+            }
+
+            @Override
+            public String recordStart(String runId, byte[] startJson) {
+                return fixture.ledger.recordStart(runId, startJson);
+            }
+
+            @Override
+            public java.util.Optional<byte[]> findStart(String runId) {
+                return fixture.ledger.findStart(runId);
+            }
+
+            @Override
+            public traceworks.core.port.LedgerRuns runs() {
+                return fixture.ledger.runs();
+            }
+
+            @Override
+            public void acknowledge(String runId, byte[] line) {
+                fixture.ledger.acknowledge(runId, line);
+            }
+
+            @Override
+            public List<String> changes(String runId) {
+                return fixture.ledger.changes(runId);
             }
 
             @Override

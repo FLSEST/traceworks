@@ -32,6 +32,21 @@ class FileEventLogTest {
         }
     }
 
+    /** The first line alone, for a reader that needs run.started only; a line without its line feed is none. */
+    @Test
+    void first_isTheFirstCompleteLine_orNone() throws IOException {
+        FileRunStore store = new FileRunStore(home.resolve("runs"));
+        Path log;
+        try (FileStoredRun run = (FileStoredRun) store.create("run-1", Instant.now())) {
+            assertThat(run.events().first()).isEmpty();
+            log = Path.of(run.location()).resolve("events.jsonl");
+            Files.write(log, b("{\"seq\":0"));
+            assertThat(run.events().first()).as("no line feed yet").isEmpty();
+            Files.write(log, b("}\n{\"seq\":1}\n{\"se"), java.nio.file.StandardOpenOption.APPEND);
+            assertThat(run.events().first()).hasValue(b("{\"seq\":0}"));
+        }
+    }
+
     /** Review C, L8: verify reads what follows the last line feed, without the writer lock and without cutting it. */
     @Test
     void tail_isWhatFollowsTheLastLineFeed_andStays() throws IOException {
