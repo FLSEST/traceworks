@@ -269,17 +269,24 @@ class CombinationsIT extends IntegrationTest {
                 .containsExactly("RED");
         assertThat(folder.eventsOf(red, "run.finished").getFirst().path("gate").path("status").asText())
                 .isEqualTo("RED");
-        assertThat(folder.ownEvents("gate.reported")).as("no gate of the run itself").isEmpty();
-        assertThat(folder.only("run.finished").path("gate").path("status").asText("")).isEmpty();
-        assertThat(run.out()).doesNotContain("RED (");
+        assertThat(folder.ofStep("gate.reported", folder.stepIndex("red_child")))
+                .as("the step that copied the child's marker reported no gate").isEmpty();
+        // ... until a step of the run itself states it (docs/cli.md, "When a step fails"): the one gate of the run
+        // is that step's. Without it the run would end with no gate at all, which the engine test pins
+        assertThat(folder.output("carry_gate")).startsWith("gate_status: RED\ngate_category: build");
+        assertThat(folder.ownEvents("gate.reported")).extracting(e -> e.path("step").asInt())
+                .containsExactly(folder.stepIndex("carry_gate"));
+        assertThat(folder.only("run.finished").path("gate").path("status").asText("")).isEqualTo("RED");
+        assertThat(run.out()).contains("gate    RED (build)");
 
-        // show: each step with the status its holder gave it, each child run with its own, and no gate
+        // show: each step with the status its holder gave it, each child run with its own, and the carried gate
         Result show = traceworks.exec("show", folder.id());
         assertThat(show.code()).as(show.describe()).isZero();
         assertThat(show.out()).contains("Status    COMPLETED");
         for (String step : List.of("sw +\\[switch\\] +FAILED", "child_fails +\\[sub-workflow\\] +FAILED",
                 "each_child +\\[foreach\\] +FAILED", "loop_fails +\\[while\\] +FAILED",
                 "times_out +\\[retry\\] +FAILED", "red_child +\\[sub-workflow\\] +COMPLETED",
+                "carry_gate +\\[shell\\] +COMPLETED",
                 "the_end +\\[shell\\] +COMPLETED")) {
             assertThat(show.out()).as(show.describe()).containsPattern("(?m)^  \\d+ +" + step + " ");
         }
@@ -293,6 +300,6 @@ class CombinationsIT extends IntegrationTest {
                 .containsPattern("(?m)^      child run " + red.substring(0, 8)
                         + " COMPLETED_WITH_ERRORS  gate RED \\(build\\)$")
                 .containsPattern("(?m)^      case fast: sw_fails \\[shell\\], sw_never \\[shell\\]$");
-        assertThat(show.out()).doesNotContainPattern("(?m)^Gate ");
+        assertThat(show.out()).containsPattern("(?m)^Gate      RED \\(build\\)$");
     }
 }

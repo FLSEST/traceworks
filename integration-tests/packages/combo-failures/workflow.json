@@ -3,7 +3,7 @@
   "format_version": 1,
   "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a60",
   "name": "IT combo-failures",
-  "description": "A failure inside each block that holds a command or blocks, each with on_failure: continue: a switch case, a child after a good step, a foreach of children with one that fails, a while whose second pass fails, a retry of a step that times out, and a child whose checked command fails; then a step that shows the run got to its end.",
+  "description": "A failure inside each block that holds a command or blocks, each with on_failure: continue: a switch case, a child after a good step, a foreach of children with one that fails, a while whose second pass fails, a retry of a step that times out, a child whose checked command fails, and a step that carries that child's gate up; then a step that shows the run got to its end.",
   "default_context": {
     "mode": "fast"
   },
@@ -90,6 +90,16 @@
       "config": {
         "workflow_id": "./red",
         "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "carry_gate",
+      "config": {
+        "values": {
+          "CHILD": "{{ block.red_child.output }}"
+        },
+        "command": "printf '%s\\n' \"$CHILD\" | grep -E '^gate_(status|category|description):' || true"
       }
     },
     {

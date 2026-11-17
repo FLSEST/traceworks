@@ -203,7 +203,7 @@ class PauseIT extends IntegrationTest {
         Result run = running.await(120);
 
         // Exit 5 after the child's step: a pause that cut the container would fail the step (its command ends 0
-        // only when it found the file), and one that waited in the process would never exit
+        // and prints "child done" only when it found the file), and one that waited in the process would never exit
         assertThat(run.code()).as(run.describe()).isEqualTo(5);
         assertThat(run.status()).isEqualTo("PARKED");
         assertThat(run.out()).contains("paused before the next step: every step that started is finished.",
@@ -268,5 +268,81 @@ class PauseIT extends IntegrationTest {
         assertThat(folder.eventsOf(again, "run.finished")).extracting(e -> e.path("status").asText())
                 .containsExactly("COMPLETED");
         assertThat(folder.output("after")).isEqualTo("after the child");
+    }
+
+    /** The lines of {@code name} in the scratch directory of the one run in the home; none before it exists. */
+    private List<String> scratchLines(String name) {
+        try {
+            for (RunFolder folder : traceworks.folders()) {
+                Path file = folder.dir().resolve("scratch").resolve(name);
+                if (Files.isRegularFile(file)) {
+                    return Files.readAllLines(file);
+                }
+            }
+        } catch (IOException | java.io.UncheckedIOException e) {
+            // read while the step writes, or while the run folder is made: the next look sees it
+        }
+        return List.of();
+    }
+
+    /**
+     * SIGTERM inside the second pass of a {@code while} (package {@code interrupt-while}; docs/cli.md, "resume"):
+     * a {@code while} keeps nothing a resume could take over, so the resumed loop starts at its first pass. The
+     * body adds a line to a file in the scratch directory at each start: two before the signal, three after the
+     * resume. A resume that went on at the pass in flight would leave four lines, one that skipped the loop two.
+     */
+    @Test
+    void sigtermInsideAWhile_leavesTheRunInterrupted_andTheResumeRunsEveryPassAgain() throws Exception {
+        Traceworks.Running running = traceworks.startRun("interrupt-while");
+        await(() -> scratchLines("passes.txt").size() == 2, "the second pass to start");
+
+        running.terminate();
+        Result run = running.await(120);
+
+        assertThat(run.code()).as("128 + SIGTERM: " + run.describe()).isEqualTo(143);
+        RunFolder folder = theRun();
+        assertThat(folder.ownEvents("run.finished")).isEmpty();
+        Containers.assertNoneLeft(traceworks.environment().runtime(), java.util.Set.of(folder.id()));
+        assertThat(scratchLines("passes.txt")).hasSize(2);
+
+        Files.createFile(traceworks.workspace().resolve("go"));
+        Result resumed = traceworks.exec("resume", folder.id());
+
+        assertThat(resumed.code()).as(resumed.describe()).isZero();
+        assertThat(scratchLines("passes.txt")).as("two starts before the signal, then all three passes again")
+                .hasSize(5);
+        assertThat(folder.output("loop")).isEqualTo("[iteration 1]: pass 3\n[iteration 2]: pass 4\n"
+                + "[iteration 3]: pass 5");
+        assertThat(folder.metadata("loop").path("iterationCount").asInt()).isEqualTo(3);
+        assertThat(folder.output("after")).isEqualTo("passes: 5");
+    }
+
+    /**
+     * SIGTERM inside the second attempt of a {@code retry} of two attempts (package {@code interrupt-retry}): the
+     * resumed step has both its attempts again. Its command passes at its fourth start ever, so a resume that went
+     * on counting (one attempt used, one cut) would have none left and fail the run.
+     */
+    @Test
+    void sigtermInsideARetry_leavesTheRunInterrupted_andTheResumeHasEveryAttemptAgain() throws Exception {
+        Traceworks.Running running = traceworks.startRun("interrupt-retry");
+        await(() -> scratchLines("attempts.txt").size() == 2, "the second attempt to start");
+
+        running.terminate();
+        Result run = running.await(120);
+
+        assertThat(run.code()).as("128 + SIGTERM: " + run.describe()).isEqualTo(143);
+        RunFolder folder = theRun();
+        assertThat(folder.ownEvents("run.finished")).isEmpty();
+        Containers.assertNoneLeft(traceworks.environment().runtime(), java.util.Set.of(folder.id()));
+
+        Files.createFile(traceworks.workspace().resolve("go"));
+        Result resumed = traceworks.exec("resume", folder.id());
+
+        assertThat(resumed.code()).as(resumed.describe()).isZero();
+        assertThat(scratchLines("attempts.txt")).as("two starts before the signal, two attempts after the resume")
+                .hasSize(4);
+        assertThat(folder.output("flaky")).isEqualTo("attempt 4 passes");
+        assertThat(folder.metadata("flaky").path("attempts").asInt()).as("counted from one again").isEqualTo(2);
+        assertThat(folder.output("after")).isEqualTo("attempts: 4");
     }
 }

@@ -1,0 +1,26 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a90",
+  "name": "IT interrupt-while",
+  "description": "A while of three passes, each of which adds a line to a file in the scratch directory; the second pass ever waits for a file of the test. For an interrupt inside the loop: the file says how often the body ran.",
+  "blocks": [
+    {
+      "type": "while",
+      "name": "loop",
+      "config": {
+        "execution_mode": "shell",
+        "max_iterations": 3,
+        "timeout_seconds": 120,
+        "command": "echo pass >> \"{{ scratch_dir }}/passes.txt\"; n=$(wc -l < \"{{ scratch_dir }}/passes.txt\"); if [ $n -eq 2 ]; then w=0; while [ ! -e \"{{ project_path }}/go\" ] && [ $w -lt 900 ]; do sleep 0.1; w=$((w + 1)); done; test -e \"{{ project_path }}/go\" || exit 9; fi; echo pass $n"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo passes: $(wc -l < \"{{ scratch_dir }}/passes.txt\")"
+      }
+    }
+  ]
+}

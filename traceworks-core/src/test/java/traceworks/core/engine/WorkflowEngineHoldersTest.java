@@ -39,9 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <li>a pause inside a {@code while} or a {@code retry} stops neither: the loop runs to its own end, the retry
  *       until an attempt completes or its attempts are used up, and the run parks after that step (docs/cli.md,
  *       "pause"). Only a top-level {@code foreach} parks between two of its passes;</li>
- *   <li>a run that was interrupted inside one of them resumes from the checkpoint before the block, so the
- *       {@code while} starts at its first iteration and the {@code retry} at its first attempt again (docs/cli.md,
- *       "resume"): the record holds nothing of either that a resume could take over;</li>
+ *   <li>(what an interrupt inside one of them costs is in {@code core.app.InterruptTest}, with a real record and
+ *       a real resume, and in {@code PauseIT} with containers;)</li>
  *   <li>a gate a child run reports, by a marker or by a failed {@code checked_command}, is the child's: it is in the
  *       parent's events under the child's run id and sets no gate of the parent (docs/cli.md, "When a step
  *       fails").</li>
@@ -117,50 +116,6 @@ class WorkflowEngineHoldersTest {
 
         assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(second.commands.commands()).as("no attempt runs again").containsExactly("./after");
-    }
-
-    /**
-     * An interrupted run has no checkpoint inside the block: the resume starts from the one before it. Breaks when a
-     * resume takes over iterations or attempts, which nothing in the record could vouch for.
-     */
-    @Test
-    void aRunInterruptedInsideAWhileOrARetry_runsTheWholeBlockAgain() {
-        // The first process: only its checkpoint before the block is used, as after a kill inside the block
-        Session killedInTheLoop = new Session();
-        AtomicInteger passes = new AtomicInteger();
-        killedInTheLoop.commands.on("./more", request -> FakeCommandRunner.exit(passes.get() < 3 ? 0 : 1, ""));
-        killedInTheLoop.commands.on("./pass", request -> FakeCommandRunner.ok("pass " + passes.incrementAndGet()));
-        killedInTheLoop.commands.on("./after", "after done");
-        killedInTheLoop.run(whileThenAfter());
-        Checkpoint beforeTheLoop = killedInTheLoop.events.of(Checkpoint.class).getFirst();
-        assertThat(beforeTheLoop.nextPosition()).isZero();
-
-        Session resumedLoop = new Session();
-        AtomicInteger again = new AtomicInteger();
-        resumedLoop.commands.on("./more", request -> FakeCommandRunner.exit(again.get() < 3 ? 0 : 1, ""));
-        resumedLoop.commands.on("./pass", request -> FakeCommandRunner.ok("pass " + again.incrementAndGet()));
-        resumedLoop.commands.on("./after", "after done");
-        RunOutcome loop = resumedLoop.resume(whileThenAfter(), beforeTheLoop);
-
-        assertThat(loop.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(resumedLoop.commands.commands()).as("every iteration again, from the first")
-                .containsExactly("./more", "./pass", "./more", "./pass", "./more", "./pass", "./more", "./after");
-
-        Session killedInTheRetry = new Session();
-        killedInTheRetry.commands.on("./flaky", "passes").on("./after", "after done");
-        killedInTheRetry.run(retryThenAfter());
-        Checkpoint beforeTheRetry = killedInTheRetry.events.of(Checkpoint.class).getFirst();
-
-        Session resumedRetry = new Session();
-        AtomicInteger attempts = new AtomicInteger();
-        resumedRetry.commands.on("./flaky", request -> attempts.incrementAndGet() < 3
-                ? FakeCommandRunner.exit(1, "fails") : FakeCommandRunner.ok("passes")).on("./after", "after done");
-        RunOutcome retry = resumedRetry.resume(retryThenAfter(), beforeTheRetry);
-
-        assertThat(retry.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(retry.steps().getFirst().getMetadata()).as("the attempts are counted from one again")
-                .containsEntry("attempts", 3).containsEntry("maxAttempts", 4);
-        assertThat(resumedRetry.commands.commands()).containsExactly("./flaky", "./flaky", "./flaky", "./after");
     }
 
     /**

@@ -156,4 +156,92 @@ class InterruptTest {
         assertThat(fx.containers.leftoversRemoved()).contains(id);
         assertThat(inContainers.view(id).status()).isEqualTo(RunStatus.INTERRUPTED);
     }
+
+    /** The {@code n}-th command that starts with {@code prefix} runs until its process is killed. */
+    private void theNthRunsUntilKilled(String prefix, int n, java.util.function.IntFunction<CommandResult> otherwise) {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        fx.commands.on(prefix, req -> {
+            int call = calls.incrementAndGet();
+            if (call != n) {
+                return otherwise.apply(call);
+            }
+            started.countDown();
+            long deadline = System.nanoTime() + AppFixture.WAIT.toNanos();
+            while (!ProcessTracking.current().cancelled() && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
+            return new CommandResult(143, "half done", "", 1, false);
+        });
+    }
+
+    /**
+     * A {@code while} keeps nothing a resume could take over: interrupted inside its second iteration, it starts at
+     * its first one again. The body's side effect happens five times for a loop of three: twice before the
+     * interrupt, the second one cut, and three times after it (docs/cli.md, "resume"). Breaks when a resume skips
+     * iterations, which nothing in the record vouches for, or when it ran the loop from where a counter stood.
+     */
+    @Test
+    void interrupt_insideAWhile_runsEveryIterationAgain() throws Exception {
+        Path pkg = Path.of("/pkg/while");
+        fx.packages.put(pkg, """
+                {"id": "wf-while", "name": "While", "blocks": [
+                  {"type": "while", "name": "loop", "config": {"execution_mode": "shell", "max_iterations": 3,
+                   "command": "./pass"}},
+                  {"type": "shell", "name": "after", "config": {"command": "./after"}}
+                ]}""");
+        fx.commands.on("./after", "after done");
+        theNthRunsUntilKilled("./pass", 2, call -> FakeCommandRunner.ok("pass " + call));
+        Background<RunResult> run = inBackground(() -> services.start(request(pkg), null, null));
+        assertThat(started.await(AppFixture.WAIT.toSeconds(), TimeUnit.SECONDS)).isTrue();
+        String id = fx.store.runIds().getFirst();
+
+        services.interruptActiveRuns();
+        run.failure();
+        assertThat(services.view(id).status()).isEqualTo(RunStatus.INTERRUPTED);
+        assertThat(ran("./pass")).as("one iteration finished, the second was in flight").isEqualTo(2);
+
+        RunResult resumed = services.resume(resumeOf(id), null, null);
+
+        assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(ran("./pass")).as("all three iterations ran again, the finished one too").isEqualTo(5);
+        assertThat(ran("./after")).isEqualTo(1);
+        assertThat(fx.text(id, fx.ofType(id, "step.output").getFirst(), "output"))
+                .isEqualTo("[iteration 1]: pass 3\n[iteration 2]: pass 4\n[iteration 3]: pass 5");
+        assertThat(services.verify(id).ok()).isTrue();
+    }
+
+    /**
+     * A {@code retry} interrupted inside its second attempt starts at its first attempt again, with all its attempts
+     * left: the failed attempt before the interrupt is not counted against the resumed step. Breaks when a resume
+     * goes on counting, so that a retry of two attempts would have none left.
+     */
+    @Test
+    void interrupt_insideARetry_startsAtItsFirstAttemptAgain() throws Exception {
+        Path pkg = Path.of("/pkg/retry");
+        fx.packages.put(pkg, """
+                {"id": "wf-retry", "name": "Retry", "blocks": [
+                  {"type": "retry", "name": "flaky", "config": {"execution_mode": "shell", "max_retries": 1,
+                   "delay": 0, "command": "./flaky"}},
+                  {"type": "shell", "name": "after", "config": {"command": "./after"}}
+                ]}""");
+        fx.commands.on("./after", "after done");
+        // Attempt 1 fails, attempt 2 is cut; after the resume attempt 3 fails and attempt 4 passes
+        theNthRunsUntilKilled("./flaky", 2, call -> call == 4 ? FakeCommandRunner.ok("attempt 4 passes")
+                : FakeCommandRunner.exit(1, "attempt " + call + " fails"));
+        Background<RunResult> run = inBackground(() -> services.start(request(pkg), null, null));
+        assertThat(started.await(AppFixture.WAIT.toSeconds(), TimeUnit.SECONDS)).isTrue();
+        String id = fx.store.runIds().getFirst();
+
+        services.interruptActiveRuns();
+        run.failure();
+        assertThat(services.view(id).status()).isEqualTo(RunStatus.INTERRUPTED);
+
+        RunResult resumed = services.resume(resumeOf(id), null, null);
+
+        assertThat(resumed.status()).as("two attempts again: a retry that went on counting had none left")
+                .isEqualTo(RunStatus.COMPLETED);
+        assertThat(ran("./flaky")).isEqualTo(4);
+        assertThat(fx.text(id, fx.ofType(id, "step.output").getFirst(), "output")).isEqualTo("attempt 4 passes");
+        assertThat(ran("./after")).isEqualTo(1);
+    }
 }

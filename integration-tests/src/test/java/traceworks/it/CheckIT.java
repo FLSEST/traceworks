@@ -134,7 +134,8 @@ class CheckIT extends IntegrationTest {
             "gates", "isolation", "secrets", "secret-astral", "secret-broken-off", "package-image",
             "missing-image", "limits", "timeout", "output-limit", "output-limit-setting", "items-timeout",
             "output-budget", "retry-cancel", "register-files", "combo-pipeline", "combo-approval",
-            "combo-failures", "combo-register", "pause-child"})
+            "combo-failures", "combo-register", "pause-child", "interrupt-while",
+            "interrupt-retry"})
     void everyOtherPackage_checksWithoutAnError(String name) {
         Result check = traceworks.exec("check", traceworks.packageDir(name).toString());
 

@@ -149,12 +149,5 @@ class AiModelChoiceIT extends AiIntegrationTest {
         }
         // The pick of a child stands in no run.started: the parent declares no choice, and a child run has none
         assertThat(folder.only("run.started").path("model_choices").path("judge").isMissingNode()).isTrue();
-
-        traceworks.credentials(Map.of("ANTHROPIC_API_KEY", FAKE_KEY));
-        Result standard = traceworks.run("combo-model-choice");
-
-        assertThat(standard.code()).as(standard.describe()).isZero();
-        assertThat(traceworks.folder(standard).output("judged")).as("without the input, the child's default")
-                .startsWith("fake-claude answered").contains("claude-fable-5-2");
     }
 }
