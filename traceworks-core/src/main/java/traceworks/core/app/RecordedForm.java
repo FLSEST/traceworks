@@ -3,8 +3,11 @@ package traceworks.core.app;
 import traceworks.core.record.Redactor;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Turns a text of a resume into the form the record holds: each value of a secret that the resume put back into a
@@ -50,34 +53,55 @@ final class RecordedForm {
     }
 
     /**
-     * {@code e} itself when neither it nor a cause of it names a value, else its recorded form: of the same kind, so
-     * the command ends with the same exit code (a damaged record stays a damaged record), with its suppressed
-     * exceptions (the checkouts a failure kept), and without its cause, whose text would name the real path. An
-     * exception of another kind becomes an {@link IllegalStateException}, which ends the command as an internal error
-     * as before.
+     * {@code e} itself when neither it, nor a cause of it, nor an exception one of them suppressed names a value, else
+     * its recorded form: of the same kind, so the command ends with the same exit code (a damaged record stays a
+     * damaged record), with its suppressed exceptions in their recorded form (the checkouts a failure kept stay
+     * {@link KeptCheckoutNotice}s, which the command line names), and without its cause, whose text would name the
+     * real path. An exception of another kind becomes an {@link IllegalStateException}, which ends the command as an
+     * internal error as before.
      */
     RuntimeException of(RuntimeException e) {
-        if (values.isEmpty() || !namesAValue(e)) {
-            return e;
-        }
+        return values.isEmpty() || !namesAValue(e, identitySet()) ? e : recorded(e, identitySet());
+    }
+
+    /** @param above the exceptions this one is suppressed under: one that comes back to itself is left out */
+    private RuntimeException recorded(Throwable e, Set<Throwable> above) {
         String message = of(e.getMessage());
-        RuntimeException recorded = e instanceof RecordDamagedException ? new RecordDamagedException(message)
+        RuntimeException recorded = e instanceof KeptCheckoutNotice kept ? new KeptCheckoutNotice(of(kept.path()))
+                : e instanceof RecordDamagedException ? new RecordDamagedException(message)
                 : e instanceof RunRefusedException ? new RunRefusedException(message)
                 : new IllegalStateException(e.getClass().getSimpleName() + ": " + message);
         recorded.setStackTrace(e.getStackTrace());
+        above.add(e);
         for (Throwable suppressed : e.getSuppressed()) {
-            recorded.addSuppressed(suppressed);
+            if (!namesAValue(suppressed, identitySet())) {
+                recorded.addSuppressed(suppressed);
+            } else if (!above.contains(suppressed)) {
+                recorded.addSuppressed(recorded(suppressed, above));
+            }
         }
+        above.remove(e);
         return recorded;
     }
 
-    private boolean namesAValue(Throwable e) {
-        for (Throwable at = e; at != null; at = at.getCause() == at ? null : at.getCause()) {
-            String message = at.getMessage();
-            if (message != null && !of(message).equals(message)) {
+    /** Whether {@code e}, a cause of it or an exception one of them suppressed names a value. */
+    private boolean namesAValue(Throwable e, Set<Throwable> seen) {
+        if (e == null || !seen.add(e)) {
+            return false;
+        }
+        String message = e.getMessage();
+        if (message != null && !of(message).equals(message) || namesAValue(e.getCause(), seen)) {
+            return true;
+        }
+        for (Throwable suppressed : e.getSuppressed()) {
+            if (namesAValue(suppressed, seen)) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static Set<Throwable> identitySet() {
+        return Collections.newSetFromMap(new IdentityHashMap<>());
     }
 }
