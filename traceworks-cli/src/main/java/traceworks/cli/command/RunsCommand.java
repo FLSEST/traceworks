@@ -10,6 +10,7 @@ import traceworks.cli.UsageException;
 import traceworks.core.app.RunListing;
 import traceworks.core.model.RunStatus;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -80,11 +81,11 @@ public final class RunsCommand implements Command {
             }
             String inputs = inputsDigest(run);
             List<String> models = runs.get(i).models();
-            lines.add(List.of(line(run), "  gate ", TerminalText.safe(run.gate() == null ? "-" : run.gate().status()),
+            lines.add(List.of(line(run), "  gate ", run.gate() == null ? "-" : TerminalText.word(String.valueOf(run.gate().status())),
                     "  " + duration(run) + "  pkg ",
                     digest(run.packageDigest(), earlier == null ? null : earlier.packageDigest(), earlier),
                     "  inputs ", digest(inputs, earlier == null ? null : inputsDigest(earlier), earlier),
-                    "  models ", TerminalText.safe(models.isEmpty() ? "-" : String.join(",", models))));
+                    "  models ", models.isEmpty() ? "-" : models(models)));
         }
         return lines;
     }
@@ -95,8 +96,18 @@ public final class RunsCommand implements Command {
 
     /** The first 8 characters of a digest, with a star when the run it is compared with has another. */
     private static Object digest(String digest, String earlierDigest, RunView earlier) {
-        TerminalText shown = TerminalText.safe(digest == null ? "-" : digest.substring(0, Math.min(8, digest.length())));
+        Object shown = digest == null ? "-" : TerminalText.word(digest.substring(0, Math.min(8, digest.length())));
         return earlier != null && !Objects.equals(digest, earlierDigest) ? TerminalText.seq(shown, "*") : shown;
+    }
+
+    /** The models of a run, each a name of the shape Traceworks records or else a text from outside. */
+    private static Object models(List<String> models) {
+        List<Object> parts = new java.util.ArrayList<>();
+        for (String model : models) {
+            parts.add(parts.isEmpty() ? "" : ",");
+            parts.add(TerminalText.word(model));
+        }
+        return parts;
     }
 
     /** From start to end; {@code -} for a run that has not ended. */
@@ -119,7 +130,7 @@ public final class RunsCommand implements Command {
     /** The plain line of a run, as parts: its name is the workflow's text, and a long one goes on on marked lines. */
     private static Object line(RunView run) {
         String started = run.startedAt() == null ? "-" : run.startedAt().truncatedTo(ChronoUnit.SECONDS).toString();
-        return TerminalText.seq(TerminalText.safe(TerminalFormat.shortId(run.runId())).padded(8),
+        return TerminalText.seq(TerminalText.word(TerminalFormat.shortId(run.runId())).padded(8),
                 String.format("  %-21s  ", run.status()),
                 TerminalText.oneLine(run.workflowName() == null ? "-" : run.workflowName()), "  " + started);
     }
@@ -131,7 +142,8 @@ public final class RunsCommand implements Command {
         try {
             return RunStatus.valueOf(value.toUpperCase(Locale.ROOT).replace('-', '_'));
         } catch (IllegalArgumentException e) {
-            throw new UsageException("--status takes one of " + List.of(RunStatus.values()) + ", got '" + value + "'");
+            throw new UsageException(Message.of("--status takes one of " + List.of(RunStatus.values()) + ", got '",
+                    Message.typed(value), "'"));
         }
     }
 
@@ -147,6 +159,6 @@ public final class RunsCommand implements Command {
         } catch (NumberFormatException e) {
             // reported below
         }
-        throw new UsageException("--limit takes a positive number, got '" + value + "'");
+        throw new UsageException(Message.of("--limit takes a positive number, got '", Message.typed(value), "'"));
     }
 }

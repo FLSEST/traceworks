@@ -29,6 +29,7 @@ import traceworks.core.app.SealSupport;
 import traceworks.core.app.SecretValues;
 import traceworks.core.blocks.CoreBlocks;
 import traceworks.core.port.AiCli;
+import traceworks.core.util.Message;
 import traceworks.core.port.LocalModels;
 import traceworks.core.port.ContainerRuntime;
 
@@ -155,7 +156,7 @@ final class Wiring {
         try {
             return OperatorConfigFile.read(home);
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 
@@ -164,7 +165,7 @@ final class Wiring {
         try {
             return HomeLayout.read(home);
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 

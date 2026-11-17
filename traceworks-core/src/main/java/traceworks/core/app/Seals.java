@@ -9,6 +9,7 @@ import traceworks.core.seal.Seal;
 import traceworks.core.seal.SealLog;
 import traceworks.core.seal.SealLogCheck;
 import traceworks.core.seal.SshSignature;
+import traceworks.core.util.Message;
 
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -79,21 +80,21 @@ public final class Seals {
         String id = requireId(pkg, "sealed");
         SealClosure closure = SealClosure.of(pkg, packagePath, packages);
         if (!closure.violations().isEmpty()) {
-            throw new RunRefusedException("The package " + pkg.directory() + " cannot be sealed: "
-                    + String.join("; ", closure.violations()));
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " cannot be sealed: ",
+                    Message.quoted(String.join("; ", closure.violations()))));
         }
         requireIntactLog();
         Seal unsigned;
         try {
             unsigned = new Seal(id, closure.digest(), actor, clock.now(), "-");
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException("The package " + pkg.directory() + " cannot be sealed: " + e.getMessage());
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " cannot be sealed: ", Message.of(e)));
         }
         String armored;
         try {
             armored = support.signer().sign(unsigned.payload(), SshSignature.NAMESPACE, key);
         } catch (IllegalStateException e) {
-            throw new RunRefusedException("The package " + pkg.directory() + " was not sealed: " + e.getMessage());
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " was not sealed: ", Message.of(e)));
         }
         Seal seal;
         SshSignature signature;
@@ -102,20 +103,20 @@ public final class Seals {
             // In the one form a run accepts, whatever line length the signer wrote
             seal = new Seal(id, closure.digest(), actor, unsigned.sealedAt(), signature.armored());
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException("The package " + pkg.directory() + " was not sealed: the signer returned"
-                    + " no signature that can be read (" + e.getMessage() + ")");
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " was not sealed: the signer returned"
+                    + " no signature that can be read (", Message.quoted(e.getMessage()), ")"));
         }
         String problem = signature.problem(seal.payload(), SshSignature.NAMESPACE);
         if (problem != null) {
-            throw new RunRefusedException("The package " + pkg.directory() + " was not sealed: " + problem);
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " was not sealed: ", Message.quoted(problem)));
         }
         AllowedSigners signers;
         try {
             signers = support.store().allowedSigners().map(AllowedSigners::parse).orElseGet(AllowedSigners::none);
         } catch (RuntimeException e) {
-            throw new RunRefusedException("The package " + pkg.directory() + " was not sealed: the allowed signers"
-                    + " of this home (" + support.store().allowedSignersLocation() + ") cannot be read: "
-                    + e.getMessage());
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " was not sealed: the allowed signers"
+                    + " of this home (" + support.store().allowedSignersLocation() + ") cannot be read: ",
+                    Message.of(e)));
         }
         List<String> principals = signers.principals(signature.publicKey(), SshSignature.NAMESPACE);
         if (principals.isEmpty()) {
@@ -129,9 +130,9 @@ public final class Seals {
             SealLog.forWriting(log.events(), clock).append(SealLog.SEALED, fields);
             support.store().writeSeal(pkg.directory(), seal.toJson());
         } catch (RuntimeException e) {
-            throw new RunRefusedException("The seal of " + pkg.directory() + " could not be written: "
-                    + e.getMessage() + ". Run 'traceworks seal' again; until then a run of the package may be"
-                    + " refused");
+            throw new RunRefusedException(Message.of("The seal of ", Message.typed(pkg.directory()), " could not be written: ",
+                    Message.of(e), ". Run 'traceworks seal' again; until then a run of the package may be"
+                    + " refused"));
         }
         return new Sealed(seal, pkg.definition().name(), signature.fingerprint(), principals, closure.children(),
                 pkg.directory().toString());
@@ -146,15 +147,15 @@ public final class Seals {
      */
     public Unsealed unseal(Path packageLocation, String note) {
         if (settings.immutable()) {
-            throw new RunRefusedException("seal_immutable is set in traceworks.json: this home removes no seal"
-                    + " through the command line. The operator removes the setting first");
+            throw new RunRefusedException(Message.of("seal_immutable is set in traceworks.json: this home removes no seal"
+                    + " through the command line. The operator removes the setting first"));
         }
         LoadedPackage pkg = load(packageLocation);
         String id = requireId(pkg, "unsealed");
         SealLogCheck check = requireIntactLog();
         if (pkg.sealJson() == null && !check.sealed().containsKey(id)) {
-            throw new RunRefusedException("The package " + pkg.directory() + " is not sealed: it carries no "
-                    + Seal.FILE_NAME + ", and this home does not hold the workflow " + id + " as sealed");
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " is not sealed: it carries no "
+                    + Seal.FILE_NAME + ", and this home does not hold the workflow ", Message.quoted(id), " as sealed"));
         }
         String digest = null;
         if (pkg.sealJson() != null) {
@@ -175,8 +176,8 @@ public final class Seals {
             SealLog.forWriting(log.events(), clock).append(SealLog.UNSEALED, fields);
             removed = support.store().removeSeal(pkg.directory());
         } catch (RuntimeException e) {
-            throw new RunRefusedException("The seal of " + pkg.directory() + " could not be removed: "
-                    + e.getMessage());
+            throw new RunRefusedException(Message.of("The seal of ", Message.typed(pkg.directory()), " could not be removed: ",
+                    Message.of(e)));
         }
         return new Unsealed(id, digest, removed, pkg.directory().toString());
     }
@@ -232,8 +233,8 @@ public final class Seals {
     private static String requireId(LoadedPackage pkg, String verb) {
         String id = pkg.definition().id();
         if (id == null || id.isBlank()) {
-            throw new RunRefusedException("The package " + pkg.directory() + " cannot be " + verb + ": its"
-                    + " workflow.json has no id, and a seal names the workflow by its id");
+            throw new RunRefusedException(Message.of("The package ", Message.typed(pkg.directory()), " cannot be " + verb + ": its"
+                    + " workflow.json has no id, and a seal names the workflow by its id"));
         }
         return id;
     }
@@ -242,7 +243,7 @@ public final class Seals {
         try {
             return packages.load(location);
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 }

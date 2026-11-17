@@ -12,6 +12,7 @@ import traceworks.core.app.SealStatus;
 import traceworks.core.app.Seals;
 import traceworks.core.seal.SealEvent;
 import traceworks.core.seal.SealLogCheck;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -54,18 +55,18 @@ public final class SealsCommand implements Command {
         return switch (words.getFirst()) {
             case "log" -> {
                 if (words.size() > 1) {
-                    throw new UsageException("seals log takes no further argument");
+                    throw new UsageException(Message.of("seals log takes no further argument"));
                 }
                 yield list(context, true);
             }
             case "verify" -> {
                 if (words.size() < 2) {
-                    throw new UsageException("seals verify needs a package");
+                    throw new UsageException(Message.of("seals verify needs a package"));
                 }
                 yield verify(context, context.resolve(words.get(1)));
             }
-            default -> throw new UsageException("unknown seals command '" + words.getFirst()
-                    + "'; the commands are 'log' and 'verify'");
+            default -> throw new UsageException(Message.of("unknown seals command '",
+                    Message.typed(words.getFirst()), "'; the commands are 'log' and 'verify'"));
         };
     }
 
@@ -117,7 +118,7 @@ public final class SealsCommand implements Command {
 
     private static int verify(Context context, Path pkg) {
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         SealStatus status = context.seals().verify(pkg);
         PrintStream out = context.out();

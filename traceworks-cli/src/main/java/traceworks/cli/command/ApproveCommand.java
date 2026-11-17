@@ -6,6 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.UsageException;
 import traceworks.core.app.AnswerRequest;
+import traceworks.core.util.Message;
 
 /** {@code traceworks approve <run> --answer OPTION}: answers the approval a run waits for. */
 public final class ApproveCommand implements Command {
@@ -25,7 +26,7 @@ public final class ApproveCommand implements Command {
     public int run(Context context, Parsed args) {
         String answer = args.option("answer");
         if (answer == null) {
-            throw new UsageException("'approve' needs --answer OPTION");
+            throw new UsageException(Message.of("'approve' needs --answer OPTION"));
         }
         String agent = Answers.agent(context, args);
         return Answers.give(context, args.positional(),

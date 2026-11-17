@@ -37,6 +37,7 @@ import traceworks.core.app.TraceworksVersion;
 import traceworks.core.port.AmbiguousRunException;
 import traceworks.core.port.NoSuchRunException;
 import traceworks.core.port.RunReferenceTooShortException;
+import traceworks.core.util.Message;
 
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -92,7 +93,7 @@ public final class Main {
             while (argv.length > 0 && (argv[0].equals("--home") || argv[0].startsWith("--home="))) {
                 if (argv[0].equals("--home")) {
                     if (argv.length < 2) {
-                        throw new UsageException("--home needs a value");
+                        throw new UsageException(Message.of("--home needs a value"));
                     }
                     leadingHome = argv[1];
                     argv = java.util.Arrays.copyOfRange(argv, 2, argv.length);
@@ -103,7 +104,7 @@ public final class Main {
             }
             final String[] cmd = argv;
             if (cmd.length == 0) {
-                throw new UsageException("no command given");
+                throw new UsageException(Message.of("no command given"));
             }
             switch (cmd[0]) {
                 case "--help", "-h", "help" -> {
@@ -118,7 +119,8 @@ public final class Main {
             }
             Command chosen = COMMANDS.stream().filter(c -> c.spec().name().equals(cmd[0])).findFirst()
                     .orElseThrow(() -> new UsageException(cmd[0].startsWith("-")
-                            ? "unknown option " + cmd[0] : "unknown command '" + cmd[0] + "'"));
+                            ? Message.of("unknown option ", Message.typed(cmd[0]))
+                            : Message.of("unknown command '", Message.typed(cmd[0]), "'")));
             command = chosen.spec().name();
             Parsed parsed = Args.parse(chosen.spec(), List.of(cmd).subList(1, cmd.length));
             if (parsed.has("help")) {
@@ -131,11 +133,11 @@ public final class Main {
         } catch (UsageException e) {
             // A message quotes what it refuses: an argument, a name of a workflow, a text of a record. It is a
             // text from outside as a whole, so a long one goes on on marked lines and none starts a line unmarked
-            TerminalText.println(err, "traceworks: ", TerminalText.safe(e.getMessage()));
+            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
             err.println("see 'traceworks " + (command.isEmpty() ? "" : command + " ") + "--help'");
             return ExitCodes.USAGE;
         } catch (RequestQueuedException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.safe(e.getMessage()));
+            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
             return ExitCodes.QUEUED;
         } catch (RecordDamagedException | traceworks.core.port.BlobStore.ChangedBlobException e) {
             // One line, not cut: it names the blob or line and ends with the verify command
@@ -143,11 +145,11 @@ public final class Main {
             keptCheckouts(err, e);
             return ExitCodes.VERIFY_FAILED;
         } catch (RunRefusedException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.safe(e.getMessage()));
+            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
             keptCheckouts(err, e);
             return ExitCodes.REFUSED;
         } catch (NoSuchRunException | AmbiguousRunException | RunReferenceTooShortException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.safe(e.getMessage()));
+            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
             return ExitCodes.USAGE;
         } catch (Exception | Error e) {
             TerminalText.println(err, "traceworks: internal error: " + e.getClass().getSimpleName(),
@@ -161,7 +163,7 @@ public final class Main {
     private static void keptCheckouts(PrintStream err, Throwable e) {
         for (Throwable suppressed : e.getSuppressed()) {
             if (suppressed instanceof KeptCheckoutNotice kept) {
-                TerminalText.println(err, "traceworks: ", TerminalText.safe(kept.getMessage()));
+                TerminalText.println(err, "traceworks: ", TerminalText.of(kept));
             }
         }
     }

@@ -79,4 +79,44 @@ class TerminalTextGuardTest {
 
         assertThat(found).as("the three definitions, and no call").isEqualTo(3);
     }
+
+    /**
+     * {@code TerminalText.word} writes a value of a record as Traceworks' own where it has the shape of one word.
+     * It is for a field that Traceworks writes itself (a run id, a status, an exit code, a digest, the runtime's
+     * name and version, a model's id, the name of a credential), never for a name a workflow or a person chooses.
+     * The calls are pinned: a new one is a field somebody looked at, added here with the others.
+     */
+    @Test
+    void theValuesWrittenAsTraceworksOwn_areTheOnesKnown() throws IOException {
+        Map<String, Integer> calls = new TreeMap<>();
+        try (Stream<Path> files = Files.walk(SOURCES)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                Matcher matcher = Pattern.compile("TerminalText\\.word\\(").matcher(Files.readString(file));
+                while (matcher.find()) {
+                    calls.merge(file.getFileName().toString(), 1, Integer::sum);
+                }
+            }
+        }
+        assertThat(calls).isEqualTo(Map.of("TerminalFormat.java", 2, "CredentialsCommand.java", 1,
+                "DiffCommand.java", 2, "RunsCommand.java", 4, "ShowCommand.java", 1, "VerifyCommand.java", 6));
+    }
+
+    /**
+     * A message says its parts in a type of the core, and the gate reads them: a value is own only where the code
+     * that composed the message wrote it as a {@code String}. No command turns the parts back into a line itself:
+     * {@code parts()} is read in the package of the gate alone, where {@code TerminalText.of} gives each its kind.
+     */
+    @Test
+    void thePartsOfAMessage_areReadByTheGateAlone() throws IOException {
+        java.util.List<String> readers = new java.util.ArrayList<>();
+        try (Stream<Path> files = Files.walk(SOURCES)) {
+            for (Path file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                if (Pattern.compile("\\.parts\\(\\)\\.(parts|text)\\(|Message\\.Part\\b").matcher(
+                        Files.readString(file)).find()) {
+                    readers.add(file.getFileName().toString());
+                }
+            }
+        }
+        assertThat(readers).containsExactly("TerminalText.java");
+    }
 }

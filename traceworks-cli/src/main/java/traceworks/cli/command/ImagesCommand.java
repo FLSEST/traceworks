@@ -8,6 +8,7 @@ import traceworks.cli.ExitCodes;
 import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Images;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -33,13 +34,14 @@ public final class ImagesCommand implements Command {
     public int run(Context context, Parsed args) {
         List<String> words = args.positionals();
         if (!words.getFirst().equals("build")) {
-            throw new UsageException("unknown images command '" + words.getFirst() + "'; the command is 'build'");
+            throw new UsageException(Message.of("unknown images command '", Message.typed(words.getFirst()),
+                    "'; the command is 'build'"));
         }
         Path pkg = null;
         if (words.size() > 1) {
             pkg = context.resolve(words.get(1));
             if (!Files.exists(pkg)) {
-                throw new UsageException("no such package: " + pkg);
+                throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
             }
         }
         if (pkg != null) {
@@ -50,8 +52,12 @@ public final class ImagesCommand implements Command {
         if (built.lines().isEmpty() && built.failures().isEmpty()) {
             context.out().println("nothing to build");
         }
-        // A line names the image as the package wrote it
-        built.lines().forEach(line -> TerminalText.println(context.out(), TerminalText.oneLine(line)));
+        // A line names the image as the package wrote it, behind what was done with it, which is Traceworks' word.
+        // A line of another form is a text from outside as a whole, and marked as one that begins its line
+        for (String line : built.lines()) {
+            String verb = line.startsWith("built ") ? "built " : line.startsWith("pulled ") ? "pulled " : "";
+            TerminalText.println(context.out(), verb, TerminalText.oneLine(line.substring(verb.length())));
+        }
         built.failures().forEach(failure -> failure(context.err(), failure));
         return built.failures().isEmpty() ? ExitCodes.OK : ExitCodes.REFUSED;
     }

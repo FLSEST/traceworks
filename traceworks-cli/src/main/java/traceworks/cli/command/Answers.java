@@ -12,6 +12,7 @@ import traceworks.core.app.AnswerResult;
 import traceworks.core.app.RunServices;
 import traceworks.core.record.RunView;
 import traceworks.core.register.DecisionAgent;
+import traceworks.core.util.Message;
 
 import java.util.List;
 
@@ -46,7 +47,7 @@ final class Answers {
         try {
             return DecisionAgent.resolve(args.option("agent"), context.env());
         } catch (IllegalArgumentException e) {
-            throw new UsageException(e.getMessage());
+            throw new UsageException(Message.of(e));
         }
     }
 
@@ -59,7 +60,8 @@ final class Answers {
                     .forEach(line -> context.err().println(line.startsWith("|") ? "  " + line : line));
             return ExitCodes.REFUSED;
         }
-        TerminalText.println(context.out(), TerminalText.safe(result.message()));
+        TerminalText.println(context.out(), result.parts() == null ? TerminalText.safe(result.message())
+                : TerminalText.of(result.parts()));
         if (result.runParked()) {
             RunServices services = context.services();
             RunView view = services.view(runRef);

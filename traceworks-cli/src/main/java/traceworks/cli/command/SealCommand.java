@@ -8,6 +8,7 @@ import traceworks.cli.ExitCodes;
 import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Seals;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -37,11 +38,11 @@ public final class SealCommand implements Command {
     public int run(Context context, Parsed args) {
         Path pkg = context.resolve(args.positional());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         String key = args.option("key");
         if (key != null && key.isBlank()) {
-            throw new UsageException("--key needs the path of an SSH key");
+            throw new UsageException(Message.of("--key needs the path of an SSH key"));
         }
         Seals.Sealed sealed = context.seals().seal(pkg, key == null ? null : context.resolve(key).toString());
         PrintStream out = context.out();

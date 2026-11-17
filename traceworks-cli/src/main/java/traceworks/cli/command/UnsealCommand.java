@@ -8,6 +8,7 @@ import traceworks.cli.ExitCodes;
 import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Seals;
+import traceworks.core.util.Message;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,7 +31,7 @@ public final class UnsealCommand implements Command {
     public int run(Context context, Parsed args) {
         Path pkg = context.resolve(args.positional());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         Seals.Unsealed unsealed = context.seals().unseal(pkg, args.option("note"));
         TerminalText.println(context.out(), "unsealed ", TerminalText.safe(unsealed.workflowId()), " (",

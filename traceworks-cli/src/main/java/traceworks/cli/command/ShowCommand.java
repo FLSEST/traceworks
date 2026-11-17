@@ -79,7 +79,7 @@ public final class ShowCommand implements Command {
         Function<String, String> text = sha -> services.content(ref, sha)
                 .map(bytes -> new String(bytes, StandardCharsets.UTF_8)).orElse("(deleted)");
 
-        out.println("Run       ", TerminalText.safe(view.runId()));
+        out.println("Run       ", TerminalText.word(view.runId()));
         out.println("Workflow  ", TerminalText.safe(view.workflowName()),
                 view.workflowId() == null ? "" : TerminalText.seq(" (", TerminalText.safe(view.workflowId()), ")"));
         out.println("Status    " + view.status());

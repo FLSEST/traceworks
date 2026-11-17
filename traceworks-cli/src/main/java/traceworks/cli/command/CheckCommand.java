@@ -9,6 +9,7 @@ import traceworks.cli.FindingLines;
 import traceworks.cli.UsageException;
 import traceworks.core.analyzer.AnalyzerFinding;
 import traceworks.core.analyzer.AnalyzerFinding.Severity;
+import traceworks.core.util.Message;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,7 +30,7 @@ public final class CheckCommand implements Command {
     public int run(Context context, Parsed args) {
         Path pkg = context.resolve(args.positional());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         List<AnalyzerFinding> findings = context.services().check(pkg);
         if (findings.isEmpty()) {

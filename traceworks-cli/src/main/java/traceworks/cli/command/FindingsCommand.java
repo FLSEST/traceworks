@@ -23,6 +23,7 @@ import traceworks.core.register.ItemsText;
 import traceworks.core.register.FindingStatus;
 import traceworks.core.register.RegisterState;
 import traceworks.core.register.StateJson;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
@@ -99,18 +100,20 @@ public final class FindingsCommand implements Command {
         }
         String key = words.get(0);
         if (!findings.keys().contains(key)) {
-            throw new UsageException("No register '" + key + "'" + (findings.keys().isEmpty()
-                    ? "; no audit run has fed one" : "; the registers are " + String.join(", ", findings.keys())));
+            throw new UsageException(Message.of("No register '", Message.typed(key), "'", findings.keys().isEmpty()
+                    ? "; no audit run has fed one" : Message.of("; the registers are ",
+                    Message.join(", ", findings.keys().stream().map(known -> Message.of(Message.quoted(known)))
+                            .toList()))));
         }
         String action = words.size() > 1 ? words.get(1) : "list";
         if (args.option("agent") != null && !List.of("accept", "dismiss", "reopen").contains(action)) {
-            throw new UsageException("--agent belongs to accept, dismiss and reopen: it names who decides");
+            throw new UsageException(Message.of("--agent belongs to accept, dismiss and reopen: it names who decides"));
         }
         return switch (action) {
             case "list" -> list(context.out(), findings.state(key), args);
             case "show" -> {
                 if (words.size() < 3) {
-                    throw new UsageException("findings " + key + " show needs the id of a finding");
+                    throw new UsageException(Message.of("findings ", Message.typed(key), " show needs the id of a finding"));
                 }
                 yield show(context, findings.state(key), findings.events(key), words.get(2));
             }
@@ -126,16 +129,17 @@ public final class FindingsCommand implements Command {
                 yield ExitCodes.OK;
             }
             case "verify" -> verify(context.out(), key, findings.verified(key));
-            default -> throw new UsageException("unknown findings command '" + action
-                    + "'; the commands are 'list', 'show', 'items', 'accept', 'dismiss', 'reopen', 'render' and"
-                    + " 'verify'");
+            default -> throw new UsageException(Message.of("unknown findings command '", Message.typed(action),
+                    "'; the commands are 'list', 'show', 'items', 'accept', 'dismiss', 'reopen', 'render' and"
+                    + " 'verify'"));
         };
     }
 
     private static int decide(PrintStream out, Findings findings, String key, String action, List<String> words,
                               Parsed args, Map<String, String> env) {
         if (words.size() < 3) {
-            throw new UsageException("findings " + key + " " + action + " needs the id of a finding");
+            throw new UsageException(Message.of("findings ", Message.typed(key), " " + action
+                    + " needs the id of a finding"));
         }
         // Who decides under the actor: the option, else the variable of a harness. A blank or bad name is refused
         // here, before anything is asked of the register: it must not be recorded as a person's decision
@@ -143,22 +147,24 @@ public final class FindingsCommand implements Command {
         try {
             agent = DecisionAgent.resolve(args.option("agent"), env);
         } catch (IllegalArgumentException e) {
-            throw new UsageException(e.getMessage());
+            throw new UsageException(Message.of(e));
         }
         String note = args.option("note");
         String untilText = args.option("until");
         if (!action.equals("reopen") && (note == null || note.isBlank())) {
-            throw new UsageException("findings " + key + " " + action + " needs --note \"why\"");
+            throw new UsageException(Message.of("findings ", Message.typed(key), " " + action
+                    + " needs --note \"why\""));
         }
         if (!action.equals("accept") && untilText != null) {
-            throw new UsageException("--until belongs to accept only");
+            throw new UsageException(Message.of("--until belongs to accept only"));
         }
         java.time.Instant until = null;
         if (untilText != null) {
             try {
                 until = java.time.LocalDate.parse(untilText).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
             } catch (java.time.format.DateTimeParseException e) {
-                throw new UsageException("--until takes a date as YYYY-MM-DD, got '" + untilText + "'");
+                throw new UsageException(Message.of("--until takes a date as YYYY-MM-DD, got '",
+                        Message.typed(untilText), "'"));
             }
         }
         Finding finding = switch (action) {
@@ -198,7 +204,7 @@ public final class FindingsCommand implements Command {
             }
             TerminalText.println(out, line);
             if (!state.items().isEmpty()) {
-                TerminalText.println(out, "  items ", TerminalText.composed(ItemsText.summary(state)));
+                TerminalText.println(out, "  items ", ItemsText.summary(state));
             }
         }
         return ExitCodes.OK;
@@ -281,19 +287,21 @@ public final class FindingsCommand implements Command {
         try {
             return FindingStatus.valueOf(value.toUpperCase(Locale.ROOT).replace('-', '_'));
         } catch (IllegalArgumentException e) {
-            throw new UsageException("--status takes one of " + List.of(FindingStatus.values()) + ", got '" + value + "'");
+            throw new UsageException(Message.of("--status takes one of " + List.of(FindingStatus.values())
+                    + ", got '", Message.typed(value), "'"));
         }
     }
 
     private static int show(Context context, RegisterState state, List<RegisterEvent> events, String reference) {
         PrintStream out = context.out();
         if (reference.length() < 8) {
-            throw new UsageException("a finding is named by its id or a prefix of at least 8 characters");
+            throw new UsageException(Message.of("a finding is named by its id or a prefix of at least 8 characters"));
         }
         List<Finding> matches = state.findings().stream().filter(f -> f.id().startsWith(reference)).toList();
         if (matches.size() != 1) {
-            throw new UsageException(matches.isEmpty() ? "No finding of " + state.key() + " starts with " + reference
-                    : matches.size() + " findings of " + state.key() + " start with " + reference);
+            throw new UsageException(Message.of(matches.isEmpty() ? "No finding of " : matches.size()
+                    + " findings of ", Message.typed(state.key()), matches.isEmpty() ? " starts with "
+                    : " start with ", Message.typed(reference)));
         }
         Finding f = matches.getFirst();
         out.println("Finding   " + f.id());

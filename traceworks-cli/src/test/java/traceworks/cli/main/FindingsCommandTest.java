@@ -203,9 +203,9 @@ class FindingsCommandTest {
         assertThat(show.out()).contains("Title     Big A.java", "Occurrences 1")
                 .containsPattern("Detail    from findings.jsonl of run [0-9a-f-]{36}")
                 .contains("  item      A001", "  file      src/A.java:12", "  quote     mount(path);",
-                        "  severity  medium",
-                        "  the model's words, not checked:", "    issue   " + ISSUE + " ?[2J second line",
-                        "    fix     check the real path first")
+                        "| severity  medium",
+                        "  the model's words, not checked:", "  | issue   " + ISSUE + " ?[2J second line",
+                        "  | fix     check the real path first")
                 .doesNotContain("\u001b").doesNotContain("not this one").doesNotContain("other()");
     }
 

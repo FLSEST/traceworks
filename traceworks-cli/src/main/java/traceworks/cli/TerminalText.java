@@ -1,5 +1,7 @@
 package traceworks.cli;
 
+import traceworks.core.util.Message;
+
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,19 +20,29 @@ import java.util.List;
  * only. No such text starts a terminal line without the mark. Control characters are replaced first
  * ({@link TerminalFormat#safe}), so no text moves the cursor either.
  *
- * <p><b>The marks.</b> {@code "| "} begins a line of a text of several lines, and the first line of a listed
- * option. {@code "|+"} begins a line that goes on with the line above: what follows the mark follows the end of
- * that line, so {@code "|+ word"} goes on behind a blank and {@code "|+ord"} inside a word (a path, a digest), and
- * nobody reads a blank into it. Taking every line feed with the blanks and the {@code "|+"} behind it out of what
- * was printed gives the line as it was.
+ * <p><b>The marks.</b> {@code "| "} begins a line of a text of several lines, the first line of a listed option,
+ * and stands before a text that begins a line of Traceworks (in the place of the two blanks before it, where the
+ * line is indented, so the columns of a table stay). {@code "|+"} begins a line that goes on with the line above:
+ * what follows the mark follows the end of that line as it is, so {@code "|+ word"} goes on behind a blank and
+ * {@code "|+word"} behind any other break (after a separator, or inside a word), and nobody reads a blank into a
+ * path. Taking every line feed with the blanks and the {@code "|+"} behind it out of what was printed gives the
+ * line as it was.
+ *
+ * <p><b>Where a text is broken.</b> At a blank; where none fits, behind a separator ({@code / #}, then
+ * {@code , (}, then {@code .}) that leaves the line at least half full; inside a word only where nothing else
+ * fits. A text that fits a line of its own is not cut in two, and on a line that goes on already a text that does
+ * not fit starts a line of its own: a row keeps its own columns, and each column that is too long stands under it.
  *
  * <p><b>The forms.</b> {@link #println} and {@link #lines} take the parts of one line in their order: a
  * {@code String} (or a number, a status) is Traceworks' own and written as it is, however long; a
  * {@code TerminalText} is a text from outside ({@link #safe}, {@link #oneLine}), text of the operator that must
- * stay whole, such as the path of a run they named ({@link #whole}), or a line that the core composed with a
- * text from outside in it ({@link #composed}). {@link #block} marks every line of a text of several lines (a
- * question, an output), {@link #shown} lists options and names that a person types as they are, and
- * {@link #inline} says whether a quoted value may stand in a command.
+ * stay whole, such as the path of a run they named ({@link #whole}), a value of a field Traceworks writes itself
+ * ({@link #word}), or a line that the core composed with a text from outside in it ({@link #composed}). A message
+ * of the core that says its parts ({@link Message}) is taken part by part ({@link #of(Message)}): its own words
+ * whole, what it quotes as a text from outside; a message that says nothing is a text from outside as a whole
+ * ({@link #of(Throwable)}). {@link #block} marks every line of a text of several lines (a question, an output),
+ * {@link #shown} lists options and names that a person types as they are, and {@link #inline} says whether a
+ * quoted value may stand in a command.
  *
  * <p><b>What keeps it closed.</b> A {@code TerminalText} is no {@code String}: {@link #toString} gives
  * {@value #WITHHELD}, never the text, so a text that is joined to a line with {@code +} or a format shows as a
@@ -40,7 +52,10 @@ import java.util.List;
  *
  * <p><b>What it does not keep.</b> The width is a constant: on a terminal narrower than {@value #WIDTH} columns
  * every line can break, a marked one too. A line of {@link #composed} holds the blanks its composer aligned it
- * with, so only its length is judged. Text that is blank without being white space (the Braille blank, the
+ * with, so only its length is judged, and it gets no mark where it begins a line. Which part of a message is its
+ * own is the word of the code that composed it: nothing here can tell a value handed over as a {@code String}
+ * from a word of Traceworks. What the operator typed is shown whole, however long, unless it holds a run of
+ * blanks. Text that is blank without being white space (the Braille blank, the
  * Hangul fillers) counts as a blank; a font may know others. HTML and JSON output do not pass here.
  */
 public final class TerminalText {
@@ -55,6 +70,15 @@ public final class TerminalText {
     static final String WITHHELD = "(text withheld: it was not printed through TerminalText)";
     /** The least columns left for a text on a marked line, however deep the line is indented. */
     private static final int LEAST = 20;
+    /** The most characters of a {@link #word}. */
+    private static final int WORD = 40;
+    private static final java.util.regex.Pattern WORD_SHAPE =
+            java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+~-]{0," + (WORD - 1) + "}");
+    /**
+     * Where a text without a blank is broken, the best first: behind a separator of a path or of a member, behind
+     * one of a list or a call, behind a dot (last, since a dot also stands before the ending of a file's name).
+     */
+    private static final List<String> SEPARATORS = List.of("/#", ",(", ".");
 
     private enum Kind { OUTSIDE, COMPOSED, WHOLE }
 
@@ -93,6 +117,46 @@ public final class TerminalText {
      */
     public static TerminalText whole(String text) {
         return new TerminalText(TerminalFormat.safe(text), Kind.WHOLE, 0);
+    }
+
+    /**
+     * The parts of a message of the core, for a line: its own words as they are, each value it quotes as a text
+     * from outside ({@link #safe}), and what the operator typed whole ({@link #whole}), unless it holds a run
+     * of blanks, with which it is a text from outside too.
+     */
+    public static Object of(Message message) {
+        List<Object> parts = new ArrayList<>();
+        for (Message.Part part : message.parts()) {
+            parts.add(switch (part.kind()) {
+                case OWN -> part.text();
+                case QUOTED -> safe(part.text());
+                // Nobody types a run of blanks into a path or a name: such a value is not shown whole
+                case TYPED -> blankRun(part.text()) ? safe(part.text()) : whole(part.text());
+            });
+        }
+        return parts;
+    }
+
+    /**
+     * The message of a failure, for a line: its parts where it says them ({@link Message.Carrier}); else its text
+     * as a text from outside as a whole, which is how a message that nobody gave parts is shown.
+     */
+    public static Object of(Throwable e) {
+        if (e instanceof Message.Carrier carrier && carrier.parts() != null) {
+            return of(carrier.parts());
+        }
+        return safe(e.getMessage());
+    }
+
+    /**
+     * A value of a field that Traceworks writes itself and that a record hands back: the name and the version of
+     * the container runtime, a status, an exit code, the type of a block. Where it has the shape of what Traceworks
+     * writes there (one word of ASCII letters, digits and {@code . _ + ~ -}, at most {@value #WORD} characters, a
+     * letter or a digit first) it is written as Traceworks' own; any other value, which only an edited record
+     * holds, is a text from outside. Not for a name a workflow or a person chooses.
+     */
+    public static TerminalText word(String value) {
+        return value != null && WORD_SHAPE.matcher(value).matches() ? whole(value) : safe(value);
     }
 
     /** This text in a column of at least {@code columns}: blanks follow it where it is shorter and not broken. */
@@ -154,17 +218,34 @@ public final class TerminalText {
                 continue;
             }
             boolean blanks = outside.kind == Kind.OUTSIDE && blankRun(text);
+            String here = line.substring(line.lastIndexOf("\n") + 1);
+            // A text from outside that begins its line: nothing of Traceworks is in front of it, so the mark is
+            if (here.isBlank() && outside.kind == Kind.OUTSIDE) {
+                // The mark takes the place of the two blanks before the text, where the line has them: the
+                // columns of a table stay where they are
+                String lead = here.length() >= MARK.length() ? here.substring(MARK.length()) : here;
+                line.setLength(line.length() - here.length());
+                List<Piece> first = pieces(text, Math.max(LEAST, WIDTH - columns(lead) - MARK_ON.length() - 1));
+                for (int i = 0; i < first.size(); i++) {
+                    line.append(i == 0 ? lead + MARK
+                                    : "\n" + lead + MARK_ON + (first.get(i - 1).atBlank() ? " " : ""))
+                            .append(first.size() == 1 ? pad(first.get(i).text(), outside.column)
+                                    : first.get(i).text());
+                }
+                continue;
+            }
             // Whether the text goes on below behind a blank it was broken at; the line's own blanks stay on it
             boolean atBlank = false;
             if (!blanks) {
-                int from = columns(line.toString());
+                int from = columns(here);
                 int room = from > 0 && from % WIDTH == 0 ? 0 : WIDTH - from % WIDTH;
                 if (columns(text) <= room) {
                     line.append(pad(text, outside.column));
                     continue;
                 }
-                // The text starts on this line where a blank lets it break there, and goes on below
-                int cut = room < 2 ? -1 : lastBlank(text, fitting(text, room));
+                // On the line of Traceworks itself the text starts where a blank lets it break there, and goes on
+                // below. On a line that goes on already, a text that does not fit starts a line of its own
+                int cut = room < 2 || !lines.isEmpty() ? -1 : lastBlank(text, fitting(text, room));
                 if (cut > 0 && !text.substring(0, cut).isBlank()) {
                     line.append(stripEnd(text.substring(0, cut)));
                     text = stripStart(text.substring(cut));
@@ -174,9 +255,10 @@ public final class TerminalText {
             if (!line.toString().isBlank()) {
                 lines.add(line.toString());
             }
+            boolean begins = lines.isEmpty();
             List<Piece> rest = pieces(text, width);
             for (int i = 0; i < rest.size(); i++) {
-                String piece = indent + (lines.isEmpty() ? MARK : MARK_ON)
+                String piece = indent + (begins && i == 0 ? MARK : MARK_ON)
                         + (i == 0 && atBlank || i > 0 && rest.get(i - 1).atBlank() ? " " : "") + rest.get(i).text();
                 if (i < rest.size() - 1) {
                     lines.add(piece);
@@ -186,7 +268,8 @@ public final class TerminalText {
             }
         }
         lines.add(line.toString());
-        return lines;
+        // Own words of several lines, and a text that began a line and was broken, hold line feeds
+        return lines.stream().flatMap(each -> Arrays.stream(each.split("\n", -1))).toList();
     }
 
     private static void flatten(List<?> parts, List<Object> flat) {
@@ -421,7 +504,7 @@ public final class TerminalText {
             // A blank that only leads the line is no place to break: the part before it would be empty
             boolean atBlank = !stripEnd(rest.substring(0, Math.max(cut, 0))).isEmpty();
             if (!atBlank) {
-                cut = fits;
+                cut = behindSeparator(rest, fits);
             }
             parts.add(new Piece(stripEnd(rest.substring(0, cut)), atBlank));
             rest = stripStart(rest.substring(cut));
@@ -430,6 +513,22 @@ public final class TerminalText {
             parts.add(new Piece(rest, false));
         }
         return parts;
+    }
+
+    /**
+     * Where to break a text that has no blank within its first {@code fits} chars: behind the last separator of the
+     * best kind that leaves the line at least half full, so that a path goes on with a whole name and a member
+     * with its whole name; at {@code fits}, inside a word, where there is none.
+     */
+    private static int behindSeparator(String text, int fits) {
+        for (String kind : SEPARATORS) {
+            for (int i = fits - 1; i >= fits / 2 && i > 0; i--) {
+                if (kind.indexOf(text.charAt(i)) >= 0) {
+                    return i + 1;
+                }
+            }
+        }
+        return fits;
     }
 
     /**

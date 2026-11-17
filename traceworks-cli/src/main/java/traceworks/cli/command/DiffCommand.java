@@ -64,8 +64,8 @@ public final class DiffCommand implements Command {
         RunComparison comparison = services.compare(refA, refB);
         PrintStream out = context.out();
         // What the two records hold is text from outside, whoever's runs they are
-        TerminalText.println(out, "Run A     ", TerminalText.safe(comparison.runA()));
-        TerminalText.println(out, "Run B     ", TerminalText.safe(comparison.runB()));
+        TerminalText.println(out, "Run A     ", TerminalText.word(comparison.runA()));
+        TerminalText.println(out, "Run B     ", TerminalText.word(comparison.runB()));
         header(out, comparison);
         inputs(out, comparison);
         // The outputs are read by the references as given: a run folder outside the home has no id the home knows
@@ -88,13 +88,20 @@ public final class DiffCommand implements Command {
         return ExitCodes.DIFFERS;
     }
 
+    /** The header fields whose names are words of Traceworks, as {@code RunComparer} writes them. */
+    private static final java.util.Set<String> OWN_FIELDS = java.util.Set.of("workflow id", "workflow name",
+            "package digest", "package commit", "inputs digest", "Traceworks version", "execution", "ai_network",
+            "models", "status", "gate");
+
     /** The header fields that differ, with both values, then one line that names the fields that are the same. */
     private static void header(PrintStream out, RunComparison comparison) {
         out.println();
         out.println("Header");
         for (Field field : comparison.header()) {
             if (!field.same()) {
-                both(out, TerminalText.safe(field.name()), value(field.a()), value(field.b()));
+                // The fields Traceworks names itself are its own words; one named after a model choice is not
+                both(out, OWN_FIELDS.contains(field.name()) ? field.name() : TerminalText.safe(field.name()),
+                        value(field.a()), value(field.b()));
             }
         }
         same(out, comparison.header().stream().filter(Field::same).map(Field::name).toList());
@@ -122,8 +129,9 @@ public final class DiffCommand implements Command {
         same(out, comparison.inputs().stream().filter(Input::same).map(Input::key).toList());
     }
 
-    private static void both(PrintStream out, TerminalText name, TerminalText a, TerminalText b) {
-        TerminalText.println(out, "  ", name.padded(20), " A ", a);
+    private static void both(PrintStream out, Object name, TerminalText a, TerminalText b) {
+        TerminalText.println(out, "  ", name instanceof TerminalText text ? text.padded(20)
+                : String.format("%-20s", name), " A ", a);
         TerminalText.println(out, String.format("  %-20s B ", ""), b);
     }
 
@@ -209,7 +217,9 @@ public final class DiffCommand implements Command {
                         ? "prompt differs (it follows an AI output that differed)" : "prompt differs")
                         + ", " + words(call.output()));
             }
-            TerminalText.println(out, "      ", TerminalText.oneLine(call.label()), "  ", verdict);
+            // The label is Traceworks' own where it has the form the comparison gives it
+            TerminalText.println(out, "      ", call.label().matches("(item \\d{1,9}, )?AI call \\d{1,9}") ? call.label()
+                    : TerminalText.oneLine(call.label()), "  ", verdict);
             side(out, "A", call.a());
             side(out, "B", call.b());
         }

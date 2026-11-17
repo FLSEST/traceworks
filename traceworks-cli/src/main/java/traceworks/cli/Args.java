@@ -1,5 +1,7 @@
 package traceworks.cli;
 
+import traceworks.core.util.Message;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -173,24 +175,24 @@ public final class Args {
             }
             if (spec.switches.contains(name)) {
                 if (inline != null) {
-                    throw new UsageException("--" + name + " takes no value");
+                    throw new UsageException(Message.of("--" + name + " takes no value"));
                 }
                 parsed.present.add(name);
             } else if (spec.options.contains(name)) {
                 String value = inline;
                 if (value == null) {
                     if (i + 1 >= args.size()) {
-                        throw new UsageException("--" + name + " needs a value");
+                        throw new UsageException(Message.of("--" + name + " needs a value"));
                     }
                     value = args.get(++i);
                 }
                 if (parsed.present.contains(name) && !spec.repeatable.contains(name)) {
-                    throw new UsageException("--" + name + " is given twice");
+                    throw new UsageException(Message.of("--" + name + " is given twice"));
                 }
                 parsed.present.add(name);
                 parsed.values.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
             } else {
-                throw new UsageException("unknown option --" + name);
+                throw new UsageException(Message.of("unknown option --", Message.typed(name)));
             }
         }
         if (parsed.has("help")) {
@@ -199,14 +201,15 @@ public final class Args {
         int expected = spec.maxPositionals;
         if (spec.minPositionals != spec.maxPositionals) {
             if (positionals.size() < spec.minPositionals || positionals.size() > spec.maxPositionals) {
-                throw new UsageException("'" + spec.name + "' takes " + spec.positional + ", got "
-                        + positionals.size() + " arguments");
+                throw new UsageException(Message.of("'" + spec.name + "' takes " + spec.positional + ", got "
+                        + positionals.size() + " arguments"));
             }
         } else if (positionals.size() != expected) {
             throw new UsageException(expected == 0
-                    ? "'" + spec.name + "' takes no argument, got '" + positionals.getFirst() + "'"
-                    : positionals.isEmpty() ? "'" + spec.name + "' needs " + spec.positional
-                    : "'" + spec.name + "' takes one " + spec.positional + ", got " + positionals.size());
+                    ? Message.of("'" + spec.name + "' takes no argument, got '", Message.typed(positionals.getFirst()),
+                            "'")
+                    : Message.of(positionals.isEmpty() ? "'" + spec.name + "' needs " + spec.positional
+                    : "'" + spec.name + "' takes one " + spec.positional + ", got " + positionals.size()));
         }
         parsed.positionals.addAll(positionals);
         return parsed;

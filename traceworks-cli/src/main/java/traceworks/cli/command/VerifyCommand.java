@@ -10,6 +10,7 @@ import traceworks.cli.UsageException;
 import traceworks.core.app.LedgerReport;
 import traceworks.core.app.VerifyReport;
 import traceworks.core.record.ChainReport;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 
@@ -51,16 +52,16 @@ public final class VerifyCommand implements Command {
         String acknowledge = args.option("acknowledge");
         if (acknowledge != null) {
             if (args.positional() != null) {
-                throw new UsageException("--acknowledge names its run itself; give no other run");
+                throw new UsageException(Message.of("--acknowledge names its run itself; give no other run"));
             }
             if (args.option("note") == null || args.option("note").isBlank()) {
-                throw new UsageException("--acknowledge needs --note \"...\": why this run is no lost run");
+                throw new UsageException(Message.of("--acknowledge needs --note \"...\": why this run is no lost run"));
             }
             LedgerReport after = context.services().acknowledge(acknowledge, args.option("note"));
             return args.has("json") ? json(context, after) : ledger(context, after);
         }
         if (args.option("note") != null) {
-            throw new UsageException("--note goes with --acknowledge <run>");
+            throw new UsageException(Message.of("--note goes with --acknowledge <run>"));
         }
         if (args.positional() == null) {
             LedgerReport home = context.services().ledgerReport(!args.has("quick"));
@@ -102,27 +103,27 @@ public final class VerifyCommand implements Command {
                 + count(report.earlier(), "run folder") + " from before the ledger");
         out.println("started, not ended (" + report.open().size() + ")");
         for (LedgerReport.Open run : report.open()) {
-            TerminalText.println(out, "  ", TerminalText.safe(run.runId()), "  ",
+            TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
                     TerminalText.safe(run.startedAt() == null ? "-" : run.startedAt()), "  ",
                     TerminalText.safe(run.workflowId() == null ? "-" : run.workflowId()), "  folder ",
                     TerminalText.safe(run.folder()));
         }
         out.println("ended, folder gone (" + report.endedGone().size() + ")");
-        report.endedGone().forEach(run -> TerminalText.println(out, "  ", TerminalText.safe(run.runId()), "  ",
+        report.endedGone().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
                 TerminalText.safe(run.detail())));
         if (!report.earlierOpen().isEmpty()) {
             out.println("from before the ledger, not ended (" + report.earlierOpen().size() + ")");
-            report.earlierOpen().forEach(run -> TerminalText.println(out, "  ", TerminalText.safe(run.runId()),
+            report.earlierOpen().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()),
                     "  folder ", TerminalText.safe(run.detail())));
         }
         if (!report.inFlight().isEmpty()) {
             out.println("in flight (" + report.inFlight().size() + ")");
-            report.inFlight().forEach(run -> TerminalText.println(out, "  ", TerminalText.safe(run.runId()), "  ",
+            report.inFlight().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
                     TerminalText.safe(run.detail()), "; its process is alive"));
         }
         out.println("acknowledged (" + report.acknowledged().size() + ")");
         for (LedgerReport.Acknowledged run : report.acknowledged()) {
-            TerminalText.println(out, "  ", TerminalText.safe(run.runId()), "  ",
+            TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
                     TerminalText.safe(String.valueOf(run.said())),
                     run.covers() ? "" : " [no longer what the check finds]");
             TerminalText.println(out, "    by ", TerminalText.safe(String.valueOf(run.actor())), " at ",
@@ -130,7 +131,7 @@ public final class VerifyCommand implements Command {
                     TerminalText.oneLine(String.valueOf(run.note())));
         }
         out.println("problems (" + report.problems().size() + ")");
-        report.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.safe(problem.runId()),
+        report.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.word(problem.runId()),
                 "  ", TerminalText.safe(problem.text())));
         if (!report.records()) {
             out.println("records   not verified (--quick): only traceworks verify <run> checks the record of a run");

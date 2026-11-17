@@ -88,18 +88,22 @@ class TerminalTextTest {
 
     @Test
     void aPaddedColumn_isFilledWithBlanks_andNestedPartsAreTakenInOrder() {
-        assertThat(TerminalText.lines("  ", TerminalText.safe("build").padded(10), "|",
-                TerminalText.seq(" [", TerminalText.safe("shell"), "]"))).containsExactly("  build     | [shell]");
+        assertThat(TerminalText.lines("  0 ", TerminalText.safe("build").padded(10), "|",
+                TerminalText.seq(" [", TerminalText.safe("shell"), "]"))).containsExactly("  0 build     | [shell]");
         assertThat(TerminalText.text("a ", TerminalText.safe("b  b"))).isEqualTo("a \n  |+b  b");
     }
 
     @Test
     void controlCharactersAreReplaced_inEveryForm() {
         String evil = "a\u001b[2Kb\u202ec\nd";
-        assertThat(TerminalText.lines(TerminalText.safe(evil))).containsExactly("a?[2Kb?c?d");
+        assertThat(TerminalText.lines(TerminalText.safe(evil))).containsExactly("| a?[2Kb?c?d");
         assertThat(TerminalText.lines(TerminalText.whole(evil))).containsExactly("a?[2Kb?c?d");
         assertThat(TerminalText.lines(TerminalText.composed(evil))).containsExactly("a?[2Kb?c?d");
-        assertThat(TerminalText.lines(TerminalText.oneLine(evil))).containsExactly("a?[2Kb?c d");
+        assertThat(TerminalText.lines(TerminalText.oneLine(evil))).containsExactly("| a?[2Kb?c d");
+        assertThat(TerminalText.lines(TerminalText.word(evil))).containsExactly("| a?[2Kb?c?d");
+        assertThat(TerminalText.lines("x ", TerminalText.of(traceworks.core.util.Message.of(
+                traceworks.core.util.Message.quoted(evil), " ", traceworks.core.util.Message.typed(evil)))))
+                .containsExactly("x a?[2Kb?c?d a?[2Kb?c?d");
         assertThat(TerminalText.block("  ", evil)).containsExactly("  | a?[2Kb?c", "  | d");
     }
 

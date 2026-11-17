@@ -112,8 +112,8 @@ class DiffCommandTest {
                 .contains("  same: workflow id, workflow name, package digest, package commit, inputs digest,"
                         + " Traceworks version, execution, ai_network, models, status, gate")
                 .contains("  same: name")
-                .containsPattern("(?m)^  greet +COMPLETED +same output$")
-                .containsPattern("(?m)^  fixed +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| greet +COMPLETED +same output$")
+                .containsPattern("(?m)^\\| fixed +COMPLETED +same output$")
                 .contains("same: run B reproduced run A");
         assertThat(diff.out()).doesNotContain("differs").doesNotContain("Anna");
         assertThat(diff.out().lines().count()).isLessThan(16);
@@ -131,11 +131,11 @@ class DiffCommandTest {
         assertThat(diff.code()).as(diff.out() + diff.err()).isEqualTo(DIFFERS);
         assertThat(diff.out())
                 .containsPattern("(?m)^  inputs digest +A [0-9a-f]{64}\\R +B [0-9a-f]{64}$")
-                .containsPattern("(?m)^  name +A \"Anna\"\\R +B \"Bert\"$")
-                .containsPattern("(?m)^  greet +COMPLETED +output differs$")
-                .containsPattern("(?m)^  fixed +COMPLETED +same output$")
-                .contains("differs: run B did not reproduce run A", "  the inputs differ",
-                        "  step greet: the output differs");
+                .containsPattern("(?m)^\\| name +A \"Anna\"\\R +B \"Bert\"$")
+                .containsPattern("(?m)^\\| greet +COMPLETED +output differs$")
+                .containsPattern("(?m)^\\| fixed +COMPLETED +same output$")
+                .contains("differs: run B did not reproduce run A", "| the inputs differ",
+                        "| step greet: the output differs");
         assertThat(diff.out()).doesNotContain("Hello, Anna");
     }
 
@@ -216,7 +216,7 @@ class DiffCommandTest {
         Result diff = exec("diff", a, b, "--outputs");
 
         assertThat(diff.code()).isEqualTo(DIFFERS);
-        assertThat(diff.out()).containsPattern("(?m)^  note +differs \\(a redacted value is not shown\\)$")
+        assertThat(diff.out()).containsPattern("(?m)^\\| note +differs \\(a redacted value is not shown\\)$")
                 .doesNotContain(secret).doesNotContain("[redacted").doesNotContain("plain");
     }
 
@@ -232,8 +232,8 @@ class DiffCommandTest {
 
         assertThat(diff.code()).isEqualTo(DIFFERS);
         assertThat(diff.out()).containsPattern("(?m)^  package digest +A [0-9a-f]{64}\\R +B [0-9a-f]{64}$")
-                .containsPattern("(?m)^  two +only in run B \\(COMPLETED\\)$")
-                .contains("  the package digest differs", "  step two: only in run B");
+                .containsPattern("(?m)^\\| two +only in run B \\(COMPLETED\\)$")
+                .contains("| the package digest differs", "| step two: only in run B");
     }
 
     @Test
@@ -318,7 +318,7 @@ class DiffCommandTest {
 
         assertThat(diff.code()).as(diff.out() + diff.err()).isZero();
         assertThat(diff.out())
-                .containsPattern("(?m)^  ask +\\[ai\\] +COMPLETED +output differs$")
+                .containsPattern("(?m)^\\| ask +\\[ai\\] +COMPLETED +output differs$")
                 .contains("      AI call 1  same setup, prompt same, output differs\n"
                         + "        A  CLAUDE  model opus  answered by claude-opus-5-5  tools none  web none"
                         + "  12 in / 3 out tokens  cost -\n"

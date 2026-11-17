@@ -280,7 +280,7 @@ class MainTest {
                         + "\"the tools on JDK 21\"}");
         Result show = exec("show", idOf(r));
         assertThat(show.out()).contains("Images" + System.lineSeparator()
-                + "  shell                    debian:bookworm-slim", "  ./images/tools           eclipse-temurin:21-jdk-noble"
+                + "| shell                    debian:bookworm-slim", "| ./images/tools           eclipse-temurin:21-jdk-noble"
                 + "   the tools on JDK 21");
     }
 
@@ -1686,9 +1686,9 @@ class MainTest {
                 .doesNotContain("output");
         assertThat(r.out()).contains("Workflow" + System.lineSeparator()
                 + "  0   build                    shell                              step 0 COMPLETED"
-                + System.lineSeparator() + "      echo built" + System.lineSeparator()
+                + System.lineSeparator() + "    | echo built" + System.lineSeparator()
                 + "  1   publish                  approval                           step 1 WAITING_APPROVAL"
-                + System.lineSeparator() + "      Publish it?" + System.lineSeparator()
+                + System.lineSeparator() + "    | Publish it?" + System.lineSeparator()
                 + "  2   done                     shell                              did not run");
     }
 
@@ -2076,8 +2076,8 @@ class MainTest {
         Result r = exec("verify", renamed.toString());
 
         assertThat(r.code()).as(r.out() + r.err()).isEqualTo(8);
-        assertThat(r.out().lines().filter(line -> line.startsWith("  ")).toList())
-                .containsExactly("  run folder not-the-run-id holds run " + id);
+        assertThat(r.out().lines().filter(line -> line.startsWith("| ")).toList())
+                .containsExactly("| run folder not-the-run-id holds run " + id);
     }
 
     @Test

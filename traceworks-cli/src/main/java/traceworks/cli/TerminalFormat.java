@@ -66,16 +66,16 @@ public final class TerminalFormat {
         String step = e.step() == null ? "" : "step " + e.step() + "  ";
         return switch (e.type()) {
             case "run.started" -> seq("run started: ", text(f.path("workflow").path("name")), " (run ",
-                    TerminalText.safe(shortId(e.run())), ") by ", text(f.path("actor")), where(f, false));
-            case "step.started" -> seq(step, name(f), " [", text(f.path("block_type")),
+                    TerminalText.word(shortId(e.run())), ") by ", text(f.path("actor")), where(f, false));
+            case "step.started" -> seq(step, name(f), " [", word(f.path("block_type")),
                     f.path("mode").asText().equals("ai") ? ", ai" : "", "] started");
             case "step.waiting" -> step + (f.path("waiting").asBoolean() ? "waiting for an answer" : "going on");
             case "step.command" -> seq(step, "$ ", content(e.blob("command")));
-            case "step.command.finished" -> seq(step, "exit ", text(f.path("exit_code")), " after "
+            case "step.command.finished" -> seq(step, "exit ", word(f.path("exit_code")), " after "
                     + f.path("duration_ms").asLong() + " ms" + (f.path("timed_out").asBoolean() ? " (timed out)" : ""),
                     truncated(f.path("truncated")), outputCut(f.path("output_cut")));
             case "step.output" -> seq(step, "output: ", content(e.blob("output")));
-            case "gate.reported" -> seq(step, "gate ", text(f.path("status")),
+            case "gate.reported" -> seq(step, "gate ", word(f.path("status")),
                     f.path("category").isNull() || f.path("category").isMissingNode() ? ""
                             : seq(" ", TerminalText.safe(f.path("category").asText())),
                     suffix(e.blob("description")));
@@ -85,16 +85,16 @@ public final class TerminalFormat {
             case "foreach.item.started" -> seq(step, "item " + (f.path("item_index").asInt() + 1) + "/"
                     + f.path("total").asInt() + " started: ", content(e.blob("item")));
             case "foreach.item.finished" -> seq(step, "item " + (f.path("item_index").asInt() + 1) + "/"
-                    + f.path("total").asInt() + " ", text(f.path("status")),
+                    + f.path("total").asInt() + " ", word(f.path("status")),
                     f.path("resumed_from").isInt()
                             ? " (taken over from event " + f.path("resumed_from").asInt() + ", not run again)" : "");
-            case "agentic.progress" -> seq(step, "agent ", text(f.path("phase")));
-            case "step.finished" -> seq(step, name(f), " ", text(f.path("status")), " after "
+            case "agentic.progress" -> seq(step, "agent ", word(f.path("phase")));
+            case "step.finished" -> seq(step, name(f), " ", word(f.path("status")), " after "
                     + f.path("duration_ms").asLong() + " ms");
             case "run.parked" -> "pause".equals(f.path("kind").asText())
                     ? "run parked: paused" + (f.path("step").isInt()
                     ? " inside the loop of step " + f.path("step").asInt() : " before the next step")
-                    : seq("run parked at step ", text(f.path("step")), ": waiting for an answer");
+                    : seq("run parked at step ", word(f.path("step")), ": waiting for an answer");
             case "run.resumed" -> seq("run resumed by ", text(f.path("actor")), where(f, true),
                     f.path("rerun_step").isNumber() ? ", running step " + f.path("rerun_step").asInt() + " again"
                             : "");
@@ -102,8 +102,8 @@ public final class TerminalFormat {
             case "run.pause_requested" -> seq("pause requested", by(f),
                     ": the run parks after the step or the loop item in flight");
             case "run.recovered" -> "record recovered: a torn last line was set aside";
-            case "run.finished" -> seq("run finished: ", text(f.path("status")),
-                    f.path("gate").isObject() ? seq(", gate ", TerminalText.safe(f.path("gate").path("status").asText()))
+            case "run.finished" -> seq("run finished: ", word(f.path("status")),
+                    f.path("gate").isObject() ? seq(", gate ", word(f.path("gate").path("status")))
                             : "",
                     suffix(e.blob("error")));
             case "run.checkpoint", "run.status" -> null;
@@ -121,6 +121,15 @@ public final class TerminalFormat {
     }
 
     /**
+     * A value of a field Traceworks writes itself (a status, an exit code, the runtime's name and version): its own
+     * where it has the shape of one, a text from outside where a record holds anything else
+     * ({@link TerminalText#word}).
+     */
+    private static TerminalText word(JsonNode value) {
+        return TerminalText.word(value.asText("?"));
+    }
+
+    /**
      * Where the run runs, as {@code run.started} and {@code run.resumed} record it: in containers with the runtime and
      * its version, or on the host, which a run starts on only where no container runtime works; empty for a record
      * that names neither.
@@ -131,8 +140,8 @@ public final class TerminalFormat {
         JsonNode runtime = f.path("container_runtime");
         boolean found = runtime.isObject();
         return switch (f.path("execution").asText("")) {
-            case "container" -> seq(" in containers", found ? seq(" (", text(runtime.path("name")), " ",
-                    text(runtime.path("version")), ")") : "");
+            case "container" -> seq(" in containers", found ? seq(" (", word(runtime.path("name")), " ",
+                    word(runtime.path("version")), ")") : "");
             case "host" -> " on the host" + (!found ? " (no container runtime works)" : resumed ? ", where it started"
                     : "");
             default -> "";

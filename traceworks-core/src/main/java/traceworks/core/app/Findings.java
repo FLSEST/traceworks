@@ -16,6 +16,7 @@ import traceworks.core.register.RegisterState;
 import traceworks.core.register.RegisterVerifier;
 import traceworks.core.register.RegisterWriter;
 import traceworks.core.register.StateJson;
+import traceworks.core.util.Message;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -129,7 +130,7 @@ public final class Findings {
         try {
             agent = named == null ? null : DecisionAgent.checked(named, "The agent of a decision");
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
         try (RegisterStore.Opened opened = store.openForWrite(requireKnown(key))) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
@@ -144,8 +145,8 @@ public final class Findings {
                     default -> Disposition.reopen(finding, note, actor, at);
                 };
             } catch (IllegalArgumentException | IllegalStateException e) {
-                throw new RunRefusedException("Finding " + finding.id().substring(0, 8) + " of " + key + ": "
-                        + e.getMessage());
+                throw new RunRefusedException(Message.of("Finding " + finding.id().substring(0, 8) + " of ", Message.typed(key), ": ",
+                        Message.of(e)));
             }
             List<Finding> findings = new ArrayList<>();
             for (Finding f : state.findings()) {
@@ -164,12 +165,13 @@ public final class Findings {
 
     private static Finding find(RegisterState state, String reference) {
         if (reference == null || reference.length() < 8) {
-            throw new RunRefusedException("A finding is named by its id or a prefix of at least 8 characters");
+            throw new RunRefusedException(Message.of("A finding is named by its id or a prefix of at least 8 characters"));
         }
         List<Finding> matches = state.findings().stream().filter(f -> f.id().startsWith(reference)).toList();
         if (matches.size() != 1) {
-            throw new RunRefusedException(matches.isEmpty() ? "No finding of " + state.key() + " starts with " + reference
-                    : matches.size() + " findings of " + state.key() + " start with " + reference);
+            throw new RunRefusedException(Message.of(matches.isEmpty() ? "No finding of " : matches.size()
+                    + " findings of ", Message.typed(state.key()), matches.isEmpty() ? " starts with "
+                    : " start with ", Message.typed(reference)));
         }
         return matches.getFirst();
     }
@@ -257,8 +259,9 @@ public final class Findings {
 
     private String requireKnown(String key) {
         if (!store.keys().contains(key)) {
-            throw new RunRefusedException("No register '" + key + "'" + (store.keys().isEmpty() ? "; no run has fed one"
-                    : "; the registers are " + String.join(", ", store.keys())));
+            throw new RunRefusedException(Message.of("No register '", Message.typed(key), "'", store.keys().isEmpty()
+                    ? "; no run has fed one" : Message.of("; the registers are ",
+                    Message.quoted(String.join(", ", store.keys())))));
         }
         return key;
     }

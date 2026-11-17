@@ -14,6 +14,7 @@ import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunRecorder;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -57,7 +58,7 @@ final class RunRecords {
      */
     static RunView view(String runId, List<RecordedEvent> events, boolean writerAlive) {
         if (events.isEmpty()) {
-            throw new RunRefusedException("Run " + runId + " has no record yet");
+            throw new RunRefusedException(Message.of("Run " + runId + " has no record yet"));
         }
         try {
             return RunView.of(events, writerAlive);
@@ -97,7 +98,7 @@ final class RunRecords {
     /** The run's {@code run.started}, the first event of its record. */
     static RecordedEvent started(List<RecordedEvent> events) {
         if (events.isEmpty() || !RecordTypes.RUN_STARTED.equals(events.getFirst().type())) {
-            throw new RunRefusedException("The record does not begin with run.started");
+            throw new RunRefusedException(Message.of("The record does not begin with run.started"));
         }
         return events.getFirst();
     }
@@ -112,10 +113,10 @@ final class RunRecords {
      */
     static byte[] content(StoredRun run, BlobRef ref, String what) {
         if (ref == null) {
-            throw new RunRefusedException("Run " + run.runId() + " has no " + what + " in its record");
+            throw new RunRefusedException(Message.of("Run " + run.runId() + " has no " + what + " in its record"));
         }
-        return checkedContent(run, ref, what).orElseThrow(() -> new RunRefusedException(
-                "The " + what + " of run " + run.runId() + " is deleted (blob " + ref.sha256() + ")"));
+        return checkedContent(run, ref, what).orElseThrow(() -> new RunRefusedException(Message.of(
+                "The " + what + " of run " + run.runId() + " is deleted (blob " + ref.sha256() + ")")));
     }
 
     /**
@@ -207,8 +208,8 @@ final class RunRecords {
      */
     private static String checkpointText(StoredRun run, RunSnapshotJson.Reference reference) {
         byte[] bytes = checkedContent(run, reference.blob(), what(reference)).orElseThrow(() ->
-                new RunRefusedException("The " + what(reference) + " of run " + run.runId() + " is deleted (blob "
-                        + reference.blob().sha256() + ")"));
+                new RunRefusedException(Message.of("The " + what(reference) + " of run " + run.runId() + " is deleted (blob "
+                        + reference.blob().sha256() + ")")));
         return new String(bytes, StandardCharsets.UTF_8);
     }
 

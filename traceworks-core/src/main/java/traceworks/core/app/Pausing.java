@@ -7,6 +7,7 @@ import traceworks.core.port.StoredRun;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.time.Duration;
 import java.util.List;
@@ -46,7 +47,7 @@ final class Pausing {
             RunView view = RunRecords.view(runId, RunRecords.events(run), false);
             String next = RunRecords.isFinal(view.status()) ? "a finished run cannot be paused"
                     : "it has stopped already; go on with traceworks resume " + runId;
-            throw new RunRefusedException("Run " + runId + " is not running (" + view.status() + "): " + next);
+            throw new RunRefusedException(Message.of("Run " + runId + " is not running (" + view.status() + "): " + next));
         }
         String requestId = ids.newRequestId();
         run.inbox().post(new InboxRequest(requestId, KIND, null, null, null, null, Map.of(), null, actor,
@@ -65,8 +66,8 @@ final class Pausing {
                     continue;
                 }
                 if (RecordTypes.REQUEST_REFUSED.equals(event.type())) {
-                    throw new RunRefusedException("The pause of run " + runId + " was refused: "
-                            + event.fields().path("reason").asText());
+                    throw new RunRefusedException(Message.of("The pause of run " + runId + " was refused: ",
+                            Message.quoted(event.fields().path("reason").asText())));
                 }
                 if (RecordTypes.RUN_PAUSE_REQUESTED.equals(event.type())) {
                     return recorded(run, events);

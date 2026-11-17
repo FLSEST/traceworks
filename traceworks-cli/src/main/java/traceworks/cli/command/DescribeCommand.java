@@ -10,6 +10,7 @@ import traceworks.cli.UsageException;
 import traceworks.core.app.TraceworksVersion;
 import traceworks.core.describe.DescriptionText;
 import traceworks.core.describe.WorkflowDescription;
+import traceworks.core.util.Message;
 import traceworks.core.view.DescribeHtml;
 
 import java.io.IOException;
@@ -47,11 +48,12 @@ public final class DescribeCommand implements Command {
         List<String> positionals = args.positionals();
         boolean html = args.has("html");
         if (positionals.size() > 1 && !html) {
-            throw new UsageException("'describe' takes a file only with --html, got '" + positionals.get(1) + "'");
+            throw new UsageException(Message.of("'describe' takes a file only with --html, got '",
+                    Message.typed(positionals.get(1)), "'"));
         }
         Path pkg = context.resolve(positionals.getFirst());
         if (!Files.exists(pkg)) {
-            throw new UsageException("no such package: " + pkg);
+            throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         WorkflowDescription described = context.services().describe(pkg);
         if (!html) {
@@ -66,9 +68,9 @@ public final class DescribeCommand implements Command {
                 : context.resolve(packageDir.getFileName() + PAGE_SUFFIX);
         boolean inside = page.startsWith(packageDir);
         if (inside && !named) {
-            throw new UsageException("the working directory is inside the package, and a page there would change the"
+            throw new UsageException(Message.of("the working directory is inside the package, and a page there would change the"
                     + " package's digest: name the file to write, as in 'traceworks describe <package> --html"
-                    + " <file>'");
+                    + " <file>'"));
         }
         try {
             // The working directory may be a checkout nobody checked, with a link under the page's name: the page
@@ -84,8 +86,9 @@ public final class DescribeCommand implements Command {
                 Files.deleteIfExists(draft);
             }
         } catch (IOException e) {
-            throw new UsageException("cannot write " + page + ": " + e.getClass().getSimpleName()
-                    + (e.getMessage() == null ? "" : " (" + e.getMessage() + ")"));
+            throw new UsageException(Message.of("cannot write ", Message.typed(page), ": "
+                    + e.getClass().getSimpleName(), e.getMessage() == null ? ""
+                    : Message.of(" (", Message.quoted(e.getMessage()), ")")));
         }
         if (inside) {
             TerminalText.println(context.err(), "traceworks: note: ", TerminalText.whole(page.toString()),

@@ -12,6 +12,7 @@ import traceworks.core.register.DecisionAgent;
 import traceworks.core.app.RunResult;
 import traceworks.core.app.RunServices;
 import traceworks.core.record.RecordedEvent;
+import traceworks.core.util.Message;
 
 import java.util.function.Consumer;
 
@@ -43,8 +44,8 @@ final class Following {
         try {
             return DecisionAgent.resolve(null, context.env());
         } catch (IllegalArgumentException e) {
-            throw new UsageException(e.getMessage() + " (it names who answers at the prompt of this run; unset it,"
-                    + " or run with --no-input)");
+            throw new UsageException(Message.of(Message.of(e), " (it names who answers at the prompt of this run;"
+                    + " unset it, or run with --no-input)"));
         }
     }
 

@@ -49,6 +49,32 @@ class TerminalFormatTest {
                 .isEqualTo("12:34:56 run started: Deploy (run 11111111) by flo@box");
     }
 
+    /**
+     * The usual start line is wider than a terminal, and is one line all the same: what Traceworks wrote into the
+     * record itself (the runtime, its version, the id) is not broken. The workflow's name is: a padded one never
+     * starts a terminal line, and neither does a runtime's name that no version of Traceworks writes.
+     */
+    @Test
+    void runStarted_staysOnOneLine_andOnlyWhatIsFromOutsideIsGated() {
+        String rest = "\"actor\":\"flo\",\"execution\":\"container\",\"container_runtime\":{\"name\":\"docker\","
+                + "\"version\":\"29.1.3\"}";
+        String printed = raw(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Security self-audit"
+                + "\"}," + rest));
+        assertThat(printed).isEqualTo("12:34:56 run started: Security self-audit (run 11111111)"
+                + " by flo in containers (docker 29.1.3)");
+        assertThat(printed.length()).as("the case: wider than the terminal").isGreaterThan(80);
+
+        for (String padded : Forged.PADDED) {
+            String forged = raw(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\""
+                    + padded.replace(" ", "\\u00a0") + "\"}," + rest));
+            Forged.assertNeverStartsATerminalLine(forged);
+            assertThat(forged.lines().count()).isGreaterThan(1);
+            Forged.assertNeverStartsATerminalLine(raw(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\""
+                    + "n".repeat(31) + "\"},\"actor\":\"flo\",\"execution\":\"container\",\"container_runtime\":"
+                    + "{\"name\":\"docker\",\"version\":\"" + Forged.HINT + "\"}")));
+        }
+    }
+
     /** The start line says where the run runs: in containers, with the runtime, or on the host without one. */
     @Test
     void runStartedAndResumed_nameWhereTheRunRuns() {
