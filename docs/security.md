@@ -473,7 +473,10 @@ content, and no blob is written through one.
     workflow the values are handed to, for the output of a child (or a child of a child) that asked a model, and
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
-    static `items` of a `foreach`, a person's answer.
+    static `items` of a `foreach`, a person's answer. A default that a person takes at the console with an empty
+    line is such an answer, so the console takes it only when its prompt showed the whole default: one that is
+    longer than the 200 characters shown, or has a line break or a character a terminal does not show, must be
+    typed. What the prompt shows, the person has seen and answers for.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a

