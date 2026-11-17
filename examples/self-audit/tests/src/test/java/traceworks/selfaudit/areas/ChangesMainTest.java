@@ -462,16 +462,15 @@ class ChangesMainTest {
                                 + " area any more: it may have moved there: `extra/src/p/Runner.java`",
                         "## Open findings that no item carries");
 
-        // The same when the Java file that came is a test: the class may have moved there
+        // A changed test does not keep a finding open: tests change with nearly every commit, and a member that
+        // was removed must be able to take its finding with it
         Path test = Files.createDirectories(root.resolve("app/src/test/java/p"));
-        Files.move(moved.resolve("Runner.java"), test.resolve("Runner.java"));
+        Files.move(moved.resolve("Runner.java"), test.resolve("RunnerTest.java"));
         Map<String, String> asTest = Handover.files(root);
         Handover.write(work.resolve("changes"), base, asTest);
         assertThat(run("", find("--known", known.toString()))).isZero();
-        assertThat(summary().get("knownGone")).isEqualTo(List.of());
-        assertThat(report()).isZero();
-        assertThat(details()).startsWith("gate_status: RED\n");
-        Files.move(test.resolve("Runner.java"), moved.resolve("Runner.java"));
+        assertThat(summary().get("knownGone")).isEqualTo(List.of(Map.of("ruleKey", "process_start", "subject", RUNNER)));
+        Files.move(test.resolve("RunnerTest.java"), moved.resolve("Runner.java"));
 
         // Without such a file, a member that is gone takes its finding with it
         Files.delete(moved.resolve("Runner.java"));
@@ -848,5 +847,59 @@ class ChangesMainTest {
         assertThat(Files.readString(work.resolve("report.md"))).contains("| Last full audit (`examples/self-audit/"
                 + "security`) | `" + "d".repeat(40) + "`, as the input `full_audit` names it: 17 commits before the"
                 + " workspace commit |");
+    }
+
+    @Test
+    void aBuiltCheckout_canBeGreen_andItsBaseMoves_whateverTheBuildLeftOutsideTheSourceRoots() throws IOException {
+        Path built = Files.createDirectories(root.resolve("app/target/classes/traceworks-images/egress/src"));
+        Files.writeString(built.resolve("Egress.java"), "class Egress { }\n");
+        Path copy = Files.createDirectories(root.resolve(".claude/worktrees/agent/app/src/main/java/p"));
+        Files.writeString(copy.resolve("Runner.java"), "package p;\nclass Runner { }\n");
+        // Only the tracked files are in the trees
+        Map<String, String> head = new java.util.TreeMap<>(Handover.files(root));
+        head.keySet().removeIf(path -> path.startsWith("app/target/") || path.startsWith(".claude/"));
+        Map<String, String> base = new java.util.TreeMap<>(head);
+        base.put(SRC + "Runner.java", head.get(SRC + "Runner.java").replace("ProcessBuilder(c)", "ProcessBuilder(c, c)"));
+        Handover.write(work.resolve("changes"), base, head);
+
+        assertThat(run("", find())).as(err.toString()).isZero();
+        assertThat(out()).contains("FACT changes_files: 1\n", "FACT changes_uncommitted: false\n",
+                "FACT changes_files_java_not_compiled: 0\n");
+        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
+
+        assertThat(out()).startsWith("gate_status: GREEN\n");
+        assertThat(headLine()).isEqualTo("FACT changes_head: " + HEAD);
+    }
+
+    @Test
+    void aChangedConstant_picksTheAreasOfItsFile_alsoWhenTheRegisterCallsTheirTextSettled() throws IOException {
+        String limits = "package p;\nclass Limits {\n    static final int MIN = %s;\n"
+                + "    void run(String c) throws Exception {\n        if (c.length() >= MIN) new ProcessBuilder(c).start();\n"
+                + "    }\n}\n";
+        source("p/Limits.java", limits.formatted("8"));
+        baseHas("p/Limits.java", limits.formatted("8").replace("ProcessBuilder(c)", "ProcessBuilder(c, c)"));
+        run("", find());
+        Path items = settled();
+
+        source("p/Limits.java", limits.formatted("9"));
+        baseHas("p/Limits.java", limits.formatted("8"));
+
+        assertThat(run("", find("--items-file", items.toString()))).as(err.toString()).isZero();
+        assertThat(areas()).extracting(a -> a.get("item") + ": " + a.get("reason")).containsExactly(
+                SRC + "Limits.java#Limits.run(String): changed: a field of its file");
+    }
+
+    @Test
+    void lowFindingsInTheReportOnly_areNotCalledNothingFound() throws IOException {
+        changes(SRC + "Runner.java");
+        run("", find());
+
+        assertThat(report(verdicts(CLEAN, "{\"area\":\"ID\",\"findings\":[{\"rule\":\"process_start\",\"severity\":"
+                + "\"low\",\"line\":4,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\",\"fix\":\"f\"}]}")))
+                .isZero();
+
+        assertThat(out()).startsWith("gate_status: GREEN\n");
+        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa, all judged, nothing for the register (1 low"
+                + " finding in the report only)");
     }
 }

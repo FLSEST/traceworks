@@ -38,8 +38,9 @@ import java.util.regex.Pattern;
  * changed file that this check cannot judge.
  *
  * <p>An area is <em>changed</em> when a changed line lies in it, when a member it shows a part of changed outside
- * that part, or when a line of its file changed that lies in no member (an import, the package, the head of a
- * class: such a line can change what every name in the file means, so every area of the file is judged). It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
+ * that part, when a line of its file changed that lies in no member (an import, the package, the head of a
+ * class: such a line can change what every name in the file means, so every area of the file is judged), or when
+ * a field or an initializer of its file changed (every member can read it without a call). It is a <em>neighbour</em> when it is not changed and a member in it calls a changed member or is
  * called by one. Two calls away is not looked at. The changed members an area is connected with are shown to the
  * verdict next to the area's own code ({@link #connectedText}).
  */
@@ -50,6 +51,7 @@ final class Changes {
     static final int MAX_CONNECTED_LINES = 60;
     private static final int MAX_NAMED = 5;
     static final String HEAD_CHANGED = "changed: the head of its file (outside every member)";
+    static final String FIELD_CHANGED = "changed: a field of its file";
     /** Above this many pairs of lines, the part of a file between its common start and end counts as rewritten. */
     private static final long MAX_COMPARED = 4_000_000;
 
@@ -333,8 +335,8 @@ final class Changes {
      * file made executable, or replaced by a link); no file is a removed one. A
      * file the workspace commit has and the base does not is new, whatever its kind. A {@code .java} file that
      * neither tree has is new too, whether git tracks it, ignores it or neither: the walk takes every regular
-     * {@code .java} file below the root that is not below a {@code .git} directory, so every file the finder can
-     * read is in it. A new file of another kind that is in no commit is not seen: nothing tells it from the output
+     * {@code .java} file below the root, except below {@code .git} and below what a build leaves outside the source
+     * roots ({@link #leftByABuild}), so every file the finder can read is in it. A new file of another kind that is in no commit is not seen: nothing tells it from the output
      * of a build.
      */
     static Compared compare(Handed handed, Path workspace) throws IOException {
@@ -371,7 +373,7 @@ final class Changes {
         Files.walkFileTree(root, new java.nio.file.SimpleFileVisitor<>() {
             @Override
             public java.nio.file.FileVisitResult preVisitDirectory(Path dir, java.nio.file.attribute.BasicFileAttributes a) {
-                return dir.getFileName() != null && dir.getFileName().toString().equals(".git") && !dir.equals(root)
+                return !dir.equals(root) && (dir.getFileName().toString().equals(".git") || leftByABuild(root, dir))
                         ? java.nio.file.FileVisitResult.SKIP_SUBTREE : java.nio.file.FileVisitResult.CONTINUE;
             }
 
@@ -394,6 +396,27 @@ final class Changes {
             dirty = true;
         }
         return new Compared(dirty, status, baseIds);
+    }
+
+    /**
+     * Whether {@code dir} is one the finder does not look into when it searches for source roots (a hidden
+     * directory, {@code target}, {@code build}, {@code node_modules}) and lies in no source root: no
+     * {@code src/main/java} stands above it. What lies there in no commit is the output of a build or the files of
+     * a tool, the finder never compiles it, and so it is no file of the workspace for this check. Inside a source
+     * root every directory counts, whatever it is called: the finder compiles what lies there.
+     */
+    private static boolean leftByABuild(Path root, Path dir) {
+        String name = dir.getFileName().toString();
+        if (!Main.SKIPPED.contains(name) && !name.startsWith(".")) return false;
+        Path above = root.relativize(dir).getParent();
+        if (above == null) return true;
+        for (int i = 0; i + 2 < above.getNameCount(); i++) {
+            if (above.getName(i).toString().equals("src") && above.getName(i + 1).toString().equals("main")
+                    && above.getName(i + 2).toString().equals("java")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** The ids of the base blobs whose bytes the line comparison needs: those of the changed {@code .java} files. */
@@ -633,6 +656,8 @@ final class Changes {
         Comparator<Declared> place = Comparator.comparing(Declared::file)
                 .thenComparingInt((Declared d) -> d.member().start()).thenComparing(d -> d.member().label());
 
+        Set<String> fieldChanged = new java.util.HashSet<>();
+        for (Declared member : changed) if (!member.member().label().endsWith(")")) fieldChanged.add(member.file());
         Map<String, Pick> picks = new LinkedHashMap<>();
         for (Area area : areas) {
             List<Declared> held = byFile.getOrDefault(area.file(), List.of()).stream()
@@ -643,6 +668,8 @@ final class Changes {
             if (changedHere) reasons.add("changed");
             // An import, the package, the head of a class: what a name in any member means may have changed
             else if (headChanged.contains(area.file())) reasons.add(HEAD_CHANGED);
+            // A field, a constant or an initializer: every member of the class can read it without a call
+            else if (fieldChanged.contains(area.file())) reasons.add(FIELD_CHANGED);
             for (Declared member : held) {
                 boolean whole = member.member().start() >= area.start() && member.member().end() <= area.end();
                 if (isChanged.contains(member) && !whole
@@ -672,7 +699,7 @@ final class Changes {
     /**
      * What the code of an area means beyond its text, for its digest: what the calls of its members resolved to (the
      * declaring type and the signature of each, as the compiler resolved them), and the lines of its file that lie
-     * in no member (the package, the imports, the heads of the classes). When an import, a supertype or an overload
+     * in no method or constructor (the package, the imports, the heads of the classes, the fields and initializers). When an import, a supertype or an overload
      * points a call of the area at other code, this text changes although the area's own lines do not, so the area
      * does not pass for judged as it is.
      */
@@ -693,7 +720,8 @@ final class Changes {
             if (!file.path().equals(area.file())) continue;
             for (int line = 1; line <= file.lines().size(); line++) {
                 int at = line;
-                if (inFile.stream().noneMatch(m -> m.member().start() <= at && m.member().end() >= at)) {
+                if (inFile.stream().noneMatch(m -> m.member().label().endsWith(")")
+                        && m.member().start() <= at && m.member().end() >= at)) {
                     out.append(file.lines().get(line - 1)).append('\n');
                 }
             }

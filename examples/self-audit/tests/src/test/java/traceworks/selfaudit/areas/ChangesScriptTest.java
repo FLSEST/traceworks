@@ -331,18 +331,18 @@ class ChangesScriptTest {
 
     @Test
     void aFileMovedBelowADirectoryCalledBuild_andEdited_isANewFileWithItsLines_notOnlyARemoval() throws IOException {
-        Files.createDirectories(repo.resolve("src/build"));
-        git("mv", "src/A.java", "src/build/A.java");
-        Files.writeString(repo.resolve("src/build/A.java"), "one\nTWO\nthree\nedited\n");
-        Files.createDirectories(repo.resolve("src/.hidden/target/node_modules"));
-        Files.writeString(repo.resolve("src/.hidden/target/node_modules/Deep.java"), "d\n");
+        Files.createDirectories(repo.resolve("src/main/java/build"));
+        git("mv", "src/A.java", "src/main/java/build/A.java");
+        Files.writeString(repo.resolve("src/main/java/build/A.java"), "one\nTWO\nthree\nedited\n");
+        Files.createDirectories(repo.resolve("src/main/java/.hidden/target/node_modules"));
+        Files.writeString(repo.resolve("src/main/java/.hidden/target/node_modules/Deep.java"), "d\n");
 
         assertThat(script(third, "").code()).isZero();
         Changes.Base base = read();
 
-        assertThat(base.status()).containsOnly(Map.entry("src/A.java", "D"), Map.entry("src/build/A.java", "A"),
-                Map.entry("src/.hidden/target/node_modules/Deep.java", "A"));
-        assertThat(base.lines()).containsKeys("src/build/A.java", "src/.hidden/target/node_modules/Deep.java");
+        assertThat(base.status()).containsOnly(Map.entry("src/A.java", "D"), Map.entry("src/main/java/build/A.java", "A"),
+                Map.entry("src/main/java/.hidden/target/node_modules/Deep.java", "A"));
+        assertThat(base.lines()).containsKeys("src/main/java/build/A.java", "src/main/java/.hidden/target/node_modules/Deep.java");
     }
 
     @Test

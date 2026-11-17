@@ -74,7 +74,7 @@ public final class Main {
     /** The line between an area's code and the code it is connected with, in what its digest holds. */
     private static final String CONNECTED = "# connected";
     private static final int MAX_UNMAPPED_NAMED = 50;
-    private static final Set<String> SKIPPED = Set.of("target", "node_modules", "build");
+    static final Set<String> SKIPPED = Set.of("target", "node_modules", "build");
 
     private Main() {
     }
@@ -327,10 +327,10 @@ public final class Main {
         // Known findings whose member is no area any more: the report names them as gone
         List<Map<String, Object>> orphans = Known.orphans(known, null, subjects);
         List<Map<String, Object>> unowned = new ArrayList<>(Known.unowned(known, null, subjects));
-        if (kinds != null && !(kinds.uncompiled().isEmpty() && kinds.tests().isEmpty()) && !orphans.isEmpty()) {
-            // Java code changed or came where the finder does not read, a test source root included. The member
-            // of such a finding may have moved there, so its absence from the areas says nothing: the finding stays
-            // open, for a person
+        if (kinds != null && !kinds.uncompiled().isEmpty() && !orphans.isEmpty()) {
+            // Java code changed or came where the finder does not read (tests aside: they change with nearly every
+            // commit, and a removed member must be able to take its finding with it). The member of such a finding
+            // may have moved there, so its absence from the areas says nothing: the finding stays open, for a person
             for (Map<String, Object> orphan : orphans) {
                 Map<String, Object> entry = new LinkedHashMap<>(orphan);
                 entry.put("severity", known.stream().filter(row -> row.asked() && row.ruleKey().equals(orphan.get("ruleKey"))

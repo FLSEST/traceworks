@@ -234,6 +234,11 @@ class ChangesTest {
         workFile("src/main/java/p/build/New.java", "n\n");
         workFile("src/main/java/p/.hidden/target/node_modules/Deep.java", "d\n");
         workFile(".git/hooks/NotThis.java", "x\n");
+        // What a build or a tool leaves outside every source root: the finder never compiles it
+        workFile("mod/target/classes/images/src/Egress.java", "x\n");
+        workFile(".claude/worktrees/a/src/main/java/p/Copy.java", "x\n");
+        workFile("mod/build/src/main/java/p/Generated.java", "x\n");
+        workFile("node_modules/x/Y.java", "x\n");
         workFile("notes.txt", "in no commit, and no Java file\n");
         Path dir = Handover.write(root.resolve("changes"), before, head);
 
@@ -514,5 +519,50 @@ class ChangesTest {
 
         assertThat(compared.status()).isEmpty();
         assertThat(compared.dirty()).as("the commit removed it, the disk has it").isTrue();
+    }
+
+    @Test
+    void whatABuildLeavesOutsideTheSourceRoots_doesNotMakeTheWorkspaceDiffer_andIsNoFile() throws IOException {
+        workFile("mod/src/main/java/p/A.java", "a\n");
+        workFile("mod/target/classes/traceworks-images/egress/src/Egress.java", "x\n");
+        workFile(".claude/worktrees/agent/mod/src/main/java/p/A.java", "other\n");
+        Path dir = Handover.write(root.resolve("changes"), Map.of("mod/src/main/java/p/A.java", "a\n"),
+                Map.of("mod/src/main/java/p/A.java", "a\n"));
+
+        Changes.Compared compared = Changes.compare(Changes.read(dir), root.resolve("work"));
+
+        assertThat(compared.status()).isEmpty();
+        assertThat(compared.dirty()).isFalse();
+    }
+
+    @Test
+    void aChangedFieldOrInitializer_picksEveryAreaOfItsFile_andNotTheReadersElsewhere() throws IOException {
+        write("p/Limits.java", """
+                package p;
+                class Limits {
+                    static final int MIN = 8;
+                    static int other;
+                    static { other = 2; }
+                    void run(String c) throws Exception {
+                        if (c.length() >= MIN) new ProcessBuilder(c).start();
+                    }
+                    String env() {
+                        return System.getenv("X");
+                    }
+                }
+                """);
+        write("p/Reader.java", """
+                package p;
+                class Reader {
+                    String read() {
+                        return Limits.MIN > 3 ? System.getenv("HOME") : "";
+                    }
+                }
+                """);
+
+        assertThat(reasons(Map.of(SRC + "p/Limits.java", List.of(new Range(3, 3)))))
+                .containsExactly(Map.entry("p/Limits.java#Limits.run(String), Limits.env()", "changed: a field of its file"));
+        assertThat(reasons(Map.of(SRC + "p/Limits.java", List.of(new Range(5, 5)))))
+                .as("an initializer").containsValue("changed: a field of its file").hasSize(1);
     }
 }

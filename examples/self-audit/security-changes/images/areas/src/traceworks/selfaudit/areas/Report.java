@@ -310,7 +310,8 @@ final class Report {
         // For a check of the changes the description is the scope, in one line; the counts are the details
         String description = changes(summary) == null ? details
                 : (noGreen ? "nothing found in what changed (this check does not say GREEN): " : "")
-                + scope(summary, areas.size(), noVerdict.size(), verified, holds(summary, noVerdict.size()));
+                + scope(summary, areas.size(), noVerdict.size(), verified, holds(summary, noVerdict.size()),
+                low.size());
         if (changes(summary) == null) details = "";
         // How many areas of this run have no verdict to keep: no answer, or one with a finding that did not verify
         int withoutVerdict = (int) areas.stream().filter(a -> withoutAnswer.contains(text(a.get("id")))).count();
@@ -332,7 +333,7 @@ final class Report {
      * whether all were judged, what was found, and what was passed unjudged or holds the base.
      */
     private static String scope(Map<String, Object> summary, int picked, int withoutVerdict, List<Finding> verified,
-                                List<String> holds) {
+                                List<String> holds, int low) {
         Map<String, Object> changes = changes(summary);
         String commits = text(changes.get("commits"));
         String since = " since " + shortId(text(changes.get("base")))
@@ -348,8 +349,10 @@ final class Report {
             if (number(changes.get("changedFiles")) > 0) out.append(since);
             out.append(notJudged == 0 ? ", all judged" : ", " + notJudged + " not judged");
             long high = severityCount(verified, "high");
-            out.append(verified.isEmpty() ? ", nothing found" : ", " + count(verified.size(), "finding") + " (" + high
-                    + " high)");
+            // "Nothing found" only when that is so: a low finding is listed in the report and kept nowhere
+            out.append(!verified.isEmpty() ? ", " + count(verified.size(), "finding") + " (" + high + " high)"
+                    : low > 0 ? ", nothing for the register (" + count(low, "low finding") + " in the report only)"
+                    : ", nothing found");
         }
         int passed = number(changes.get("uncompiledFiles")) + number(changes.get("removedJavaFiles"))
                 + number(changes.get("cannotJudgeFiles"));
