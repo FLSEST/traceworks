@@ -152,7 +152,12 @@ public final class RegisterHtml {
         if (f.disposition() != null) {
             Finding.DispositionRecord d = f.disposition();
             out.append("<p>").append(d.kind() == FindingStatus.ACCEPTED_RISK ? "accepted" : "dismissed").append(" by ")
-                    .append(Html.line(d.actor() == null ? "?" : d.actor())).append(" at ").append(d.at());
+                    .append(Html.line(d.actor() == null ? "?" : d.actor()));
+            if (d.agent() != null) {
+                // The actor ran the command; an agent that named itself decided under that actor
+                out.append(Html.line(traceworks.core.register.DecisionAgent.through(d.agent())));
+            }
+            out.append(" at ").append(d.at());
             if (d.until() != null) {
                 out.append(", review by ").append(d.until());
             }
@@ -198,7 +203,7 @@ public final class RegisterHtml {
             out.append("<tr><td>").append(e.seq()).append("</td><td>").append(e.at()).append("</td><td>")
                     .append(Html.line(e.type())).append("</td><td>");
             StringBuilder what = new StringBuilder();
-            for (String field : List.of("run_id", "id", "reason", "actor", "note", "counts", "workflow_id")) {
+            for (String field : List.of("run_id", "id", "reason", "actor", "agent", "note", "counts", "workflow_id")) {
                 if (e.fields().has(field) && !e.fields().get(field).isNull()) {
                     String value = e.fields().get(field).isTextual() ? e.fields().get(field).asText()
                             : e.fields().get(field).toString();

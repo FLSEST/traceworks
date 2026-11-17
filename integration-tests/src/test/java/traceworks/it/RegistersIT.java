@@ -67,6 +67,20 @@ class RegistersIT extends IntegrationTest {
                 .contains("ACCEPTED_RISK | LOW | long-file | b.txt | b.txt has 15 lines, more than 10 | Evidence: "
                         + "long_file: b.txt (15 lines) | Disposition: an example");
         assertThat(traceworks.exec("findings", "hello", "verify").code()).isZero();
+
+        // An agent that decides under the operator's user names itself, and the register says who decided
+        Result reopen = traceworks.exec("findings", "hello", "reopen", id, "--note", "look again", "--agent",
+                "it-agent");
+        assertThat(reopen.code()).as(reopen.describe()).isZero();
+        assertThat(reopen.out()).contains("reopened " + id + " through the agent it-agent");
+        Result dismiss = traceworks.exec("findings", "hello", "dismiss", id, "--note", "not ours", "--agent",
+                "it-agent");
+        assertThat(dismiss.code()).as(dismiss.describe()).isZero();
+        assertThat(traceworks.exec("findings", "hello", "show", id).out())
+                .containsPattern("Decision  DISMISSED by \\S+ through the agent it-agent at ");
+        assertThat(traceworks.exec("findings", "hello", "list").out())
+                .contains("DISMISSED  LOW       long-file  b.txt").contains("(through the agent it-agent)");
+        assertThat(traceworks.exec("findings", "hello", "verify").code()).isZero();
     }
 
     private void file(String name, int lines) {

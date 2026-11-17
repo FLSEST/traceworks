@@ -499,7 +499,8 @@ public final class RunServices {
     public WorkflowDescription describe(Path packageLocation) {
         LoadedPackage pkg = load(packageLocation);
         return WorkflowDescriber.describe(pkg, new PackageWorkflowResolver(pkg, settings.packagePath(), packages),
-                this::localServer);
+                this::localServer, host -> containers.directories().writableMountRefusal(host).isPresent(),
+                containers.directories().workspaceGitWritable());
     }
 
     /**

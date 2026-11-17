@@ -166,10 +166,10 @@ class SecurityChangesToolIT extends IntegrationTest {
                 "FACT changes_areas_not_looked_at: 1\n",
                 " Runner.run(String) [process_start] because: changed\n",
                 " Caller.call(Runner) [env_pass] because: neighbour of Runner.run(String)\n");
-        assertThat(folder.output("report") + "\n").startsWith("gate_status: GREEN\ngate_category: changes\n"
-                + "gate_description: 2 areas picked since " + first.substring(0, 12) + " (1 commit), all judged,"
+        assertThat(folder.output("report") + "\n").startsWith("gate_status: YELLOW\ngate_category: changes\n"
+                + "gate_description: nothing found in what changed (this check does not say GREEN): 2 areas picked since " + first.substring(0, 12) + " (1 commit), all judged,"
                 + " nothing found\nDETAILS: of the changes since ").contains("1 of 3 areas of the project not looked at");
-        assertThat(run.out()).contains("GREEN (changes)");
+        assertThat(run.out()).contains("YELLOW (changes)");
     }
 
     @Test

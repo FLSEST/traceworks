@@ -57,10 +57,16 @@ import java.util.regex.Pattern;
  *   <li><b>SIGTERM</b> on a timeout or cancel: the client hands it to the container's init ({@code --init}, tini),
  *       which sends it to the whole process group of the command with {@code TINI_KILL_PROCESS_GROUP=1}, so the
  *       running command gets it and its own TERM trap runs ({@link BashScript}).</li>
+ *   <li><b>The {@code .git} of a writable workspace:</b> after the mount of a workspace that the step may write
+ *       comes the mount of its top-level {@code .git}, a directory or a file, at the place it has in the
+ *       workspace, read-only as a whole ({@link WorkspaceGit#readOnly}); not where the operator opened it
+ *       ({@code workspace_git_writable}) and not in the run's own checkout of its source.</li>
  *   <li><b>Refused</b> with an {@link IllegalArgumentException}, before anything starts: a value that would reach the
  *       client as an option (an image, name, working directory, entrypoint or user that starts with {@code -}), an
  *       image that is not a local image ID, a mount path that is not absolute or holds a comma, a quote or a line
- *       break ({@code --mount} would split or misread it), and an environment name that is no variable name.</li>
+ *       break ({@code --mount} would split or misread it), an environment name that is no variable name, and a
+ *       writable workspace whose {@code .git} is to be read-only and is a symbolic link, which no mount holds in
+ *       place.</li>
  * </ul>
  */
 final class ContainerArguments {
@@ -144,14 +150,27 @@ final class ContainerArguments {
     }
 
     /**
+     * {@link #of(Client, ContainerRun, String, List, boolean)} in a home whose operator did not open the
+     * {@code .git} of a writable workspace, for a workspace that is no checkout of the run's own.
+     */
+    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths) {
+        return of(client, run, user, declaredRealPaths, false);
+    }
+
+    /**
      * The command line that starts {@code run}, with the host side of each mount the step declared as it was judged.
      *
      * @param declaredRealPaths the real path of each of {@link ContainerRun#declaredMounts()}, in their order: the
      *                          path the mount guard judged, which is mounted as it is and not resolved again
-     * @throws IllegalArgumentException for what the command line must not carry, and for a declared mount without a
-     *                                  judged path: a mount the guard did not judge is never mounted as given
+     * @param workspaceGitWritable whether a step that may write the workspace may write its top-level {@code .git}
+     *                          as well ({@link MountGuard.Context#workspaceGitWritable()}); without it that
+     *                          {@code .git} is mounted read-only ({@link WorkspaceGit#readOnly})
+     * @throws IllegalArgumentException for what the command line must not carry (see the class documentation), and
+     *                                  for a declared mount without a judged path: a mount the guard did not judge
+     *                                  is never mounted as given
      */
-    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths) {
+    static Invocation of(Client client, ContainerRun run, String user, List<String> declaredRealPaths,
+                         boolean workspaceGitWritable) {
         if (declaredRealPaths.size() != run.declaredMounts().size() || declaredRealPaths.contains(null)) {
             throw new IllegalArgumentException("A mount of the step was not judged, so the container is not started");
         }
@@ -183,6 +202,12 @@ final class ContainerArguments {
             Mount mount = run.mounts().get(i);
             String source = i < own ? MountGuard.realRunDirectory(mount.hostPath()) : declaredRealPaths.get(i - own);
             arguments.addAll(List.of("--mount", bind(mount, source)));
+            if (i < own && !workspaceGitWritable && isWritableWorkspace(mount, run)) {
+                // After the workspace's own mount: its .git once more at its place, read-only as a whole
+                WorkspaceGit.readOnly(Path.of(source)).ifPresent(git -> arguments.addAll(List.of("--mount",
+                        bind(new Mount(git.toString(), inside(mount.containerPath(), WorkspaceGit.NAME), true),
+                                git.toString()))));
+            }
             if (isPackageWithGitDirectory(mount, run, source)) {
                 arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + GIT_COVER));
             } else if (i < own) {
@@ -367,6 +392,17 @@ final class ContainerArguments {
         String base = mount.containerPath().endsWith("/") ? mount.containerPath() : mount.containerPath() + "/";
         String place = base + holder.relativize(real);
         return run.mounts().stream().anyMatch(other -> other.containerPath().equals(place)) ? null : place;
+    }
+
+    /** Whether {@code mount} is the run's own mount of its workspace, and a step may write it. */
+    private static boolean isWritableWorkspace(Mount mount, ContainerRun run) {
+        String workspace = run.directories() == null ? null : run.directories().workspace();
+        return workspace != null && !workspace.isBlank() && workspace.equals(mount.hostPath()) && !mount.readOnly();
+    }
+
+    /** The container path of {@code relative} inside the mount at {@code containerPath}. */
+    private static String inside(String containerPath, String relative) {
+        return (containerPath.endsWith("/") ? containerPath : containerPath + "/") + relative;
     }
 
     /** @param source the host side as it is mounted: the real path that was judged */

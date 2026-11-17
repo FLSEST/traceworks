@@ -559,7 +559,7 @@ public final class CliContainerRuntime implements ContainerRuntime {
         }
         Invocation invocation;
         try {
-            invocation = ContainerArguments.of(client, run, user(), judgedAs);
+            invocation = ContainerArguments.of(client, run, user(), judgedAs, context.workspaceGitWritable());
         } catch (IllegalArgumentException e) {
             return Start.refused(e.getMessage());
         }

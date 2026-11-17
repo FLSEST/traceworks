@@ -310,12 +310,21 @@ public interface CommandRunner {
      * @param toolCache whether this is the cache folder the engine itself mounts for a tool step's image
      *                  ({@code cache_dir}). No text of a workflow sets it: a {@code mounts} entry is never one, so
      *                  the mount check lets only such a mount name a folder of the tool caches
+     * @param toolOutput whether this is the folder the engine itself made for what a tool step writes
+     *                  ({@code output_dir}), which it reads and removes after the step. No text of a workflow sets
+     *                  it either: the mount check asks no listed folder ({@code writable_mounts}) of such a mount,
+     *                  as of everything Traceworks manages itself
      */
-    record Mount(String hostPath, String containerPath, boolean readOnly, boolean toolCache) {
+    record Mount(String hostPath, String containerPath, boolean readOnly, boolean toolCache, boolean toolOutput) {
 
-        /** A mount a block declared, or one of the run's own: no tool cache. */
+        /** A mount a block declared, or one of the run's own: no tool cache and no tool output. */
         public Mount(String hostPath, String containerPath, boolean readOnly) {
-            this(hostPath, containerPath, readOnly, false);
+            this(hostPath, containerPath, readOnly, false, false);
+        }
+
+        /** A mount that is the cache folder of a tool step's image, or is not: no tool output. */
+        public Mount(String hostPath, String containerPath, boolean readOnly, boolean toolCache) {
+            this(hostPath, containerPath, readOnly, toolCache, false);
         }
     }
 

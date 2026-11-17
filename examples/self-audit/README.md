@@ -81,6 +81,18 @@ copied run that shows the gap). A testing finding names a change of one line: ap
 means the gap is real, and the fix is the test that goes red; red means the finding is wrong, and it is dismissed
 with the name of the test that caught the change.
 
+When an agent does the triage, it says so. An agent that works with your user is your user to the machine, and
+its decision would read as yours. It names itself with `--agent`, or its harness sets `TRACEWORKS_AGENT` once:
+
+```bash
+traceworks findings security dismiss <id> --note "RunPaths refuses this mount before the call" --agent claude-code
+export TRACEWORKS_AGENT=claude-code     # or once, in the environment the agent's commands run in
+```
+
+The register then records the decision as made `by <you> through the agent claude-code`, in its log, in `show`,
+`list` and `report.html`, and in the files the next run gets. The name is what the agent says, unsigned: an agent
+that leaves it out is recorded as you ([docs/registers.md](../../docs/registers.md), "Who decided").
+
 A finding that holds and gets fixed needs no decision: it stays open, and the next run resolves it: a measured one
 because the snapshot no longer states it, a judged one because the run was asked about it and answered "gone". A round ends
 when the register shows the fixed findings as resolved. How many findings triage refuted is the
@@ -272,7 +284,8 @@ traceworks run examples/self-audit/security-changes        # since the workspace
 
 Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
 changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
-keeps the gate from GREEN for that run; tests and documentation are counted. A changed import or class head
+keeps the gate from its best word, YELLOW ("nothing found in what changed"); it never says GREEN, which is the full
+audit's word alone; tests and documentation are counted. A changed import or class head
 picks every area of its file and makes the areas that call into it neighbours, the digest of an area holds what
 its calls resolve to, and the base moves only when the run judged everything a run can judge. It
 has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding

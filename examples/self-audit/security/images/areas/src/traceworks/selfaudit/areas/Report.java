@@ -423,9 +423,9 @@ final class Report {
                         || coveredNow.stream().anyMatch(c -> HIGH.contains(c.severity())),
                 openMissing);
         String gate = gate(states, summary);
-        // The one place where a check of the changes is kept from saying GREEN, when the run was started so
-        boolean noGreen = gate.equals("GREEN") && changes(summary) != null
-                && Boolean.FALSE.equals(changes(summary).get("green"));
+        // The one place where a check of the changes is kept from saying GREEN: it judges the changes and their
+        // neighbours only, so its best word is "nothing found in what changed"
+        boolean noGreen = gate.equals("GREEN") && changes(summary) != null;
         if (noGreen) gate = "YELLOW";
         String register = summary.get("register") instanceof String key && key.matches("[a-z0-9][a-z0-9._-]{0,127}")
                 ? key : "security";

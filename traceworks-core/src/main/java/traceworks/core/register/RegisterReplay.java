@@ -95,6 +95,9 @@ public final class RegisterReplay {
             }
             case RegisterEvents.REQUIRES -> {
                 String feature = event.text("feature");
+                if (RegisterEvents.DECISION_AGENT.equals(feature)) {
+                    return state;   // lines after it may name an agent, which the fold of a decision reads
+                }
                 if (!RegisterEvents.DECISION_SEVERITY.equals(feature)) {
                     throw new IllegalStateException("seq " + event.seq() + ": the register requires '" + feature
                             + "', which this version of Traceworks does not know: a newer version wrote it");
@@ -111,8 +114,10 @@ public final class RegisterReplay {
                 Finding finding = requireFinding(state, event);
                 Finding after = RegisterEvents.FINDING_ACCEPTED.equals(event.type())
                         ? Disposition.accept(finding, event.text("note"), event.text("actor"), event.at(),
-                                event.text("until") == null ? null : Instant.parse(event.text("until")))
-                        : Disposition.dismiss(finding, event.text("note"), event.text("actor"), event.at());
+                                event.text("until") == null ? null : Instant.parse(event.text("until")),
+                                event.text("agent"))
+                        : Disposition.dismiss(finding, event.text("note"), event.text("actor"), event.at(),
+                                event.text("agent"));   // absent in a line without an agent, and of an earlier version
                 // The severity the decision covers is the one the fold holds at this line, for a line of any version
                 return state.with(replacing(state, after));
             }

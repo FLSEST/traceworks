@@ -61,7 +61,7 @@ class ContainerToolStep {
         Path outputDir = spec.sarif() ? createOutputDir() : null;
         try {
             List<Mount> mounts = new ArrayList<>();
-            if (outputDir != null) mounts.add(new Mount(outputDir.toString(), spec.outputDir(), false));
+            if (outputDir != null) mounts.add(new Mount(outputDir.toString(), spec.outputDir(), false, false, true));
             if (cache != null) mounts.add(cache);
             mounts.addAll(extraMounts);
             CommandRequest request = CommandRequest.entrypoint(spec.image(), args, context.getProjectPath(),

@@ -243,7 +243,7 @@ class ChangesRoundTripTest {
                 + "clean       [0-9a-f]{16}  " + Pattern.quote(LONE) + "\n");
 
         // The third run: nothing changed since the second. Only the open finding is asked about, and the answer
-        // says that it is gone: the register resolves it, every item is settled, and the gate is GREEN
+        // says that it is gone: the register resolves it, every item is settled, and the gate is YELLOW (this check never says GREEN)
         Files.writeString(pkg.resolve("answer-A004.json"), "{\"area\":\"A004\",\"findings\":[],\"known\":[{\"id\":"
                 + "\"K1\",\"status\":\"gone\",\"reason\":\"it never held\"}]}");
         String three = run();
@@ -251,17 +251,17 @@ class ChangesRoundTripTest {
         assertThat(three).as(two).contains("register security-changes: 0 new, 1 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).containsExactly(RUNNER + ": an open finding of an earlier run");
         assertThat(newest("security-changes-report.md")).startsWith("# Security check of the changes\n\n**Gate:**"
-                + " GREEN: nothing changed since " + third.substring(0, 12) + ": no verified finding; 1 of 1 areas"
+                + " YELLOW: nothing changed since " + third.substring(0, 12) + ": no verified finding; 1 of 1 areas"
                 + " judged; 3 of 3 items settled (2 clean, 1 decided; 0 open, 0 not judged); 3 of 4 areas of the"
                 + " project not looked at\n");
         assertThat(items()).doesNotContain("open ", "not judged");
 
-        // The fourth run: nothing changed and nothing is open, so nobody is asked, and the gate stays GREEN
+        // The fourth run: nothing changed and nothing is open, so nobody is asked, and the gate stays YELLOW
         String four = run();
 
         assertThat(four).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).isEmpty();
-        assertThat(newest("security-changes-report.md")).contains("**Gate:** GREEN: nothing changed since ",
+        assertThat(newest("security-changes-report.md")).contains("**Gate:** YELLOW: nothing changed since ",
                 "3 of 3 items settled", "**Nothing changed.** No file of the workspace differs from the base, the"
                         + " workspace commit of the last run.");
     }
@@ -354,7 +354,7 @@ class ChangesRoundTripTest {
 
         assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).as("the disk is the base: nothing to judge").isEmpty();
-        assertThat(newest("security-changes-report.md")).contains("**Gate:** GREEN: nothing changed since ",
+        assertThat(newest("security-changes-report.md")).contains("**Gate:** YELLOW: nothing changed since ",
                 "| The next run without `since` starts from | `" + first + "`");
 
         git("checkout", "--quiet", "--", ".");

@@ -344,7 +344,7 @@ One line of `findings.jsonl` (wrapped here; in the file it is one line, its keys
 | `item` | the item the finding is about; the key is absent for a finding that names none |
 | `first_seen`, `last_seen` | the run and the time of the first and of the last report that stated the finding |
 | `occurrences`, `regressions`, `absent_reports`, `unverified_evidence`, `resolved_at` | as in `state.json` |
-| `disposition` | `null` without a decision. More than `{{ audit_findings }}` shows, which has the note only: who decided and when are here too. Otherwise `kind` (`ACCEPTED_RISK` or `DISMISSED`), `note`, `actor`, `at`, `until` (the review date of an acceptance), `evidence` (frozen at an acceptance), `severity` (the severity the decision was made on, always given; `null` only where a register of an earlier version does not know it) and `in_force` (always given: `false` for a decision that stays with a finding that is open again) |
+| `disposition` | `null` without a decision. More than `{{ audit_findings }}` shows, which has the note only: who decided and when are here too. Otherwise `kind` (`ACCEPTED_RISK` or `DISMISSED`), `note`, `actor`, `agent` (the agent that decided under the actor, by the name it gave itself; the key is absent for a decision that named none: "Who decided"), `at`, `until` (the review date of an acceptance), `evidence` (frozen at an acceptance), `severity` (the severity the decision was made on, always given; `null` only where a register of an earlier version does not know it) and `in_force` (always given: `false` for a decision that stays with a finding that is open again) |
 
 One line of `items.jsonl`:
 
@@ -433,8 +433,8 @@ text) that does not hash to its name, refuses the run and names `findings <key> 
 
 **It is data, and part of it was written by a model.** Titles, subjects, evidence, descriptions and the report
 come from the output of earlier runs, and notes from a person. The files also hold what the placeholders leave out:
-the actor of each decision (`disposition.actor`, a name such as `anna@laptop`) and its time, and the ids of earlier
-runs. Every step of the audit that gets the folder can read them, and a step that prints them puts them into the
+the actor of each decision (`disposition.actor`, a name such as `anna@laptop`), the agent that decided under that
+actor when it named itself (`disposition.agent`) and the decision's time, and the ids of earlier runs. Every step of the audit that gets the folder can read them, and a step that prints them puts them into the
 run's record. Treat a file as the placeholders are treated: a
 step that passes text from the folder to a model passes untrusted text, should set `untrusted_input: true` on that
 AI step, and should quote what it puts into a shell line. Traceworks cannot follow a file the way it follows a
@@ -501,8 +501,78 @@ traceworks findings architecture reopen 9d3692a8 --note "fix it after all"
 `accept` and `dismiss` take an `OPEN` or `AWAITING_VERIFICATION` finding and need a note; `accept` freezes the
 finding's evidence for the comparison with later reports and sets a review date (`--until`, at most 180 days ahead,
 which is the default). `reopen` takes an accepted, dismissed or resolved finding. A wrong transition is refused and
-records nothing. Every decision is a line of the log with the actor (docs/cli.md, "Actor"), the time, the note and
-the state after it; `signature` is `null` until signed decisions exist.
+records nothing. Every decision is a line of the log with the actor (docs/cli.md, "Actor"), the agent when one
+decided ("Who decided", below), the time, the note and the state after it; `signature` is `null` until signed
+decisions exist.
+
+### Who decided
+
+The line of a decision names its **actor**: who ran the command (`TRACEWORKS_ACTOR`, else `actor` in
+`traceworks.json`, else `user@host`; docs/cli.md, "Actor"). An AI agent that works with the operator's user is that
+user to the machine, so a decision it makes on the operator's word would read as the operator's own. An agent
+therefore **names itself**, and the register records it beside the actor:
+
+```bash
+traceworks findings security dismiss 9d3692a8 --note "RunPaths refuses this mount before the call" --agent claude-code
+TRACEWORKS_AGENT=claude-code traceworks findings security accept 4a4dd633 --note "L12"   # set once by a harness
+```
+
+- **`--agent NAME`** on `accept`, `dismiss` and `reopen`, or the environment variable **`TRACEWORKS_AGENT`** for a
+  harness that sets it once for everything its agent runs. The option wins over the variable. Only these three
+  commands read either: `list`, `show` and `verify` decide nothing.
+- **The name** is a label of at most 64 characters: ASCII letters and digits, the characters `. _ - : / @ +`, and
+  single spaces between them (`claude-code`, `Claude Code 2.1`, `pi:astra@build-7`). White space around it is
+  dropped. So no name holds a control or format character, a line break, two spaces in a row, a quote, a bracket,
+  a comma or a `|`: it stands in a line and a column of every view as it is.
+- **A blank name is refused, not ignored**, and so is one beyond these bounds (a usage error, exit 2, nothing is
+  recorded): whoever set the option or the variable meant to name an agent, and the decision must not be recorded
+  as a person's instead. To decide as a person in a shell where the variable is set, unset it for the command.
+- **The line** of the decision takes one more field, `agent`, beside `actor`, which means what it always did:
+
+  ```json
+  {"seq":41,"at":"2026-11-17T10:02:11.418Z","type":"finding.dismissed","register":"security","prev":"...",
+   "actor":"operator@host","agent":"claude-code","evidence":"...","id":"9d3692a8...","note":"...","severity":"LOW",
+   "signature":null,"state_blob":"..."}
+  ```
+
+- **A decision without an agent** has no `agent` key, in its line and everywhere else, and reads exactly as
+  before: every view below says something only for a decision an agent made.
+
+| Where | What it says |
+|---|---|
+| `findings <key> accept`, `dismiss`, `reopen` | the name as it was recorded: `dismissed 9d3692a8 through the agent claude-code` |
+| `findings <key> show <id>` | `Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17T10:02:11.418Z, ...` |
+| `findings <key> list` | the row ends with `(through the agent claude-code)`; inside the note of a row that has one: `(decided on LOW through the agent claude-code)`, `(dismissed on LOW through the agent claude-code before, not in force)` |
+| `state.json`, `findings <key> list --json` | `disposition.agent` |
+| `report.html` | `dismissed by operator@host through the agent claude-code at ...`, and in the history `actor operator@host · agent claude-code` |
+| the register folder of a run (`findings.jsonl`, `resolved.jsonl`) | `disposition.agent`, next to `disposition.actor` |
+
+`{{ audit_findings }}` carries the note of a decision and neither its actor nor its agent, and the diff a hook gets
+("Hooks") carries no decision at all; both are as they were. A manual reopening removes the decision from its
+finding, so the agent of a reopening is in its line of the log and in the history of `report.html`, not in the
+state.
+
+**The name is what the caller says, and nothing checks it.** It is self-declared and unsigned, like the actor:
+
+- An agent that leaves the name out is recorded as the actor alone, and its decision reads as a person's. Nothing
+  in Traceworks can tell an agent from the person whose user it works with; a harness that sets `TRACEWORKS_AGENT`
+  for its agent is what makes the name reliable, as far as that harness is.
+- Any caller can give any name: a person can decide as `claude-code`, and one agent as another.
+- So `agent` says "the caller named this agent", and its absence says "the caller named none". Neither is proof of
+  who decided. Signatures of decisions would be; they are not built ("What a register does not do").
+
+**A register with such a decision needs a version that knows the field.** A version from before 2026-11-17 reads
+only `actor` from the line of a decision: it would fold the decision as the actor's own, show it so in every view,
+and find the state the line recorded (which names the agent) different from its fold, so its `verify` would fail
+and its next write would leave lines that this version folds to other states. Therefore this version writes, once
+per register and before its first line that names an agent (a reopening included), the line `register.requires`
+with `"feature": "decision_agent"`. A version that knows `register.requires` and not this feature refuses to replay
+the log (`seq N: the register requires 'decision_agent', which this version of Traceworks does not know: a newer
+version wrote it`), as an older one refuses the line itself ("What a decision covers", below); neither shows the
+agent's decision as the operator's, and neither writes. This is read from the code of that version; no binary of
+it was run against such a register. A register in which no agent decided gets no such line, has the bytes an
+earlier version would have written, and stays readable and writable by the version before this one. A register of
+an earlier version verifies and replays unchanged.
 
 ### What a decision covers
 
@@ -696,3 +766,8 @@ It does not resolve a model's judgement by silence (a judged rule needs `gone`),
 keys fuzzily, let a finding inherit the disposition of an absent finding of another rule on the same file, replay an
 invalid report as `previous_report`, or take the facts of the report block as evidence for its own findings.
 docs/workflow-format.md has the rows and the reasons.
+
+It does not prove who decided. The actor of a decision is a label (docs/cli.md, "Actor"), and the agent beside it
+is the name the caller gave ("Who decided"): self-declared and unsigned. An agent that leaves its name out is
+recorded as the actor alone, any caller can give any name, and no setting lists who may decide. Decisions are not
+signed (docs/security.md, "Registers").

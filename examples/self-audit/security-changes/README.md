@@ -7,9 +7,9 @@ every area.
 **What it costs, measured.** On the last ten merges of this repository's `main` (November 2026, about 140 areas in
 the project) it picked 5, 0, 51, 27, 0, 57, 26, 44, 0 and 0 areas. A merge that touches main code costs about 35
 calls, roughly a quarter of a full audit, and the neighbours outnumber the changed areas. So it is short per
-merge, not per day: run it per merge. It was GREEN in at most 2 of the 10, on a clean `--source` checkout; the
-others were YELLOW for files passed unjudged (workflow files, scripts, package READMEs, `AGENTS.md`). Expect
-YELLOW with a short list of files to look at yourself as its usual good result.
+merge, not per day: run it per merge. It never says GREEN: its best gate is YELLOW, "nothing found in what changed". Where it is
+YELLOW for files passed unjudged (workflow files, scripts, package READMEs, `AGENTS.md`), expect a short list of
+files to look at yourself as its usual good result.
 
 **What it does not claim.** It selects what to look at by text and by one call. That catches the ordinary mistake
 in the code somebody just wrote. It does not protect against someone who hides a change on purpose: a selection
@@ -47,7 +47,6 @@ traceworks run examples/self-audit/security-changes --input since=4f2a91c      #
 traceworks run examples/self-audit/security-changes --input since=2026-11-10   # since a date
 traceworks run examples/self-audit/security-changes                            # since the last run of this check
 traceworks run examples/self-audit/security-changes --input full_audit=4f2a91c # and name the last full audit
-traceworks run examples/self-audit/security-changes --input green=no           # never say GREEN
 traceworks findings security-changes list
 ```
 
@@ -70,7 +69,7 @@ The first step refuses a base that would make the run say more than it looked at
 - **A base that is no ancestor of the workspace commit** (another branch, a rewritten history): the difference to
   it is not what changed in this history.
 - **A base that is the workspace commit itself, with a workspace that holds no other change**, when `since` named
-  it (the `changed` step refuses this one, since it is the tool that knows what differs): there is nothing to check, and a GREEN run would read as an audit. A date can do that (every commit is older
+  it (the `changed` step refuses this one, since it is the tool that knows what differs): there is nothing to check, and a clean run would read as an audit. A date can do that (every commit is older
   than it); the message names the commit the date resolved to and its date. Both dates of a commit count because
   whoever makes a commit sets them: a commit that claims to be old in one of them is not taken for old. One that
   claims it in both can be the base; it is then the workspace commit or lies below changes that are compared.
@@ -243,11 +242,11 @@ its reason. A run in which no file differs says `Nothing changed.`
 The gate has a category of its own, `changes`, and its description says in one line what its colour covers:
 
 ```
-GREEN   12 areas picked since 4e12a3c80b1d (3 commits), all judged, nothing found
+YELLOW  nothing found in what changed (this check does not say GREEN): 12 areas picked since 4e12a3c80b1d (3 commits), all judged, nothing found
 YELLOW  12 areas picked since 4e12a3c80b1d (3 commits), all judged, nothing found; 3 files passed unjudged
 YELLOW  12 areas picked since 4e12a3c80b1d (3 commits), 2 not judged, nothing found; the base does not move
 RED     12 areas picked since 4e12a3c80b1d (3 commits), all judged, 1 finding (1 high)
-GREEN   nothing changed since 4e12a3c80b1d, no area picked
+YELLOW  nothing found in what changed (this check does not say GREEN): nothing changed since 4e12a3c80b1d, no area picked
 ```
 
 The counts behind it follow as the details (`DETAILS:` in the step's output, `**Details:**` in the report), which
@@ -257,14 +256,14 @@ end with how much of the project was not looked at: `104 of 110 areas of the pro
 |---|---|
 | RED | an open finding of high severity stands |
 | YELLOW | an item is open or not judged; a file could not be read or compared; a file changed that this check cannot judge and was **passed unjudged**; commits were skipped (`skip=yes`) |
-| GREEN | every picked area was judged, nothing was found for the register, and nothing was passed unjudged |
+| YELLOW, at best | every picked area was judged, nothing was found for the register, and nothing was passed unjudged: the description begins `nothing found in what changed (this check does not say GREEN)` |
 
-The items are the areas this check ever picked. GREEN says that about them and about nothing else.
+The items are the areas this check ever picked. The best word says that about them and about nothing else.
 
-**The switch `green`.** Whether a check that selects by text should say GREEN at all is a decision for whoever
-runs it. With `--input green=no` a run that would be GREEN is YELLOW, and its description begins `nothing found in
-what changed (this check does not say GREEN): ...`; GREEN is then the full audit's word alone. The default is
-`green=yes`. It is one place in the tool (`Report.of`, where the gate is set) and this paragraph.
+**No GREEN.** A check that selects by text and judges only the changes and their neighbours does not say GREEN;
+GREEN is the full audit's word alone. A run that would be GREEN is YELLOW, and its description begins `nothing found
+in what changed (this check does not say GREEN): ...`. There is no input or option for it (`--green` is refused like
+any unknown option). It is one place in the tool (`Report.of`, where the gate is set) and this paragraph.
 
 **The last full audit.** The report has a row for it. A run of this audit gets the register of this audit and no
 other, so the package cannot look up when `security` last ran; it prints what the operator names:

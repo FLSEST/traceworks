@@ -32,14 +32,15 @@ limit Hooks
 limit Registers
   quote Lines appended after the last anchor are accepted.
   quote But they can **add** to both
-  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed.
-  digest 40eaf5ab88ded69a
+  quote **Who decided is a label, not a proof.**
+  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed. The agent named beside a decision's actor is self-declared and unsigned: it can be left out, or be any name within its bounds.
+  digest 2c95d3cc38f1fa0b
 
 limit The register folder of a run
   quote In a host run nothing keeps a command from writing the folder
   quote An audit package you run is trusted with the names of the people who decided on its findings.
   says  In a host run nothing keeps a command from writing the run's register folder: it is compared with the recorded digests before each command that gets it, not while it reads; in a container run it is a read-only mount. Every shell and tool step of an audit can read it, who decided included; an AI step's container does not get it.
-  digest 2f557af3549e9794
+  digest 39cffd31f3da8967
 
 limit What nothing in this version finds:
   quote the ledger is not signed
@@ -291,16 +292,18 @@ limit A mount is checked, then mounted.
   says  The host side of a mount is resolved once and the runtime gets the checked real path; a process that can write a parent directory of it can still swap a part before the runtime opens it.
   digest b988183568735c9d
 
-limit A writable mount below the home.
-  quote it does not refuse a writable mount (`:rw`) of any other file or folder of yours
-  says  The mount check refuses the home as a whole, the logins below it and the places it lists, not a writable mount of any other file or folder of the operator, such as ~/.bashrc or the .git/hooks of a repository.
-  digest b28ca8938a975d2d
+limit A listed folder is open to every package.
+  quote inside a listed folder a package may mount any file or folder writable
+  quote it does not refuse a repository with its `.git/hooks` and `.git/config`
+  says  A writable mount is refused unless it lies in a folder the operator listed in writable_mounts, or in the workspace of a step that may write its workspace anyway; inside a listed folder every package may mount any file or folder writable, a repository with its .git/hooks and .git/config or a script included, and the mount check refuses there only what it refuses everywhere.
+  digest df7389e201f7aca8
 
-limit A writable workspace has its own `.git`.
-  quote With `workspace_writable: true` a step writes everything in the workspace, its `.git/` included
-  quote Traceworks does not cover or check the workspace's `.git`
-  says  With workspace_writable: true a step writes everything in the workspace, its own .git included (hooks, config), which Traceworks neither covers nor checks: the next git command the operator runs in that directory on the host runs what the step left there, as the operator.
-  digest ba84cb6fcb578128
+limit A writable workspace beyond its top-level `.git`.
+  quote In a workspace without a `.git` a step can make one
+  quote A host run holds nothing
+  quote a container step writes all of it too
+  says  With workspace_writable: true a container step sees only the workspace's own top-level .git read-only: it still makes a .git where there is none, writes deeper repositories and a submodule's .git, a git directory in the workspace that a .git file names, and files the config or the hooks name; a host run holds nothing; with the operator's workspace_git_writable: true, and in the checkout of run --source, a step writes all of that .git.
+  digest 6ce83509fe05c40b
 
 limit A called package's `.git` in the workspace.
   quote has no cover while the steps of the calling package run
