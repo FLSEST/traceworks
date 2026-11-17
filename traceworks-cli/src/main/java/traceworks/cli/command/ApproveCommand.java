@@ -10,9 +10,11 @@ import traceworks.core.app.AnswerRequest;
 /** {@code traceworks approve <run> --answer OPTION}: answers the approval a run waits for. */
 public final class ApproveCommand implements Command {
 
-    private static final Spec SPEC = Spec.of("approve", "Answers the approval a run waits for.", "<run>")
-            .option("answer", "OPTION", "one of the offered options (required)")
-            .option("comment", "TEXT", "a comment recorded with the answer");
+    private static final Spec SPEC = Answers.agentOption(
+            Spec.of("approve", "Answers the approval a run waits for.", "<run>")
+                    .option("answer", "OPTION", "one of the offered options (required)")
+                    .option("comment", "TEXT", "a comment recorded with the answer"))
+            .note(Answers.AGENT_NOTE);
 
     @Override
     public Spec spec() {
@@ -25,7 +27,8 @@ public final class ApproveCommand implements Command {
         if (answer == null) {
             throw new UsageException("'approve' needs --answer OPTION");
         }
+        String agent = Answers.agent(context, args);
         return Answers.give(context, args.positional(),
-                new AnswerRequest("approval", null, answer, null, args.option("comment")));
+                new AnswerRequest("approval", null, answer, null, args.option("comment"), agent));
     }
 }

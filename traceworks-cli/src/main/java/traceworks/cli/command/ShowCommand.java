@@ -22,6 +22,7 @@ import traceworks.core.record.StepFiles;
 import traceworks.core.record.StepView;
 import traceworks.core.record.SwitchCase;
 import traceworks.core.record.WorkflowOutline;
+import traceworks.core.register.DecisionAgent;
 
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -496,7 +497,8 @@ public final class ShowCommand implements Command {
         for (RunView.Intervention intervention : view.interventions()) {
             out.println("  " + time(intervention.at()) + "  "
                     + TerminalFormat.safe(intervention.actor() == null ? "-" : intervention.actor()) + "  "
-                    + TerminalFormat.oneLine(intervention.description()));
+                    + TerminalFormat.oneLine(intervention.description()
+                    + DecisionAgent.through(intervention.agent())));
         }
     }
 

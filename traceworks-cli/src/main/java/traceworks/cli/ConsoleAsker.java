@@ -41,6 +41,7 @@ public final class ConsoleAsker implements QuestionAsker {
 
     private final PrintStream out;
     private final Function<String, Optional<String>> blobText;
+    private final String agent;
     private final BlockingQueue<String> lines = new LinkedBlockingQueue<>();
     private final ReentrantLock turn = new ReentrantLock();
 
@@ -48,11 +49,25 @@ public final class ConsoleAsker implements QuestionAsker {
      * @param blobText the text of a blob by its SHA-256, for the question and the default value
      */
     public ConsoleAsker(InputStream in, PrintStream out, Function<String, Optional<String>> blobText) {
+        this(in, out, blobText, null);
+    }
+
+    /**
+     * @param agent the agent that types the answers here under the actor of the run's process, by its checked name;
+     *              {@code null} when a person does, or nobody said otherwise
+     */
+    public ConsoleAsker(InputStream in, PrintStream out, Function<String, Optional<String>> blobText, String agent) {
         this.out = out;
         this.blobText = blobText;
+        this.agent = agent;
         Thread reader = new Thread(() -> read(in), "traceworks-console");
         reader.setDaemon(true);
         reader.start();
+    }
+
+    @Override
+    public String agent() {
+        return agent;
     }
 
     private void read(InputStream in) {
