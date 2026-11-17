@@ -194,9 +194,30 @@ class SwitchBlockExecutorTest {
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
         assertThat(result.getOutput()).contains("No matching case");
         assertThat(result.getOutput()).contains("unknown");
-        assertThat(result.getMetadata()).containsEntry("matchedCase", "none");
+        assertThat(result.getMetadata()).containsEntry("matchedCase", "none").containsEntry("caseMatched", false);
         verify(commands, never()).aiStep(any(AiStepRequest.class), any());
         verify(commands, never()).shellStep(any(), anyInt(), anyInt(), any());
+    }
+
+    /**
+     * A case may be called {@code none}, which is also what {@code matchedCase} says when no case ran:
+     * {@code caseMatched} tells the two apart.
+     */
+    @Test
+    void execute_aCaseCalledNone_isACaseThatMatched() {
+        context.setVariable("status", "none");
+        when(commands.aiStep(any(AiStepRequest.class), any())).thenReturn(step(1, StepStatus.COMPLETED, "nothing"));
+
+        Map<String, Object> config = new HashMap<>();
+        config.put("expression", "{{ status }}");
+        config.put("cases", List.of(
+                Map.of("value", "none", "blocks", List.of(
+                        Map.of("type", "simple", "config", Map.of("command", "say nothing"))))));
+
+        StepResult result = executor.execute(switchOf(config), context);
+
+        assertThat(result.getOutput()).isEqualTo("nothing");
+        assertThat(result.getMetadata()).containsEntry("matchedCase", "none").containsEntry("caseMatched", true);
     }
 
     @Test

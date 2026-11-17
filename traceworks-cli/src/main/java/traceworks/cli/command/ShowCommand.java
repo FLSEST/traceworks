@@ -25,6 +25,7 @@ import traceworks.core.record.StepView;
 import traceworks.core.record.WorkflowOutline;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -265,16 +266,22 @@ public final class ShowCommand implements Command {
             return;
         }
         String matched;
+        JsonNode ran;
         try {
-            JsonNode value = JSON.readTree(text.apply(step.metadata().sha256())).path("matchedCase");
-            matched = value.isTextual() ? value.asText() : null;
+            JsonNode metadata = JSON.readTree(text.apply(step.metadata().sha256()));
+            matched = metadata.path("matchedCase").isTextual() ? metadata.path("matchedCase").asText() : null;
+            ran = metadata.path("caseMatched");
         } catch (IOException e) {
-            matched = null;   // a deleted or damaged metadata blob: nothing to name
+            return;   // a deleted or damaged metadata blob: nothing to name
         }
         if (matched == null) {
             return;
         }
-        if (matched.equals("none")) {
+        // "none" is what the step says when no case ran, and may be the value of a case that did. The step says
+        // which (caseMatched); a record of an earlier version does not, and there only a case ran a command or a call
+        boolean noCase = ran.isBoolean() ? !ran.asBoolean()
+                : matched.equals("none") && step.commands().isEmpty() && step.aiCalls().isEmpty();
+        if (noCase) {
             out.println(UNDER + "no case matched");
             return;
         }
@@ -344,12 +351,24 @@ public final class ShowCommand implements Command {
 
     /** A stream that writes each line to {@code out} after {@code indent}. */
     private static PrintStream indented(PrintStream target, String indent) {
-        return new PrintStream(target, false, StandardCharsets.UTF_8) {
+        byte[] prefix = indent.getBytes(StandardCharsets.UTF_8);
+        // On the bytes, so that it holds for whatever is printed and however: a line starts after each line feed,
+        // and gets the indent before its first byte; an empty line gets none
+        return new PrintStream(new OutputStream() {
+            private boolean atLineStart = true;
+
             @Override
-            public void println(String line) {
-                target.println(indent + line);
+            public void write(int b) {
+                if (atLineStart && b != '\n' && b != '\r') {
+                    target.write(prefix, 0, prefix.length);
+                    atLineStart = false;
+                }
+                target.write(b);
+                if (b == '\n') {
+                    atLineStart = true;
+                }
             }
-        };
+        }, true, StandardCharsets.UTF_8);
     }
 
     /**

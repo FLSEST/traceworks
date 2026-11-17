@@ -3,7 +3,25 @@ package traceworks.cli.main;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import traceworks.adapters.record.FileRunStore;
 import traceworks.cli.RuntimeSource;
+import traceworks.core.ai.ToolPolicy;
+import traceworks.core.ai.cli.CliAiProvider;
+import traceworks.core.model.RunStatus;
+import traceworks.core.model.StepStatus;
+import traceworks.core.model.TriggerSource;
+import traceworks.core.model.WorkflowDefinition;
+import traceworks.core.port.AiProvider;
+import traceworks.core.port.AiProviders;
+import traceworks.core.port.Clock;
+import traceworks.core.port.CommandRunner.CommandRequest;
+import traceworks.core.port.CommandRunner.CommandResult;
+import traceworks.core.port.RunEvent;
+import traceworks.core.port.RunEvent.ChildRunEvent;
+import traceworks.core.port.StoredRun;
+import traceworks.core.record.RunRecorder;
+import traceworks.core.record.RunStart;
+import traceworks.core.testing.FakeAiCli;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -11,6 +29,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -214,4 +233,158 @@ class ShowNestedStepsTest {
         assertThat(steps.get(2)).matches("  \\d   two                      \\[shell\\]          COMPLETED         \\d+ ms");
         assertThat(shown).doesNotContain("child run", "Child ", "case ");
     }
+
+    /** A case whose value is {@code none} is a case that ran, not "no case matched". */
+    @Test
+    void aCaseCalledNone_isNamedAsACase() throws IOException {
+        Path pkg = workflow("none", """
+                {"type":"switch","name":"route","config":{"expression":"none","cases":[
+                  {"value":"none","blocks":[{"type":"shell","name":"on_none","config":{"command":"echo n"}}]}]}}""");
+
+        List<String> steps = steps(shown(pkg));
+
+        assertThat(steps).hasSize(2);
+        assertThat(steps.get(1)).isEqualTo("      case none: on_none [shell]");
+    }
+
+    private static final String WORKFLOW = """
+            {"id":"wf","name":"Fixed","description":"A fixed record.","blocks":[
+              {"type":"shell","name":"build","config":{"command":"make"}},
+              {"type":"switch","name":"route","config":{"expression":"x","cases":[
+                {"value":"none","blocks":[{"type":"shell","name":"on_none","config":{"command":"echo n"}}]}]}},
+              {"type":"sub-workflow","name":"outer","config":{"workflow_id":"./child"}}]}""";
+
+    /** What a test writes into a record with the real recorder, as a run would. */
+    private interface Recorded {
+        void into(RunRecorder recorder) throws IOException;
+    }
+
+    /**
+     * Writes a finished run with a fixed id, fixed times and the events of {@code steps}, with the real recorder, so
+     * what {@code show} prints of it is the same bytes every time.
+     */
+    private String fixedRun(String id, Recorded steps) throws IOException {
+        WorkflowDefinition definition = new WorkflowDefinition("wf", "Fixed", null, List.of(), null, null, null, null,
+                null, null, null, null, null);
+        Clock clock = () -> Instant.parse("2026-11-04T10:00:00Z");
+        try (StoredRun run = new FileRunStore(home.resolve("runs")).create(id, clock.now())) {
+            RunRecorder recorder = RunRecorder.start(run.events(), run.blobs(), clock, id, definition);
+            recorder.runStarted(new RunStart("wf", "Fixed", "/pkg", "d", null, null,
+                    WORKFLOW.getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "tester", "0.1.0",
+                    "container", null, null));
+            steps.into(recorder);
+            recorder.emit(new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null));
+        }
+        Result show = exec("show", id);
+        assertThat(show.code()).as(show.out() + show.err()).isZero();
+        return show.out();
+    }
+
+    private static void command(RunRecorder recorder, String command) {
+        recorder.recording(request -> new CommandResult(0, "", "", 1, false))
+                .run(new CommandRequest(command, "/ws", 60, null, null, null, false));
+    }
+
+    /**
+     * Every line under a nested step stands as far in as its step: the line of an AI call too, which once came
+     * out at the column of a top-level step's, whatever the depth.
+     */
+    @Test
+    void theAiCallOfAChildsStep_standsUnderItsStep() throws IOException {
+        String child = "c0000000-0000-0000-0000-000000000001";
+        String grandchild = "d0000000-0000-0000-0000-000000000002";
+
+        String shown = fixedRun("00000000-0000-0000-0000-0000000000b1", recorder -> {
+            recorder.emit(new RunEvent.StepStarted(0, "outer", "sub-workflow", 2, true));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.StepStarted(0, "deeper", "sub-workflow", 0, true)));
+            recorder.emit(new ChildRunEvent(child, new ChildRunEvent(grandchild,
+                    new RunEvent.StepStarted(0, "ask", "simple", 0, true))));
+            AiProviders providers = recorder.recording(AiProviders.of("CLAUDE", List.of(new CliAiProvider(
+                    FakeAiCli.claude().answers("fine"),
+                    recorder.recording(request -> new CommandResult(0, "", "", 1, false)), "traceworks/claude:abc",
+                    Map.of("ANTHROPIC_API_KEY", "sk-ant-test-value-01")))));
+            providers.resolve("CLAUDE").executeAction(new AiProvider.ActionRequest("Review", "opus", null, null, null,
+                    null, ToolPolicy.READ, false, null));
+            recorder.emit(new ChildRunEvent(child, new ChildRunEvent(grandchild, new RunEvent.StepFinished(0, "ask",
+                    "simple", StepStatus.COMPLETED, "Review", 5, Map.of()))));
+            recorder.emit(new ChildRunEvent(child, new ChildRunEvent(grandchild,
+                    new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null))));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.StepFinished(0, "deeper", "sub-workflow",
+                    StepStatus.COMPLETED, "", 7, Map.of())));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null)));
+            recorder.emit(new RunEvent.StepFinished(0, "outer", "sub-workflow", StepStatus.COMPLETED, "", 9, Map.of()));
+        });
+
+        assertThat(String.join("\n", steps(shown))).as(shown).isEqualTo("""
+                  0   outer                    [sub-workflow, ai] COMPLETED         9 ms
+                      child run c0000000 COMPLETED
+                        0   deeper                   [sub-workflow, ai] COMPLETED         7 ms
+                            child run d0000000 COMPLETED
+                              0   ask                      [simple, ai]     COMPLETED         5 ms
+                                  ai CLAUDE  model opus  tools read  exit 0  100 in / 20 out tokens  0 tool calls
+                                  network hosts api.claude.example:443"""
+                .indent(2).stripTrailing());
+    }
+
+    /**
+     * A record of the version before has no {@code caseMatched}: its {@code matchedCase: none} is "no case matched"
+     * unless the step ran a command, which only a case does.
+     */
+    @Test
+    void anEarlierRecordsNone_isNoCase_unlessTheStepRanACommand() throws IOException {
+        String noCase = fixedRun("00000000-0000-0000-0000-0000000000b2", recorder -> {
+            recorder.emit(new RunEvent.StepStarted(1, "route", "switch", 1, false));
+            recorder.emit(new RunEvent.StepFinished(1, "route", "switch", StepStatus.COMPLETED, "switch (x)", 3,
+                    Map.of("matchedCase", "none")));
+        });
+        String aCase = fixedRun("00000000-0000-0000-0000-0000000000b3", recorder -> {
+            recorder.emit(new RunEvent.StepStarted(1, "route", "switch", 1, false));
+            command(recorder, "echo n");
+            recorder.emit(new RunEvent.StepFinished(1, "route", "switch", StepStatus.COMPLETED, "switch (none)", 3,
+                    Map.of("matchedCase", "none")));
+        });
+
+        assertThat(steps(noCase)).last().isEqualTo("      no case matched");
+        assertThat(steps(aCase)).last().isEqualTo("      case none: on_none [shell]");
+    }
+
+    /**
+     * The whole of {@code show} for a run without child runs and switches, byte for byte: what it printed before it
+     * learnt to name what ran inside a step. A change to any line of it shows here.
+     */
+    @Test
+    void aRunWithoutChildRunsAndSwitches_isShownByteForByteAsBefore() throws IOException {
+        String shown = fixedRun("00000000-0000-0000-0000-0000000000b4", recorder -> {
+            recorder.emit(new RunEvent.StepStarted(0, "build", "shell", 0, false));
+            command(recorder, "make");
+            recorder.emit(new RunEvent.OutputRecorded(0, "build", "built"));
+            recorder.emit(new RunEvent.StepFinished(0, "build", "shell", StepStatus.COMPLETED, "make", 12, Map.of()));
+        });
+
+        assertThat(shown).isEqualTo(PLAIN);
+    }
+
+    private static final String PLAIN = """
+            Run       00000000-0000-0000-0000-0000000000b4
+            Workflow  Fixed (wf)
+            Status    COMPLETED
+            Actor     tester
+            Started   2026-11-04T10:00:00Z
+            Finished  2026-11-04T10:00:00Z
+            Package   /pkg
+            Seal      unsealed
+            Ledger    start noted in the ledger: no (recorded by a version that noted no start)
+            AI net    restricted
+
+            Workflow
+              A fixed record.
+              0   build                    shell                              step 0 COMPLETED
+                  make
+              1   route                    switch                             did not run
+              2   outer                    sub-workflow                       did not run
+                  ./child
+
+            Steps
+              0   build                    [shell]          COMPLETED         12 ms
+            """;
 }
