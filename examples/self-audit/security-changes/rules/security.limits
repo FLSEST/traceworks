@@ -291,16 +291,17 @@ limit A mount is checked, then mounted.
   says  The host side of a mount is resolved once and the runtime gets the checked real path; a process that can write a parent directory of it can still swap a part before the runtime opens it.
   digest b988183568735c9d
 
-limit A writable mount below the home.
-  quote it does not refuse a writable mount (`:rw`) of any other file or folder of yours
-  says  The mount check refuses the home as a whole, the logins below it and the places it lists, not a writable mount of any other file or folder of the operator, such as ~/.bashrc or the .git/hooks of a repository.
-  digest b28ca8938a975d2d
+limit A listed folder is open to every package.
+  quote inside a listed folder a package may mount any file or folder writable
+  quote it does not refuse a repository with its `.git/hooks` and `.git/config`
+  says  A writable mount is refused unless it lies in a folder the operator listed in writable_mounts; inside a listed folder every package may mount any file or folder writable, a repository with its .git/hooks and .git/config or a script included, and the mount check refuses there only what it refuses everywhere.
+  digest 6812034275a4417b
 
-limit A writable workspace has its own `.git`.
-  quote With `workspace_writable: true` a step writes everything in the workspace, its `.git/` included
-  quote Traceworks does not cover or check the workspace's `.git`
-  says  With workspace_writable: true a step writes everything in the workspace, its own .git included (hooks, config), which Traceworks neither covers nor checks: the next git command the operator runs in that directory on the host runs what the step left there, as the operator.
-  digest ba84cb6fcb578128
+limit A writable workspace's `.git` beyond its hooks and its config.
+  quote a step can still create what git reads once it is there
+  quote A host run holds nothing
+  says  With workspace_writable: true a container step sees only the hooks and the config of the workspace's top-level .git read-only: it still writes the rest of .git, creates files git reads later (commondir, config.worktree), writes files of the workspace the config names and the git directories of submodules and deeper repositories, and makes a .git where there is none; a host run holds nothing.
+  digest 53fe409c0bd50314
 
 limit A called package's `.git` in the workspace.
   quote has no cover while the steps of the calling package run

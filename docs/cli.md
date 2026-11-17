@@ -937,7 +937,9 @@ Nothing was checked: 'traceworks check <package>' says what a run would refuse.
     a `simple` block of a switch case in shell mode): `network none` or `network open` (`network: true`),
     `workspace read-only` or `workspace writable`, the names of its `secrets` (a name, never a value: `describe` reads
     no credential), its image (`container_image`, else the run's shell image), its `mounts` and its
-    `timeout_seconds` when the block sets them. An image of the package itself is followed by what its Dockerfile
+    `timeout_seconds` when the block sets them. A writable mount that the block writes out and that lies in no
+    folder of your `writable_mounts` is followed by `(writable, in no folder of writable_mounts: a run is
+    refused)`; `describe` reads the home's `traceworks.json` for that ("Writable mounts"). An image of the package itself is followed by what its Dockerfile
     says it holds, as in `image ./images/areas — eclipse-temurin:21-jdk-noble: the area finder on JDK 21` (see
     "images"); a child workflow of another package gets no such text, since a run refuses a `./images/` there.
   - `ai:` for a block that calls an AI: the provider, model and effort the call runs with (the block's own, else the
@@ -1591,6 +1593,7 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `container_runtime` | `"podman"`, `"docker"` or `null` | the container runtime; `null` (the default) takes the first of `docker` and `podman` on `PATH` that answers `version`. Docker comes first because this release is tested with it (29.1.3); Podman is supported by the code but untested |
 | `hooks` | object or `null` | the operator's hooks: `register_changed`, the program and its arguments as a list (never a shell line) that gets the diff of a register after an audit run on its standard input, and `timeout_seconds` (default 60), after which the hook is ended. See "Hooks" and `examples/hooks/` |
 | `secret_names` | list of names or `null` | the secrets a run may take from the environment of Traceworks. `null` or missing (the default) and `[]` allow none; a list allows those names. Values from `credentials.json` and the AI providers' credentials are not affected. Each name must match `[A-Z_][A-Z0-9_]*`, else the file is refused (see "Secrets") |
+| `writable_mounts` | list of directories or `null` | the folders in or below which a package may mount a host path writable (`:rw` in `mounts`). `null` or missing (the default) and `[]` allow none: every writable mount is refused. Each entry is an absolute path, or starts with `~/` for a folder below your home directory; `/`, your home directory, a folder that holds it and a relative path are refused. No workflow can set it (see "Writable mounts") |
 | `container_limits` | object | the limits of every container: `memory` (a string such as `"4g"`), `pids` (an integer) and `cpus` (a string or a number, such as `"2"` or `0.5`); a missing one keeps its default, `"4g"`, `1024` and `"2"` |
 | `output_limit_mib` | integer or `null` | how much Traceworks keeps of each stream of every command, in MiB: from `1` to `1024`; `null` (the default) is `16`. A string such as `"16"` or a number such as `1.5` is refused. No workflow can set it (see "Output limit") |
 | `run_output_budget_mib` | integer or `null` | how much memory the output text a run holds may take, in MiB: from `1` to `65536`, and at least twice `output_limit_mib`; `null` (the default) is `128`, or eight times `output_limit_mib` when that is more. A smaller value, a string or a fraction is refused. No workflow can set it (see "Output budget") |
@@ -1689,6 +1692,49 @@ on another disk, or beside a project. Without them nothing changes: each lies in
   home that uses a ledger without the setting takes `<home>/ledger.lock` instead: do not name the fixed
   `<home>/ledger` of one home as the `ledger_dir` of another, since the two would not exclude each other. A shared
   runs or registers folder would mix the runs and the audits of both.
+
+### Writable mounts
+
+A block may ask for more mounts than the run's own (`mounts`, each `host:container:ro` or `host:container:rw`). A
+read-only one is checked as before. A writable one is refused unless you listed a folder that holds it:
+
+```json
+{
+  "writable_mounts": ["~/traceworks-out", "/srv/reports"]
+}
+```
+
+- **What an entry is.** A directory: an absolute path, or one that starts with `~/`, which is your home directory as
+  on the host side of a mount. It need not exist. The file is refused (exit 6, by every command that reads the home)
+  for an entry that is no string, begins or ends with white space, is not absolute, is `/`, or is your home
+  directory or a folder that holds it, as written or behind a symbolic link.
+- **What it allows.** A writable mount whose real path (`..` and symbolic links resolved) is a listed folder or lies
+  below one, with the listed folder resolved the same way: a link inside a listed folder that leads out of it allows
+  nothing. Without the setting, and with `[]`, no package mounts a host path of yours writable.
+- **What it does not allow.** Anything the mount check refuses anyway (docs/workflow-format.md, the row on declared
+  mounts): a login, a folder with a credential store of its own, a socket, the Traceworks home, the package, the
+  workspace of a step without `workspace_writable: true`, the `.git` of a writable workspace. A file directly in
+  your home directory (`~/.bashrc`) can never be mounted writable, since its folder cannot be listed.
+- **What needs no entry.** What Traceworks manages itself: the run's scratch directory (`{{ scratch_dir }}`), the
+  cache folder (`cache_dir`) and the output folder (`output_dir`) of a tool step, and the checkout of `run --source`
+  while the step has `workspace_writable: true`. Your own workspace does need one: with `workspace_writable: true`
+  the step writes it at `/workspace` anyway, and a second, writable mount of a folder in it is a mount like any other.
+- **When it is refused.** A mount that the workflow writes out (`"~/out:/out:rw"`) is refused by the start check,
+  before the run is created and before a resume records anything (exit 6), with every such mount in one message. A
+  mount that a placeholder names (`"{{ out_dir }}:/out:rw"`) is known when its step runs: the step is refused with
+  exit code 125, and nothing starts. Both name the mount and the line to add:
+
+```
+The run is refused: Block 2 "export": the mount ~/out:/out:rw is refused: a package may mount a host path writable
+only in or below a folder that writable_mounts in /home/anna/.traceworks/traceworks.json lists, and /home/anna/out
+lies in none; mount it :ro, or, if every package you run may write that folder, allow it with this line in
+/home/anna/.traceworks/traceworks.json: "writable_mounts": ["/home/anna/out"]
+```
+
+The list is a grant to every package you run in this home, not to one. List folders that hold results, and none
+that holds what the host runs later: a repository (its `.git/hooks`), a folder on your `PATH`, a folder of startup
+files (docs/security.md, "A listed folder is open to every package"). `traceworks describe <package>` shows the
+mounts of every block, and marks a writable one that no listed folder holds.
 
 ## AI images
 
@@ -1969,9 +2015,9 @@ A block takes `command` or `container_args`, not both. A block with `container_a
 | `output_dir` | where the tool writes its SARIF files in its container (default `/out`); read only with `output_format: sarif` |
 | `fact_prefix` | the prefix of the fact sheet; default the block's name. It is lower-cased, every run of characters other than `a-z`, `0-9` and `_` becomes one `_`, and `_` at its ends is dropped (`Scan-Tree` gives `scan_tree`); a prefix with nothing left is `tool` |
 | `cache_dir` | where the tool's persistent cache folder appears in its container (see "The cache folder") |
-| `mounts` | more mounts, as for a command, each with `:ro` or `:rw` |
+| `mounts` | more mounts, as for a command, each with `:ro` or `:rw`; a writable one must lie in a folder of the operator's `writable_mounts` ("Writable mounts") |
 | `network` | `true` gives the tool network access; by default it has none |
-| `workspace_writable` | `true` mounts the workspace writable; by default the tool sees it read-only |
+| `workspace_writable` | `true` mounts the workspace writable, but for the `hooks` and the `config` of its `.git`; by default the tool sees it read-only |
 | `timeout_seconds` | how long the tool may run (default 300); a tool that is stopped for it has exit code 124 |
 | `secrets` | the names of secrets that reach the tool as environment variables (see "Secrets") |
 | `mount_docker_socket` | refused: with `true` the step fails, and `traceworks check` reports `docker-socket-refused` |
@@ -2715,7 +2761,9 @@ Before the run is created, and after the start check, the source is cloned into 
 commit, detached (`git checkout --detach <sha>`); each git call may take ten minutes. That checkout is the run's
 workspace: a container sees it at `/workspace`, read-only unless a block sets `workspace_writable: true`, and then
 the step's writes stay in the checkout, never in the source. A step's own `mounts` entry inside the checkout follows
-the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`. Another run's
+the rules of a mount inside a workspace: `:ro` always, `:rw` only with `workspace_writable: true`, and then without
+an entry in `writable_mounts`, since the checkout is the run's own; its `.git` is held as that of any writable
+workspace (`hooks` and `config` read-only), and the checkout has an empty `hooks` folder for that. Another run's
 checkout cannot be mounted.
 
 `run.started` records the source as `workspace_source` and the full commit as `workspace_source_sha` (see

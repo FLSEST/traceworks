@@ -117,6 +117,34 @@ so a directory that something replaces by a link after the check is not what the
 start refuses a run directory that no longer resolves to that path. The full list
 is in the row on declared mounts of [docs/workflow-format.md](workflow-format.md).
 
+**Writable mounts.** A block's own mount that is writable (`:rw`) is refused unless its real path lies in or below a
+folder you listed in `writable_mounts` of `traceworks.json` (docs/cli.md, "Writable mounts"), wherever it lies, in
+your home directory or outside it. Without the setting every such mount is refused. The reason: a step runs as you,
+so a file it writes on the host can be one the host runs later, outside every container (`~/.bashrc`, a script in
+`~/.local/bin`, a unit in `~/.config/systemd/user`, the `.git/hooks` of a repository), and no list of such files
+could be complete, so you say where packages may write. A mount that the workflow writes out is refused before the
+run is created, and before a resume records anything, so no step runs first; one that a placeholder names is
+refused when its step runs, with exit code 125 and nothing started. The refusal names the mount and the line to add
+to `traceworks.json`. A listed folder lifts no other refusal of the mount check, and the setting itself refuses `/`,
+your home directory, a folder that holds it and a path that is not absolute; both sides are compared by their real
+paths. What Traceworks manages itself needs no entry: the run's scratch directory, the cache folder and the output
+folder of a tool step, and the run's own checkout (`run --source`) while the step may write its workspace. A
+read-only mount needs none either. `traceworks describe` marks a writable mount that no listed folder holds.
+
+**A writable workspace's `.git`.** With `workspace_writable: true` a container step writes the workspace, but not
+the `hooks` and the `config` of its top-level `.git`: what a step left there, the next git command you run in that
+directory would run on the host, as you (a hook, an alias, a pager, a filter, `core.fsmonitor`). The container gets
+`.git/hooks` and `.git/config` read-only, and `.git` itself as a mount point, so a step can neither write the two,
+nor move them or the whole `.git` away and put its own in their place. Everything else in `.git` stays writable, so
+a step can still commit; `git config` and what else writes the config fails there. A `.git` that is a file (a
+linked worktree, a submodule) is mounted read-only as a whole, so no step points it at a git directory of its own
+making. A writable mount of the step's own that is that `.git`, lies in it or holds it is refused, in a listed
+folder too. Traceworks writes nothing into your repository for this, and a mount needs something to lie on: a `.git`
+without a `hooks` folder or without a `config` file, or with a symbolic link at `.git`, `hooks` or `config`, is
+refused when the step runs (exit code 125, nothing started), with the command that makes what is missing. The
+checkout of `run --source` gets its empty `hooks` folder from Traceworks. What this does not cover is under "Images
+and containers" below.
+
 **Secrets** (docs/cli.md, "Secrets"). A step names the secrets it needs, and only that step gets them, as environment
 variables (what it writes is another matter; see "Secrets and the record" below). `credentials.json` is refused
 when its group or others can read or change it. A value comes from the environment of Traceworks only for the
@@ -758,19 +786,29 @@ What a seal does not protect:
   was checked, so a link that replaces a part of the path as written changes nothing. What is left is the runtime
   itself, which opens that real path a moment later: a process that can write one of its parent directories could
   still swap a part of it in between. Do not declare mounts below directories that others can write.
-- **A writable mount below the home.** The mount check refuses the home as a whole, the logins below it and the
-  places listed above; it does not refuse a writable mount (`:rw`) of any other file or folder of yours. A workflow
-  that declares `~/.bashrc:/x:rw`, `~/.local/bin:/x:rw`, `~/.config/systemd/user:/x:rw` or the `.git/hooks` of one of your
-  repositories gets it, and its step, which runs as you, can leave commands there that your shell, your session or
-  git runs later outside every container. `traceworks describe <package>` shows every mount of every block before
-  anything runs: read it for a package you did not write, and run no package whose writable mounts you would not
-  hand to its author.
-- **A writable workspace has its own `.git`.** With `workspace_writable: true` a step writes everything in the
-  workspace, its `.git/` included: `.git/hooks/*`, `.git/config` (an alias, a pager, a filter, `core.fsmonitor`).
-  The next git command you run in that directory on the host runs what the step left there, as you. Traceworks does
-  not cover or check the workspace's `.git`; a writing workflow may need git itself. Let a package you did not
-  write work on a checkout of its own (`run --source`, whose checkout no git of the host reads afterwards), or
-  look at `.git/config` and `.git/hooks` after a run that wrote the workspace, before you use git there.
+- **A listed folder is open to every package.** A writable mount (`:rw`) is refused unless it lies in or below a
+  folder you listed in `writable_mounts` ("Writable mounts", above). The list is a grant to every package you run,
+  not to one: inside a listed folder a package may mount any file or folder writable, and its step, which runs as
+  you, can leave commands there that your shell, your session or git runs later outside every container. The mount
+  check refuses there only what it refuses everywhere (a login, a folder with a credential store of its own, a
+  socket, the Traceworks home); it does not refuse a repository with its `.git/hooks` and `.git/config`, a script or
+  a folder on your `PATH`. List folders that hold results, not folders that hold what the host runs.
+  `traceworks describe <package>` shows every mount of every block before anything runs.
+- **A writable workspace's `.git` beyond its hooks and its config.** With `workspace_writable: true` a container
+  step sees the `hooks` and the `config` of the workspace's top-level `.git` read-only ("A writable workspace's
+  `.git`", above) and writes the rest of `.git`, as a commit must. A mount cannot hold a file that does not exist,
+  so a step can still create what git reads once it is there: `.git/commondir`, which makes git take its config and
+  its hooks from the directory that file names, and `.git/config.worktree` where your config sets
+  `extensions.worktreeConfig`. It can write `.git/info/attributes` and `.gitattributes`, which hand more files to a
+  filter, diff or merge driver your config already defines; the state of a rebase or a bisect, whose commands run
+  when you continue it; any file of the workspace your config names (`core.hooksPath`, an `include.path`, the
+  scripts of a hook manager); and the git directories of submodules (`.git/modules/`) and of repositories deeper
+  in the workspace, hooks and config included. In a workspace without a `.git` a step can make one, and the git
+  directory that a `.git` file names is not held when it lies in the workspace. A host run holds nothing: a command
+  on the host writes all of `.git`. The next git command you run there on the host can run what the step left, as
+  you. Let a package you did not write work on a checkout of its own (`run --source`, whose checkout no git of the
+  host reads afterwards), or look for `.git/commondir` and `.git/config.worktree` and at `git status` in a
+  container before you use git there.
 - **A called package's `.git` in the workspace.** The package's own `.git/` is covered wherever a container
   sees the package. A package it calls that lies in the workspace has no cover while the steps of the calling
   package run: they see its `.git/` as any file of the workspace. A workspace that lies inside the package's
