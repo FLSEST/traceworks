@@ -55,7 +55,7 @@ class DiffIT extends IntegrationTest {
                 .contains("      | - Hello, Anna\n      | + Hello, Bert\n")
                 .containsPattern("(?m)^\\| count +COMPLETED +same output$")
                 .containsPattern("(?m)^\\| done +COMPLETED +output differs$")
-                .contains("differs: run B did not reproduce run A", "  the inputs differ",
+                .contains("differs: run B did not reproduce run A", "| the inputs differ",
                         "| step greet: the output differs", "| step done: the output differs");
 
         List<String> runs = traceworks.exec("runs", "--long").out().lines().toList();
