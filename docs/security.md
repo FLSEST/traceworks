@@ -344,7 +344,11 @@ three groups:
   only a run whose start entry is in the pushed ledger.
 
 `run.html` has no scripts and loads
-nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
+nothing, and the terminal shows text from a run with its control characters made harmless. No such text starts a
+terminal line of its own, where it would read as a line of Traceworks: a text of a workflow, a step, a model, a
+record or a report that would cross the end of a line of 80 columns, or that holds a run of blanks, goes on lines
+that begin with `|+` (docs/cli.md, "Text from outside on the terminal"). The width is fixed: a terminal narrower
+than 80 columns breaks any line. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
 content, and no blob is written through one.
@@ -534,9 +538,10 @@ content, and no blob is written through one.
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
     static `items` of a `foreach`, a person's answer. A default that a person takes at the console with an empty
-    line is such an answer, so the console takes it only when its prompt showed the whole default: one that is
-    longer than the 200 characters shown, or has a line break or a character a terminal does not show, must be
-    typed. What the prompt shows, the person has seen and answers for.
+    line is such an answer, so the console takes it only when its prompt showed the whole default on its line: one
+    that is longer than the 200 characters shown, that does not fit the prompt's line of 80 columns, or has a line
+    break, a run of blanks or a character a terminal does not show, must be typed. What the prompt shows, the
+    person has seen and answers for.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a

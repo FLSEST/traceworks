@@ -1192,7 +1192,8 @@ Detail    from findings.jsonl of run 4c1f6a52-0d3e-4b56-9a57-2f1c8f0f3b1e
     fix     Compare the real path.
 ```
 
-Every value is on one line, with control characters replaced and cut at 200 characters; the whole text is in the
+Every value is made one line of text, with control characters replaced and cut at 200 characters (one too long
+for its line of the terminal goes on behind `|+`); the whole text is in the
 file (`show <run>` lists it as `file findings.jsonl ... blob <sha256>`). When there is no detail, one line says why
 and the rest is shown: `Detail    none: run <id> is not in this home`, `... recorded no findings.jsonl` (a run of
 an earlier version, or an audit that writes none), `... has no entry for this rule and subject in its
@@ -1575,12 +1576,37 @@ Without a terminal (CI, a pipe), or with `--no-input`, nobody can answer inside 
    row: an option padded to the terminal's width would otherwise end on a line of its own and read as a hint of
    Traceworks. With the run's id that is an option of up to 9 characters. For anything longer the command is
    printed once with a placeholder (`--answer '<option>'`, `--field '<name>=<value>'`) and the options or names
-   follow on lines marked with `|`, as the lines of the question are; type the one you choose, quoted for your
+   follow on lines marked with `|` (`| ` before each, `|+` where one goes on), as the lines of the question are; type the one you choose, quoted for your
    shell, or copy the command from `run.html`. The hint of a question that does not park the run
    (`waiting for an answer: ...`) follows the same rule, and so does every other place that shows options or a
    field's label on the terminal: the question asked at the console (`answer with one of:`, `one of:`,
    `is not one of:`) and the live line of a question (`question: ... [Yes / No]`, or `[options:]` with the
    options on marked lines below it).
+
+   **Text from outside on the terminal.** The same holds for every text that is not Traceworks' own, in every
+   command: a question, the hint of a default, a pattern, the name of a workflow or a step, a command line, an
+   output, an error, a finding, and a message that quotes any of them. Such a text is written into its line only
+   where it stays on one line of a terminal of 80 columns and holds no two blanks in a row. A text that is too
+   long goes on below, on lines that begin with `|+` behind the indent of their line. What follows `|+` follows the
+   end of the line above: `|+ word` where the line was broken at a blank, `|+ord` where it was broken inside a
+   word (a path, a digest), so that nobody reads a blank into it. A text with a run of blanks is written on such
+   lines only. A text of several lines (the
+   question of a parked run, an output under `show --outputs`, a line diff) has `| ` before each of its lines, and
+   a line of it that is too wide is broken with the same `| ` before each part.
+
+   ```
+   12:34:56 step 2  output: the first words of an output that is longer than the
+     |+ line, which go on here
+   traceworks: The run is refused: image ./images/tool is missing: run 'traceworks
+     |+ images build /home/you/packages/a-package-with-a-long-name'
+   ```
+
+   So a long message is printed on several lines, also where your terminal is wider, and a command in it is to
+   be put together again before it is copied. What you named yourself stays whole: the folder of a run in
+   `record` and `report`, and the commands that answer and resume a run. At the console a question of one line
+   that fits stays behind `? `; any other is printed below a lone `?`, every line behind `| `. The hint of a
+   default that does not fit its line goes on the same way, and an empty line does not take such a default.
+   Traceworks does not ask the terminal for its width: on one narrower than 80 columns any line can break.
 4. `traceworks approve` records the answer. `traceworks resume` (a host run with `--allow-host-execution`, or the
    setting) continues from the last checkpoint. The step asks again and receives the recorded answer at once. For a
    host run, the commands that `run`, `approve`, `answer` and `show` print to go on carry `--allow-host-execution`
