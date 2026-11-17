@@ -272,7 +272,8 @@ traceworks run examples/self-audit/security-changes        # since the workspace
 
 Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
 changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
-keeps the gate from GREEN for that run; tests and documentation are counted. A changed import or class head
+keeps the gate from its best word, YELLOW ("nothing found in what changed"); it never says GREEN, which is the full
+audit's word alone; tests and documentation are counted. A changed import or class head
 picks every area of its file and makes the areas that call into it neighbours, the digest of an area holds what
 its calls resolve to, and the base moves only when the run judged everything a run can judge. It
 has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding

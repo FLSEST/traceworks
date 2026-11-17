@@ -12,8 +12,7 @@
   "default_context": {
     "since": "",
     "skip": "",
-    "full_audit": "",
-    "green": "yes"
+    "full_audit": ""
   },
   "model_choices": {
     "judge": {
@@ -86,10 +85,7 @@
       "name": "areas",
       "config": {
         "container_image": "./images/areas",
-        "values": {
-          "SAY_GREEN": "{{ green }}"
-        },
-        "command": "set -euo pipefail; areas find --rules {{ package_dir }}/rules/security.rules --root . --changes {{ scratch_dir }}/changes --register security-changes --green \"$SAY_GREEN\" --known-file {{ register_dir }}/findings.jsonl --items-file {{ register_dir }}/items.jsonl --limits {{ package_dir }}/rules/security.limits --previous-report {{ register_dir }}/previous-report.md --verdict-version 2 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
+        "command": "set -euo pipefail; areas find --rules {{ package_dir }}/rules/security.rules --root . --changes {{ scratch_dir }}/changes --register security-changes --known-file {{ register_dir }}/findings.jsonl --items-file {{ register_dir }}/items.jsonl --limits {{ package_dir }}/rules/security.limits --previous-report {{ register_dir }}/previous-report.md --verdict-version 2 --judge {{ judge }} --judge-provider {{ judge_provider }} --judge-model {{ judge_model }} --out {{ scratch_dir }}/areas.jsonl --summary {{ scratch_dir }}/areas-summary.json",
         "timeout_seconds": 600,
         "shell_escape_variables": true
       }

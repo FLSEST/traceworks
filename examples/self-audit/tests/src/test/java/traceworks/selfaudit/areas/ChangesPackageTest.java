@@ -72,7 +72,7 @@ class ChangesPackageTest {
         assertThat(own.get("model_choices")).isEqualTo(security.get("model_choices"));
         assertThat(own.get("requires")).isEqualTo(security.get("requires"));
         assertThat(own.get("default_context")).as("without the input, the base comes from the register")
-                .isEqualTo(Map.of("since", "", "skip", "", "full_audit", "", "green", "yes"));
+                .isEqualTo(Map.of("since", "", "skip", "", "full_audit", ""));
         Map<String, Object> verdicts = config(own, "verdicts");
         Map<String, Object> theirs = config(security, "verdicts");
         for (String key : List.of("execution_mode", "model_choice", "tools", "untrusted_input", "items_command",
@@ -103,9 +103,8 @@ class ChangesPackageTest {
         assertThat(String.valueOf(areas.get("command"))).contains(" --changes {{ scratch_dir }}/changes ",
                 " --register security-changes ", " --items-file {{ register_dir }}/items.jsonl ",
                 " --known-file {{ register_dir }}/findings.jsonl ",
-                " --judge {{ judge }} ", " --green \"$SAY_GREEN\" ").doesNotContain("{{ audit_findings }}", "{{ green }}");
-        assertThat((Map<String, Object>) areas.get("values")).containsEntry("SAY_GREEN", "{{ green }}");
-        assertThat(areas).doesNotContainKeys("network", "workspace_writable");
+                " --judge {{ judge }} ").doesNotContain("{{ audit_findings }}", "{{ green }}", "--green");
+        assertThat(areas).doesNotContainKeys("network", "workspace_writable", "values");
     }
 
     @Test
