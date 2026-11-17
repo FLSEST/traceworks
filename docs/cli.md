@@ -446,7 +446,7 @@ same way", not "the two runs printed the same".
 
 ### show and watch
 
-`traceworks show [<run>] [--outputs] [--full]` shows a run: status, the workflow it ran (its package directory and
+`traceworks show [<run>] [--outputs] [--full] [--children]` shows a run: status, the workflow it ran (its package directory and
 commit, its description, and one line per block of the recorded definition with the step it became, or `did not
 run`), steps with their files, gate and the question it waits for. For a workflow with a model choice, a line
 `Model` names the option the run picked, whether it is the default, and its provider and model (`Model     judge =
@@ -463,6 +463,38 @@ egress proxy for; a denied one is marked `DENIED`, and the line `Egress` counts 
 of an AI step").
 `--outputs` adds each step's output, cut at 2000 characters. `--full` adds it whole. A step's status is `COMPLETED`,
 `FAILED`, `SKIPPED`, `CANCELLED` (the run's cancel ended it), `RUNNING` or `WAITING_APPROVAL`.
+
+**What ran inside a step** stands under it, further in:
+
+```
+Steps
+  0   route                    [switch]         COMPLETED         412 ms
+      case fast|quick: case_fast [shell], notify [simple (PI)]
+  2   child                    [sub-workflow]   COMPLETED         5210 ms
+      child run 1a2b3c4d COMPLETED
+        0   count_up                 [while]          COMPLETED         2204 ms
+        1   deeper                   [sub-workflow]   COMPLETED         801 ms
+            child run 77aa01c3 COMPLETED_WITH_ERRORS  gate RED (build)
+              0   build                    [shell]          FAILED            640 ms
+  3   each                     [foreach]        FAILED            9120 ms
+      item 7/14  child run 5e6f7a8b FAILED
+        0   work                     [shell]          FAILED            301 ms
+      13 more child runs, all COMPLETED (show --children lists each)
+```
+
+- **A child run** (`sub-workflow`, a `foreach` with `workflow_id`) is one line under the step that started it: the
+  first 8 characters of its run id, its status, its item for a `foreach` (`item 2/3`), and its gate when it reported
+  one. Its steps follow, each as a step of the run itself is shown (its line, AI calls, egress, values, files, and
+  its output with `--outputs`), six columns further in; a child of a child stands under its step the same way, to
+  any depth. These are the child runs `run.html` draws under the same step, from the same reading of the record.
+- **A step with more than 10 child runs** lists only those that did not end `COMPLETED`, at most 10, and counts the
+  others by status. `--children` lists every child run of every step.
+- **A `switch`** names the case that ran, as its `value` is written, and the blocks of that case with their types,
+  from the definition the record holds; `case default` for the default blocks, `no case matched` when none ran. The
+  blocks of a case are no steps of their own: their commands and AI calls are those of the switch's step. Under a
+  switch of a child run only the case is named, since the record holds the definition of the run itself.
+
+A run without child runs and switches is shown as before.
 
 `show` and `run.html` also list the interventions: what people and processes did to the run from outside its
 steps, with who and when. These are resumes (with the step that runs again and whether the package changed),
