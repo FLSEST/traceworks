@@ -7,42 +7,39 @@ set -euo pipefail
 scratch="$1"
 limit=10
 
-python3 - "$scratch/long-files.tsv" "$limit" <<'PY'
-import json
-import sys
+# long-files.tsv holds one "<name><TAB><lines>" per long file; a name may hold a tab, so the count is after the last.
+# The envelope is written in one line, with ", " and ": " between its parts and every character outside printable
+# ASCII as \uXXXX (a pair of them above U+FFFF), so the line stays the same bytes on any terminal and in any record.
+jq -R -s -r --argjson limit "$limit" '
+  def hex4: [(. / 4096 | floor) % 16, (. / 256 | floor) % 16, (. / 16 | floor) % 16, . % 16]
+    | map("0123456789abcdef"[. : . + 1]) | add;
+  def ascii: explode | map(if . < 127 then [.]
+    else (if . < 65536 then [.] else [55296 + ((. - 65536) / 1024 | floor), 56320 + ((. - 65536) % 1024)] end
+          | map("\\u" + hex4) | add | explode) end) | add | implode;
+  def dumps: if type == "object" then "{" + (to_entries | map((.key | dumps) + ": " + (.value | dumps)) | join(", ")) + "}"
+    elif type == "array" then "[" + (map(dumps) | join(", ")) + "]"
+    elif type == "string" then tojson | ascii
+    else tojson end;
 
-path, limit = sys.argv[1], int(sys.argv[2])
-rows = []
-with open(path, encoding="utf-8", errors="replace") as f:
-    for line in f:
-        line = line.rstrip("\n")
-        if line:
-            name, lines = line.rsplit("\t", 1)
-            rows.append((name, int(lines)))
-
-print("# Long files")
-print()
-if rows:
-    print(f"{len(rows)} file(s) have more than {limit} lines:")
-    print()
-    for name, n in rows:
-        print(f"- `{name}`: {n} lines")
-else:
-    print(f"No file has more than {limit} lines.")
-print()
-print("gate_status: " + ("YELLOW" if rows else "GREEN"))
-print("gate_category: hello")
-print(f"gate_description: {len(rows)} of the files are longer than {limit} lines")
-
-findings = [{
-    "ruleKey": "long-file",
-    "subject": name,
-    "severity": "LOW",
-    "title": f"{name} has {n} lines, more than {limit}",
-    "description": f"The example counts every file with more than {limit} lines as a finding.",
-    "evidence": f"long_file: {name} ({n} lines)",
-} for name, n in rows]
-envelope = {"snapshotComplete": True, "expectedFindings": len(findings), "findings": findings}
-print()
-print("<!-- traceworks:audit-result:v1 " + json.dumps(envelope) + " -->")
-PY
+  [split("\n")[] | select(. != "") | split("\t") | {name: (.[:-1] | join("\t")), n: (.[-1] | tonumber)}] as $rows
+  | ($rows | length) as $count
+  | [$rows[] | {
+      ruleKey: "long-file",
+      subject: .name,
+      severity: "LOW",
+      title: "\(.name) has \(.n) lines, more than \($limit)",
+      description: "The example counts every file with more than \($limit) lines as a finding.",
+      evidence: "long_file: \(.name) (\(.n) lines)"
+    }] as $findings
+  | "# Long files",
+    "",
+    (if $count > 0
+     then "\($count) file(s) have more than \($limit) lines:", "", ($rows[] | "- `\(.name)`: \(.n) lines")
+     else "No file has more than \($limit) lines." end),
+    "",
+    "gate_status: \(if $count > 0 then "YELLOW" else "GREEN" end)",
+    "gate_category: hello",
+    "gate_description: \($count) of the files are longer than \($limit) lines",
+    "",
+    "<!-- traceworks:audit-result:v1 \({snapshotComplete: true, expectedFindings: $count, findings: $findings} | dumps) -->"
+' "$scratch/long-files.tsv"

@@ -12,13 +12,13 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The scripts of the testing audit ({@code examples/audit/testing/scripts}) as they ship, in the built-in shell
- * image: {@code findings.sh} on a fixed result of PIT and {@code report.sh} on fixed answers of the rating, in a
+ * The scripts of the mutation testing audit ({@code examples/mutation-testing/scripts}) as they ship, in the built-in
+ * shell image: {@code findings.sh} on a fixed result of PIT and {@code report.sh} on fixed answers of the rating, in a
  * package that leaves out the steps that measure and rate. The register is real, so the runs show what a decision
  * of a person does to the gate and to what is rated again. The scripts learn what the register knew from the register
  * folder of the run ({@code {{ register_dir }}}), which is {@code register/} in the run's folder.
  */
-class TestingAuditScriptsIT extends IntegrationTest {
+class MutationTestingScriptsIT extends IntegrationTest {
 
     /** Four mutants in three methods: a nested class counts for the class of its file, a lambda for its method. */
     private static final String PIT = """
@@ -33,10 +33,10 @@ class TestingAuditScriptsIT extends IntegrationTest {
               "format": "traceworks-workflow",
               "format_version": 1,
               "id": "5f0c7b1e-2a4d-4c3b-9e8f-6d1a2b3c4d5e",
-              "name": "IT testing audit scripts",
+              "name": "IT mutation testing scripts",
               "metadata": {
                 "gate": {"expected": true},
-                "audit": {"enabled": true, "key": "it.testing", "category": "testing", "report_block": "report"}
+                "audit": {"enabled": true, "key": "it.mutation", "category": "testing", "report_block": "report"}
               },
               "default_context": {"answers": "first", "report": "report"},
               "blocks": [
@@ -68,7 +68,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
 
         assertThat(first.code()).as(first.describe()).isZero();
         assertThat(first.out()).contains("RED (testing)")
-                .contains("register it.testing: 2 new, 0 resolved, 0 reopened, 2 open now");
+                .contains("register it.mutation: 2 new, 0 resolved, 0 reopened, 2 open now");
         assertThat(traceworks.folder(first).output("findings")).contains("FACT mutants: 4\n")
                 .contains("FACT survived: 2\n").contains("FACT not_covered: 1\n")
                 .contains("FACT packages_to_rate: 1 of 1\n")
@@ -91,7 +91,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
         // The decision is part of what a rating sees, so the package is rated again; the accepted method stays a
         // finding of the report and no longer counts
         assertThat(second.out()).contains("YELLOW (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(traceworks.folder(second).output("findings")).contains("FACT packages_to_rate: 1 of 1\n");
         assertThat(traceworks.folder(second).output("report"))
                 .contains("A person decided on 1 of them; 1 are left to decide, 0 of them high:")
@@ -102,7 +102,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
 
         assertThat(third.code()).as(third.describe()).isZero();
         assertThat(third.out()).contains("GREEN (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 0 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(traceworks.folder(third).output("report"))
                 .contains("2 of them rated above low; 0 left to decide, 0 of them high\n");
 
@@ -129,7 +129,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
         // that changed.)
         assertThat(fifth.code()).as(fifth.describe()).isZero();
         assertThat(fifth.out()).contains("RED (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 1 reopened, 1 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 1 reopened, 1 open now");
         assertThat(traceworks.folder(fifth).output("report"))
                 .contains("A person decided on 1 of them; 1 are left to decide, 1 of them high:\n\n"
                         + "- `demo.Guard#check`: the check lets everything through\n");
@@ -146,10 +146,10 @@ class TestingAuditScriptsIT extends IntegrationTest {
                 .contains("\"severity\":\"MEDIUM\",\"status\":\"DISMISSED\",\"subject\":\"demo.Guard#check\"");
         assertThat(seventh.code()).as(seventh.describe()).isZero();
         assertThat(seventh.out()).contains("GREEN (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 0 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(traceworks.folder(seventh).output("report"))
                 .contains("A person decided on 2 of them; 0 are left to decide, 0 of them high:");
-        assertThat(traceworks.exec("findings", "it.testing", "verify").code()).isZero();
+        assertThat(traceworks.exec("findings", "it.mutation", "verify").code()).isZero();
     }
 
     /**
@@ -168,7 +168,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
 
         assertThat(raised.code()).as(raised.describe()).isZero();
         assertThat(raised.out()).contains("RED (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 0 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 0 open now");
 
         Result next = run(dir, "--input", "answers=second");
 
@@ -222,7 +222,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
                         + "high:\n\n- `demo.Flow#step`: a wrong result\n")
                 .doesNotContain("\"subject\":\"demo.Guard#check\"");
         assertThat(next.out()).contains("RED (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 1 open now");
     }
 
     /**
@@ -254,7 +254,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
                 StandardCharsets.UTF_8);
         Result before = run(dir, "--input", "report=before");
         assertThat(before.code()).as(before.describe()).isZero();
-        assertThat(before.out()).contains("register it.testing: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(before.out()).contains("register it.mutation: 1 new, 0 resolved, 0 reopened, 1 open now");
 
         Result first = run(dir, "--input", "answers=none");
 
@@ -267,7 +267,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
                         + "methods are rated above low. A person decided on 0 of them; 1 are left to decide, 0 of them "
                         + "high:");
         assertThat(first.out()).contains("YELLOW (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 1 open now");
 
         Result hostile = run(dir, "--input", "answers=hostile");
 
@@ -279,7 +279,7 @@ class TestingAuditScriptsIT extends IntegrationTest {
         assertThat(hostile.code()).as(hostile.describe()).isZero();
         assertThat(traceworks.folder(hostile).output("report")).contains("- `demo.Guard#check`: x} --> <!-- y\n");
         assertThat(hostile.out()).contains("RED (testing)")
-                .contains("register it.testing: 0 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register it.mutation: 0 new, 0 resolved, 0 reopened, 1 open now");
 
         Result after = run(dir, "--input", "answers=none");
 
@@ -288,13 +288,13 @@ class TestingAuditScriptsIT extends IntegrationTest {
         assertThat(registerFile(after, "findings.jsonl")).content()
                 .contains("\"description\":\"Rating: x} --> \\u003c!-- y\\nSurvived (a test runs the line")
                 .contains("\"severity\":\"HIGH\",\"status\":\"OPEN\",\"subject\":\"demo.Guard#check\"");
-        assertThat(traceworks.exec("findings", "it.testing", "verify").code()).isZero();
+        assertThat(traceworks.exec("findings", "it.mutation", "verify").code()).isZero();
     }
 
     /** The package: the scripts of the example, the result of PIT and two sets of answers of the rating. */
     private Path audit() throws IOException {
         Path dir = Files.createDirectories(sandbox.resolve("testing-audit"));
-        Path scripts = traceworks.examplePackage("audit/testing").resolve("scripts");
+        Path scripts = traceworks.examplePackage("mutation-testing").resolve("scripts");
         Files.createDirectories(dir.resolve("scripts"));
         try (Stream<Path> files = Files.list(scripts)) {
             for (Path script : files.toList()) {
@@ -328,14 +328,14 @@ class TestingAuditScriptsIT extends IntegrationTest {
     }
 
     private String list() {
-        Result list = traceworks.exec("findings", "it.testing", "list");
+        Result list = traceworks.exec("findings", "it.mutation", "list");
         assertThat(list.code()).as(list.describe()).isZero();
         return list.out();
     }
 
     private void decide(String decision, String subject) {
         String id = list().lines().filter(line -> line.contains(subject)).findFirst().orElseThrow().substring(0, 8);
-        Result decided = traceworks.exec("findings", "it.testing", decision, id, "--note", "looked at it");
+        Result decided = traceworks.exec("findings", "it.mutation", decision, id, "--note", "looked at it");
         assertThat(decided.code()).as(decided.describe()).isZero();
     }
 }

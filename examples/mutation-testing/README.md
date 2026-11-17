@@ -1,13 +1,36 @@
-# Testing audit
+# Mutation testing
 
 Would the tests notice when the code changes? This audit answers with mutation testing: [PIT](https://pitest.org)
 changes the compiled code in one place at a time and runs the tests that reach the line. A change no test detects is a
 gap in the tests.
 
+The package is meant for your own Maven project. It names no project of its own: tell it which modules and classes to
+measure, with `--workspace` at the project.
+
 ```
-traceworks images build examples/audit/testing
-traceworks run examples/audit/testing
-traceworks findings audit.testing
+traceworks images build examples/mutation-testing
+traceworks run examples/mutation-testing --workspace ~/src/my-project \
+    --input modules=core,service --input classes='com.example.*'
+traceworks findings mutation-testing
+```
+
+A run without `modules` or `classes` stops in its first step, before anything is copied or fetched, and says what to
+pass.
+
+**What the project needs:**
+
+- Maven, and tests in JUnit 5: PIT finds them through its JUnit 5 plugin, which `scripts/pit.sh` adds to a copy of
+  the root `pom.xml`. The project is not changed.
+- A `<pluginManagement><plugins>` element in the root `pom.xml`, which is where the plugin goes. Without one the
+  `fetch` step stops with exit code 2 and says so.
+- A module named as `mvn -pl` takes it, and in a form that is also a file name: the folder of a module directly below
+  the root (`core`), or `:<artifactId>`. For a project of one module, or a module deeper down, use `:<artifactId>`.
+
+**How Traceworks runs it on itself,** from the root of its repository:
+
+```
+traceworks run examples/mutation-testing \
+    --input modules=traceworks-cli,traceworks-adapters,traceworks-core --input classes='traceworks.*'
 ```
 
 | Step | Image | Network | What it does |
@@ -42,19 +65,22 @@ traceworks findings audit.testing
   description (`Rating: ...`); the evidence is the measured fact alone. A method rated `low` is no finding, so the
   register keeps no reason for it: that is enough here, because a package that changed is rated from zero.
 - **A second audit rates again from the earlier verdict:** this audit rates a changed package from zero, and a
-  model does not rate the same gap the same way every time. [`examples/audit/testing-again`](../testing-again/README.md)
-  measures the same and rates from the earlier verdict: the method is its unit, an unchanged method is not asked
-  about, and the rating of a changed method moves only when the answer names a test or a calling line that a script
-  finds in the workspace. That shows that the place exists, not that the rating is right. It has a register of its
+  model does not rate the same gap the same way every time.
+  [`mutation-testing-grounded`](../mutation-testing-grounded/README.md) measures the same and rates from the earlier
+  verdict: the method is its unit, an unchanged method is not asked about, and the rating of a changed method moves
+  only when the answer names a test or a calling line (a ground) that a script finds in the workspace. That shows that the place exists, not that the rating is right. It has a register of its
   own. Use this one for a fresh look, that one for ratings that do not move without a named place.
-- **Inputs:** `modules` (a comma list of Maven modules), `classes` (a PIT glob of the classes to change and of the
-  tests to run) and `threads`. A run with other `modules` or `classes` states another snapshot, so the register
-  resolves what the smaller run did not look at: keep them the same from run to run.
+- **Inputs:** `modules` (a comma list of Maven modules) and `classes` (a PIT glob of the classes to change and of the
+  tests to run), both without a default, and `threads` (default `2`). A run with other `modules` or `classes` states
+  another snapshot, so the register resolves what the smaller run did not look at: keep them the same from run to
+  run.
 - **Run time:** PIT runs the tests once per change. A whole project takes hours; the operator's `container_limits` in
   `traceworks.json` say how many CPUs the step gets.
-- **The project is not changed.** PIT needs its JUnit 5 plugin in the pom; `scripts/pit.sh` adds it to the copy.
-- **Measured once per state of the sources:** the result is kept in the cache folder under a digest of the poms, the
-  `src` folders and `classes`, and a run on the same sources takes it from there (the step says so).
+- **Measured once per state of the sources:** the result is kept in the cache folder under a digest of every
+  `pom.xml`, every file below a `src` folder and the `.mvn` folder, at any depth, of `scripts/pit.sh` (PIT's version
+  and settings), of `images/maven/Dockerfile` (Maven and the JDK) and of `classes`, and a run with the same digest
+  takes it from there (the step says so). A file outside these that the tests read, such as test data next to a
+  module's `src` folder, is not in the digest: after changing one, empty the folder `pit` of the step's cache folder.
 - **Left out:** a test that is red in the image without any change (it needs a program the image lacks) does not
   count: add the program to `images/maven/Dockerfile`. PIT runs only the tests of the module it changes.
 - The Maven repository in the cache folder (`<home>/cache/tools/maven`) is written by the step with network and read

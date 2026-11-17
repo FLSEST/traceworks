@@ -36,7 +36,7 @@ jq -r --rawfile answers /dev/stdin '
   | ($reported | map(select(.undecided))) as $open
   | ($open | map(select((.severity | rank) >= ("HIGH" | rank)))) as $high
   | (($reported | length) - ($open | length)) as $decided
-  | "# Testing audit",
+  | "# Mutation testing",
     "",
     "PIT changed the code in \($mutants) places. \($unnoticed) changes went unnoticed by the tests, in \($methods | length) methods. A model rated \($methods | map(select(.rated)) | length) of them in this run, in \([.packages[] | select(.rate)] | length) of \(.packages | length) packages; the others keep their rating. \($reported | length) methods are rated above low. A person decided on \($decided) of them; \($open | length) are left to decide, \($high | length) of them high:",
     "",

@@ -1278,8 +1278,8 @@ review_due, still_open, counts}`, each finding with its id, rule key, subject, s
 evidence, tags and status. It runs without a shell, with the operator's own environment variables, in the register's
 folder, after the register's lock is released; its exit code, duration and the tail of its standard error are
 recorded as `hook.ran`, and the summary says `hook ran` or `hook exited N`. A failing hook never changes the run's
-exit code. `examples/hooks/todo-service.sh` posts the diff to a TODO service over HTTP; the same shape serves GitHub
-Issues or Jira. A workflow never configures a hook.
+exit code. `examples/hooks/github-issues.sh` opens a GitHub issue per new or reopened finding with the GitHub CLI;
+the same shape serves another tracker. A workflow never configures a hook.
 
 A run of an audit workflow ends its summary with what it did to the register:
 
