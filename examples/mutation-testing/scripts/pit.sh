@@ -6,6 +6,12 @@
 # <modules> is a comma list of Maven modules, <classes> a PIT glob of the classes to change and of the tests to run.
 set -euo pipefail
 mode=$1 modules=$2 classes=$3 threads=$4
+if [ -z "$modules" ] || [ -z "$classes" ]; then
+  echo "The package names no project of its own: name the Maven modules and the classes to measure," \
+    "--input modules=<a comma list, each as mvn -pl takes it, such as core,service or :my-app>" \
+    "--input classes=<a PIT glob of the classes to change and of the tests to run, such as com.example.*>" >&2
+  exit 2
+fi
 pit=1.30.2 junit5=1.2.3
 script=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
 dockerfile=$(dirname "$script")/../images/maven/Dockerfile

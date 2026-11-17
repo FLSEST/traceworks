@@ -11,9 +11,15 @@ script finds.
 
 ```
 traceworks images build examples/mutation-testing-grounded
-traceworks run examples/mutation-testing-grounded
+traceworks run examples/mutation-testing-grounded --workspace ~/src/my-project \
+    --input modules=core,service --input classes='com.example.*'
 traceworks findings mutation-testing-grounded
 ```
+
+The inputs, and what the project needs, are those of `mutation-testing` ("What the project needs" in its README): a
+run without `modules` or `classes` stops in its first step and says what to pass. Traceworks runs it on itself from
+the root of its repository with
+`--input modules=traceworks-cli,traceworks-adapters,traceworks-core --input classes='traceworks.*'`.
 
 | Step | Image | Network | What it does |
 |---|---|---|---|

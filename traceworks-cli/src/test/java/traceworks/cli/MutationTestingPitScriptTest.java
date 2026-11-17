@@ -6,19 +6,20 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The key under which {@code scripts/pit.sh} of {@code examples/mutation-testing} keeps a result of PIT in the cache
- * folder: a run takes a kept result when the key is the same, so everything that decides the result must be in the
- * key, in any Maven layout. The script runs on the host with {@code bash pit.sh key}, in the folder of a small Maven
- * project; it needs {@code bash}, {@code find}, {@code sort} and {@code sha256sum}, as the script tests of this build
+ * {@code scripts/pit.sh} of {@code examples/mutation-testing}: it refuses a run that names no modules or classes, and
+ * it keeps a result of PIT in the cache folder under a key. A run takes a kept result when the key is the same, so
+ * everything that decides the result must be in the key, in any Maven layout. The script runs on the host, the key
+ * with {@code bash pit.sh key} in the folder of a small Maven project; it needs {@code bash}, {@code find}, {@code sort} and {@code sha256sum}, as the script tests of this build
  * do. {@code examples/mutation-testing-grounded} holds the same script byte for byte ({@link ExamplePackagesTest}).
  */
-class MutationTestingPitKeyTest {
+class MutationTestingPitScriptTest {
 
     private static final Path PACKAGE = Path.of("../examples/mutation-testing").toAbsolutePath().normalize();
     private static final Path SCRIPT = PACKAGE.resolve("scripts/pit.sh");
@@ -30,23 +31,33 @@ class MutationTestingPitKeyTest {
         return key(project, SCRIPT, classes);
     }
 
-    private String key(Path project, Path script, String classes) throws IOException {
+    private record Ran(int code, String stdout, String stderr) {
+    }
+
+    private Ran run(Path directory, Path script, String... args) throws IOException {
         Path out = Files.createTempFile(temp, "out", ".txt");
         Path err = Files.createTempFile(temp, "err", ".txt");
-        ProcessBuilder builder = new ProcessBuilder(List.of("bash", script.toString(), "key", "app", classes, "2"))
-                .directory(project.toFile()).redirectOutput(out.toFile()).redirectError(err.toFile());
+        List<String> command = new ArrayList<>(List.of("bash", script.toString()));
+        command.addAll(List.of(args));
+        ProcessBuilder builder = new ProcessBuilder(command)
+                .directory(directory.toFile()).redirectOutput(out.toFile()).redirectError(err.toFile());
         try {
             Process process = builder.start();
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                throw new AssertionError("pit.sh key did not end");
+                throw new AssertionError("did not end: " + String.join(" ", command));
             }
-            assertThat(process.exitValue()).as(Files.readString(err)).isZero();
+            return new Ran(process.exitValue(), Files.readString(out), Files.readString(err));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new AssertionError(e);
         }
-        String key = Files.readString(out).strip();
+    }
+
+    private String key(Path project, Path script, String classes) throws IOException {
+        Ran ran = run(project, script, "key", "app", classes, "2");
+        assertThat(ran.code()).as(ran.stderr()).isZero();
+        String key = ran.stdout().strip();
         assertThat(key).matches("[0-9a-f]{16}");
         return key;
     }
@@ -63,6 +74,25 @@ class MutationTestingPitKeyTest {
             write(project, file, "// " + file + "\n");
         }
         return project;
+    }
+
+    /**
+     * The package names no module and no classes of its own: a run without them stops in its first step, before
+     * anything is copied, built or fetched, and says what to pass.
+     */
+    @Test
+    void withoutModulesOrClasses_theScriptRefuses_andSaysWhatToPass() throws IOException {
+        Path project = project("inputs", "pom.xml", "src/main/java/demo/A.java");
+
+        for (String[] inputs : List.of(new String[] {"", ""}, new String[] {"app", ""}, new String[] {"", "demo.*"})) {
+            for (String mode : List.of("fetch", "measure")) {
+                Ran ran = run(project, SCRIPT, mode, inputs[0], inputs[1], "2");
+
+                assertThat(ran.code()).as(mode + " " + List.of(inputs)).isEqualTo(2);
+                assertThat(ran.stderr()).contains("--input modules=").contains("--input classes=");
+                assertThat(ran.stdout()).isEmpty();
+            }
+        }
     }
 
     @Test
