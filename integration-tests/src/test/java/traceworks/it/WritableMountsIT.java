@@ -15,16 +15,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * What a step may write on the host beyond its workspace and its scratch directory (docs/security.md, "Writable
- * mounts" and "A writable workspace"; packages {@code writable-mounts}, {@code mounts} and
- * {@code writable-workspace-git}):
+ * mounts" and "A writable workspace"; packages {@code writable-mounts}, {@code mounts},
+ * {@code writable-workspace-git} and {@code writable-workspace-commit}):
  *
  * <ul>
  *   <li>a writable mount ({@code :rw}) is refused unless the operator's {@code writable_mounts} in
  *       {@code traceworks.json} lists a folder that holds it: before the first step for a mount the workflow writes
  *       out, when its step runs for one a placeholder names;</li>
  *   <li>in a listed folder a step writes it;</li>
- *   <li>a step with {@code workspace_writable: true} cannot write the hooks or the config of the workspace's
- *       {@code .git}, nor move them or the {@code .git} away, and can commit.</li>
+ *   <li>a step with {@code workspace_writable: true} writes the files of the workspace and reads its repository,
+ *       and writes nothing under the workspace's {@code .git}: no hook, no config, no {@code commondir}, no commit,
+ *       and it cannot move the {@code .git} away;</li>
+ *   <li>with the operator's {@code workspace_git_writable} it commits.</li>
  * </ul>
  */
 class WritableMountsIT extends IntegrationTest {
@@ -156,73 +158,106 @@ class WritableMountsIT extends IntegrationTest {
         return Files.readString(output).strip();
     }
 
-    /** The workspace as a repository with one commit, a hooks folder and a config, whatever git's template holds. */
+    /** The workspace as a repository with one commit. */
     private Path repository() throws IOException {
         git("init", "--quiet", "--initial-branch=main");
         Files.writeString(traceworks.workspace().resolve("tracked.txt"), "first\n");
         git("add", "tracked.txt");
         git("commit", "--quiet", "-m", "on the host");
-        Path dotGit = traceworks.workspace().resolve(".git");
-        Files.createDirectories(dotGit.resolve("hooks"));
-        return dotGit;
+        return traceworks.workspace().resolve(".git");
     }
 
-    @Test
-    void aStepInAWritableWorkspace_cannotWriteTheHooksOrTheConfigOfItsGit_andCanCommit() throws Exception {
-        Path dotGit = repository();
-        String config = Files.readString(dotGit.resolve("config"));
-        List<String> hooks;
-        try (var entries = Files.list(dotGit.resolve("hooks"))) {
-            hooks = entries.map(entry -> entry.getFileName().toString()).sorted().toList();
+    /** Every file below {@code folder} with its bytes as text, by its path in the folder. */
+    private static Map<String, String> files(Path folder) throws IOException {
+        Map<String, String> found = new java.util.TreeMap<>();
+        try (var paths = Files.walk(folder)) {
+            for (Path file : paths.filter(Files::isRegularFile).toList()) {
+                found.put(folder.relativize(file).toString(),
+                        new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.ISO_8859_1));
+            }
         }
+        return found;
+    }
+
+    /**
+     * By default the {@code .git} of a writable workspace is read-only for the step, as a whole: it writes a file
+     * of the workspace and reads the repository, and can leave no hook, no config, no {@code commondir} and no
+     * commit, nor move the {@code .git} away. The repository has no hooks folder here: nothing is asked of what a
+     * {@code .git} holds, and Traceworks makes nothing in it.
+     */
+    @Test
+    void aStepInAWritableWorkspace_writesItsFiles_andNothingUnderItsGit() throws Exception {
+        Path dotGit = repository();
+        Path hooks = dotGit.resolve("hooks");
+        if (Files.isDirectory(hooks)) {
+            try (var entries = Files.list(hooks)) {
+                for (Path entry : entries.toList()) {
+                    Files.delete(entry);
+                }
+            }
+            Files.delete(hooks);
+        }
+        Map<String, String> before = files(dotGit);
 
         Result run = traceworks.run("writable-workspace-git");
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
-        for (String refused : List.of("write_hook", "write_config", "set_config", "move_git", "move_hooks")) {
+        assertThat(folder.stepStatus("write_file")).as(folder.output("write_file")).isEqualTo("COMPLETED");
+        assertThat(folder.output("write_file")).isEqualTo("changed");
+        for (String refused : List.of("write_hook", "write_config", "write_commondir", "move_git", "commit")) {
             assertThat(folder.stepStatus(refused)).as(refused + ": " + folder.output(refused)).isEqualTo("FAILED");
         }
-        assertThat(folder.output("write_hook")).contains("Read-only file system");
-        assertThat(folder.output("write_config")).contains("Read-only file system");
-        assertThat(folder.stepStatus("commit")).isEqualTo("COMPLETED");
-        assertThat(folder.output("commit")).isEqualTo("from the container");
+        for (String readOnly : List.of("write_hook", "write_config", "write_commondir", "commit")) {
+            assertThat(folder.output(readOnly)).as(readOnly).contains("Read-only file system");
+        }
+        assertThat(folder.stepStatus("read_git")).as(folder.output("read_git")).isEqualTo("COMPLETED");
+        assertThat(folder.output("read_git")).as("the step reads the repository").isEqualTo("on the host");
 
+        assertThat(traceworks.workspace().resolve("tracked.txt")).hasContent("changed\n");
         assertThat(dotGit).isDirectory();
         assertThat(traceworks.workspace().resolve(".git-moved")).doesNotExist();
-        assertThat(dotGit.resolve("hooks/pre-commit")).doesNotExist();
-        assertThat(dotGit.resolve("hooks-moved")).doesNotExist();
-        try (var entries = Files.list(dotGit.resolve("hooks"))) {
-            assertThat(entries.map(entry -> entry.getFileName().toString()).sorted().toList()).isEqualTo(hooks);
-        }
-        assertThat(dotGit.resolve("config")).as("the config, byte for byte").hasContent(config);
-        assertThat(git("log", "-1", "--format=%s")).as("the commit of the step, read on the host")
-                .isEqualTo("from the container");
-        assertThat(git("status", "--porcelain")).isEmpty();
+        assertThat(hooks).as("neither the step nor Traceworks made one").doesNotExist();
+        assertThat(dotGit.resolve("commondir")).doesNotExist();
+        assertThat(files(dotGit)).as("the repository, file for file and byte for byte").isEqualTo(before);
+        assertThat(git("log", "-1", "--format=%s")).isEqualTo("on the host");
+        assertThat(git("status", "--porcelain")).as("the change of the step, not committed")
+                .isEqualTo("M tracked.txt");
+    }
+
+    /** Without the operator's word the step that commits fails, and the repository keeps its commit. */
+    @Test
+    void aStepInAWritableWorkspace_cannotCommit_withoutTheOperatorsSetting() throws Exception {
+        repository();
+
+        Result run = traceworks.run("writable-workspace-commit");
+
+        assertThat(run.code()).as(run.describe()).isEqualTo(3);
+        assertThat(traceworks.folder(run).output("commit")).contains("Read-only file system");
+        assertThat(git("log", "-1", "--format=%s")).isEqualTo("on the host");
     }
 
     /**
-     * A mount needs a folder to lie on, and Traceworks writes nothing into the operator's repository: without a
-     * hooks folder the step is refused, with the command that makes one, and nothing starts.
+     * {@code workspace_git_writable} in {@code traceworks.json} is the operator's trust in the packages it runs
+     * there: the {@code .git} is writable like the rest of the workspace, and the step commits.
      */
     @Test
-    void aWritableWorkspaceWhoseGitHasNoHooksFolder_isRefusedWhenTheStepRuns_withTheCommandThatMakesOne()
-            throws Exception {
-        Path dotGit = repository();
-        try (var entries = Files.list(dotGit.resolve("hooks"))) {
-            for (Path entry : entries.toList()) {
-                Files.delete(entry);
-            }
-        }
-        Files.delete(dotGit.resolve("hooks"));
+    void aStepInAWritableWorkspace_commits_whereTheOperatorOpenedItsGit() throws Exception {
+        repository();
+        traceworks.configure(Map.of("workspace_git_writable", true));
 
-        Result run = traceworks.run("writable-workspace-git");
+        Result run = traceworks.run("writable-workspace-commit");
 
-        assertThat(run.code()).as(run.describe()).isEqualTo(3);
+        assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
-        assertThat(folder.output("write_hook")).contains("mkdir " + dotGit.toRealPath().resolve("hooks"));
-        assertThat(folder.output("commit")).contains("mkdir " + dotGit.toRealPath().resolve("hooks"));
-        assertThat(dotGit.resolve("hooks")).as("Traceworks made none").doesNotExist();
-        assertThat(git("log", "-1", "--format=%s")).isEqualTo("on the host");
+        assertThat(folder.stepStatus("commit")).isEqualTo("COMPLETED");
+        assertThat(folder.output("commit")).isEqualTo("from the container");
+        assertThat(git("log", "-1", "--format=%s")).as("the commit of the step, read on the host")
+                .isEqualTo("from the container");
+        assertThat(git("status", "--porcelain")).isEmpty();
+
+        Result described = traceworks.exec("describe", traceworks.packageDir("writable-workspace-commit").toString());
+        assertThat(described.code()).as(described.describe()).isZero();
+        assertThat(described.out()).contains("workspace writable, with its .git (workspace_git_writable)");
     }
 }
