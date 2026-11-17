@@ -185,6 +185,11 @@ final class ContainerArguments {
             arguments.addAll(List.of("--mount", bind(mount, source)));
             if (isPackageWithGitDirectory(mount, run, source)) {
                 arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + GIT_COVER));
+            } else if (i < own) {
+                String inside = packageWithGitDirectoryInside(mount, run, source);
+                if (inside != null) {
+                    arguments.addAll(List.of("--tmpfs", mountPath("container", inside) + GIT_COVER));
+                }
             }
         }
         for (String name : new TreeSet<>(run.environment().keySet())) {
@@ -337,6 +342,31 @@ final class ContainerArguments {
         String pkg = run.directories() == null ? null : run.directories().packageDirectory();
         return pkg != null && pkg.equals(mount.hostPath())
                 && Files.isDirectory(Path.of(source, ".git"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    /**
+     * Where the run's package shows inside {@code mount}, one of the run's own, when the mount holds the package
+     * and the package has a top-level {@code .git} directory: the container path of the package there, whose
+     * {@code .git} needs the cover too. A read-only workspace that holds the package is such a mount: the package
+     * has its own mount at {@code /package}, with its cover, and would show its {@code .git} once more at its
+     * place in the workspace. {@code null} when the mount does not hold the package, the package has no
+     * {@code .git} directory, or another mount of the run already shows the package at that place (the second
+     * package mount of a writable workspace, which brings its own cover).
+     */
+    private static String packageWithGitDirectoryInside(Mount mount, ContainerRun run, String source) {
+        String pkg = run.directories() == null ? null : run.directories().packageDirectory();
+        if (pkg == null || pkg.isBlank()) {
+            return null;
+        }
+        Path holder = Path.of(source);
+        Path real = Path.of(MountGuard.realRunDirectory(pkg));
+        if (real.equals(holder) || !real.startsWith(holder)
+                || !Files.isDirectory(real.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
+            return null;
+        }
+        String base = mount.containerPath().endsWith("/") ? mount.containerPath() : mount.containerPath() + "/";
+        String place = base + holder.relativize(real);
+        return run.mounts().stream().anyMatch(other -> other.containerPath().equals(place)) ? null : place;
     }
 
     /** @param source the host side as it is mounted: the real path that was judged */
