@@ -323,8 +323,8 @@ class ChangesTest {
     void aChangedFileWhoseBaseBytesAreNotThere_orAreNoText_countsAsAWhole_andIsNamed() throws IOException {
         workFile("A.java", "now\n");
         workFile("B.java", "now\n");
-        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", "one\n", "B.java", "ä\n"), Map.of());
-        Files.write(dir.resolve("blobs"), Handover.batch(List.of("ä\n")));
+        Path dir = Handover.write(root.resolve("changes"), Map.of("A.java", "one\n", "B.java", "\u00e4\n"), Map.of());
+        Files.write(dir.resolve("blobs"), Handover.batch(List.of("\u00e4\n")));
         Path work = root.resolve("work");
 
         Changes.Handed handed = Changes.read(dir);
