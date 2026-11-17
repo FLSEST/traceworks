@@ -26,7 +26,6 @@ import traceworks.core.register.RegisterState;
 import traceworks.core.register.RegisterWriter;
 import traceworks.core.register.GoneFinding;
 import traceworks.core.register.ReportedFinding;
-import traceworks.core.register.StateJson;
 import traceworks.core.register.TodoItemLines;
 import traceworks.core.util.TimedRegex;
 
@@ -121,81 +120,6 @@ public final class Registers {
     }
 
     /**
-     * Anchors the head of the register's log in the ledger, under the register's lock, so the anchors of two writers
-     * are in the order of their lines. The write is done by then and stays: a ledger that cannot take the anchor is
-     * reported, never thrown, and {@code findings <key> verify} names the lines that are not anchored.
-     *
-     * @return why the ledger did not take it; {@code null} when it did, or when there is no ledger
-     */
-    /**
-     * What a writer finds of the anchors before it writes, under the register's lock. Lines after the last anchor
-     * are taken as they are, since a writer that was cut off before its anchor leaves the same as someone who
-     * appended to the log; but the writer records them ({@code register.unanchored}, with the first and the last
-     * sequence number) and says so. A log that does not match its anchors is said too; {@code findings <key> verify}
-     * names the place. A ledger that cannot be read says nothing here: the anchoring after the write reports it.
-     *
-     * @return what to tell the person; {@code null} when the last line is anchored or no anchor exists yet
-     */
-    static String anchorsBefore(Ledger ledger, RegisterStore.Opened opened, RegisterLog log) {
-        if (ledger == null || log.lastSeq() < 0) {
-            return null;
-        }
-        List<traceworks.core.port.RegisterAnchor> anchors;
-        try {
-            anchors = ledger.registerAnchors(opened.key());
-        } catch (RuntimeException e) {
-            return null;
-        }
-        String note = null;
-        if (!traceworks.core.register.RegisterAnchors.check(opened.events().readAll(), anchors)
-                .problems().isEmpty()) {
-            note = "the register does not match its anchors in the ledger ('traceworks findings " + opened.key()
-                    + " verify' says where)";
-        }
-        int[] tail = traceworks.core.register.RegisterAnchors.tail(log.lastSeq(), anchors);
-        if (tail != null) {
-            // One line per gap: a gap that an earlier write found and recorded is not recorded again. The lines
-            // since are the ones of the writes whose anchor failed, each reported when it failed
-            RegisterEvent recorded = null;
-            for (RegisterEvent event : log.read()) {
-                if (event.seq() >= tail[0] && RegisterEvents.UNANCHORED.equals(event.type())) {
-                    recorded = event;
-                    break;
-                }
-            }
-            String range = "seq " + tail[0] + (tail[0] == tail[1] ? "" : " to " + tail[1]);
-            String found;
-            if (recorded != null) {
-                found = range + (tail[0] == tail[1] ? " is" : " are") + " still not anchored: the gap is recorded at"
-                        + " seq " + recorded.seq() + ", and the anchor of every write since failed, as reported then";
-            } else {
-                Map<String, Object> fields = new java.util.LinkedHashMap<>();
-                fields.put("first_seq", tail[0]);
-                fields.put("last_seq", tail[1]);
-                log.append(RegisterEvents.UNANCHORED, fields);
-                found = range + (tail[0] == tail[1] ? " was" : " were") + " not anchored before this write and "
-                        + (tail[0] == tail[1] ? "is" : "are") + " taken unproven: lines that were never anchored,"
-                        + " left by a write whose anchor failed or appended without Traceworks (recorded as "
-                        + RegisterEvents.UNANCHORED + ")";
-            }
-            note = note == null ? found : note + "; " + found;
-        }
-        return note;
-    }
-
-    static String anchor(Ledger ledger, RegisterStore.Opened opened, RegisterLog log) {
-        if (ledger == null || log.lastSeq() < 0) {
-            return null;
-        }
-        try {
-            ledger.anchorRegister(opened.key(), log.lastSeq(), log.head());
-            return null;
-        } catch (RuntimeException e) {
-            return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-        }
-    }
-
-    /**
      * Runs the operator's hook after the lock is released, when the report changed something or was rejected, and
      * records how it ended under the lock afterwards; a run the register took in before gets no hook again.
      */
@@ -218,15 +142,15 @@ public final class Registers {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             // Not after a report whose own anchor just failed: its lines are the ones without an anchor, and that
             // was reported with the report
-            found = fed.outcome().unanchored() != null ? null : anchorsBefore(ledger, opened, log);
+            found = fed.outcome().unanchored() != null ? null : RegisterWrites.anchorsBefore(ledger, opened, log);
             Map<String, Object> fields = new java.util.LinkedHashMap<>();
             fields.put("run_id", run.runId());
             fields.put("exit_code", ran.exitCode());
             fields.put("duration_ms", ran.durationMs());
             fields.put("stderr_tail", ran.stderrTail());
             log.append(RegisterEvents.HOOK_RAN, fields);
-            writeDerived(opened, log, RegisterReplay.replay(config.key(), log.read(), opened.blobs()));
-            unanchored = anchor(ledger, opened, log);
+            RegisterWrites.writeDerived(opened, log, RegisterReplay.replay(config.key(), log.read(), opened.blobs()));
+            unanchored = RegisterWrites.anchor(ledger, opened, log);
         }
         return fed.outcome().withHook(ran.exitCode()).withUnanchored(unanchored).withAnchorNote(found);
     }
@@ -243,7 +167,7 @@ public final class Registers {
             }
             RegisterState state = RegisterReplay.replay(config.key(), events, opened.blobs());
             // After the replay, so a register that cannot be read gets no line; the line itself changes no state
-            String found = anchorsBefore(ledger, opened, log);
+            String found = RegisterWrites.anchorsBefore(ledger, opened, log);
             if (events.isEmpty()) {
                 writer.created(definition.id(), config.category());
                 state = RegisterState.empty(config.key(), definition.id(), config.category());
@@ -257,21 +181,21 @@ public final class Registers {
                 writer.rejected(run.runId(), rejection, report == null || report.errors == null ? List.of()
                         : report.errors);
                 RegisterState after = RegisterReplay.replay(config.key(), log.read(), opened.blobs());
-                writeDerived(opened, log, after);
+                RegisterWrites.writeDerived(opened, log, after);
                 return new Fed(new RegisterOutcome(config.key(), false, rejection, Map.of())
-                        .withUnanchored(anchor(ledger, opened, log)).withAnchorNote(found), state, after, List.of(),
-                        false);
+                        .withUnanchored(RegisterWrites.anchor(ledger, opened, log)).withAnchorNote(found), state, after,
+                        List.of(), false);
             }
             Reconciler.Applied applied = writer.applied(state, new Reconciler.Report(run.runId(), view.finishedAt(),
                     report.reportBlob, report.findings, factNames(run, view, config), report.gone, report.items,
                     report.itemsComplete), report.catalog,
                     catalogJson,
                     runHead, higherSeverity);
-            writeDerived(opened, log, applied.state());
+            RegisterWrites.writeDerived(opened, log, applied.state());
             Map<Change.Kind, Integer> counts = new EnumMap<>(Change.Kind.class);
             applied.changes().forEach(change -> counts.merge(change.kind(), 1, Integer::sum));
             RegisterOutcome outcome = new RegisterOutcome(config.key(), true, null, counts)
-                    .withUnanchored(anchor(ledger, opened, log)).withAnchorNote(found);
+                    .withUnanchored(RegisterWrites.anchor(ledger, opened, log)).withAnchorNote(found);
             if (report.items != null) {
                 Map<traceworks.core.register.ItemState, Integer> states = applied.state().itemCounts();
                 outcome = outcome.withItems(new RegisterOutcome.ItemTally(report.items.size(),
@@ -298,16 +222,6 @@ public final class Registers {
                     outputs.add(new String(bytes, StandardCharsets.UTF_8)));
         }
         return traceworks.core.register.EvidenceVerification.factNames(outputs);
-    }
-
-    /** Writes what is derived from the log: {@code state.json} and {@code report.html}. */
-    static void writeDerived(RegisterStore.Opened opened, RegisterLog log, RegisterState state) {
-        opened.writeState(StateJson.write(state));
-        List<RegisterEvent> events = log.read();
-        traceworks.core.record.ChainReport chain = traceworks.core.register
-                .RegisterVerifier.verify(opened.key(), opened.events().readAll(), opened.blobs(), Optional.empty());
-        opened.writeView(traceworks.core.view.RegisterHtml.render(state, events, opened.blobs(), chain,
-                TraceworksVersion.current()).getBytes(StandardCharsets.UTF_8));
     }
 
     /** The outcome recorded for this run already, if the register took it in before (a resume, a completion). */

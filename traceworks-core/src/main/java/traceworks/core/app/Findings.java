@@ -120,11 +120,11 @@ public final class Findings {
                 findings.add(f.id().equals(after.id()) ? after : f);
             }
             // Only now, when the decision is taken: a refused one writes nothing, this line neither
-            anchorNote = Registers.anchorsBefore(ledger, opened, log);
+            anchorNote = RegisterWrites.anchorsBefore(ledger, opened, log);
             RegisterState next = new RegisterWriter(log, opened.blobs()).disposition(state.with(findings), after,
                     kind, note, actor, at, after.disposition() == null ? null : after.disposition().until());
-            Registers.writeDerived(opened, log, next);
-            unanchored = Registers.anchor(ledger, opened, log);
+            RegisterWrites.writeDerived(opened, log, next);
+            unanchored = RegisterWrites.anchor(ledger, opened, log);
             return after;
         }
     }
@@ -169,10 +169,10 @@ public final class Findings {
         try (RegisterStore.Opened opened = store.openForWrite(requireKnown(key))) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             RegisterState state = RegisterReplay.replay(key, log.read(), opened.blobs());
-            anchorNote = Registers.anchorsBefore(ledger, opened, log);
-            Registers.writeDerived(opened, log, state);
+            anchorNote = RegisterWrites.anchorsBefore(ledger, opened, log);
+            RegisterWrites.writeDerived(opened, log, state);
             // Anchors a head the ledger could not take when it was written; an anchor the ledger holds stays
-            unanchored = Registers.anchor(ledger, opened, log);
+            unanchored = RegisterWrites.anchor(ledger, opened, log);
             return opened.location();
         }
     }
