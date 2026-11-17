@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import traceworks.core.app.FindingDetails;
 import traceworks.core.app.Findings;
 import traceworks.core.record.ChainReport;
+import traceworks.core.register.DecisionAgent;
 import traceworks.core.register.Disposition;
 import traceworks.core.register.Finding;
 import traceworks.core.register.RegisterEvent;
@@ -47,6 +48,8 @@ public final class FindingsCommand implements Command {
             .option("status", "S", "list: only findings with this status, such as OPEN or ACCEPTED_RISK")
             .option("note", "TEXT", "accept, dismiss: why (required); reopen: optional")
             .option("until", "YYYY-MM-DD", "accept: the review date, at most 180 days ahead (the default)")
+            .option("agent", "NAME", "accept, dismiss, reopen: the agent that decides under your user, recorded"
+                    + " beside the actor; without it, the environment variable " + DecisionAgent.ENV)
             .note("""
                     findings                    the registers of this home, each with its counts by status, and
                                                 for an audit that lists its items how many of them are settled
@@ -68,7 +71,12 @@ public final class FindingsCommand implements Command {
                     findings <key> verify       the register's chain, its blobs and state.json, and its log against
                                                 the anchors in the ledger; exit 8 when it does not hold
                     Every decision is recorded in the register with who decided and when; a wrong transition or
-                    a date out of range is refused (exit 6). A decision covers the severity it was made on: a
+                    a date out of range is refused (exit 6). Who decided is the actor who ran the command, and an
+                    agent that decides under that user names itself: --agent NAME, or TRACEWORKS_AGENT in the
+                    environment of a harness (the option wins). The name is at most 64 characters: ASCII letters
+                    and digits, . _ - : / @ + and single spaces; a blank one is refused (exit 2). It is what the
+                    caller says, unsigned: a decision without it reads as a person's.
+                    A decision covers the severity it was made on: a
                     report that states the finding with a higher one opens it again, unless traceworks.json
                     says "decision_on_higher_severity": "keep".""");
 
@@ -94,6 +102,9 @@ public final class FindingsCommand implements Command {
                     ? "; no audit run has fed one" : "; the registers are " + String.join(", ", findings.keys())));
         }
         String action = words.size() > 1 ? words.get(1) : "list";
+        if (args.option("agent") != null && !List.of("accept", "dismiss", "reopen").contains(action)) {
+            throw new UsageException("--agent belongs to accept, dismiss and reopen: it names who decides");
+        }
         return switch (action) {
             case "list" -> list(context.out(), findings.state(key), args);
             case "show" -> {
@@ -104,7 +115,7 @@ public final class FindingsCommand implements Command {
             }
             case "items" -> items(context.out(), findings.state(key), args);
             case "accept", "dismiss", "reopen" -> {
-                int code = decide(context.out(), findings, key, action, words, args);
+                int code = decide(context.out(), findings, key, action, words, args, context.env());
                 unanchored(context.err(), findings, key, "the decision is recorded, but it");
                 yield code;
             }
@@ -121,9 +132,17 @@ public final class FindingsCommand implements Command {
     }
 
     private static int decide(PrintStream out, Findings findings, String key, String action, List<String> words,
-                              Parsed args) {
+                              Parsed args, Map<String, String> env) {
         if (words.size() < 3) {
             throw new UsageException("findings " + key + " " + action + " needs the id of a finding");
+        }
+        // Who decides under the actor: the option, else the variable of a harness. A blank or bad name is refused
+        // here, before anything is asked of the register: it must not be recorded as a person's decision
+        String agent;
+        try {
+            agent = DecisionAgent.resolve(args.option("agent"), env);
+        } catch (IllegalArgumentException e) {
+            throw new UsageException(e.getMessage());
         }
         String note = args.option("note");
         String untilText = args.option("until");
@@ -142,16 +161,18 @@ public final class FindingsCommand implements Command {
             }
         }
         Finding finding = switch (action) {
-            case "accept" -> findings.accept(key, words.get(2), note, until);
-            case "dismiss" -> findings.dismiss(key, words.get(2), note);
-            default -> findings.reopen(key, words.get(2), note);
+            case "accept" -> findings.accept(key, words.get(2), note, until, agent);
+            case "dismiss" -> findings.dismiss(key, words.get(2), note, agent);
+            default -> findings.reopen(key, words.get(2), note, agent);
         };
         String id = finding.id().substring(0, 8);
+        // The agent as it was recorded, so a harness sees that its name arrived; nothing more for a person
+        String through = TerminalFormat.safe(DecisionAgent.through(agent));
         out.println(switch (action) {
-            case "accept" -> "accepted " + id + " as a risk, review by "
+            case "accept" -> "accepted " + id + " as a risk" + through + ", review by "
                     + finding.disposition().until().atZone(java.time.ZoneOffset.UTC).toLocalDate();
-            case "dismiss" -> "dismissed " + id;
-            default -> "reopened " + id;
+            case "dismiss" -> "dismissed " + id + through;
+            default -> "reopened " + id + through;
         });
         return ExitCodes.OK;
     }
@@ -226,7 +247,9 @@ public final class FindingsCommand implements Command {
      * What a row says about the decision on its finding, when the row alone would mislead. A decision covers the
      * severity it was made on, so a decision in force on a finding that has another severity now names the one it
      * was made on; and a decision that is no longer in force (the finding was opened again, came up for review or
-     * was resolved) says so, so that nobody reads an open finding as decided. Empty otherwise.
+     * was resolved) says so, so that nobody reads an open finding as decided. And a decision an agent made names
+     * the agent, so that nobody reads the status as a person's decision: {@code (through the agent claude-code)},
+     * or inside one of the two notes above. Empty otherwise.
      */
     private static String decisionNote(Finding f) {
         if (f.disposition() == null) {
@@ -234,10 +257,16 @@ public final class FindingsCommand implements Command {
         }
         String kind = f.disposition().kind() == FindingStatus.ACCEPTED_RISK ? "accepted" : "dismissed";
         String on = f.disposition().severity() == null ? "" : " on " + f.disposition().severity();
+        // The name is bounded where it is given; a log that was edited can hold any, so it is made safe here
+        String agent = TerminalFormat.oneLine(DecisionAgent.through(f.disposition().agent()));
+        String through = agent.isEmpty() ? "" : " " + agent;
         if (!f.decisionInForce()) {
-            return "  (" + kind + on + " before, not in force)";
+            return "  (" + kind + on + through + " before, not in force)";
         }
-        return f.decidedOnOtherSeverity() == null ? "" : "  (decided on " + f.decidedOnOtherSeverity() + ")";
+        if (f.decidedOnOtherSeverity() != null) {
+            return "  (decided on " + f.decidedOnOtherSeverity() + through + ")";
+        }
+        return agent.isEmpty() ? "" : "  (" + agent + ")";
     }
 
     private static FindingStatus status(String value) {
@@ -294,7 +323,8 @@ public final class FindingsCommand implements Command {
         if (f.disposition() != null) {
             Finding.DispositionRecord d = f.disposition();
             String madeOn = Disposition.madeOn(f);
-            out.println("Decision  " + d.kind() + " by " + TerminalFormat.safe(d.actor()) + " at " + d.at()
+            out.println("Decision  " + d.kind() + " by " + TerminalFormat.safe(d.actor())
+                    + TerminalFormat.safe(DecisionAgent.through(d.agent())) + " at " + d.at()
                     + (d.until() == null ? "" : ", review by " + d.until())
                     + (madeOn == null ? "" : ", " + madeOn)
                     + (f.status() == d.kind() ? "" : "; not in force: the finding is " + f.status()));

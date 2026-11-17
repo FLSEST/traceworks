@@ -64,14 +64,23 @@ public record Finding(String id, String ruleKey, String subject, Severity severi
      * @param severity the severity the finding had when the person decided: what the decision covers. No report
      *                 changes it. {@code null} only where it is not known: a state read from a {@code state.json}
      *                 that does not name it
+     * @param actor    who ran the command that decided ({@code docs/cli.md}, "Actor")
+     * @param agent    the agent that decided under that actor, by the name it gave itself ({@link DecisionAgent});
+     *                 {@code null} for a decision that named none, which reads as a person's
      */
     public record DispositionRecord(FindingStatus kind, String note, String actor, Instant at, Instant until,
-                                    String evidence, Severity severity) {
+                                    String evidence, Severity severity, String agent) {
 
-        /** A decision whose severity is not known. */
+        /** A decision that named no agent. */
+        public DispositionRecord(FindingStatus kind, String note, String actor, Instant at, Instant until,
+                                 String evidence, Severity severity) {
+            this(kind, note, actor, at, until, evidence, severity, null);
+        }
+
+        /** A decision whose severity is not known, and that named no agent. */
         public DispositionRecord(FindingStatus kind, String note, String actor, Instant at, Instant until,
                                  String evidence) {
-            this(kind, note, actor, at, until, evidence, null);
+            this(kind, note, actor, at, until, evidence, null, null);
         }
     }
 

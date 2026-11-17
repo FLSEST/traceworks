@@ -1080,9 +1080,11 @@ traceworks findings architecture render      # writes state.json and report.html
 traceworks findings architecture accept 9d3692a8 --note "a fold over every event type stays one" --until 2027-03-31
 traceworks findings architecture dismiss 9d3692a8 --note "not ours"
 traceworks findings architecture reopen 9d3692a8 --note "fix it after all"
+traceworks findings architecture dismiss 9d3692a8 --note "not ours" --agent claude-code   # an agent decides under your user
 ```
 
-A decision is recorded in the register with who decided (the actor, see "Actor") and when, and it changes the
+A decision is recorded in the register with who decided (the actor, see "Actor", and the agent, below) and when,
+and it changes the
 finding's status: `accept` makes it `ACCEPTED_RISK` with a review date (`--until`, a date at most 180 days ahead,
 which is the default), freezes its evidence for the comparison with later runs, and needs `--note`; `dismiss` makes
 it `DISMISSED`, with `--note` and without a review; `reopen` makes an accepted, dismissed or resolved finding `OPEN`
@@ -1097,6 +1099,36 @@ finding that three applied reports in a row do not state, or whose rule left `ca
 rule that `catalog.json` marks as judged by a model, silence resolves nothing: an open finding stays open until a
 report names it as gone, a decided one stays decided, and `show` says how long no report has mentioned an open one
 (`Silent    the last 2 applied reports did not mention it`; docs/registers.md, "Reconciliation").
+
+**An agent that decides names itself.** An AI agent that works with your user is your user to the machine, so the
+actor alone would record its decision as yours. `accept`, `dismiss` and `reopen` take `--agent NAME`, and without
+the option the environment variable `TRACEWORKS_AGENT`, which a harness sets once for its agent; the option wins.
+The register records the name beside the actor (`agent` in the line of the decision, `disposition.agent` in
+`state.json`, `list --json` and the register folder of a run), and the views say it after the actor:
+
+```
+$ traceworks findings security dismiss 9d3692a8 --note "RunPaths refuses this mount before the call" --agent claude-code
+dismissed 9d3692a8 through the agent claude-code
+$ traceworks findings security list
+9d3692a8  DISMISSED  LOW       path_check  core/Mounts.java#Mounts.check(Path)  A link gets past the path check  (through the agent claude-code)
+$ traceworks findings security show 9d3692a8
+...
+Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17T10:02:11.418Z, made on severity LOW
+```
+
+- **The name:** at most 64 characters, each an ASCII letter or digit, one of `. _ - : / @ +`, or a single space
+  between two of those; white space around it is dropped.
+- **A blank name, or one beyond these bounds, is a usage error** (exit 2) and records nothing, whether it came from
+  the option or from the variable: it is not taken for "no agent". `--agent` on any other `findings` command is a
+  usage error too; the variable is read by these three only.
+- **A decision without an agent** is recorded and shown exactly as before.
+- **The name is self-declared and unsigned.** An agent that leaves it out is recorded as you, and anyone can give
+  any name. It is a label like the actor, not a proof (docs/registers.md, "Who decided").
+- **An earlier version of Traceworks refuses a register in which an agent decided** (`register.requires` with the
+  feature `decision_agent`), so that it cannot show such a decision as yours.
+
+The answer to an `approval` or a `human-input` of a run (`traceworks approve`, `traceworks answer`) takes no
+`--agent` and does not read the variable: `approval.answered` names the actor alone.
 
 A `list` line is the first 8 characters of the finding's id, its status, severity, rule key, subject and title,
 sorted by status (`OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK`, `DISMISSED`, `RESOLVED`), severity, rule key and
@@ -2587,6 +2619,10 @@ Every run, answer, resume and cancel is attributed to an actor. It is, in this o
 3. `user@host`
 
 The actor is only a label for the record. Traceworks does not authenticate it.
+
+An AI agent that works with your user has your actor. For a decision in a register it can name itself beside the
+actor (`--agent NAME` or `TRACEWORKS_AGENT`; "findings"); for a run, an answer, a resume and a cancel there is no
+such name, and the record names the actor alone.
 
 ## Output limit
 

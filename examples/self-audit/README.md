@@ -81,6 +81,18 @@ copied run that shows the gap). A testing finding names a change of one line: ap
 means the gap is real, and the fix is the test that goes red; red means the finding is wrong, and it is dismissed
 with the name of the test that caught the change.
 
+When an agent does the triage, it says so. An agent that works with your user is your user to the machine, and
+its decision would read as yours. It names itself with `--agent`, or its harness sets `TRACEWORKS_AGENT` once:
+
+```bash
+traceworks findings security dismiss <id> --note "RunPaths refuses this mount before the call" --agent claude-code
+export TRACEWORKS_AGENT=claude-code     # or once, in the environment the agent's commands run in
+```
+
+The register then records the decision as made `by <you> through the agent claude-code`, in its log, in `show`,
+`list` and `report.html`, and in the files the next run gets. The name is what the agent says, unsigned: an agent
+that leaves it out is recorded as you ([docs/registers.md](../../docs/registers.md), "Who decided").
+
 A finding that holds and gets fixed needs no decision: it stays open, and the next run resolves it: a measured one
 because the snapshot no longer states it, a judged one because the run was asked about it and answered "gone". A round ends
 when the register shows the fixed findings as resolved. How many findings triage refuted is the

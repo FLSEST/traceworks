@@ -228,14 +228,21 @@ the protection of the ledger's. Whoever can write the ledger too cannot rewrite 
 are only added to, and a rewritten anchor file is found. But they can **add** to both: append a forged decision that
 chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace
 (docs/events.md, "What the ledger shows, and what it does not"). Signatures of decisions would close that; they are
-not built.
+not built. **Who decided is a label, not a proof.** A decision names its actor, who ran the command, and beside it
+the agent that decided under that actor when the caller named one (`--agent`, or `TRACEWORKS_AGENT`). The name is
+self-declared and unsigned: an agent that works with your user and leaves it out is recorded as you, and any
+caller can give any name. What Traceworks does about it: the name is bounded (64 characters, ASCII letters and
+digits, `. _ - : / @ +` and single spaces), a blank one is refused instead of being taken for none, and an earlier
+version refuses a register that names an agent rather than show the decision as the actor's own
+(docs/registers.md, "Who decided").
 
 **The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
 read-only at `/register`. What that means:
 
 - *The files hold more than the placeholders.* Besides every finding with its whole evidence and its description,
-  each decision is there with who made it and when (`disposition.actor`, `disposition.at`), which
+  each decision is there with who made it and when (`disposition.actor`, `disposition.agent` for a decision an
+  agent made, `disposition.at`), which
   `{{ audit_findings }}` does not carry, and the ids of the runs that reported a finding. Every shell and tool step
   of the audit can read that, and what a step prints of it is in the run's record. An audit package you run is
   trusted with the names of the people who decided on its findings.

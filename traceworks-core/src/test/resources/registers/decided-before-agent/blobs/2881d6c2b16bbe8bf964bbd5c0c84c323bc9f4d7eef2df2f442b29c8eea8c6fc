@@ -1,0 +1,1 @@
+[{"description":"d","evidence":"E1","rule_key":"size","severity":"LOW","subject":"A.java","tags":[],"title":"A is long"},{"description":"d","evidence":"E1","rule_key":"size","severity":"MEDIUM","subject":"B.java","tags":[],"title":"B is long"},{"description":"d","evidence":"E1","rule_key":"size","severity":"HIGH","subject":"C.java","tags":[],"title":"C is long"}]
