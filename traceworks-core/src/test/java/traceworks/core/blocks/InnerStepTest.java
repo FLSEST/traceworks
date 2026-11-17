@@ -267,6 +267,28 @@ class InnerStepTest {
     }
 
     @Test
+    void resolve_anAiPromptThatNamesTheRegisterFolder_isRefused() {
+        context.setVariable("register_dir", "/register");
+        InnerStep step = new InnerStep(block(Map.of()), false, false, 60, null);
+
+        assertThatThrownBy(() -> step.resolve(context, "read {{ register_dir }}"))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .hasMessageContaining("stands in the prompt of an AI step");
+    }
+
+    @Test
+    void resolve_aShellCommandThatNamesTheRegisterFolder_needsARunWithOne() {
+        InnerStep step = new InnerStep(block(Map.of()), true, false, 60, null);
+
+        assertThatThrownBy(() -> step.resolve(context, "ls {{ register_dir }}"))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .hasMessageContaining("this run has none");
+
+        context.setVariable("register_dir", "/register");
+        assertThat(step.resolve(context, "ls {{ register_dir }}")).contains("/register");
+    }
+
+    @Test
     void runResolved_doesNotFillInPlaceholdersAgain() {
         when(commands.aiStep(any(AiStepRequest.class), eq(context))).thenReturn(done);
         InnerStep step = new InnerStep(block(Map.of()), false, false, 60, null);

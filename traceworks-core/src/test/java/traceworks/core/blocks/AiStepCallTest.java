@@ -294,6 +294,17 @@ class AiStepCallTest {
         assertThat(captor.getValue().tools()).isEqualTo(ToolPolicy.NONE);
     }
 
+    /** The answer is model text: from the question on, the run protects what it records. */
+    @Test
+    void ask_marksTheRunAsHavingAskedAModel() throws IOException {
+        when(aiProvider.executeAction(any())).thenReturn(new AiProvider.ActionResult("TRUE", 0, null));
+        assertThat(context.modelAsked()).isFalse();
+
+        call.ask(request("Evaluate: x").build(), context);
+
+        assertThat(context.modelAsked()).isTrue();
+    }
+
     @Test
     void ask_nonZeroExit_isAnAnswerToo() throws IOException {
         when(aiProvider.executeAction(any())).thenReturn(new AiProvider.ActionResult("usage limit", 1, null));
