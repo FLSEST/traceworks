@@ -46,7 +46,7 @@ limit What nothing in this version finds:
   quote the ledger is not signed
   quote a record cut to its first line
   says  The ledger check does not find what was before a new ledger, a well-formed entry or acknowledgement committed by hand (the ledger is not signed), a record cut to its first line, or an audit run in a place this ledger does not see; what the bullets before it list is found.
-  digest f974b0c4766d8e1e
+  digest f9a960dfde8f0cb5
 
 section AI steps
 

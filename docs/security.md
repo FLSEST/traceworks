@@ -347,8 +347,13 @@ three groups:
 nothing, and the terminal shows text from a run with its control characters made harmless. No such text starts a
 terminal line of its own, where it would read as a line of Traceworks: a text of a workflow, a step, a model, a
 record or a report that would cross the end of a line of 80 columns, or that holds a run of blanks, goes on lines
-that begin with `|+` (docs/cli.md, "Text from outside on the terminal"). The width is fixed: a terminal narrower
-than 80 columns breaks any line. A run folder opened by
+that begin with `|+`, and one that begins a line has `| ` in front of it (docs/cli.md, "Text from outside on the
+terminal"). Traceworks' own words are printed whole: a message says which of its parts quote a value from outside,
+beside its text and never in it, so no quoted value can make itself Traceworks' words and no record, event,
+register or JSON holds a mark; a message that does not say its parts counts as from outside as a whole. What the
+operator typed on the command line is shown whole unless it holds a run of blanks, and a field Traceworks writes
+itself (a status, the runtime's version) counts as its own only as one short word. The width is fixed: a terminal
+narrower than 80 columns breaks any line. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
 content, and no blob is written through one.
