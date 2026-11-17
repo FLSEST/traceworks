@@ -66,15 +66,20 @@ bin/traceworks resume <run> --no-input     # runs the last block, exits 0
 # The result.
 bin/traceworks show <run>                  # status, the workflow, every step, the gate
 bin/traceworks render <run>                # prints the path of run.html: open it in a browser
-bin/traceworks verify <run>                # the chain, the blobs, the manifest, the ledger entry: exits 8 if one does not hold
+bin/traceworks verify <run>                # the chain, the blobs, the manifest, the ledger entries: exits 8 if one does not hold
 ```
 
 Leave out `--no-input` in a terminal and the run asks the question there instead of parking.
 
 The steps see the directory you start the run in as their workspace, read-only, and have no network. The record is
 in `~/.traceworks/runs/<yyyy-mm-dd>/<run-id>/`: `events.jsonl`, `blobs/`, `manifest.json` and `run.html`.
-`~/.traceworks` is the Traceworks home; `--home` or `TRACEWORKS_HOME` moves it. Change one byte of `events.jsonl`
-and `verify` exits with code 8.
+`~/.traceworks` is the Traceworks home; `--home` or `TRACEWORKS_HOME` moves it, and `runs_dir` in its
+`traceworks.json` moves the runs alone. Change one byte of `events.jsonl` and `verify` exits with code 8.
+
+A block can ask to write the workspace. Its `.git` stays read-only even then, unless you set
+`workspace_git_writable` in `traceworks.json`. A block can mount a host folder writable only in or below a folder
+you list there in `writable_mounts`. No package can change either setting
+([docs/cli.md](docs/cli.md#writable-mounts)).
 
 [examples/hello](examples/hello/README.md) explains the example, and [docs/cli.md](docs/cli.md) every command and
 exit code. On a machine where no container runtime works, a run can go to the host with
@@ -96,7 +101,7 @@ The names are those of [docs/features.html](docs/features.html), where each has 
 | Defined once, used again | The same package runs on any workspace, or on a new checkout of a git repository at one commit (`--workspace`, `--source`) | [docs/cli.md](docs/cli.md#isolated-workspace) |
 | Repeatable | A run records the package digest, its inputs, every image ID and the setup of every AI call; `traceworks diff` says whether a second run reproduced the first | [docs/cli.md](docs/cli.md#diff) |
 | Sealed | `traceworks seal` signs a digest of the package with an SSH key; a sealed package that changed is refused | [docs/cli.md](docs/cli.md#seal-unseal-and-seals) |
-| Traceable | The record is an append-only event log in which each line holds the hash of the line before; outputs are blobs named by their SHA-256; a manifest and a git ledger name the last line | [docs/events.md](docs/events.md) |
+| Traceable | The record is an append-only event log in which each line holds the hash of the line before; outputs are blobs named by their SHA-256; a manifest names the last line; a git ledger notes each run when it starts and when it ends, so `traceworks verify` finds a run whose folder was deleted. The ledger is unsigned and stays on this machine | [docs/events.md](docs/events.md#the-ledger) |
 | Visible | `describe` shows a workflow before it runs; `run.html` shows the run afterwards, as one static file without scripts | [docs/cli.md](docs/cli.md#describe) |
 | Deterministic first, AI optional | A workflow works without any AI: shell steps, tool steps, loops, conditions and questions to a person; no default calls a model | [docs/cli.md](docs/cli.md#ai-steps) |
 | The model, chosen per step | A block names its provider and its model, or a choice the workflow declares and an input of the run picks; the record names the model that was asked for and the one that answered | [docs/cli.md](docs/cli.md#model-choices) |
@@ -114,16 +119,20 @@ that its blocks do not name.
 
 - **Two command line tools** do the calls, each in its own built-in image: Claude Code (provider `CLAUDE`) and Pi
   (provider `PI`), which reaches the backend its model names. Any other provider is refused, never replaced.
+- **A model server of your own:** a `PI` step can run on a server you declare in `traceworks.json`
+  (`local_models`: its URL and a closed list of models). The step names `<backend>/<model>` and needs no provider
+  credential. The server must speak OpenAI's chat completions API, and one on this machine is reached by an
+  address containers reach, not by `localhost` ([docs/cli.md](docs/cli.md#local-models)).
 - **Tools** are set per block: `none` (the default: the model only answers), `read`, `write` or `shell`. Web
   search and fetch are a switch of their own (`web`), off unless a block sets it.
 - **Credentials** come from `credentials.json` in the home, written by `traceworks credentials set <NAME>`, or from
   the environment. Claude takes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`; the names Pi takes are in
   [docs/cli.md](docs/cli.md#ai-steps). Without a credential the run is refused before it starts. The credential
   goes to the provider's containers only and is redacted in the record.
-- **The network:** the container of an AI step reaches the API of its provider and nothing else. Its only way out
-  is an allowlist proxy that Traceworks starts next to it, and the record names every connection it asked for,
-  allowed or denied ([docs/cli.md](docs/cli.md#the-network-of-an-ai-step)). Everything a model reads is sent to
-  its provider.
+- **The network:** the container of an AI step reaches the API of its provider, or your model server, and nothing
+  else. Its only way out is an allowlist proxy that Traceworks starts next to it, and the record names every
+  connection it asked for, allowed or denied ([docs/cli.md](docs/cli.md#the-network-of-an-ai-step)). Everything a
+  model reads is sent to its provider or to that server.
 - **The record** keeps the prompt, every tool call and the answer, with tokens and cost.
 
 [examples/ai-hello](examples/ai-hello/README.md) is one AI step with read-only tools. It calls a real model, so it
@@ -161,8 +170,10 @@ measurement, and Traceworks asks of it what one asks of a witness:
 - **It is on record.** The prompt and the answer are in the run record, and a change of either shows.
 - **It can be checked.** A finding names its evidence, and the register compares it with the facts the run
   measured.
-- **Someone answers for the decision.** The model proposes. Who accepts or dismisses a finding in the register is
-  the operator's choice, a person or an agent, and the register records who it was and when.
+- **Someone answers for the decision.** The model proposes. Who accepts or dismisses a finding in the register,
+  and who answers an approval in a run, is the operator's choice, a person or an agent. The record names the actor
+  and the time, and the agent when the caller names one (`--agent`, or `TRACEWORKS_AGENT` for a harness). Both
+  names are what the caller says: nothing checks them, and nothing signs them.
 
 A loop over a model's verdicts does not end by itself. It ends when the workflow keeps to a few rules. They are
 decisions of the workflow's author, and the tool gives the means: a defined workflow, a register as the memory.
@@ -204,7 +215,11 @@ in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `reso
   `security`, `architecture`, `build`, `functionality` and `testing`. They share one shape: a script measures and
   chooses, a model judges one item per call, and a script checks every quote, counts and sets the gate; `build`
   asks no model at all. The four that ask a model each feed a register, so the next run knows what was found and
-  decided and asks only about what changed, was never judged or is still open.
+  decided and asks only about what changed, was never judged or is still open. Beside `security` stands a short
+  check for the time between two full audits,
+  [`security-changes`](examples/self-audit/security-changes/README.md), with a register of its own. It judges only
+  the code that changed since a commit and the code one call away. It never says GREEN, since it did not look at
+  the rest: its best gate is YELLOW.
 - [examples/hooks](examples/hooks/README.md): an operator's hook gets the diff of a register that changed.
   `todo-service.sh` creates one TODO per new or reopened finding in a TODO service over HTTP.
 
@@ -213,15 +228,16 @@ in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `reso
 The version is `0.1.0-SNAPSHOT`. There is no release.
 
 **Built:** the engine and its block types, the check of a package (`check`, `describe`), container runs with
-Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), the run record with `verify`,
-`show`, `watch`, `run.html` and `diff`, pause and resume, secrets and their redaction, AI steps with Claude Code
-and Pi behind the allowlist proxy, model choices, named values for shell steps, seals, registers with
-`traceworks findings`, the five self-audit packages and the two testing audits.
+Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), the run record and the ledger with
+`verify`, `show`, `watch`, `run.html` and `diff`, pause and resume, secrets and their redaction, AI steps with
+Claude Code and Pi behind the allowlist proxy, Pi on a model server of the operator's own, model choices, named
+values for shell steps, seals, registers with `traceworks findings`, the five self-audit packages, the short
+security check beside them and the two testing audits.
 
 **Not built yet:**
 
-- Signatures of the record. A manifest, an approval in a run and a decision in a register are not signed. The
-  record is tamper-evident, not signed; only a package can be signed, by its seal.
+- Signatures of the record. A manifest, the ledger, an approval in a run and a decision in a register are not
+  signed. The record is tamper-evident, not signed; only a package can be signed, by its seal.
 - A server for MCP clients, and MCP servers for AI steps.
 - An export of a workflow to BPMN.
 
@@ -239,7 +255,8 @@ and Pi behind the allowlist proxy, model choices, named values for shell steps, 
 - Linux. CI runs on Linux only. Where the system has no `setsid` program (macOS), Ctrl-C cancels a run instead of
   pausing it.
 - Stand-in command line tools in place of the models, in every automatic test. No test calls a model or uses a
-  real credential. The web tools of an AI step are tested this way only.
+  real credential. The web tools of an AI step are tested this way only, and a model server of the operator's own
+  only as a stand-in server that the real Pi command line tool calls.
 
 [docs/security.md](docs/security.md) says what the defaults protect and what they do not. Read it before you run a
 package you did not write: a package is code you run.
