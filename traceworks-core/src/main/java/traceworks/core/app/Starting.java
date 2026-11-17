@@ -118,6 +118,16 @@ final class Starting {
         if (request.inputsFrom() != null) {
             try (StoredRun earlier = store.open(request.inputsFrom())) {
                 inputsFrom = earlier.runId();
+                // The inputs come from the earlier record's first line, and the new record names that run as their
+                // origin: a record that does not verify (its chain, its blobs, its manifest, its ledger entries)
+                // vouches for no inputs
+                VerifyReport verified = Verification.verify(earlier, ledger);
+                if (!verified.ok()) {
+                    throw new RecordDamagedException("Run " + earlier.runId() + " does not verify, so --inputs-from"
+                            + " cannot take its inputs" + (verified.chain().problems().isEmpty() ? ""
+                            : " (" + verified.chain().problems().getFirst() + ")")
+                            + RecordDamagedException.seeVerify(earlier.runId()));
+                }
                 inputs.putAll(recordedInputs(earlier));
             }
         }

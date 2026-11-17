@@ -507,6 +507,13 @@ final class RunPreparation {
         Mounted mounted = new Mounted(checkedWorkspace == null ? null : checkedWorkspace.realPath(),
                 checkedPackage.realPath());
         if (mounted.workspace() != null && mounted.packageDirectory() != null
+                && RunPaths.within(mounted.workspace(), mounted.packageDirectory() + "/.git")) {
+            // The package's .git is covered wherever a container sees the package; a workspace in it would be no
+            // part of the package's mount, and every step would see it uncovered
+            preflight.refuse("the workspace " + workspace + " lies in the .git of the package " + pkg.directory()
+                    + ", which the package digest leaves out and no step sees: run from a directory outside it");
+        }
+        if (mounted.workspace() != null && mounted.packageDirectory() != null
                 && writesTheWorkspace(pkg.definition(), children)
                 && RunPaths.within(mounted.workspace(), mounted.packageDirectory())) {
             preflight.refuse("the workspace " + workspace + " lies inside the package " + pkg.directory() + ", which"
