@@ -61,18 +61,19 @@ reported, not the first (docs/workflow-format.md). A report without an envelope 
 rule `todo_item` whose subject is its title; a reworded title is a new finding. A line has the limits of a finding
 of an envelope: a title over 2000 or a description over 20 000 characters rejects the report. That is the simple form for a workflow whose findings are tasks (GitHub issues, Jira), not measurements.
 
-`examples/audit-hello` is the smallest audit: two shell steps and no AI. `examples/self-audit/architecture` feeds
+`examples/audit-hello` is the smallest audit: three shell steps and no AI. `examples/self-audit/architecture` feeds
 the register `architecture` with its measured findings and its verified verdicts. `examples/self-audit/security`,
 `functionality` and `testing` feed registers of their own; `examples/self-audit/README.md` shows how the audits, the
 registers and the triage of their findings make a loop. `examples/self-audit/security-changes` is an audit whose
 runs each judge a part of the project (what changed since a commit): it lists every item its register knows in
 every report, and takes every item that is open or was not judged into its next run.
 
-`examples/audit/testing` is an audit of the tests of a Maven project: it measures with mutation testing (PIT) which
-changes of the code no test notices, has a model rate each method's gap, and feeds the register `audit.testing`. It
-reads what the register knew from the register folder of the run (`{{ register_dir }}`, see "The register folder of
-a run"). `examples/audit/testing-again` measures the same, reads the register folder the same way, and rates a changed
-method from its earlier verdict; it feeds the register `audit.testing-again`.
+`examples/mutation-testing` is an audit of the tests of a Maven project: it measures with mutation testing (PIT)
+which changes of the code no test notices, has a model rate each method's gap, and feeds the register
+`mutation-testing`. It reads what the register knew from the register folder of the run (`{{ register_dir }}`, see
+"The register folder of a run"). `examples/mutation-testing-grounded` measures the same, reads the register folder the
+same way, and rates a changed method from its earlier verdict, moving a rating only on a ground a script finds; it
+feeds the register `mutation-testing-grounded`.
 
 ### catalog.json
 
@@ -631,7 +632,7 @@ With `hooks.register_changed` in `traceworks.json`, a program of the operator ru
 run whose report changed the register (something new, resolved, reopened or due for review) or was rejected:
 
 ```json
-{"hooks": {"register_changed": ["/opt/traceworks-hooks/register-todos.sh"], "timeout_seconds": 60}}
+{"hooks": {"register_changed": ["/path/to/examples/hooks/github-issues.sh", "owner/repo"], "timeout_seconds": 60}}
 ```
 
 It is started without a shell, with the operator's own environment, in the register's folder, after the register's
@@ -649,9 +650,9 @@ Each finding carries `id`, `rule_key`, `subject`, `severity`, `title`, `descript
 CRITICAL` for an accepted or dismissed finding stated above the severity its decision was made on). The
 hook's exit code, duration and the tail of its standard error are recorded as `hook.ran`; a timeout is exit 124, a
 program that does not start 127; the summary says `hook ran` or `hook exited N`. A failing hook never changes the
-run's exit code. `examples/hooks/todo-service.sh` posts the diff to a TODO service over HTTP; the
-same shape serves GitHub Issues or Jira. A workflow never configures a hook: the diff of a run is the operator's to
-act on.
+run's exit code. `examples/hooks/github-issues.sh` opens a GitHub issue per new or reopened finding with the GitHub
+CLI; the same shape serves another tracker. A workflow never configures a hook: the diff of a run is the operator's
+to act on.
 
 ## The register folder
 
