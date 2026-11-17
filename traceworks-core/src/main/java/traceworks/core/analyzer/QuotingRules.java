@@ -6,11 +6,7 @@ import traceworks.core.analyzer.ShellQuoteScanner.Placeholder;
 import traceworks.core.analyzer.ShellQuoteScanner.Quote;
 import traceworks.core.context.PlaceholderSyntax;
 import traceworks.core.context.ShellLineRefusedException;
-import traceworks.core.engine.ChildWorkflows;
-import traceworks.core.engine.NestedBlocks;
-import traceworks.core.engine.StepModes;
 import traceworks.core.model.BlockDefinition;
-import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.WorkflowResolver;
 
 import java.util.ArrayList;
@@ -52,17 +48,9 @@ import java.util.regex.Pattern;
  *       in a body is a {@code WARNING}: the resolver quotes it there too and the quotes land in the text.</li>
  * </ul>
  *
- * <p><b>What a model wrote</b>, as far as the block list tells: the output of a block that asks a model
- * ({@code simple}, {@code agentic}, {@code compress-ai}, a wrapper in AI mode, a block with AI steps nested in it, a
- * step an AI actor decides, and a {@code sub-workflow} or {@code foreach} whose child workflow has such a block, when
- * the analyzer can find the child), and the output of every block after the first of them, because the run protects
- * those too: a later step can print what the model wrote without naming it. The block is found through
- * {@code block.<name>.output}, {@code previous_output} in the block's own fields, and {@code step_N_output} while no
- * wrapper before it draws further step indices. A {@code step_N_output} after such a wrapper, and a
- * {@code previous_output} in a nested block, name an output whose step the list does not tell: they count as what a
- * model wrote when the workflow asks a model before the block. What the list does not tell at all (a loop item, a
- * variable, a child whose reference is a placeholder, the values a parent hands to a child) the run decides: it
- * refuses the shell line ({@code ShellLineRefusedException}).
+ * <p>Which placeholders the workflow shows to be protected is {@link ProtectedValues}'s. What the block list does
+ * not tell (a loop item, a variable, a child whose reference is a placeholder, the values a parent hands to a child)
+ * the run decides: it refuses the shell line ({@code ShellLineRefusedException}).
  *
  * <p>The TODO and goal variables ({@code todo_title}, {@code open_todos}, {@code goal_status}, ...) are no outside
  * text: Traceworks does not provide them. A run input of the same name is used as is (never
@@ -73,20 +61,7 @@ final class QuotingRules {
 
     private QuotingRules() {}
 
-    /** Outputs of earlier runs: always untrusted, always single-quoted by the resolver. */
-    static final Set<String> PLATFORM_DATA = Set.of("previous_report", "audit_findings", "audit_items");
-
-    /** Text from outside: a chain hands on the last entry's output. */
-    private static final Set<String> FOREIGN_TEXT = Set.of("previous_chain_output");
-
     private static final Pattern OUTPUT = Pattern.compile("previous_output|step_\\d+_output|block\\.[^.\\s]+\\.output");
-    private static final Pattern STEP_OUTPUT = Pattern.compile("step_(\\d{1,6})_output");
-    private static final Pattern BLOCK_OUTPUT = Pattern.compile("block\\.([^.\\s]+)\\.output");
-
-    /** Blocks that draw further step indices, so a later step_N_output no longer matches the block position. */
-    private static final Set<String> INDEX_DRAWING = Set.of("foreach", "while", "retry", "conditional", "switch",
-            "sub-workflow");
-
     private static final String PLACEHOLDER = "\\{\\{ ?([^{}]+?) ?\\}\\}";
     private static final String NAME = "([A-Za-z_][A-Za-z0-9_]*)";
     /** {@code X='{{ x }}'}: the whole value is the placeholder. */
@@ -114,7 +89,7 @@ final class QuotingRules {
      *                 asks a model; {@code null} looks into none
      */
     static void apply(List<BlockDefinition> blocks, WorkflowResolver children, List<AnalyzerFinding> out) {
-        ModelSteps model = ModelSteps.of(blocks, children);
+        ProtectedValues model = ProtectedValues.of(blocks, children);
         for (int i = 0; i < blocks.size(); i++) {
             BlockDefinition block = blocks.get(i);
             if (block == null) continue;
@@ -131,23 +106,22 @@ final class QuotingRules {
      * Whether the run protects the value of the placeholder {@code key} in block {@code i}, as far as the workflow
      * tells: outside text, or what a model wrote.
      */
-    private static boolean protectedValue(ModelSteps model, int i, String key, boolean own) {
-        return outsideText(key.strip()) || model.sourceOf(i, key.strip(), own) != null;
+    private static boolean protectedValue(ProtectedValues model, int i, String key, boolean own) {
+        return model.protects(i, key, own);
     }
 
     /**
      * A placeholder the workflow shows to be protected, anywhere in shell code: in a comment or a heredoc body too,
      * because the run fills those in like the rest and refuses the line.
      */
-    private static void protectedInShell(ModelSteps model, List<ShellText> texts, int i, String name,
+    private static void protectedInShell(ProtectedValues model, List<ShellText> texts, int i, String name,
                                          List<AnalyzerFinding> out) {
         Set<String> keys = new LinkedHashSet<>();
         Set<String> sources = new LinkedHashSet<>();
         for (ShellText text : texts) {
             for (String key : PlaceholderSyntax.keysIn(text.code())) {
                 String stripped = key.strip();
-                String source = outsideText(stripped) ? "text from outside the run"
-                        : model.sourceOf(i, stripped, text.own());
+                String source = model.sourceOf(i, stripped, text.own());
                 if (source != null) {
                     keys.add(stripped);
                     sources.add(source);
@@ -168,161 +142,10 @@ final class QuotingRules {
     }
 
     /**
-     * A block a placeholder stands for, and the position of the top-level block it is, or is nested in.
-     *
-     * @param afterNestedModel for a nested block: whether a block nested in the same top-level block may ask a model
-     *                         before it runs, one written before it in a {@code switch}, any one in a loop
-     */
-    private record Source(BlockDefinition block, int position, boolean afterNestedModel) {
-
-        Source(BlockDefinition block, int position) {
-            this(block, position, false);
-        }
-    }
-
-    /**
-     * The blocks of a workflow that ask a model, as far as the definition tells, and with them what a run quotes as
-     * text a model wrote: the output of such a block, and the output of every block after the first of them.
-     *
-     * @param first the position of the first top-level block that asks a model; -1 for a workflow without one
-     */
-    private record ModelSteps(List<BlockDefinition> blocks, WorkflowResolver children, int first) {
-
-        static ModelSteps of(List<BlockDefinition> blocks, WorkflowResolver children) {
-            int first = -1;
-            for (int j = 0; j < blocks.size() && first < 0; j++) {
-                if (blocks.get(j) != null && asksModel(blocks.get(j), children)) first = j;
-            }
-            return new ModelSteps(blocks, children, first);
-        }
-
-        /**
-         * What {@code name} stands for in block {@code i}, when the run quotes it as text a model wrote, as the
-         * words a finding says it with; null otherwise.
-         */
-        String sourceOf(int i, String name, boolean own) {
-            if (first < 0) return null;
-            Source source = null;
-            // Whether the name is an output whose step the block list does not tell
-            boolean untold = false;
-            Matcher byName = BLOCK_OUTPUT.matcher(name);
-            Matcher byIndex = STEP_OUTPUT.matcher(name);
-            if (byName.matches()) {
-                source = named(blocks, children, byName.group(1));
-            } else if ("previous_output".equals(name)) {
-                source = own && i > 0 && blocks.get(i - 1) != null ? new Source(blocks.get(i - 1), i - 1) : null;
-                untold = !own;   // in a nested block it may be the output of the step nested before it
-            } else if (byIndex.matches()) {
-                int index = Integer.parseInt(byIndex.group(1));
-                source = atStepIndex(blocks, index, i);
-                untold = source == null && drawnBefore(blocks, Math.min(index, own ? i : i + 1));
-            }
-            if (source == null) {
-                // The run quotes it when it was recorded after a model was asked: possible from the first AI step on
-                boolean afterModel = first < i || (first == i && !own);
-                return untold && afterModel ? "an output whose step the workflow does not tell, in a run that asks"
-                        + " a model before it (the AI step " + label(blocks.get(first)) + "), so it may hold what the"
-                        + " model wrote" : null;
-            }
-            if (asksModel(source.block(), children)) return "the output of the AI step " + label(source.block());
-            if (source.position() > first || source.afterNestedModel()) {
-                return "the output of the step " + label(source.block()) + ", which runs after the AI step "
-                        + label(blocks.get(first)) + " and may hold what the model wrote";
-            }
-            return null;
-        }
-
-        private static String label(BlockDefinition block) {
-            return block.getName() != null && !block.getName().isBlank() ? block.getName() : block.getType();
-        }
-    }
-
-    /** The block of that name: a top-level one first, else a nested one. */
-    private static Source named(List<BlockDefinition> blocks, WorkflowResolver children, String name) {
-        for (int j = 0; j < blocks.size(); j++) {
-            if (blocks.get(j) != null && name.equals(blocks.get(j).getName())) return new Source(blocks.get(j), j);
-        }
-        List<Source> nested = new ArrayList<>();
-        for (int j = 0; j < blocks.size(); j++) {
-            if (blocks.get(j) == null) continue;
-            int position = j;
-            // A switch runs its nested blocks once, in the order written; any other wrapper may run them again
-            boolean inOrder = "switch".equals(blocks.get(j).getType());
-            boolean[] modelBefore = {!inOrder && asksModel(blocks.get(j), children)};
-            NestedBlocks.visit(blocks.get(j).getConfig(), inner -> {
-                BlockDefinition block = BlockDefinition.builder().type(inner.type()).name(inner.name())
-                        .config(inner.config() != null ? inner.config() : Map.of()).build();
-                if (name.equals(inner.name())) nested.add(new Source(block, position, modelBefore[0]));
-                if (inner.type() != null && asksModel(block, children)) modelBefore[0] = true;
-            });
-        }
-        return nested.isEmpty() ? null : nested.getFirst();
-    }
-
-    /** Whether a block before position {@code end} draws further step indices, so the numbers after it are not known. */
-    private static boolean drawnBefore(List<BlockDefinition> blocks, int end) {
-        for (int j = 0; j < Math.min(end, blocks.size()); j++) {
-            if (blocks.get(j) == null || INDEX_DRAWING.contains(blocks.get(j).getType())) return true;
-        }
-        return false;
-    }
-
-    /** The block at position {@code index}, before {@code i}, while no block before it draws further indices. */
-    private static Source atStepIndex(List<BlockDefinition> blocks, int index, int i) {
-        if (index >= i) return null;
-        for (int j = 0; j < index; j++) {
-            if (blocks.get(j) == null || INDEX_DRAWING.contains(blocks.get(j).getType())) return null;
-        }
-        return blocks.get(index) == null ? null : new Source(blocks.get(index), index);
-    }
-
-    /** Whether a run of the block asks a model: the block writes AI text itself, or its child workflow does. */
-    private static boolean asksModel(BlockDefinition block, WorkflowResolver children) {
-        return writesAiText(block) || childAsksModel(block, children);
-    }
-
-    /**
-     * Whether the workflow the block runs by a literal {@code workflow_id}, or one that workflow reaches, has a block
-     * that writes AI text. A reference with a placeholder or one that names no workflow is not followed, and neither
-     * is any without a resolver: the run quotes such a child's output when the child asked a model.
-     */
-    private static boolean childAsksModel(BlockDefinition block, WorkflowResolver children) {
-        String ref = children == null ? null : ChildWorkflows.literalRef(block.getType(), block.getConfig());
-        if (ref == null) return false;
-        WorkflowDefinition child;
-        try {
-            child = children.resolve(ref);
-        } catch (RuntimeException e) {
-            return false;   // a reference that names no workflow fails at run time, with its own message
-        }
-        if (child == null) return false;
-        for (ChildWorkflows.Reached reached : ChildWorkflows.reached(child, children.forChild(child))) {
-            for (BlockDefinition inner : reached.definition().blocks()) {
-                if (inner != null && writesAiText(inner)) return true;
-            }
-        }
-        return false;
-    }
-
-    /** Whether the block's output is text a model wrote: it calls an AI itself, or a block nested in it does. */
-    private static boolean writesAiText(BlockDefinition block) {
-        if (block.getType() == null) return false;
-        if (StepModes.usesAi(block)) return true;
-        boolean[] nestedAi = {false};
-        NestedBlocks.visit(block.getConfig(), inner -> {
-            if (inner.type() != null && StepModes.usesAi(BlockDefinition.builder().type(inner.type())
-                    .config(inner.config() != null ? inner.config() : Map.of()).build())) {
-                nestedAi[0] = true;
-            }
-        });
-        return nestedAi[0];
-    }
-
-    /**
      * A value the run inserts as it is, inside the author's quotes. A protected value is not judged here: it is
      * {@link #protectedInShell}'s, wherever it stands.
      */
-    private static void quoted(ModelSteps model, List<ShellText> texts, int i, String name,
+    private static void quoted(ProtectedValues model, List<ShellText> texts, int i, String name,
                                List<AnalyzerFinding> out) {
         Set<String> names = new LinkedHashSet<>();
         for (ShellText text : texts) {
@@ -344,10 +167,6 @@ final class QuotingRules {
                         + " shell_escape_variables: true, for a variable that may be unset set -- {{ x }}; X=\"$*\""));
     }
 
-    private static boolean outsideText(String name) {
-        return PLATFORM_DATA.contains(name) || FOREIGN_TEXT.contains(name);
-    }
-
     /** What the heredoc bodies of one block hold, sorted by what reads them. */
     private static final class HeredocHits {
         final Set<String> source = new LinkedHashSet<>();
@@ -361,7 +180,7 @@ final class QuotingRules {
      * A value the run inserts as it is, in the body of a heredoc. A protected value is not judged here: it is
      * {@link #protectedInShell}'s, wherever it stands.
      */
-    private static void heredoc(ModelSteps model, List<ShellText> texts, int i, String name,
+    private static void heredoc(ProtectedValues model, List<ShellText> texts, int i, String name,
                                 List<AnalyzerFinding> out) {
         HeredocHits hits = new HeredocHits();
         for (ShellText text : texts) {

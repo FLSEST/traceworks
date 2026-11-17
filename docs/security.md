@@ -497,9 +497,11 @@ content, and no blob is written through one.
     the value: `eval "$REVIEW"`, `bash -c "$REVIEW"`, `$REVIEW` as the command itself, and bash's arithmetic, which
     evaluates a variable's content (`$(( REVIEW ))`, `[[ $REVIEW -eq 1 ]]`, an array index, `declare -i`). The
     same holds for programs that take code: `xargs`, `find -exec`, `ssh host "$REVIEW"`, an `awk` or `sed` program.
-  - **No protected value outside a shell line either.** A tool step's `container_args`, the host path of a
-    `mounts` entry and a child's `workflow_id` take none, model text included: it would choose what the tool does,
-    what the container sees or which workflow runs. The image of a step (`container_image`), its `network` and its
+  - **No protected value outside a shell line either.** A tool step's `container_args`, a
+    `mounts` entry (either side of it) and a child's `workflow_id` take none, model text included: it would choose what the tool does,
+    what the container sees or which workflow runs. `check` reports such a placeholder
+    (`protected-value-outside-shell`) where the workflow shows it, as an error where every run refuses the step
+    and as a warning where only some runs do, and the run refuses the step in every case. The image of a step (`container_image`), its `network` and its
     secrets are read as written, without placeholders; a hook gets its payload on standard input and its program
     and arguments from `traceworks.json`; the git commands of `run --source` take the operator's arguments only.
   - **Earlier checkpoints.** A checkpoint written before model text was kept says nothing of the calls before it,

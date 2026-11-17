@@ -97,6 +97,13 @@ class AnalyzerFindingLanguagesTest {
                 block("simple", "review", Map.of("command", "Review the diff")),
                 block("shell", "report", Map.of("command", "set -euo pipefail\nprintf '%s' {{ block.review.output }}"))),
                 null));
+        // An AI step's output in the arguments of a tool, a mount and a workflow_id: protected-value-outside-shell
+        out.addAll(analyzer.analyze(List.of(
+                block("simple", "review", Map.of("command", "Review the diff")),
+                block("shell", "tool", Map.of("container_image", "./images/tool",
+                        "container_args", List.of("{{ block.review.output }}"),
+                        "mounts", List.of("{{ block.review.output }}:/data:ro"))),
+                block("sub-workflow", "child", Map.of("workflow_id", "{{ block.review.output }}"))), null));
         // The shell variables of a block: invalid-value-name, value-name-configures-program, unused-value
         out.addAll(analyzer.analyze(List.of(
                 block("shell", "named", Map.of("command", "set -euo pipefail\necho", "values", Map.of("lower", "x"))),
