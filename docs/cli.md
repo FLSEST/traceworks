@@ -1165,6 +1165,12 @@ option and reads the same variable ("approve and answer"). There no earlier vers
 such an answer with its actor alone.
 
 A `list` line is the first 8 characters of the finding's id, its status, severity, rule key, subject and title,
+without a title that only repeats the row: one that, in lower case and taken apart at white space and at
+`# , / : _ -`, holds nothing but parts of the rule key and of the subject and the words `finding`, `findings`, `in`,
+`of`, `for`, `at`, `on`, `the`, `a` and `an` (`path_check finding in core/Mounts.java, Mounts.check(Path)` under the
+subject `core/Mounts.java#Mounts.check(Path)`). A title with a word or a number of its own stays, and
+`findings <key> show <id>` and `list --json` hold every title whole. Under a subject too long for its line the title
+begins a line of its own, marked `| ` where the subject's lines are marked `|+`. The lines are
 sorted by status (`OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK`, `DISMISSED`, `RESOLVED`), severity, rule key and
 subject; a row whose decision was made on another severity than the finding has now ends with `(decided on LOW)`,
 and a row whose decision is no longer in force with `(dismissed on LOW before, not in force)`. `list --json` holds
@@ -1597,7 +1603,8 @@ Without a terminal (CI, a pipe), or with `--no-input`, nobody can answer inside 
      behind it out, and the line is as it was. A text that fits a line of its own is not cut in two, and on a
      line that goes on already each further text that does not fit starts a line of its own: so a row of a list
      (`findings <key> list`, `runs --long`, `seals`) keeps its own columns, and a subject or a title too long for
-     it stands under the row, each from the start of a `|+` line.
+     it stands under the row: the subject from the start of a `|+` line, and a title under such a subject on a line
+     of its own that begins with `| ` ("findings", what a `list` line holds).
    - **A text that begins a line** has `| ` in front of it, in the place of the two blanks before it where the line
      is indented, so that the columns of a table stay: a workflow's description and what a block runs in `show`,
      the name of a step or an input in `diff`, a problem `verify` lists, a workflow's id in `seals`.

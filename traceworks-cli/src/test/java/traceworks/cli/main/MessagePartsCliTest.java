@@ -101,38 +101,67 @@ class MessagePartsCliTest {
                 + " or run on the host with --allow-host-execution");
     }
 
-    /** The owner's third complaint: the list broke a subject's path in the middle of a word. */
-    @Test
-    void aFindingsRow_keepsItsColumns_andASubjectThatDoesNotFitGoesOnBelow_brokenAtSeparators() throws IOException {
-        ObjectNode finding = JSON.createObjectNode().put("ruleKey", "path_check").put("subject", SUBJECT)
-                .put("severity", "MEDIUM").put("title", TITLE);
+    /** A register {@code key} with one finding of the rule {@code path_check}, as an audit's report states it. */
+    private void register(String key, String subject, String title) throws IOException {
+        ObjectNode finding = JSON.createObjectNode().put("ruleKey", "path_check").put("subject", subject)
+                .put("severity", "MEDIUM").put("title", title);
         ObjectNode envelope = JSON.createObjectNode().put("snapshotComplete", true);
         envelope.putArray("findings").add(finding);
-        Path report = Files.writeString(temp.resolve("report.md"), "# Report\n<!-- traceworks:audit-result:v1\n"
+        Path report = Files.writeString(temp.resolve(key + ".md"), "# Report\n<!-- traceworks:audit-result:v1\n"
                 + JSON.writeValueAsString(envelope) + "\n-->\n");
-        ObjectNode workflow = JSON.createObjectNode().put("id", "rows").put("name", "Audit");
-        workflow.putObject("metadata").putObject("audit").put("enabled", true).put("key", "rows")
+        ObjectNode workflow = JSON.createObjectNode().put("id", key).put("name", "Audit");
+        workflow.putObject("metadata").putObject("audit").put("enabled", true).put("key", key)
                 .put("category", "security").put("report_block", "report");
         workflow.putArray("blocks").add(shell("report", "cat '" + report + "'"));
-        Path folder = Files.createDirectories(temp.resolve("rows"));
+        Path folder = Files.createDirectories(temp.resolve(key));
         Files.writeString(folder.resolve("workflow.json"), JSON.writeValueAsString(workflow));
         String ran = exec(null, "run", folder.toString(), "--allow-host-execution", "--no-input", "--quiet");
-        assertThat(ran).as(ran).contains("register rows");
+        assertThat(ran).as(ran).contains("register " + key);
+    }
+
+    /**
+     * The owner's third complaint: the list broke a subject's path in the middle of a word. And his fourth: a
+     * title that only repeats the rule and the subject made the row twice as long.
+     */
+    @Test
+    void aFindingsRow_keepsItsColumns_andATitleThatRepeatsTheSubjectIsLeftOut_ofTheTextOnly() throws IOException {
+        register("rows", SUBJECT, TITLE);
 
         List<String> listed = exec(null, "findings", "rows", "list").lines().toList();
 
         assertThat(listed.getFirst()).matches("[0-9a-f]{8}  OPEN       MEDIUM    path_check  ");
-        assertThat(listed.subList(1, listed.size())).containsExactly(
+        assertThat(listed.subList(1, listed.size())).as("the subject's lines only").containsExactly(
                 "  |+traceworks-adapters/src/main/java/traceworks/adapters/container/",
                 "  |+MountGuard.java#MountGuard.normalized(String), MountGuard.real(Path),",
-                "  |+ MountGuard.expandHome(String, Path)  ",
-                "  |+path_check finding in",
-                "  |+ traceworks-adapters/src/main/java/traceworks/adapters/container/",
-                "  |+MountGuard.java, MountGuard.normalized(String)");
+                "  |+ MountGuard.expandHome(String, Path)");
         assertThat(Unbroken.of(String.join("\n", listed))).as("put together again, the row is as it was")
-                .endsWith("  OPEN       MEDIUM    path_check  " + SUBJECT + "  " + TITLE);
-        assertThat(exec(null, "findings", "rows", "list", "--json")).as("no mark of the terminal in JSON")
-                .contains(SUBJECT).doesNotContain("|+");
+                .endsWith("  OPEN       MEDIUM    path_check  " + SUBJECT);
+        String id = listed.getFirst().substring(0, 8);
+        assertThat(exec(null, "findings", "rows", "list", "--json")).as("JSON: the title, and no mark")
+                .contains(SUBJECT).contains("\"title\":\"" + TITLE + "\"").doesNotContain("|+");
+        assertThat(Unbroken.of(exec(null, "findings", "rows", "show", id))).as("show prints the whole title")
+                .contains("Title     " + TITLE);
+    }
+
+    /** A title with words of its own stays, and under a subject that was broken it begins a line of its own. */
+    @Test
+    void aTitleThatAddsSomething_stays_andBeginsItsOwnLineUnderABrokenSubject() throws IOException {
+        register("adds", SUBJECT, "A link gets past the path check");
+        register("grouped", "a/Mount.java#Mount.check(Path)", "2 path_check findings in a/Mount.java, Mount.check(Path)");
+        register("short", "a/Mount.java#Mount.check(Path)", "Path_Check  finding in a/Mount.java,Mount.check(Path)");
+
+        List<String> adds = exec(null, "findings", "adds", "list").lines().toList();
+
+        assertThat(adds.subList(1, adds.size())).containsExactly(
+                "  |+traceworks-adapters/src/main/java/traceworks/adapters/container/",
+                "  |+MountGuard.java#MountGuard.normalized(String), MountGuard.real(Path),",
+                "  |+ MountGuard.expandHome(String, Path)",
+                "  | A link gets past the path check");
+        assertThat(Unbroken.of(exec(null, "findings", "grouped", "list")).strip()).as("a count is said nowhere else")
+                .endsWith("  path_check  a/Mount.java#Mount.check(Path)"
+                        + "  2 path_check findings in a/Mount.java, Mount.check(Path)");
+        assertThat(exec(null, "findings", "short", "list").lines().toList()).as("case and separators alike")
+                .singleElement().asString().endsWith("  path_check  a/Mount.java#Mount.check(Path)");
     }
 
     /** Reported as not covered: a text of a workflow that began a line and fitted it was shown unmarked. */

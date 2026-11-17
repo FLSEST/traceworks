@@ -29,9 +29,12 @@ import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * {@code traceworks findings [<key> list|show|items|verify]}: what a register holds (docs/registers.md). Without a
@@ -56,8 +59,9 @@ public final class FindingsCommand implements Command {
                     findings                    the registers of this home, each with its counts by status, and
                                                 for an audit that lists its items how many of them are settled
                     findings <key> list         the findings of the register that are not resolved: id, status,
-                                                severity, rule key, subject and title; sorted by status, severity,
-                                                rule key and subject; --json prints them as a JSON array
+                                                severity, rule key, subject and title (no title that only repeats
+                                                the rule key and the subject); sorted by status, severity, rule
+                                                key and subject; --json prints them as a JSON array
                     findings <key> show <id>    one finding, by its id or a prefix of at least 8 characters, and
                                                 its detail (what is wrong, the fix, the quoted line) from
                                                 findings.jsonl of the run that last reported it
@@ -246,11 +250,56 @@ public final class FindingsCommand implements Command {
             out.flush();
             return ExitCodes.OK;
         }
-        // The rule, the subject and the title are a report's text: a row too long goes on on marked lines
-        listed.forEach(f -> TerminalText.println(out, String.format("%s  %-9s  %-8s  ", f.id().substring(0, 8),
-                f.status(), f.severity()), TerminalText.oneLine(f.ruleKey()), "  ",
-                TerminalText.oneLine(f.subject()), "  ", TerminalText.oneLine(f.title()), decisionNote(f)));
+        listed.forEach(f -> row(out, f));
         return ExitCodes.OK;
+    }
+
+    /**
+     * One row of the list. The rule, the subject and the title are a report's text: a row too long goes on on
+     * marked lines. A title that says nothing the row does not say ({@link #repeats}) is left out; and under a
+     * subject that did not fit its line the title begins a line of its own, marked as a text that begins one, so
+     * that a reader sees where the subject ends.
+     */
+    private static void row(PrintStream out, Finding f) {
+        List<Object> row = new ArrayList<>(List.of(String.format("%s  %-9s  %-8s  ", f.id().substring(0, 8),
+                f.status(), f.severity()), TerminalText.oneLine(f.ruleKey()), "  ", TerminalText.oneLine(f.subject())));
+        if (repeats(f.title(), f.ruleKey(), f.subject())) {
+            TerminalText.println(out, row, decisionNote(f));
+        } else if (TerminalText.lines(row).size() > 1) {
+            TerminalText.println(out, row);
+            TerminalText.println(out, "    ", TerminalText.oneLine(f.title()), decisionNote(f));
+        } else {
+            TerminalText.println(out, row, "  ", TerminalText.oneLine(f.title()), decisionNote(f));
+        }
+    }
+
+    /** What a title may hold beside the rule and the subject and still say nothing of its own. */
+    private static final Set<String> FILLER = Set.of("finding", "findings", "in", "of", "for", "at", "on", "the", "a",
+            "an");
+    /** Where a rule key, a subject and a title are taken apart: white space and the separators between parts. */
+    private static final Pattern PARTS = Pattern.compile("[\\s#,/:_-]+");
+
+    /**
+     * Whether a title only repeats its row. The title, the rule key and the subject are each put in lower case
+     * and taken apart at white space and at {@code # , / : _ -}; the title repeats the row when each of its parts
+     * is a part of the rule key or of the subject, or one of the filler words {@code finding}, {@code findings},
+     * {@code in}, {@code of}, {@code for}, {@code at}, {@code on}, {@code the}, {@code a} and {@code an}, in any
+     * order. So {@code path_check finding in a/Mount.java, Mount.check(Path)} repeats the subject
+     * {@code a/Mount.java#Mount.check(Path)}, as {@code Package cycle: core.x} repeats the rule
+     * {@code package-cycle} and the subject {@code core.x}, and an empty title repeats any row. Any other part
+     * keeps the title: a word of its own, and a number too ({@code 2 path_check findings in ...}), since the row
+     * says the count nowhere else. The comparison reads the texts and prints nothing.
+     */
+    static boolean repeats(String title, String ruleKey, String subject) {
+        Set<String> known = new HashSet<>(FILLER);
+        known.addAll(parts(ruleKey));
+        known.addAll(parts(subject));
+        return known.containsAll(parts(title));
+    }
+
+    private static List<String> parts(String text) {
+        return text == null ? List.of() : PARTS.splitAsStream(text.toLowerCase(Locale.ROOT))
+                .filter(part -> !part.isEmpty()).toList();
     }
 
     /**
