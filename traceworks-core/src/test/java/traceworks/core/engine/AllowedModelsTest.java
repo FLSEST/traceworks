@@ -41,6 +41,24 @@ class AllowedModelsTest {
                 .allows("CLAUDE", "axb")).as("only the star is a wildcard").isFalse();
     }
 
+    @Test
+    void theParts_mayNotOverlapInTheText() {
+        // first and last overlap: "claude-latest" is shorter than "claude-" + "-latest"
+        assertThat(allowsGlob("claude-*-latest", "claude-latest")).isFalse();
+        assertThat(allowsGlob("claude-*-latest", "claude--latest")).isTrue();
+        // a part between overlaps the last part
+        assertThat(allowsGlob("a*b*bc", "abc")).isFalse();
+        // a part between fits exactly between first and last
+        assertThat(allowsGlob("a*b*c", "abc")).isTrue();
+        // the next part is searched after the part before, not inside it
+        assertThat(allowsGlob("x*ab*b*y", "xaby")).isFalse();
+        assertThat(allowsGlob("x*ab*b*y", "xabby")).isTrue();
+    }
+
+    private static boolean allowsGlob(String glob, String model) {
+        return new AllowedModels(List.of(new AllowedModels.Entry("CLAUDE", glob))).allows("CLAUDE", model);
+    }
+
     /** An entry without a star names one model: a longer name that starts with it is another model. */
     /**
      * The model is the workflow's text and has no bound of its own. An entry with two stars must not cost a time
