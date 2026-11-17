@@ -239,7 +239,7 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `execution` | where the run runs its steps: `container` (wherever a container runtime works: every command in a container) or `host` (a host run, where none works and the operator consents: shell commands without an image on the host). A resume keeps it. A record of an earlier version says `host` |
 | `container_runtime` | `{name, version}` of the container runtime the run uses (`docker` or `podman`, and the version it reported); `null` for a host run that found none |
 | `output_limit_mib` | the output limit of every command of the run, in MiB: the operator's `output_limit_mib`, `16` by default (docs/cli.md, "Output limit"). A record of an earlier version has no such field; its limit was 16 MiB |
-| `records` | what this version writes into the record only when it happened, so that its absence says that it did not: a list of names, now `["output_cut"]` (the field of `step.command.finished`). `run.resumed` has it too: a run that an earlier version started or resumed has a line without it, and from then on the record cannot say. A record of an earlier version has no such field |
+| `records` | what this version writes into the record only when it happened, so that its absence says that it did not: a list of names, now `["output_cut","answer_agent"]` (`output_cut`: the field of `step.command.finished`; `answer_agent`: the field `agent` of `approval.answered`). `run.resumed` has it too: a run that an earlier version started or resumed has a line without it, and from then on the record cannot say. A record of an earlier version has no such field |
 | `run_output_budget_mib` | the output budget of the run, in MiB: the operator's `run_output_budget_mib`, or its default (`128`, or eight times `output_limit_mib` when that is more), always as the number in force (docs/cli.md, "Output budget"). A record of an earlier version has no such field; its run had no budget |
 | `ai_images` | the images the operator's `ai_images` runs AI CLIs in instead of their built-in images, as an object by CLI id (`{"claude": "registry.example.org/ops/claude:2.1"}`); `{}` when it replaces none (docs/cli.md, "AI images"). A record of an earlier version has no such field; it ran only the built-in images |
 | `ai_network` | where the containers of the AI CLIs can connect: `restricted` (the default: only to the hosts of the call's provider and the operator's `ai_hosts`, through the egress proxy) or `open` (the runtime's default network), the operator's `ai_network` (docs/cli.md, "The network of an AI step"). A record of an earlier version has no such field; its AI containers had the open network |
@@ -255,7 +255,7 @@ The first line of a run's log, line 0. A child run has none: its lines stand in 
 | `workspace_source_sha` | only with `--source`: the full commit the checkout is detached at, which the steps also see as `workspace_source_sha` |
 
 ```json
-{"workflow":{"id":"b1445bda-e182-479a-bf85-f5b519d68ad2","name":"Hello"},"package":{"dir":"/work/hello","digest":"ad91b638...","git_commit":null,"git_dirty":null},"definition":{"sha256":"3915...","size":912},"inputs":{"sha256":"ea6e...","size":2},"trigger":"MANUAL","actor":"anna@laptop","version":"0.1.0","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{},"workspace":"/work/project"}
+{"workflow":{"id":"b1445bda-e182-479a-bf85-f5b519d68ad2","name":"Hello"},"package":{"dir":"/work/hello","digest":"ad91b638...","git_commit":null,"git_dirty":null},"definition":{"sha256":"3915...","size":912},"inputs":{"sha256":"ea6e...","size":2},"trigger":"MANUAL","actor":"anna@laptop","version":"0.1.0","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut","answer_agent"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{},"workspace":"/work/project"}
 ```
 
 The `register` field of an audit run:
@@ -571,6 +571,7 @@ A question was answered.
 | `kind` | `approval` or `human-input` |
 | `answer` | blob: the answer |
 | `actor` | who answered, or `null` when nobody did: the step took the answer by itself, such as a question that timed out or took its default. An answer that arrives as the question's wait ends either resolves it and is named here, or is refused (one from the inbox with `request.refused`) and is not |
+| `agent` | only when an agent gave the answer under the actor: the name it gave itself, with `--agent` on `traceworks approve` or `answer`, or with `TRACEWORKS_AGENT` (for `terminal`, the variable in the environment of the run's process). The key is absent for an answer no agent claimed and for one nobody gave. An answer with the source `resume` names the agent of the answer it takes over, whoever resumed. The name is self-declared and unsigned (see below) |
 | `source` | where the answer came from: `terminal`, `inbox` (`traceworks approve` or `answer` sent it to a running run), `cli` (`traceworks approve` or `answer` on a parked run) or `resume` (a resumed run received an answer recorded earlier) |
 | `request` | the id of the request that carried the answer, or `null` |
 | `comment` | blob: the comment given with the answer, or `null` |
@@ -579,8 +580,30 @@ A question was answered.
 {"step":2,"kind":"approval","answer":{"sha256":"85a3...","size":3},"actor":"anna@laptop","source":"cli","request":"6efd92f3-5b4e-4d81-a5da-62e8db978c3a","comment":null}
 ```
 
+An answer an agent gave under the actor:
+
+```json
+{"step":2,"kind":"approval","answer":{"sha256":"85a3...","size":3},"actor":"anna@laptop","agent":"claude-code","source":"cli","request":"0a6c1c1e-7f0f-4a55-9d0c-0f3c9b1f2a77","comment":null}
+```
+
 After a park, the log holds the answer twice: once when it was given (`cli`) and once when the resumed step
-received it (`resume`).
+received it (`resume`), both with the same `actor` and the same `agent`.
+
+**Who answered is a label, not a proof.** `actor` is who ran the command or the run; `agent` is what the caller
+said about itself. The name is bounded as in a register (at most 64 characters: ASCII letters and digits,
+`. _ - : / @ +` and single spaces; a blank or bad one is refused and nothing is recorded), but it is unsigned: an
+agent that works with the operator's user and leaves it out is recorded as the operator, and any caller can give
+any name. Starts, resumes, pauses and cancels name their actor alone.
+
+**What the absence of `agent` says.** A record whose `run.started` and every `run.resumed` name `answer_agent` in
+`records` writes the key whenever an agent was named, so an answer without it was claimed by no agent. A record
+of an earlier version has no such name, and its answers say nothing about agents. The answer to a parked run is
+written by the command that answers, not by a run's process, and is read by what those lines of its record say:
+answered by this version without an agent in a run an earlier version started, it counts as an answer that cannot
+say. A run has no `requires`: an earlier version reads `agent` as it reads any field it does not know. It verifies
+the record, and its `show` and `run.html` name the actor alone, so there an agent's answer reads as the actor's
+own. A running run of an earlier version takes an answer from the inbox without the agent the same way, and
+`approve` and `answer` say so when it happens.
 
 ### request.refused
 
@@ -787,7 +810,7 @@ that step was the last one, the run ends instead. A run records it once: a secon
 | `execution` | the target the run keeps, as `run.started` records it: `container` or `host`. A host run resumes on the host also where a container runtime works now |
 | `container_runtime` | `{name, version}` of the container runtime of the process that resumed the run, which may differ from the one in `run.started` (another machine, an update); `null` when it found none (a host run) |
 | `output_limit_mib` | the output limit of the commands after the resume, in MiB: the operator's setting when the run resumed, which may differ from the one in `run.started`. A record of an earlier version has no such field |
-| `records` | as in `run.started`: what the version that resumed the run records only when it happened (`["output_cut"]`). A `run.resumed` of an earlier version has no such field |
+| `records` | as in `run.started`: what the version that resumed the run records only when it happened (`["output_cut","answer_agent"]`). A `run.resumed` of an earlier version has no such field |
 | `run_output_budget_mib` | the output budget of the run after the resume, in MiB, as in `run.started`: the one in force when the run resumed, which may differ from the one there. The resumed run counts the texts of its checkpoint and the variables its steps set against it; a resume whose checkpoint already holds more is refused, and nothing is recorded. A record of an earlier version has no such field |
 | `ai_images` | the operator's `ai_images` when the run resumed, as in `run.started`, which may differ from the one there: the AI calls after the resume run in these images. A record of an earlier version has no such field |
 | `ai_network`, `ai_hosts` | the operator's `ai_network` and `ai_hosts` when the run resumed, as in `run.started`, which may differ from the ones there: the AI calls after the resume connect as these say. A record of an earlier version has no such fields |
@@ -796,7 +819,7 @@ that step was the last one, the run ends instead. A run records it once: a secon
 | `workspace_cloned` | only for a run started with `--source`: `true` when its checkout was missing and the resume cloned the source again at `workspace_source_sha`, so whatever a step had written there before is gone; `false` when it works in the checkout as it was |
 
 ```json
-{"actor":"anna@laptop","from_checkpoint":14,"next_position":2,"rerun_step":2,"answer":19,"package_changed":false,"package_digest":"ad91b638...","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{}}
+{"actor":"anna@laptop","from_checkpoint":14,"next_position":2,"rerun_step":2,"answer":19,"package_changed":false,"package_digest":"ad91b638...","execution":"container","container_runtime":{"name":"docker","version":"29.1.3"},"output_limit_mib":16,"records":["output_cut","answer_agent"],"run_output_budget_mib":128,"ai_images":{},"ai_network":"restricted","ai_hosts":{}}
 ```
 
 A resume runs the package's `workflow.json`, which is the definition the run started with as long as the package

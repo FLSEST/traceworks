@@ -175,10 +175,19 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
      *
      * @param type        the event type, such as {@code run.resumed}
      * @param actor       who did it; {@code null} when the event names nobody ({@code run.recovered})
+     * @param agent       for an answer: the agent that gave it under the actor, as it named itself; {@code null}
+     *                    for none, and for everything that is no answer. A view names it after the description
      * @param description what happened, in one line of plain text
      * @param content     the blob that goes with it: the answer given, or the line set aside; {@code null} for none
      */
-    public record Intervention(int seq, Instant at, String type, String actor, String description, BlobRef content) {}
+    public record Intervention(int seq, Instant at, String type, String actor, String agent, String description,
+                               BlobRef content) {
+
+        /** An intervention no agent claims. */
+        public Intervention(int seq, Instant at, String type, String actor, String description, BlobRef content) {
+            this(seq, at, type, actor, null, description, content);
+        }
+    }
 
     /**
      * @param events in log order; the first is the {@code run.started} of the root run

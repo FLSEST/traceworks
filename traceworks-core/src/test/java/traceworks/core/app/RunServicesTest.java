@@ -1799,6 +1799,151 @@ class RunServicesTest {
         assertThatThrownBy(() -> services.check(Path.of("/pkg/missing"))).isInstanceOf(RunRefusedException.class);
     }
 
+    // ---- the agent of an answer ----
+
+    /** A parked run: the answer names its agent beside the actor, and the resumed step takes it over unchanged. */
+    @Test
+    void answer_byAnAgent_recordsItBesideTheActor_andTheResumedStepKeepsIt() {
+        String id = services.start(request(DEPLOY), null, null).runId();
+
+        AnswerResult answered = services.answer(id,
+                new AnswerRequest("approval", 1, "yes", null, null, " claude-code "));
+
+        assertThat(answered.accepted()).isTrue();
+        assertThat(answered.message()).contains("is recorded through the agent claude-code;");
+        RecordedEvent cli = fx.events(id).getLast();
+        assertThat(cli.fields().path("actor").asText()).isEqualTo(ACTOR);
+        assertThat(cli.fields().path("agent").asText()).isEqualTo("claude-code");
+        assertThat(services.view(id).parkedAnswer().agent()).isEqualTo("claude-code");
+
+        // The asker of the resume is another agent: it gave no answer, so its name is nowhere
+        RunResult resumed = services.resume(resumeOf(id), null, new QuestionAsker() {
+            @Override
+            public Optional<String> ask(QuestionView question) {
+                return Optional.empty();
+            }
+
+            @Override
+            public String agent() {
+                return "another-harness";
+            }
+        });
+
+        assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
+        List<RecordedEvent> answers = fx.ofType(id, "approval.answered");
+        assertThat(answers).extracting(e -> e.fields().path("source").asText()).containsExactly("cli", "resume");
+        assertThat(answers).extracting(e -> e.fields().path("agent").asText())
+                .containsExactly("claude-code", "claude-code");
+        assertThat(fx.ofType(id, "run.resumed").getFirst().fields().has("agent"))
+                .as("a resume gets no agent: the actor is enough").isFalse();
+        assertThat(fx.ofType(id, "run.started").getFirst().fields().path("records")).extracting(n -> n.asText())
+                .contains("answer_agent");
+        assertThat(fx.ofType(id, "run.resumed").getFirst().fields().path("records")).extracting(n -> n.asText())
+                .contains("answer_agent");
+    }
+
+    /** Without an agent the answer has no such field, on the parked run and on the step that takes it over. */
+    @Test
+    void answer_withoutAnAgent_recordsNoAgent() {
+        String id = services.start(request(DEPLOY), null, null).runId();
+
+        services.answer(id, new AnswerRequest("approval", 1, "yes", null, null));
+        services.resume(resumeOf(id), null, null);
+
+        assertThat(fx.ofType(id, "approval.answered")).hasSize(2)
+                .noneMatch(e -> e.fields().has("agent"));
+    }
+
+    /** A name that is none is refused before anything is recorded, and the question still waits for its answer. */
+    @Test
+    void answer_withABadAgentName_isRefused_recordsNothing_andTheQuestionStillWaits() {
+        String id = services.start(request(DEPLOY), null, null).runId();
+        int before = fx.events(id).size();
+
+        for (String bad : List.of("", "  ", "two  spaces", "line\nbreak", "x".repeat(65))) {
+            assertThatThrownBy(() -> services.answer(id, new AnswerRequest("approval", 1, "yes", null, null, bad)))
+                    .as(bad).isInstanceOf(IllegalArgumentException.class).hasMessageContaining("agent");
+        }
+
+        assertThat(fx.events(id)).hasSize(before);
+        assertThat(services.view(id).status()).isEqualTo(RunStatus.PARKED);
+        assertThat(services.view(id).parkedAnswer()).isNull();
+        assertThat(services.answer(id, new AnswerRequest("approval", 1, "yes", null, null)).accepted()).isTrue();
+    }
+
+    /** A running run: the agent travels through the inbox, and the run's process records it. */
+    @Test
+    void inboxAnswer_byAnAgent_recordsItBesideTheActor() throws Exception {
+        Events events = new Events();
+        StartRequest interactive = new StartRequest(DEPLOY, Map.of("version", "1.2"), WORKSPACE, false, true);
+        Background<RunResult> running = inBackground(
+                () -> services.start(interactive, events, question -> Optional.empty()));
+        String id = events.await("approval.requested").run();
+
+        AnswerResult result = services.answer(id, new AnswerRequest("approval", 1, "Yes", null, null, "claude-code"));
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(running.join().status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.run(id).inbox().posted()).singleElement()
+                .satisfies(posted -> assertThat(posted.agent()).isEqualTo("claude-code"));
+        assertThat(fx.ofType(id, "approval.answered")).singleElement().satisfies(e -> {
+            assertThat(e.fields().path("source").asText()).isEqualTo("inbox");
+            assertThat(e.fields().path("actor").asText()).isEqualTo(ACTOR);
+            assertThat(e.fields().path("agent").asText()).isEqualTo("claude-code");
+        });
+    }
+
+    /**
+     * The inbox is a folder: a request whose agent is no name is refused by the run's process, nothing is recorded
+     * as an answer, and the question stays open for the next one.
+     */
+    @Test
+    void inboxAnswer_withABadAgentName_isRefused_andTheQuestionStaysOpen() throws Exception {
+        Events events = new Events();
+        StartRequest interactive = new StartRequest(DEPLOY, Map.of("version", "1.2"), WORKSPACE, false, true);
+        Background<RunResult> running = inBackground(
+                () -> services.start(interactive, events, question -> Optional.empty()));
+        RecordedEvent asked = events.await("approval.requested");
+        String id = asked.run();
+
+        fx.run(id).inbox().post(new InboxRequest("bad-agent", "approval", id, asked.step(), asked.seq(), "Yes",
+                Map.of(), null, "b@box", fx.clock.now(), "two  spaces\u001b[31m"));
+        RecordedEvent refused = events.await(e -> refusalOf(e, "bad-agent"));
+
+        assertThat(refused.fields().path("reason").asText()).contains("agent").doesNotContain("\u001b");
+        assertThat(fx.ofType(id, "approval.answered")).isEmpty();
+        assertThat(services.view(id).steps().get(1).status()).isEqualTo(StepStatus.WAITING_APPROVAL);
+        assertThat(services.answer(id, new AnswerRequest("approval", 1, "Yes", null, null)).accepted()).isTrue();
+        assertThat(running.join().status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.ofType(id, "approval.answered")).singleElement()
+                .satisfies(e -> assertThat(e.fields().has("agent")).isFalse());
+    }
+
+    /** The prompt of a run in the foreground: its answers are the agent's that the asker names. */
+    @Test
+    void interactive_withAnAskerOfAnAgent_recordsTheAgentWithSourceTerminal() {
+        StartRequest interactive = new StartRequest(DEPLOY, Map.of("version", "1.2"), WORKSPACE, false, true);
+
+        RunResult result = services.start(interactive, null, new QuestionAsker() {
+            @Override
+            public Optional<String> ask(QuestionView question) {
+                return Optional.of("yes");
+            }
+
+            @Override
+            public String agent() {
+                return "claude-code";
+            }
+        });
+
+        assertThat(result.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.ofType(result.runId(), "approval.answered")).singleElement().satisfies(e -> {
+            assertThat(e.fields().path("source").asText()).isEqualTo("terminal");
+            assertThat(e.fields().path("actor").asText()).isEqualTo(ACTOR);
+            assertThat(e.fields().path("agent").asText()).isEqualTo("claude-code");
+        });
+    }
+
     @Test
     void version_isTheFilteredProjectVersion() {
         assertThat(TraceworksVersion.current()).matches("\\d+\\.\\d+\\.\\d+.*").doesNotContain("${");

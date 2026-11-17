@@ -38,6 +38,27 @@ class FileInboxTest {
         assertThat(inbox.take()).isEmpty();
     }
 
+    /** The agent of an answer travels with it; a request without one is the file it always was. */
+    @Test
+    void anAnswersAgent_isPostedAndTaken_andARequestWithoutOneHasNoSuchField() throws IOException {
+        FileInbox inbox = new FileInbox(dir.resolve("inbox"));
+        InboxRequest byAgent = new InboxRequest("z", "approval", "run-z", 2, 17, "yes", Map.of(), null, "flo",
+                Instant.ofEpochMilli(2_000), "claude-code");
+        inbox.post(request("a", 1_000));
+        inbox.post(byAgent);
+
+        try (Stream<Path> files = Files.walk(dir.resolve("inbox"))) {
+            java.util.List<String> posted = new java.util.ArrayList<>();
+            for (Path file : files.filter(Files::isRegularFile).sorted().toList()) {
+                posted.add(Files.readString(file));
+            }
+            assertThat(posted).hasSize(2).filteredOn(text -> text.contains("\"agent\"")).singleElement().asString()
+                    .contains("\"agent\":\"claude-code\"");
+        }
+        assertThat(inbox.take()).containsExactly(request("a", 1_000), byAgent);
+        assertThat(inbox.take().isEmpty()).isTrue();
+    }
+
     @Test
     void take_movesThemToDone() throws IOException {
         FileInbox inbox = new FileInbox(dir.resolve("inbox"));

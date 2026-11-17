@@ -252,6 +252,37 @@ class RunHtmlTest {
         assertThat(page.indexOf("<h2>Interventions</h2>")).isLessThan(page.indexOf("<h2>Steps</h2>"));
     }
 
+    /** An answer an agent gave names it after the actor, in the register's words, and escaped as any text of a record. */
+    @Test
+    void anAnswerAnAgentGave_namesTheAgentAfterTheActor() {
+        started();
+        emit(new StepStarted(0, "fetch", "approval", 0, false),
+                new ApprovalRequested(0, "b1", "approval", "Ship?", List.of("yes", "no"), List.of(), null, null,
+                        true, null, null, null),
+                new RunParked(0, "approval"));
+        RunRecorder next = RunRecorder.continueAfter(log, blobs, clock, RUN, definition(),
+                log.readAll().stream().map(RecordedEvent::parse).toList());
+        next.attributeNextAnswer("anna@box", "cli", "req-1", null, "claude<code>");
+        next.emit(new ApprovalAnswered(0, "approval", "yes"));
+        next.record("run.resumed", Map.of("actor", "flo@box", "package_changed", false));
+        next.attributeNextAnswer("anna@box", "resume", null, null, "claude<code>");
+        for (RunEvent event : List.of(new StepStarted(0, "fetch", "approval", 0, false),
+                new ApprovalRequested(0, "b1", "approval", "Ship?", List.of("yes", "no"), List.of(), null, null,
+                        false, null, null, null),
+                new ApprovalAnswered(0, "approval", "yes"),
+                new StepFinished(0, "fetch", "approval", StepStatus.COMPLETED, "i", 5, Map.of()))) {
+            next.emit(event);
+        }
+
+        String page = RunHtml.render(view(), blobs, new ChainReport(true, log.readAll().size(), next.head(),
+                List.of(), List.of()), "1.2.3");
+
+        assertThat(page).contains("by anna@box through the agent claude&lt;code&gt; &middot; via resume")
+                .contains("given by anna@box through the agent claude&lt;code&gt; via cli")
+                .contains("answered step 0 (approval) via cli through the agent claude&lt;code&gt;")
+                .doesNotContain("claude<code>");
+    }
+
     @Test
     void badges_showDeterministicAndAi() {
         started();

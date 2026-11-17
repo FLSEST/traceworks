@@ -425,12 +425,13 @@ final class RunViewBuilder {
         QuestionView.Answer given = "resume".equals(source) && run.parkedAnswer != null && e.step() != null
                 && e.step() == run.parkedAnswer.step() ? run.parkedAnswer : null;
         QuestionView.Answer answer = new QuestionView.Answer(e.seq(), e.step() == null ? -1 : e.step(),
-                text(e.fields(), "kind"), e.blob("answer"), text(e.fields(), "actor"), source,
+                text(e.fields(), "kind"), e.blob("answer"), text(e.fields(), "actor"), text(e.fields(), "agent"),
+                source,
                 text(e.fields(), "request"), e.blob("comment"), e.at(), given);
         if ("cli".equals(source) || "inbox".equals(source)) {
-            intervention(e, answer.actor(), "answered step " + answer.step()
-                    + (run.runId.equals(rootId) ? "" : " of child run " + run.runId)
-                    + " (" + answer.kind() + ") via " + source, answer.answer());
+            interventions.add(new RunView.Intervention(e.seq(), e.at(), e.type(), answer.actor(), answer.agent(),
+                    "answered step " + answer.step() + (run.runId.equals(rootId) ? "" : " of child run " + run.runId)
+                            + " (" + answer.kind() + ") via " + source, answer.answer()));
         }
         if (step != null) {
             for (int i = step.questions.size() - 1; i >= 0; i--) {
