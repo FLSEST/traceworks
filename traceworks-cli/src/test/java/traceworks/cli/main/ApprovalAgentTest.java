@@ -176,7 +176,7 @@ class ApprovalAgentTest {
                 "--allow-host-execution", "--no-input");
         String id = idOf(parked);
 
-        Result answer = exec("answer", id, "--value", "flo", "--agent", "claude-code");
+        Result answer = exec("answer", id, "--value", "alex", "--agent", "claude-code");
 
         assertThat(answer.code()).as(answer.out() + answer.err()).isZero();
         assertThat(answers(id)).singleElement().asString().contains("\"agent\":\"claude-code\"");

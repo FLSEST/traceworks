@@ -90,13 +90,13 @@ class RunComparerTest {
         }
 
         static RunView view(String id, List<StepView> steps, Map<String, RunView> children) {
-            return new RunView(id, "wf", "Wf", "/pkg", null, null, null, "flo", "MANUAL", null, T0, T0.plusSeconds(3),
+            return new RunView(id, "wf", "Wf", "/pkg", null, null, null, "alex", "MANUAL", null, T0, T0.plusSeconds(3),
                     RunStatus.COMPLETED, null, null, steps, null, null, null, blob("definition"), null, children, 10,
                     "head", List.of(), List.of(), null, Map.of());
         }
 
         RunFacts facts() {
-            RunView view = new RunView(id, "wf", "Wf", "/pkg", digest, commit, dirty, "flo", "MANUAL", execution, T0,
+            RunView view = new RunView(id, "wf", "Wf", "/pkg", digest, commit, dirty, "alex", "MANUAL", execution, T0,
                     T0.plusSeconds(3), status, null, gate, steps, null, null, null, blob("definition"),
                     blob(inputsDigest), children, 10, "head", List.of(), List.of(), network, aiHosts, null, null,
                     modelChoices, null, false, null, recordsCuts);

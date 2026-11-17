@@ -14,18 +14,18 @@ class ActorsTest {
 
     @Test
     void env_winsOverConfig() {
-        assertThat(Actors.resolve(CONFIGURED, Map.of("TRACEWORKS_ACTOR", "env-actor"), "flo", "box"))
+        assertThat(Actors.resolve(CONFIGURED, Map.of("TRACEWORKS_ACTOR", "env-actor"), "alex", "box"))
                 .isEqualTo("env-actor");
     }
 
     @Test
     void config_winsOverUserAtHost() {
-        assertThat(Actors.resolve(CONFIGURED, Map.of(), "flo", "box")).isEqualTo("config-actor");
+        assertThat(Actors.resolve(CONFIGURED, Map.of(), "alex", "box")).isEqualTo("config-actor");
     }
 
     @Test
     void blankValues_fallThroughToUserAtHost() {
         assertThat(Actors.resolve(new OperatorSettings(false, "  ", List.of()), Map.of("TRACEWORKS_ACTOR", " "),
-                "flo", "box")).isEqualTo("flo@box");
+                "alex", "box")).isEqualTo("alex@box");
     }
 }

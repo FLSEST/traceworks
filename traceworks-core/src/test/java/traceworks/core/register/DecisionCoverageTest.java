@@ -56,12 +56,12 @@ class DecisionCoverageTest {
     /** Run 1 states the finding with {@code severity}, then a person dismisses it. */
     private RegisterState dismissedAt(Severity severity) {
         RegisterState first = Reconciler.apply(empty, report("run-1", T1, stated(severity, "E1")), null).state();
-        return first.with(List.of(Disposition.dismiss(only(first), "false positive", "flo", T1)));
+        return first.with(List.of(Disposition.dismiss(only(first), "false positive", "alex", T1)));
     }
 
     private RegisterState acceptedAt(Severity severity) {
         RegisterState first = Reconciler.apply(empty, report("run-1", T1, stated(severity, "E1")), null).state();
-        return first.with(List.of(Disposition.accept(only(first), "known", "flo", T1, null)));
+        return first.with(List.of(Disposition.accept(only(first), "known", "alex", T1, null)));
     }
 
     @Test
@@ -119,7 +119,7 @@ class DecisionCoverageTest {
     void aFindingDismissedAgainAtTheHigherSeverity_staysDismissedThere_andComesBackOnlyAboveIt() {
         RegisterState reopened = Reconciler.apply(dismissedAt(Severity.LOW), report("run-2", T2,
                 stated(Severity.HIGH, "E2")), null).state();
-        RegisterState again = reopened.with(List.of(Disposition.dismiss(only(reopened), "still not ours", "flo", T2)));
+        RegisterState again = reopened.with(List.of(Disposition.dismiss(only(reopened), "still not ours", "alex", T2)));
         assertThat(only(again).disposition().severity()).isEqualTo(Severity.HIGH);
 
         Applied same = Reconciler.apply(again, report("run-3", T3, stated(Severity.HIGH, "E3")), null);
@@ -168,7 +168,7 @@ class DecisionCoverageTest {
         String keptJson = new String(StateJson.write(kept), StandardCharsets.UTF_8);
 
         assertThat(sameJson).as("no case, no key: the bytes are what they always were")
-                .contains("\"disposition\":{\"actor\":\"flo\",\"at\":\"2026-11-11T10:00:00Z\",\"evidence\":null,"
+                .contains("\"disposition\":{\"actor\":\"alex\",\"at\":\"2026-11-11T10:00:00Z\",\"evidence\":null,"
                         + "\"kind\":\"DISMISSED\",\"note\":\"false positive\",\"until\":null}");
         assertThat(keptJson).contains("\"kind\":\"DISMISSED\",\"note\":\"false positive\",\"severity\":\"LOW\","
                 + "\"until\":null}").contains("\"severity\":\"CRITICAL\",\"status\":\"DISMISSED\"");
@@ -198,10 +198,10 @@ class DecisionCoverageTest {
 
     private static RegisterState decide(RegisterWriter writer, RegisterState state, boolean dismiss, Instant at) {
         Finding f = only(state);
-        Finding after = dismiss ? Disposition.dismiss(f, "false positive", "flo", at)
-                : Disposition.accept(f, "known", "flo", at, null);
+        Finding after = dismiss ? Disposition.dismiss(f, "false positive", "alex", at)
+                : Disposition.accept(f, "known", "alex", at, null);
         return writer.disposition(state.with(List.of(after)), after, after.status(), after.disposition().note(),
-                "flo", at, after.disposition().until());
+                "alex", at, after.disposition().until());
     }
 
     @Test
@@ -256,8 +256,8 @@ class DecisionCoverageTest {
             writer.created("wf-1", "architecture");
             RegisterState state = writer.applied(empty, report(opened, "run-1", T1, stated(Severity.HIGH, "320 LOC")),
                     null, "head-1").state();
-            Finding after = Disposition.accept(only(state), "known", "flo", T2, T3);
-            state = writer.disposition(state.with(List.of(after)), after, FindingStatus.ACCEPTED_RISK, "known", "flo",
+            Finding after = Disposition.accept(only(state), "known", "alex", T2, T3);
+            state = writer.disposition(state.with(List.of(after)), after, FindingStatus.ACCEPTED_RISK, "known", "alex",
                     T2, T3);
             opened.writeState(StateJson.write(state));
 
@@ -386,15 +386,15 @@ class DecisionCoverageTest {
             Finding accepted = state.findings().stream().filter(f -> f.status() == FindingStatus.ACCEPTED_RISK)
                     .findFirst().orElseThrow();
 
-            Finding open = Disposition.reopen(dismissed, "look again", "flo", T3);
+            Finding open = Disposition.reopen(dismissed, "look again", "alex", T3);
             state = writer.disposition(state.with(List.of(open, accepted)), open, FindingStatus.OPEN, "look again",
-                    "flo", T3, null);
+                    "alex", T3, null);
             assertThat(state.namesDecidedSeverity()).as("a reopening names no severity").isFalse();
             assertThat(log.read().getLast().type()).as("and is a line an earlier version folds the same way")
                     .isEqualTo("finding.reopened");
-            Finding again = Disposition.dismiss(open, "checked: not ours", "flo", T3);
+            Finding again = Disposition.dismiss(open, "checked: not ours", "alex", T3);
             state = writer.disposition(state.with(List.of(again, accepted)), again, FindingStatus.DISMISSED,
-                    "checked: not ours", "flo", T3, null);
+                    "checked: not ours", "alex", T3, null);
             opened.writeState(StateJson.write(state));
 
             assertThat(state.namesDecidedSeverity()).isTrue();

@@ -14,13 +14,13 @@ class SealTest {
     static final Instant AT = Instant.parse("2026-11-13T12:00:00.123Z");
 
     private static Seal seal() {
-        return new Seal("wf-build", DIGEST, "flo@box", AT, SshSignatureTest.ARMORED);
+        return new Seal("wf-build", DIGEST, "alex@box", AT, SshSignatureTest.ARMORED);
     }
 
     @Test
     void thePayload_namesEveryFieldTheSignatureCovers() {
         assertThat(new String(seal().payload(), StandardCharsets.UTF_8)).isEqualTo("traceworks-seal-v1\n"
-                + "workflow_id=wf-build\ndigest=" + DIGEST + "\nsigner=flo@box\nsealed_at=2026-11-13T12:00:00.123Z\n");
+                + "workflow_id=wf-build\ndigest=" + DIGEST + "\nsigner=alex@box\nsealed_at=2026-11-13T12:00:00.123Z\n");
     }
 
     @Test
@@ -41,7 +41,7 @@ class SealTest {
         assertRefused(text.replace("\"version\": 1", "\"version\":   1"), "written");
         assertRefused(text.replace("\"version\": 1", "\"version\": 2"), "version");
         assertRefused(text.replace(DIGEST, "xyz"), "digest");
-        assertRefused(text.replace("\"flo@box\"", "7"), "signer");
+        assertRefused(text.replace("\"alex@box\"", "7"), "signer");
         assertRefused(text.replace("2026-11-13T12:00:00.123Z", "yesterday"), "sealed_at");
         assertRefused("[]", "JSON object");
         assertRefused("{", "JSON");
@@ -50,16 +50,16 @@ class SealTest {
 
     @Test
     void aFieldWithALineFeed_cannotBeSealed() {
-        assertThatThrownBy(() -> new Seal("wf\nbuild", DIGEST, "flo", AT, "s")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new Seal("wf", DIGEST, "flo\ndigest=0", AT, "s")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new Seal("", DIGEST, "flo", AT, "s")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new Seal("wf", DIGEST.toUpperCase(), "flo", AT, "s"))
+        assertThatThrownBy(() -> new Seal("wf\nbuild", DIGEST, "alex", AT, "s")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Seal("wf", DIGEST, "alex\ndigest=0", AT, "s")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Seal("", DIGEST, "alex", AT, "s")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new Seal("wf", DIGEST.toUpperCase(), "alex", AT, "s"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void theTime_isKeptToTheMillisecond() {
-        Seal fine = new Seal("wf", DIGEST, "flo", Instant.parse("2026-11-13T12:00:00.123456789Z"), "s");
+        Seal fine = new Seal("wf", DIGEST, "alex", Instant.parse("2026-11-13T12:00:00.123456789Z"), "s");
 
         assertThat(fine.sealedAt()).isEqualTo(AT);
     }

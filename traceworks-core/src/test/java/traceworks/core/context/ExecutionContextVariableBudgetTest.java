@@ -67,7 +67,7 @@ class ExecutionContextVariableBudgetTest {
     void theTextsOfAListOrAMap_count() {
         context.countVariables(STEP_OUTPUTS, name -> false);
 
-        context.setVariable("form", Map.of("name", "flo"));
+        context.setVariable("form", Map.of("name", "ann"));
         context.setVariable("tags", List.of("a", "bc"));
 
         assertThat(budget.heldBytes()).isEqualTo(4 + 3 + 3);

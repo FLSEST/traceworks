@@ -490,7 +490,7 @@ class RunServicesTest {
         String id = services.start(request(DEPLOY), null, null).runId();
 
         AnswerResult otherKind = services.answer(id, new AnswerRequest("human-input", null, null,
-                Map.of("who", "Flo"), null));
+                Map.of("who", "Alex"), null));
         AnswerResult otherStep = services.answer(id, new AnswerRequest("approval", 0, "Yes", null, null));
 
         assertThat(otherKind.accepted()).isFalse();
@@ -531,24 +531,24 @@ class RunServicesTest {
         String id = services.start(request(WHO), null, null).runId();
 
         AnswerResult answered = services.answer(id, new AnswerRequest("human-input", 0, null,
-                Map.of("who", "Flo"), null));
+                Map.of("who", "Alex"), null));
         RunResult resumed = services.resume(resumeOf(id), null, null);
 
         assertThat(answered.accepted()).isTrue();
         assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(fx.commands.commands()).containsExactly("echo Flo");
+        assertThat(fx.commands.commands()).containsExactly("echo Alex");
     }
 
     @Test
     void answer_withPlainText_isTheValueOfTheQuestionsVariable() {
         String id = services.start(request(WHO), null, null).runId();
 
-        AnswerResult answered = services.answer(id, new AnswerRequest("human-input", null, "Flo", null, null));
+        AnswerResult answered = services.answer(id, new AnswerRequest("human-input", null, "Alex", null, null));
         RunResult resumed = services.resume(resumeOf(id), null, null);
 
         assertThat(answered.accepted()).as(answered.message()).isTrue();
         assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(fx.commands.commands()).containsExactly("echo Flo");
+        assertThat(fx.commands.commands()).containsExactly("echo Alex");
     }
 
     @Test

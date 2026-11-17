@@ -30,12 +30,12 @@ class OperatorConfigFileTest {
 
     @Test
     void readsAllKeys() throws IOException {
-        config("{\"allow_host_execution\": true, \"actor\": \"flo\", \"package_path\": [\"/abs/lib\", \"rel/lib\"]}");
+        config("{\"allow_host_execution\": true, \"actor\": \"alex\", \"package_path\": [\"/abs/lib\", \"rel/lib\"]}");
 
         OperatorSettings settings = OperatorConfigFile.read(home);
 
         assertThat(settings.allowHostExecution()).isTrue();
-        assertThat(settings.actor()).isEqualTo("flo");
+        assertThat(settings.actor()).isEqualTo("alex");
         assertThat(settings.packagePath()).containsExactly(Path.of("/abs/lib"), home.resolve("rel/lib"));
     }
 

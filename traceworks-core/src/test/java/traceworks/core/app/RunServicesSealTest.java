@@ -246,7 +246,7 @@ class RunServicesSealTest {
         List<String> lines = fx.sealStore.lines();
 
         // a changed line
-        fx.sealStore.rewrite(List.of(lines.get(0).replace("flo@box", "eve@box"), lines.get(1)));
+        fx.sealStore.rewrite(List.of(lines.get(0).replace("alex@box", "eve@box"), lines.get(1)));
         assertThatThrownBy(() -> services().start(request(BUILD), null, null)).isInstanceOf(RunRefusedException.class)
                 .hasMessageContaining("seal log").hasMessageContaining("memory:seals")
                 .hasMessageContaining("changed or removed");
@@ -293,7 +293,7 @@ class RunServicesSealTest {
         // the home had never seen the workflow: it takes the seal into its log, once
         assertThat(allowing.sealStore.lines()).singleElement().asString().contains("\"type\":\"SEALED\"")
                 .contains("\"adopted\":true").contains("\"workflow_id\":\"wf-build\"")
-                .contains("\"signer\":\"flo@box\"");
+                .contains("\"signer\":\"alex@box\"");
         assertThat(allowing.services().start(request(BUILD), null, null).status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(allowing.sealStore.lines()).hasSize(1);
         assertThatThrownBy(() -> strict.services().start(request(BUILD), null, null))
@@ -470,7 +470,7 @@ class RunServicesSealTest {
         List<byte[]> lines = log.readAll();
         log.dropLast(lines.size());
         for (byte[] line : lines) {
-            log.append(new String(line, StandardCharsets.UTF_8).replace("\"signer\":\"flo@box\"", "\"signer\":\"eve@box\"")
+            log.append(new String(line, StandardCharsets.UTF_8).replace("\"signer\":\"alex@box\"", "\"signer\":\"eve@box\"")
                     .getBytes(StandardCharsets.UTF_8));
         }
 

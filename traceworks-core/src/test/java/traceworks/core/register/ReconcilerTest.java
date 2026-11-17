@@ -447,7 +447,7 @@ class ReconcilerTest {
         Finding changed = new Finding(f.id(), f.ruleKey(), f.subject(), f.severity(), f.title(), f.description(),
                 frozenEvidence, f.tags(), FindingStatus.ACCEPTED_RISK, f.firstSeen(), f.lastSeen(), f.occurrences(),
                 f.regressions(), f.unverifiedEvidence(), null, new Finding.DispositionRecord(
-                        FindingStatus.ACCEPTED_RISK, "note", "flo", T1, until, frozenEvidence));
+                        FindingStatus.ACCEPTED_RISK, "note", "alex", T1, until, frozenEvidence));
         return after1.with(List.of(changed));
     }
 
@@ -571,7 +571,7 @@ class ReconcilerTest {
     @Test
     void aDecidedFindingAbsentFromAReport_keepsItsItem() {
         RegisterState first = Reconciler.apply(empty, report("run-1", T1, findingOf("p.A", "p.A#1")), null).state();
-        Finding dismissed = Disposition.dismiss(one(first, "split", "p.A#1"), "no concern", "flo", T1);
+        Finding dismissed = Disposition.dismiss(one(first, "split", "p.A#1"), "no concern", "alex", T1);
         assertThat(dismissed.item()).isEqualTo("p.A");
 
         RegisterState second = Reconciler.apply(first.with(List.of(dismissed)), report("run-2", T2), null).state();

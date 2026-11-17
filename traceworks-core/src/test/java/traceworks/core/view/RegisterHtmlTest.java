@@ -30,7 +30,7 @@ class RegisterHtmlTest {
 
     private RegisterState state() {
         Finding.DispositionRecord accepted = new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "known & bounded",
-                "flo@box", T, T.plusSeconds(3600), "340 LOC");
+                "alex@box", T, T.plusSeconds(3600), "340 LOC");
         return new RegisterState(1, "arch", "wf-1", "architecture",
                 new RegisterState.LastReport("run-2", T.plusSeconds(60), "c".repeat(64), true), List.of(
                 finding("a", "A.java", FindingStatus.OPEN, null),
@@ -46,7 +46,7 @@ class RegisterHtmlTest {
     private String render() {
         List<RegisterEvent> history = List.of(event(0, "register.created", "\"workflow_id\":\"wf-1\""),
                 event(1, "report.applied", "\"run_id\":\"run-1\",\"counts\":{\"new\":2}"),
-                event(2, "finding.accepted", "\"id\":\"" + "b".repeat(64) + "\",\"actor\":\"flo@box\",\"note\":\"known & bounded\""));
+                event(2, "finding.accepted", "\"id\":\"" + "b".repeat(64) + "\",\"actor\":\"alex@box\",\"note\":\"known & bounded\""));
         return RegisterHtml.render(state(), history, blobs, new ChainReport(true, 3, "h".repeat(64), List.of(), List.of()),
                 "1.2.3");
     }
@@ -94,7 +94,7 @@ class RegisterHtmlTest {
         assertThat(page).contains("<details><summary>RESOLVED (1)</summary>");
         assertThat(page).contains("<code>size.class</code>", "A.java", "Big &lt;b&gt;A.java", "340 LOC",
                 "<span class=\"unverified\">unverified evidence</span>", "first seen run run-1", "last seen run run-2",
-                "2 occurrences, 1 regression", "accepted by flo@box at 2026-11-11T10:00:00Z, review by 2026-11-11T11:00:00Z",
+                "2 occurrences, 1 regression", "accepted by alex@box at 2026-11-11T10:00:00Z, review by 2026-11-11T11:00:00Z",
                 "known &amp; bounded");
         assertThat(page).contains("B|C.java");
     }
@@ -103,7 +103,7 @@ class RegisterHtmlTest {
     void history_listsTheLastEvents_andTheVerificationLine() {
         String page = render();
 
-        assertThat(page).contains("<h2>History</h2>", "report.applied", "run-1", "finding.accepted", "flo@box",
+        assertThat(page).contains("<h2>History</h2>", "report.applied", "run-1", "finding.accepted", "alex@box",
                 "chain intact, 3 events, head " + "h".repeat(64));
     }
 
@@ -113,7 +113,7 @@ class RegisterHtmlTest {
         String page = render();
 
         assertThat(page).contains(
-                "<tr><td>2</td><td>2026-11-11T10:00:00Z</td><td>finding.accepted</td><td>id bbbbbbbb · actor flo@box"
+                "<tr><td>2</td><td>2026-11-11T10:00:00Z</td><td>finding.accepted</td><td>id bbbbbbbb · actor alex@box"
                         + " · note known &amp; bounded</td></tr>",
                 "<tr><td>1</td><td>2026-11-11T10:00:00Z</td><td>report.applied</td><td>run_id run-1 · counts"
                         + " {&quot;new&quot;:2}</td></tr>",
@@ -171,30 +171,30 @@ class RegisterHtmlTest {
     @Test
     void aDecisionOfAnAgent_namesItAfterTheActor_inTheFindingAndInTheHistory() {
         Finding.DispositionRecord byAgent = new Finding.DispositionRecord(FindingStatus.DISMISSED, "not ours",
-                "flo@box", T, null, null, Severity.HIGH, "claude-code");
+                "alex@box", T, null, null, Severity.HIGH, "claude-code");
         Finding.DispositionRecord byPerson = new Finding.DispositionRecord(FindingStatus.DISMISSED, "checked",
-                "flo@box", T, null, null, Severity.HIGH);
+                "alex@box", T, null, null, Severity.HIGH);
         RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
                 finding("a", "A.java", FindingStatus.DISMISSED, byAgent),
                 finding("b", "B.java", FindingStatus.DISMISSED, byPerson)), 2);
         List<RegisterEvent> history = List.of(event(0, "finding.dismissed", "\"id\":\"" + "a".repeat(64)
-                + "\",\"actor\":\"flo@box\",\"agent\":\"claude-code\",\"note\":\"not ours\""));
+                + "\",\"actor\":\"alex@box\",\"agent\":\"claude-code\",\"note\":\"not ours\""));
 
         String page = RegisterHtml.render(state, history, blobs, new ChainReport(true, 1, "h".repeat(64), List.of(),
                 List.of()), "1.2.3");
 
         assertThat(page).contains(
-                "dismissed by flo@box through the agent claude-code at 2026-11-11T10:00:00Z, made on severity HIGH:"
+                "dismissed by alex@box through the agent claude-code at 2026-11-11T10:00:00Z, made on severity HIGH:"
                         + " not ours",
-                "dismissed by flo@box at 2026-11-11T10:00:00Z, made on severity HIGH: checked",
-                "<td>finding.dismissed</td><td>id aaaaaaaa \u00b7 actor flo@box \u00b7 agent claude-code \u00b7 note"
+                "dismissed by alex@box at 2026-11-11T10:00:00Z, made on severity HIGH: checked",
+                "<td>finding.dismissed</td><td>id aaaaaaaa \u00b7 actor alex@box \u00b7 agent claude-code \u00b7 note"
                         + " not ours</td>");
     }
 
     /** The name is checked where it is given; a state that was edited can hold any, and the page shows it as text. */
     @Test
     void theNameOfAnAgentFromAnEditedState_isEscaped_andItsDirectionMarkIsShownByItsCodePoint() {
-        Finding.DispositionRecord hostile = new Finding.DispositionRecord(FindingStatus.DISMISSED, "n", "flo@box", T,
+        Finding.DispositionRecord hostile = new Finding.DispositionRecord(FindingStatus.DISMISSED, "n", "alex@box", T,
                 null, null, Severity.HIGH, "<script>x</script>\u202e");
         RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
                 finding("a", "A.java", FindingStatus.DISMISSED, hostile)), 1);
@@ -210,9 +210,9 @@ class RegisterHtmlTest {
     @Test
     void aDecisionMadeOnAnotherSeverity_saysSo_andOneMadeOnTheSameNamesIt() {
         Finding.DispositionRecord onLow = new Finding.DispositionRecord(FindingStatus.DISMISSED, "false positive",
-                "flo@box", T, null, null, Severity.LOW);
+                "alex@box", T, null, null, Severity.LOW);
         Finding.DispositionRecord onHigh = new Finding.DispositionRecord(FindingStatus.DISMISSED, "not ours",
-                "flo@box", T, null, null, Severity.HIGH);
+                "alex@box", T, null, null, Severity.HIGH);
         RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
                 finding("a", "A.java", FindingStatus.DISMISSED, onLow),
                 finding("b", "B.java", FindingStatus.DISMISSED, onHigh)), 2);
@@ -220,8 +220,8 @@ class RegisterHtmlTest {
         String page = RegisterHtml.render(state, List.of(), blobs, new ChainReport(true, 0, "h".repeat(64), List.of(),
                 List.of()), "1.2.3");
 
-        assertThat(page).contains("dismissed by flo@box at 2026-11-11T10:00:00Z, made on severity LOW, not on the HIGH"
+        assertThat(page).contains("dismissed by alex@box at 2026-11-11T10:00:00Z, made on severity LOW, not on the HIGH"
                         + " the finding has now: false positive",
-                "dismissed by flo@box at 2026-11-11T10:00:00Z, made on severity HIGH: not ours");
+                "dismissed by alex@box at 2026-11-11T10:00:00Z, made on severity HIGH: not ours");
     }
 }

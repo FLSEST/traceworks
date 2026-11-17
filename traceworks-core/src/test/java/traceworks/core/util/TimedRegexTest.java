@@ -41,7 +41,7 @@ class TimedRegexTest {
         assertThat(TimedRegex.repetitionProblem("(?:^{2147483647}){2147483647}")).contains("1,000,000,000,000");
         assertThat(TimedRegex.repetitionProblem("(?:(?:(?:(?:(?:){1000}){1000}){1000}){1000}){1000}")).isNotNull();
         assertThat(TimedRegex.repetitionProblem("[a-z]{1,64}@[a-z]{1,255}\\.[a-z]{2,63}")).isNull();
-        assertThat(TimedRegex.matches(Pattern.compile("[a-z]{1,64}@[a-z]{1,255}\\.[a-z]{2,63}"), "flo@example.org",
+        assertThat(TimedRegex.matches(Pattern.compile("[a-z]{1,64}@[a-z]{1,255}\\.[a-z]{2,63}"), "alex@example.org",
                 BUDGET)).isTrue();
     }
 

@@ -24,7 +24,7 @@ class SealLogTest {
         fields.put("workflow_name", "Name of " + id);
         fields.put("package_dir", "/pkg/" + id);
         fields.put("digest", digest);
-        fields.put("signer", "flo@box");
+        fields.put("signer", "alex@box");
         fields.put("key", "SHA256:abc");
         return fields;
     }

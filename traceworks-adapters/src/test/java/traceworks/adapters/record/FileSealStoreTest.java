@@ -114,9 +114,9 @@ class FileSealStoreTest {
         assertThat(store().allowedSigners()).isEmpty();
         assertThat(store().allowedSignersLocation()).isEqualTo(home.resolve("allowed_signers").toString());
 
-        Files.writeString(home.resolve("allowed_signers"), "flo ssh-ed25519 AAAA\n");
+        Files.writeString(home.resolve("allowed_signers"), "alex ssh-ed25519 AAAA\n");
 
-        assertThat(store().allowedSigners()).hasValue("flo ssh-ed25519 AAAA\n".getBytes(StandardCharsets.UTF_8));
+        assertThat(store().allowedSigners()).hasValue("alex ssh-ed25519 AAAA\n".getBytes(StandardCharsets.UTF_8));
     }
 
     @Test

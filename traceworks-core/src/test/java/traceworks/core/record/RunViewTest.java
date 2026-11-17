@@ -163,7 +163,7 @@ class RunViewTest {
         assertThat(view.packageDigest()).isEqualTo("digest-1");
         assertThat(view.packageCommit()).as("no repository recorded").isNull();
         assertThat(view.packageDirty()).isNull();
-        assertThat(view.actor()).isEqualTo("flo@box");
+        assertThat(view.actor()).isEqualTo("alex@box");
         assertThat(view.trigger()).isEqualTo("MANUAL");
         assertThat(view.startedAt()).isBefore(view.finishedAt());
         assertThat(view.gate().status()).isEqualTo("YELLOW");
@@ -200,7 +200,7 @@ class RunViewTest {
                 new traceworks.core.container.ImageFacts("alpine:3.20", null, null));
         fx2.recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 "{\"id\":\"wf\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of(),
-                traceworks.core.model.TriggerSource.MANUAL, "flo@box", "0.1.0", "container",
+                traceworks.core.model.TriggerSource.MANUAL, "alex@box", "0.1.0", "container",
                 new RunStart.Runtime("docker", "29.1.3"), 16, Map.of(), "/ws", null, null, 128, null, images));
 
         RunView view = RunView.of(fx2.log.readAll().stream().map(RecordedEvent::parse).toList(), false);
@@ -223,7 +223,7 @@ class RunViewTest {
         RecordFixture inGit = new RecordFixture();
         inGit.recorder.runStarted(new traceworks.core.record.RunStart("wf", "Wf", "/pkg", "digest-1",
                 "abc123", true, "{\"id\":\"wf\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of(),
-                traceworks.core.model.TriggerSource.MANUAL, "flo@box", "0.1.0", "host", null, "/ws"));
+                traceworks.core.model.TriggerSource.MANUAL, "alex@box", "0.1.0", "host", null, "/ws"));
 
         RunView view = RunView.of(inGit.log.readAll().stream().map(RecordedEvent::parse).toList(), false);
 
@@ -236,7 +236,7 @@ class RunViewTest {
         RecordFixture inGit = new RecordFixture();
         inGit.recorder.runStarted(new traceworks.core.record.RunStart("wf", "Wf", "/pkg", "digest-1",
                 "abc123", false, "{\"id\":\"wf\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of(),
-                traceworks.core.model.TriggerSource.MANUAL, "flo@box", "0.1.0", "host", null, "/ws"));
+                traceworks.core.model.TriggerSource.MANUAL, "alex@box", "0.1.0", "host", null, "/ws"));
 
         RunView view = RunView.of(inGit.log.readAll().stream().map(RecordedEvent::parse).toList(), false);
 
@@ -281,14 +281,14 @@ class RunViewTest {
                         true, null, null, null),
                 new RunParked(0, "approval"));
         fx.nextWriter();
-        fx.recorder.attributeNextAnswer("flo@box", "cli", null, "go");
+        fx.recorder.attributeNextAnswer("alex@box", "cli", null, "go");
         fx.emit(new ApprovalAnswered(0, "approval", "yes"));
 
         RunView view = view(false);
 
         assertThat(view.status()).isEqualTo(RunStatus.PARKED);
         assertThat(text(view.parkedAnswer().answer())).isEqualTo("yes");
-        assertThat(view.parkedAnswer().actor()).isEqualTo("flo@box");
+        assertThat(view.parkedAnswer().actor()).isEqualTo("alex@box");
         assertThat(view.parkedAnswer().source()).isEqualTo("cli");
         assertThat(text(view.parkedAnswer().comment())).isEqualTo("go");
     }
@@ -298,7 +298,7 @@ class RunViewTest {
     void aRunParkedByAPause_isParkedWithoutAQuestion() {
         fx.emit(new StepStarted(0, "build", "shell", 0, false),
                 new StepFinished(0, "build", "shell", StepStatus.COMPLETED, "./build", 5, Map.of()));
-        fx.recorder.record("run.pause_requested", Map.of("actor", "flo@box", "request", "req-7"));
+        fx.recorder.record("run.pause_requested", Map.of("actor", "alex@box", "request", "req-7"));
         fx.emit(new RunParked(RunParked.NO_STEP, RunParked.PAUSE));
 
         RunView view = view(false);
@@ -340,7 +340,7 @@ class RunViewTest {
     void resumedAfterParking_isNoLongerParked() {
         fx.emit(new StepStarted(0, "ask", "approval", 0, false), new RunParked(0, "approval"));
         fx.nextWriter();
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box"));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box"));
 
         assertThat(view(true).status()).isEqualTo(RunStatus.RUNNING);
         assertThat(view(true).parkedAnswer()).isNull();
@@ -352,7 +352,7 @@ class RunViewTest {
     void aRunParkedAgainAfterAResume_isParked() {
         fx.emit(new StepStarted(0, "ask", "approval", 0, false), new RunParked(0, "approval"));
         fx.nextWriter();
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box"));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box"));
         fx.emit(new RunParked(RunParked.NO_STEP, RunParked.PAUSE));
 
         assertThat(view(false).status()).isEqualTo(RunStatus.PARKED);
@@ -365,7 +365,7 @@ class RunViewTest {
         fx.emit(new StepStarted(0, "ask", "approval", 0, false),
                 new ApprovalRequested(0, "b1", "approval", "Ship it?", List.of("yes", "no"), List.of(), null, null,
                         true, null, null, null));
-        fx.recorder.attributeNextAnswer("flo@box", "inbox", null, null);
+        fx.recorder.attributeNextAnswer("alex@box", "inbox", null, null);
         fx.emit(new ApprovalAnswered(0, "approval", "yes"));
 
         assertThat(view(true).interventions()).extracting(RunView.Intervention::description)
@@ -403,7 +403,7 @@ class RunViewTest {
     void resumedRun_countsAttempts_andTheLatestAttemptWins() {
         fx.emit(new StepStarted(0, "build", "shell", 0, false), new OutputRecorded(0, "build", "first"),
                 new Checkpoint(0, snapshot()));
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box", "rerun_step", 0));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box", "rerun_step", 0));
         fx.emit(new StepStarted(0, "build", "shell", 0, false), new OutputRecorded(0, "build", "second"),
                 new StepFinished(0, "build", "shell", StepStatus.COMPLETED, "i", 5, Map.of()),
                 new RunFinished(RunStatus.COMPLETED, Map.of(), null));
@@ -429,7 +429,7 @@ class RunViewTest {
         fx.recorder.attributeNextAnswer("anna@box", "cli", "req-1", null, "claude-code");
         fx.emit(new ApprovalAnswered(0, "approval", "yes"));
         fx.nextWriter();
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box", "package_changed", false));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box", "package_changed", false));
         fx.recorder.attributeNextAnswer("anna@box", "resume", null, null, "claude-code");
         fx.emit(new StepStarted(0, "ask", "approval", 0, false),
                 new ApprovalRequested(0, "b1", "approval", "Ship it?", List.of("yes", "no"), List.of(), null, null,
@@ -438,7 +438,7 @@ class RunViewTest {
                 new StepStarted(1, "again", "approval", 1, false),
                 new ApprovalRequested(1, "b2", "approval", "Sure?", List.of("yes", "no"), List.of(), null, null,
                         false, null, null, null));
-        fx.recorder.attributeNextAnswer("flo@box", "inbox", "req-2", null);
+        fx.recorder.attributeNextAnswer("alex@box", "inbox", "req-2", null);
         fx.emit(new ApprovalAnswered(1, "approval", "yes"));
 
         RunView view = view(false);
@@ -465,7 +465,7 @@ class RunViewTest {
         int cli = fx.events().getLast().seq();
         fx.nextWriter();
         Map<String, Object> resumed = new java.util.LinkedHashMap<>();
-        resumed.put("actor", "flo@box");
+        resumed.put("actor", "alex@box");
         resumed.put("from_checkpoint", 0);
         resumed.put("next_position", 0);
         resumed.put("rerun_step", null);
@@ -505,7 +505,7 @@ class RunViewTest {
                 .containsExactly("approval.answered", "run.resumed");
         assertThat(view.interventions().get(0).actor()).isEqualTo("anna@box");
         assertThat(view.interventions().get(0).description()).contains("step 0", "cli");
-        assertThat(view.interventions().get(1).actor()).isEqualTo("flo@box");
+        assertThat(view.interventions().get(1).actor()).isEqualTo("alex@box");
         assertThat(view.interventions().get(1).description()).contains("package changed", "digest-2");
     }
 
@@ -519,7 +519,7 @@ class RunViewTest {
         fx.nextWriter();
         fx.recorder.record("run.recovered", Map.of("discarded", "{\"seq\":9".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         Map<String, Object> resumed = new java.util.LinkedHashMap<>();
-        resumed.put("actor", "flo@box");
+        resumed.put("actor", "alex@box");
         resumed.put("rerun_step", 0);
         resumed.put("package_changed", false);
         fx.recorder.record("run.resumed", resumed);
@@ -549,7 +549,7 @@ class RunViewTest {
                         false, null, null, null),
                 new StepWaiting(1, true), new RunParked(1, "approval"));
         fx.nextWriter();
-        fx.recorder.record("run.cancel_requested", Map.of("actor", "flo@box", "request", "r-1"));
+        fx.recorder.record("run.cancel_requested", Map.of("actor", "alex@box", "request", "r-1"));
         fx.emit(new RunFinished(RunStatus.CANCELLED, Map.of(), null));
 
         RunView view = view(false);
@@ -580,7 +580,7 @@ class RunViewTest {
     void anOpenStepOfAnInterruptedRunThatWasCancelled_isCancelled() {
         fx.emit(new StepStarted(0, "build", "shell", 0, false));
         fx.nextWriter();
-        fx.recorder.record("run.cancel_requested", Map.of("actor", "flo@box", "request", "r-1"));
+        fx.recorder.record("run.cancel_requested", Map.of("actor", "alex@box", "request", "r-1"));
         fx.emit(new RunFinished(RunStatus.CANCELLED, Map.of(), null));
 
         assertThat(view(false).steps().getFirst().shownStatus()).isEqualTo("CANCELLED");
@@ -591,7 +591,7 @@ class RunViewTest {
         fx.emit(new StepStarted(0, "build", "shell", 0, false));
         fx.recorder.record("request.refused", Map.of("kind", "approval", "request", "r-1", "actor", "eve@box",
                 "reason", "another answer came first"));
-        fx.recorder.record("run.cancel_requested", Map.of("actor", "flo@box", "request", "r-2"));
+        fx.recorder.record("run.cancel_requested", Map.of("actor", "alex@box", "request", "r-2"));
         fx.emit(new RunFinished(RunStatus.CANCELLED, Map.of(), null));
 
         List<RunView.Intervention> interventions = view(false).interventions();
@@ -600,7 +600,7 @@ class RunViewTest {
                 .containsExactly("request.refused", "run.cancel_requested");
         assertThat(interventions.get(0).actor()).isEqualTo("eve@box");
         assertThat(interventions.get(0).description()).contains("approval", "another answer came first");
-        assertThat(interventions.get(1).actor()).isEqualTo("flo@box");
+        assertThat(interventions.get(1).actor()).isEqualTo("alex@box");
         assertThat(interventions.get(1).description()).isEqualTo("requested a cancel (request r-2)");
         assertThat(interventions.get(1).at()).isNotNull();
     }
@@ -608,7 +608,7 @@ class RunViewTest {
     /** A cancel that came without a request, from the terminal say, names none. */
     @Test
     void aCancelRequestWithoutARequest_namesNone() {
-        fx.recorder.record("run.cancel_requested", Map.of("actor", "flo@box"));
+        fx.recorder.record("run.cancel_requested", Map.of("actor", "alex@box"));
         fx.emit(new RunFinished(RunStatus.CANCELLED, Map.of(), null));
 
         assertThat(view(false).interventions()).extracting(RunView.Intervention::description)
@@ -619,14 +619,14 @@ class RunViewTest {
     @Test
     void aResume_namesWhereItWentOn_theStepThatRunsAgain_andTheAnswerItUses() {
         Map<String, Object> full = new java.util.LinkedHashMap<>();
-        full.put("actor", "flo@box");
+        full.put("actor", "alex@box");
         full.put("from_checkpoint", 4);
         full.put("next_position", 1);
         full.put("rerun_step", 1);
         full.put("answer", 7);
         full.put("package_changed", false);
         fx.recorder.record("run.resumed", full);
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box"));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box"));
 
         assertThat(view(true).interventions()).extracting(RunView.Intervention::description).containsExactly(
                 "resumed the run from the checkpoint at seq 4, going on at position 1; step 1 runs again; with the"
@@ -639,7 +639,7 @@ class RunViewTest {
     void interventions_belongToTheRunItself_notToItsChildRuns() {
         fx.emit(new StepStarted(0, "parent-step", "sub-workflow", 0, false),
                 new ChildRunEvent("child-1", new StepStarted(0, "inner", "shell", 0, false)));
-        fx.recorder.record("run.cancel_requested", Map.of("actor", "flo@box", "request", "r-1"));
+        fx.recorder.record("run.cancel_requested", Map.of("actor", "alex@box", "request", "r-1"));
         fx.emit(new ChildRunEvent("child-1", new RunFinished(RunStatus.CANCELLED, Map.of(), null)),
                 new RunFinished(RunStatus.CANCELLED, Map.of(), null));
 
@@ -895,9 +895,9 @@ class RunViewTest {
         ofAnEarlierVersion.getFirst().fields().remove("records");
         assertThat(RunView.of(ofAnEarlierVersion, false).recordsOutputCut()).isFalse();
 
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box", "records", List.of("output_cut")));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box", "records", List.of("output_cut")));
         assertThat(view(false).recordsOutputCut()).as("resumed by this version").isTrue();
-        fx.recorder.record("run.resumed", Map.of("actor", "flo@box"));
+        fx.recorder.record("run.resumed", Map.of("actor", "alex@box"));
         assertThat(view(false).recordsOutputCut()).as("resumed by an earlier version").isFalse();
     }
 
@@ -935,7 +935,7 @@ class RunViewTest {
         RecordFixture other = new RecordFixture();
         other.recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8), Map.of(),
-                traceworks.core.model.TriggerSource.MANUAL, "flo", "0.1.0", "container", null, 16,
+                traceworks.core.model.TriggerSource.MANUAL, "alex", "0.1.0", "container", null, 16,
                 Map.of(), "/ws", null, null, 128, null, List.of(),
                 new AiNetwork(true, Map.of("claude", List.of("gateway.example:8443")))));
         RunView open = RunView.of(other.events(), false);

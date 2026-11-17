@@ -38,30 +38,30 @@ class TerminalFormatTest {
 
     @Test
     void runStarted_namesWorkflowRunAndActor() {
-        assertThat(line(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"actor\":\"flo@box\"")))
-                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by flo@box");
+        assertThat(line(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"actor\":\"alex@box\"")))
+                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by alex@box");
     }
 
     /** The start line says where the run runs: in containers, with the runtime, or on the host without one. */
     @Test
     void runStartedAndResumed_nameWhereTheRunRuns() {
-        String workflow = "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"actor\":\"flo@box\",";
+        String workflow = "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"actor\":\"alex@box\",";
         String docker = "\"container_runtime\":{\"name\":\"docker\",\"version\":\"29.1.3\"}";
 
         assertThat(line(event("run.started", workflow + "\"execution\":\"container\"," + docker)))
-                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by flo@box in containers (docker 29.1.3)");
+                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by alex@box in containers (docker 29.1.3)");
         assertThat(line(event("run.started", workflow + "\"execution\":\"host\",\"container_runtime\":null")))
-                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by flo@box on the host (no container runtime"
+                .isEqualTo("12:34:56 run started: Deploy (run 11111111) by alex@box on the host (no container runtime"
                         + " works)");
-        assertThat(line(event("run.resumed", "\"actor\":\"flo@box\",\"rerun_step\":2,\"execution\":\"container\","
-                + docker))).isEqualTo("12:34:56 run resumed by flo@box in containers (docker 29.1.3), running step 2"
+        assertThat(line(event("run.resumed", "\"actor\":\"alex@box\",\"rerun_step\":2,\"execution\":\"container\","
+                + docker))).isEqualTo("12:34:56 run resumed by alex@box in containers (docker 29.1.3), running step 2"
                 + " again");
-        assertThat(line(event("run.resumed", "\"actor\":\"flo@box\",\"rerun_step\":null,\"execution\":\"host\","
+        assertThat(line(event("run.resumed", "\"actor\":\"alex@box\",\"rerun_step\":null,\"execution\":\"host\","
                 + docker))).as("a host run stays one where a runtime works now")
-                .isEqualTo("12:34:56 run resumed by flo@box on the host, where it started");
-        assertThat(line(event("run.resumed", "\"actor\":\"flo@box\",\"rerun_step\":null,\"execution\":\"host\","
+                .isEqualTo("12:34:56 run resumed by alex@box on the host, where it started");
+        assertThat(line(event("run.resumed", "\"actor\":\"alex@box\",\"rerun_step\":null,\"execution\":\"host\","
                 + "\"container_runtime\":null")))
-                .isEqualTo("12:34:56 run resumed by flo@box on the host (no container runtime works)");
+                .isEqualTo("12:34:56 run resumed by alex@box on the host (no container runtime works)");
     }
 
     @Test
@@ -107,9 +107,9 @@ class TerminalFormatTest {
 
         line(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"output_limit_mib\":4"));
         assertThat(line(event("step.command.finished", cut))).endsWith("(stdout beyond 4 MiB)");
-        line(event("run.resumed", "\"actor\":\"flo@box\",\"output_limit_mib\":64"));
+        line(event("run.resumed", "\"actor\":\"alex@box\",\"output_limit_mib\":64"));
         assertThat(line(event("step.command.finished", cut))).endsWith("(stdout beyond 64 MiB)");
-        line(event("run.resumed", "\"actor\":\"flo@box\""));
+        line(event("run.resumed", "\"actor\":\"alex@box\""));
         assertThat(line(event("step.command.finished", cut))).as("a record of an earlier version: the default")
                 .endsWith("(stdout beyond 16 MiB)");
     }
@@ -125,11 +125,11 @@ class TerminalFormatTest {
                 + ",\"options\":[\"Yes\",\"No\"]")))
                 .isEqualTo("12:34:56 step 1  question: Publish 1.0? [Yes / No]");
         assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
-                + ",\"actor\":\"flo@box\"")))
-                .isEqualTo("12:34:56 step 1  answered: Yes by flo@box");
+                + ",\"actor\":\"alex@box\"")))
+                .isEqualTo("12:34:56 step 1  answered: Yes by alex@box");
         assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
-                + ",\"actor\":\"flo@box\",\"agent\":\"claude-code\"")))
-                .isEqualTo("12:34:56 step 1  answered: Yes by flo@box through the agent claude-code");
+                + ",\"actor\":\"alex@box\",\"agent\":\"claude-code\"")))
+                .isEqualTo("12:34:56 step 1  answered: Yes by alex@box through the agent claude-code");
         assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
                 + ",\"actor\":null,\"agent\":\"claude-code\"")))
                 .as("a line somebody edited: an agent without an actor")
@@ -145,8 +145,8 @@ class TerminalFormatTest {
         String error = blob("e1", "boom");
         assertThat(line(event("run.finished", "\"status\":\"FAILED\",\"gate\":null,\"error\":" + error)))
                 .isEqualTo("12:34:56 run finished: FAILED: boom");
-        assertThat(line(event("run.resumed", "\"actor\":\"flo@box\",\"rerun_step\":2")))
-                .isEqualTo("12:34:56 run resumed by flo@box, running step 2 again");
+        assertThat(line(event("run.resumed", "\"actor\":\"alex@box\",\"rerun_step\":2")))
+                .isEqualTo("12:34:56 run resumed by alex@box, running step 2 again");
     }
 
     @Test
@@ -198,7 +198,7 @@ class TerminalFormatTest {
     @Test
     void valuesFromTheRecord_areNeutralisedInEventLines() {
         String shown = line(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\\u001b]0;x\\u0007\\u202e\"},"
-                + "\"actor\":\"flo\\u001b[2J\""));
+                + "\"actor\":\"alex\\u001b[2J\""));
 
         assertThat(shown).doesNotContain("\u001b", "\u0007", "\u202e").contains("Deploy?]0;x??");
     }

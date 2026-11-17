@@ -111,9 +111,9 @@ class ConsoleAskerTest {
 
     @Test
     void aSingleInput_takesTheLine_orTheDefaultOnAnEmptyLine() throws Exception {
-        type("flo\n\n");
+        type("alex\n\n");
 
-        assertThat(asker.ask(input(null, null))).contains("flo");
+        assertThat(asker.ask(input(null, null))).contains("alex");
         assertThat(asker.ask(input(new BlobRef("d", 4), null))).contains("dflt");
         assertThat(shown()).contains("[dflt]");
     }
@@ -142,13 +142,13 @@ class ConsoleAskerTest {
 
     @Test
     void aForm_isAskedFieldByField_andAnsweredAsJson() throws Exception {
-        type("flo\nprod\n");
+        type("alex\nprod\n");
         QuestionView form = new QuestionView(4, 1, "human-input", "b", new BlobRef("q", 6), List.of(), List.of(), null,
                 null, true, null, null,
                 List.of(Map.of("variable_name", "who", "label", "Who?"), Map.of("variable_name", "where", "label", "Where?")),
                 false, false, null);
 
-        assertThat(asker.ask(form)).contains("{\"who\":\"flo\",\"where\":\"prod\"}");
+        assertThat(asker.ask(form)).contains("{\"who\":\"alex\",\"where\":\"prod\"}");
         assertThat(shown()).contains("Who?", "Where?");
     }
 

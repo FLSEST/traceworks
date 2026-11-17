@@ -423,7 +423,7 @@ class MountGuardTest {
         Files.createDirectories(home.resolve(".config/gcloud"));
         Path keys = Files.createDirectories(elsewhere.resolve("keys/ssh"));
         Files.createSymbolicLink(home.resolve(".ssh"), keys);
-        Path backup = Files.createDirectories(elsewhere.resolve("backup/flo/.aws"));
+        Path backup = Files.createDirectories(elsewhere.resolve("backup/alex/.aws"));
 
         assertThat(check(home.resolve(".config"))).hasValueSatisfying(r -> assertThat(r).contains("~/.config/gcloud"));
         assertThat(check(elsewhere.resolve("keys"))).hasValueSatisfying(r -> assertThat(r).contains("~/.ssh"));
@@ -913,7 +913,7 @@ class MountGuardTest {
      */
     @Test
     void folderDirectlyHoldingASocket_isRefused_namingIt() throws IOException {
-        List<Path> folders = List.of(outside.resolve("tmux-1000"), outside.resolve("screen/S-flo"),
+        List<Path> folders = List.of(outside.resolve("tmux-1000"), outside.resolve("screen/S-alex"),
                 outside.resolve(".ICE-unix"), outside.resolve("tsx-1000"));
         List<String> names = List.of("default", "1234.pts-0.host", "4242", "sock");
         List<ServerSocketChannel> servers = new java.util.ArrayList<>();

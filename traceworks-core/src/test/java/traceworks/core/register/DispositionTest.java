@@ -21,11 +21,11 @@ class DispositionTest {
 
     @Test
     void accept_freezesTheEvidence_andSetsTheReviewDate_default180Days() {
-        Finding accepted = Disposition.accept(with(FindingStatus.OPEN), "known and bounded", "flo@box", T, null);
+        Finding accepted = Disposition.accept(with(FindingStatus.OPEN), "known and bounded", "alex@box", T, null);
 
         assertThat(accepted.status()).isEqualTo(FindingStatus.ACCEPTED_RISK);
         assertThat(accepted.disposition()).isEqualTo(new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK,
-                "known and bounded", "flo@box", T, T.plus(Duration.ofDays(180)), "320 LOC", Severity.HIGH));
+                "known and bounded", "alex@box", T, T.plus(Duration.ofDays(180)), "320 LOC", Severity.HIGH));
         assertThat(accepted.resolvedAt()).isNull();
     }
 
@@ -44,18 +44,18 @@ class DispositionTest {
 
     @Test
     void dismiss_hasNoReviewDate_andNoFrozenEvidence() {
-        Finding dismissed = Disposition.dismiss(with(FindingStatus.OPEN), "not ours", "flo@box", T);
+        Finding dismissed = Disposition.dismiss(with(FindingStatus.OPEN), "not ours", "alex@box", T);
 
         assertThat(dismissed.status()).isEqualTo(FindingStatus.DISMISSED);
         assertThat(dismissed.disposition()).isEqualTo(new Finding.DispositionRecord(FindingStatus.DISMISSED,
-                "not ours", "flo@box", T, null, null, Severity.HIGH));
+                "not ours", "alex@box", T, null, null, Severity.HIGH));
     }
 
     @Test
     void reopen_clearsTheDisposition_andOpensTheFinding() {
         Finding accepted = Disposition.accept(with(FindingStatus.OPEN), "n", "a", T, null);
 
-        Finding reopened = Disposition.reopen(accepted, "fix it after all", "flo@box", T.plusSeconds(60));
+        Finding reopened = Disposition.reopen(accepted, "fix it after all", "alex@box", T.plusSeconds(60));
 
         assertThat(reopened.status()).isEqualTo(FindingStatus.OPEN);
         assertThat(reopened.disposition()).isNull();

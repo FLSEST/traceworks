@@ -337,7 +337,7 @@ class RunRecorderTest {
     void runStarted_recordsTheStart() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", "abc", true,
                 "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of("who", "SECRET-IN"),
-                TriggerSource.MANUAL, "flo", "0.1.0", "container", new RunStart.Runtime("podman", "5.4.1"), "/ws"));
+                TriggerSource.MANUAL, "alex", "0.1.0", "container", new RunStart.Runtime("podman", "5.4.1"), "/ws"));
 
         JsonNode node = lines().get(0);
         assertThat(node.get("type").asText()).isEqualTo("run.started");
@@ -350,7 +350,7 @@ class RunRecorderTest {
         assertThat(text(node.get("definition"))).isEqualTo("{\"id\":\"wf\"}");
         assertThat(text(node.get("inputs"))).contains("SECRET-IN");
         assertThat(node.get("trigger").asText()).isEqualTo("MANUAL");
-        assertThat(node.get("actor").asText()).isEqualTo("flo");
+        assertThat(node.get("actor").asText()).isEqualTo("alex");
         assertThat(node.get("version").asText()).isEqualTo("0.1.0");
         assertThat(node.get("execution").asText()).isEqualTo("container");
         assertThat(node.get("container_runtime").get("name").asText()).isEqualTo("podman");
@@ -366,7 +366,7 @@ class RunRecorderTest {
     @Test
     void runStarted_recordsTheOutputLimit() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 4, "/ws", null, null));
 
         JsonNode node = lines().get(0);
@@ -381,10 +381,10 @@ class RunRecorderTest {
     @Test
     void runStarted_recordsTheOutputBudget_afterTheOutputLimit() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 4, Map.of(), "/ws", null, null, 40));
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 64, "/ws", null, null));
 
         JsonNode node = lines().get(0);
@@ -400,10 +400,10 @@ class RunRecorderTest {
     @Test
     void runStarted_recordsTheAiImages_emptyWithoutAny() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 16, Map.of("pi", "pi:2", "claude", "claude:7"), "/ws", null, null));
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 4, "/ws", null, null));
 
         JsonNode node = lines().get(0);
@@ -424,7 +424,7 @@ class RunRecorderTest {
             aiImages.put(cli, cli + ":1");
         }
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 16, aiImages, "/ws", null, null));
 
         List<String> written = new java.util.ArrayList<>();
@@ -437,14 +437,14 @@ class RunRecorderTest {
     @Test
     void runStarted_recordsTheAiNetworkAndTheOperatorsHosts() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 16, Map.of(), "/ws", null, null, 128, null, List.of(), new AiNetwork(false,
                 Map.of("pi", List.of("llm.corp.example:443"), "claude", List.of("b.example:443", "a.example:443")))));
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 16, Map.of(), "/ws", null, null, 128, null, List.of(), new AiNetwork(true, Map.of())));
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, 4, "/ws", null, null));
 
         JsonNode node = lines().get(0);
@@ -464,7 +464,7 @@ class RunRecorderTest {
     @Test
     void runStarted_withASource_recordsItAndItsSha() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null,
-                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "container",
+                "{}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "container",
                 null, "/home/workspaces/run-1",
                 "https://host/repo", "4b825dc642cb6eb9a060e54bf8d69288fbee4904"));
 
@@ -477,7 +477,7 @@ class RunRecorderTest {
     @Test
     void runStarted_ofAHostRunWithoutARuntime_recordsANullRuntime() throws Exception {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest", null, null, "{}".getBytes(StandardCharsets.UTF_8),
-                Map.of(), TriggerSource.MANUAL, "flo", "0.1.0", "host", null, "/ws"));
+                Map.of(), TriggerSource.MANUAL, "alex", "0.1.0", "host", null, "/ws"));
 
         JsonNode node = lines().get(0);
         assertThat(node.get("execution").asText()).isEqualTo("host");
@@ -534,7 +534,7 @@ class RunRecorderTest {
     @Test
     void record_writesUseCaseEvents_withBytesAsBlobs() throws Exception {
         Map<String, Object> fields = new LinkedHashMap<>();
-        fields.put("actor", "flo");
+        fields.put("actor", "alex");
         fields.put("from_checkpoint", 4);
         fields.put("discarded", "TORN".getBytes(StandardCharsets.UTF_8));
         fields.put("answer", null);
@@ -543,7 +543,7 @@ class RunRecorderTest {
         JsonNode node = lines().get(0);
         assertThat(node.get("type").asText()).isEqualTo("run.recovered");
         assertThat(node.get("run").asText()).isEqualTo(RUN);
-        assertThat(node.get("actor").asText()).isEqualTo("flo");
+        assertThat(node.get("actor").asText()).isEqualTo("alex");
         assertThat(node.get("from_checkpoint").asInt()).isEqualTo(4);
         assertThat(text(node.get("discarded"))).isEqualTo("TORN");
         assertThat(node.get("answer").isNull()).isTrue();
@@ -551,7 +551,7 @@ class RunRecorderTest {
 
     @Test
     void answerAttribution_appliesToTheNextAnswerOnly() throws Exception {
-        recorder.attributeNextAnswer("flo", "cli", "req-1", "looks fine");
+        recorder.attributeNextAnswer("alex", "cli", "req-1", "looks fine");
         recorder.emit(new ApprovalAnswered(1, "approval", "Yes"));
         recorder.emit(new ApprovalAnswered(1, "approval", "No"));
 
@@ -559,7 +559,7 @@ class RunRecorderTest {
         assertThat(n.get(0).get("type").asText()).isEqualTo("approval.answered");
         assertThat(n.get(0).get("kind").asText()).isEqualTo("approval");
         assertThat(text(n.get(0).get("answer"))).isEqualTo("Yes");
-        assertThat(n.get(0).get("actor").asText()).isEqualTo("flo");
+        assertThat(n.get(0).get("actor").asText()).isEqualTo("alex");
         assertThat(n.get(0).get("source").asText()).isEqualTo("cli");
         assertThat(n.get(0).get("request").asText()).isEqualTo("req-1");
         assertThat(text(n.get(0).get("comment"))).isEqualTo("looks fine");
@@ -572,23 +572,23 @@ class RunRecorderTest {
     /** The answer names the agent beside the actor only when one was given: no agent is no field, not a null. */
     @Test
     void answerAttribution_namesTheAgent_onlyWhenOneWasGiven() throws Exception {
-        recorder.attributeNextAnswer("flo", "cli", "req-1", null, "claude-code");
+        recorder.attributeNextAnswer("alex", "cli", "req-1", null, "claude-code");
         recorder.emit(new ApprovalAnswered(1, "approval", "Yes"));
-        recorder.attributeNextAnswer("flo", "cli", "req-2", null, null);
+        recorder.attributeNextAnswer("alex", "cli", "req-2", null, null);
         recorder.emit(new ApprovalAnswered(2, "approval", "Yes"));
         recorder.emit(new ApprovalAnswered(3, "approval", "Yes"));
 
         List<JsonNode> n = lines();
-        assertThat(n.get(0).get("actor").asText()).isEqualTo("flo");
+        assertThat(n.get(0).get("actor").asText()).isEqualTo("alex");
         assertThat(n.get(0).get("agent").asText()).isEqualTo("claude-code");
-        assertThat(n.get(1).get("actor").asText()).isEqualTo("flo");
+        assertThat(n.get(1).get("actor").asText()).isEqualTo("alex");
         assertThat(n.get(1).has("agent")).as("answered by the actor alone").isFalse();
         assertThat(n.get(2).has("agent")).as("a default nobody gave").isFalse();
     }
 
     @Test
     void clearAnswerAttribution_leavesTheNextAnswerUnattributed() throws Exception {
-        recorder.attributeNextAnswer("flo", "inbox", "req-1", null);
+        recorder.attributeNextAnswer("alex", "inbox", "req-1", null);
         recorder.clearAnswerAttribution();
         recorder.emit(new ApprovalAnswered(1, "approval", "Yes"));
 
@@ -616,18 +616,18 @@ class RunRecorderTest {
         int before = lines().size();
         recorder.stop();
 
-        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "flo"))).isFalse();
+        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "alex"))).isFalse();
         assertThat(lines()).hasSize(before);
     }
 
     @Test
     void afterTheRunParked_nothingIsAppended_butAChildsEndEndsNothing() throws Exception {
         recorder.emit(new ChildRunEvent("child-1", new RunFinished(RunStatus.COMPLETED, Map.of(), null)));
-        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "flo"))).isTrue();
+        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "alex"))).isTrue();
 
         recorder.emit(new RunParked(1, "approval"));
 
-        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "flo"))).isFalse();
+        assertThat(recorder.record("run.cancel_requested", Map.of("actor", "alex"))).isFalse();
         assertThat(lines()).extracting(n -> n.get("type").asText())
                 .containsExactly("run.finished", "run.cancel_requested", "run.parked");
     }
@@ -707,7 +707,7 @@ class RunRecorderTest {
         recorder.onAppend(seen::add);
 
         recorder.emit(new StepWaiting(0, true));
-        recorder.record("run.cancel_requested", Map.of("actor", "flo"));
+        recorder.record("run.cancel_requested", Map.of("actor", "alex"));
         recorder.emit(new RunStatusChanged(RunStatus.CANCELLED));
 
         assertThat(seen).extracting(RecordedEvent::seq).containsExactly(0, 1, 2);

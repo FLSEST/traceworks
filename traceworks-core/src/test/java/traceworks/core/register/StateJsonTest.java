@@ -15,7 +15,7 @@ class StateJsonTest {
     private static RegisterState sample() {
         Finding a = new Finding("b".repeat(64), "r", "s", Severity.HIGH, "t", "d", "e", List.of("x"),
                 FindingStatus.ACCEPTED_RISK, new Finding.Seen("run-1", T), new Finding.Seen("run-2", T.plusSeconds(60)),
-                2, 1, true, null, new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "note", "flo@box", T,
+                2, 1, true, null, new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "note", "alex@box", T,
                 T.plusSeconds(3600), "frozen"));
         Finding b = new Finding("a".repeat(64), "r2", "s2", Severity.LOW, "t2", null, null, List.of(),
                 FindingStatus.RESOLVED, new Finding.Seen("run-1", T), new Finding.Seen("run-1", T), 1, 0, false,

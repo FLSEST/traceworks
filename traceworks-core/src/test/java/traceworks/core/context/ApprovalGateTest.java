@@ -180,7 +180,7 @@ class ApprovalGateTest {
 
     @Test
     void aPreset_forAnotherStepOrType_answersNothing() {
-        gate.preset(1, "human-input", "Who?", "Flo", java.util.List.of());
+        gate.preset(1, "human-input", "Who?", "Alex", java.util.List.of());
 
         CompletableFuture<String> otherType = gate.request(
                 ApprovalRequest.builder().question("Who?").stepIndex(1).type("approval").build());

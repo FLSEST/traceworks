@@ -43,7 +43,7 @@ import java.util.function.Supplier;
 /** The use cases on in-memory ports: a store, a ledger, packages from JSON texts, fixed ids and a ticking clock. */
 final class AppFixture {
 
-    static final String ACTOR = "flo@box";
+    static final String ACTOR = "alex@box";
     static final Duration WAIT = Duration.ofSeconds(10);
     static final Path WORKSPACE = Path.of("/work");
 

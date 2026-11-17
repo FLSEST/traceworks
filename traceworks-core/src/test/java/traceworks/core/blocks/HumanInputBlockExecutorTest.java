@@ -245,7 +245,7 @@ class HumanInputBlockExecutorTest {
         var block = BlockDefinition.builder().type("human-input")
                 .config(new HashMap<>(Map.of("prompt", "Enter value", "variable_name", "val"))).build();
         var context = buildContext();
-        context.presetAnswer(0, "human-input", "Who deploys?", "Flo");
+        context.presetAnswer(0, "human-input", "Who deploys?", "Alex");
 
         var result = executor.execute(block, context);
 
@@ -261,12 +261,12 @@ class HumanInputBlockExecutorTest {
         var block = BlockDefinition.builder().type("human-input")
                 .config(new HashMap<>(Map.of("prompt", "Enter value", "variable_name", "val"))).build();
         var context = buildContext();
-        context.presetAnswer(0, "human-input", "Enter value", "Flo");
+        context.presetAnswer(0, "human-input", "Enter value", "Alex");
 
         var result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(context.getVariable("val")).isEqualTo("Flo");
+        assertThat(context.getVariable("val")).isEqualTo("Alex");
         assertThat(events.getFirst()).isInstanceOfSatisfying(ApprovalRequested.class,
                 requested -> assertThat(requested.preset()).isTrue());
     }

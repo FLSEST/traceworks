@@ -42,7 +42,7 @@ final class RecordFixture {
         Map<String, Object> inputs = new LinkedHashMap<>();
         inputs.put("ticket", "T-1");
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), inputs, TriggerSource.MANUAL, "flo@box",
+                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), inputs, TriggerSource.MANUAL, "alex@box",
                 "0.1.0", execution, null, "/ws"));
         return this;
     }

@@ -1497,10 +1497,10 @@ class MainTest {
 
         assertThat(parked.code()).isEqualTo(5);
         assertThat(parked.out()).contains("traceworks answer '" + id + "' --value '<text>'");
-        assertThat(exec("answer", id, "--value", "flo").code()).isZero();
+        assertThat(exec("answer", id, "--value", "alex").code()).isZero();
         Result resume = exec("resume", id, "--no-input", "--allow-host-execution");
         assertThat(resume.code()).as(resume.out() + resume.err()).isZero();
-        assertThat(resume.out()).contains("output: by flo");
+        assertThat(resume.out()).contains("output: by alex");
     }
 
     @Test
@@ -1524,12 +1524,12 @@ class MainTest {
                 {"type":"shell","name":"say","config":{"command":"echo {{ who }} to {{ target }}"}}""");
         String id = idOf(runHost(pkg));
 
-        Result answer = exec("answer", id, "--field", "who=flo", "--field", "target=env=prod");
+        Result answer = exec("answer", id, "--field", "who=alex", "--field", "target=env=prod");
         Result resume = exec("resume", id, "--no-input", "--allow-host-execution");
 
         assertThat(answer.code()).as(answer.err()).isZero();
         assertThat(resume.code()).as(resume.out() + resume.err()).isZero();
-        assertThat(resume.out()).contains("output: flo to env=prod");
+        assertThat(resume.out()).contains("output: alex to env=prod");
     }
 
     /** An answer the run does not take exits 6 and says why; it is not reported as given. */
