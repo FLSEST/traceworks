@@ -43,28 +43,34 @@ public final class TimedRegex {
      * counts multiply to more than {@link #MAX_REPETITIONS} is refused before the engine sees it.
      *
      * <p>The product of every count in the pattern is taken, nested or not: that refuses more than it must, and it
-     * needs no reading of groups. An escaped brace, a brace in a character class or in quoted text
-     * ({@code \Q...\E}) and the braces of {@code \p{...}} or {@code \x{...}} count nothing. Where the reading
+     * needs no reading of groups. The quoting ({@code \Q...\E}) is taken out first, as the engine takes it
+     * out ({@link #withoutQuotes}), so an empty quote inside a count hides nothing and a quoted brace is an escaped
+     * one. An escaped brace, a brace in a character class and the braces of {@code \p{...}}, {@code \x{...}} or
+     * {@code \N{...}} count nothing. Where the reading
      * here and the engine's could differ (a {@code ]} right after {@code [}), the class is taken to end early, so
      * a count is never missed.
+     *
+     * <p>Two things this reading cannot follow, so a pattern with either has every brace counted, also an escaped
+     * one, one in a class and one in quoted text: a control escape, which takes the character after it
+     * ({@code \c[} is one character and opens no class, {@code \c\} takes the backslash that would escape a brace),
+     * and a {@code #}, which starts a comment in comments mode, and a pattern can switch that mode on for a part
+     * of itself ({@code (?x)}), so that a {@code [} after it opens nothing. Every count the engine takes is a brace
+     * in the text, so that reading misses none.
      */
-    public static String repetitionProblem(String regex) {
+    public static String repetitionProblem(String pattern) {
+        // Quoting first, as the engine does: from here on no quote is left, and a quoted brace is an escaped one
+        String regex = withoutQuotes(pattern);
+        boolean everyBrace = regex.contains("\\c") || regex.indexOf('#') >= 0;
         long product = 1;
         int classDepth = 0;
         int i = 0;
         while (i < regex.length()) {
             char c = regex.charAt(i);
-            if (c == '\\') {
-                if (regex.startsWith("\\Q", i)) {
-                    int end = regex.indexOf("\\E", i + 2);
-                    if (end < 0) break;   // quoted to the end
-                    i = end + 2;
-                } else {
-                    i = afterEscape(regex, i);
-                }
+            if (c == '\\' && !everyBrace) {
+                i = afterEscape(regex, i);
                 continue;
             }
-            if (c == '[') {
+            if (c == '[' && !everyBrace) {
                 classDepth++;
             } else if (c == ']') {
                 if (classDepth > 0) classDepth--;
@@ -81,6 +87,60 @@ public final class TimedRegex {
             i++;
         }
         return null;
+    }
+
+    /**
+     * The pattern as the engine reads it after its first step, which takes the quoting out before anything else is
+     * parsed: {@code \Q} and {@code \E} go, and each quoted character becomes an escaped one. An empty quote
+     * leaves nothing behind, so {@code {1\Q\E0}} is {@code {10}}; a quoted brace becomes {@code \{}. This follows
+     * {@code java.util.regex.Pattern.RemoveQEQuoting} step by step (JDK 21), so that what is counted is what the
+     * engine parses: the first {@code \Q} is found by reading escapes as pairs; inside a quote a letter or a
+     * character outside ASCII stays, the first digit becomes {@code \x3<digit>}, later digits stay, and every
+     * other character gets a backslash; outside a quote an escape is copied as a pair.
+     */
+    static String withoutQuotes(String regex) {
+        int length = regex.length();
+        int i = 0;
+        while (i < length - 1) {
+            if (regex.charAt(i) != '\\') i += 1;
+            else if (regex.charAt(i + 1) != 'Q') i += 2;
+            else break;
+        }
+        if (i >= length - 1) return regex;   // no quote
+        StringBuilder out = new StringBuilder(length + 16).append(regex, 0, i);
+        i += 2;
+        boolean inQuote = true;
+        boolean beginQuote = true;
+        while (i < length) {
+            char c = regex.charAt(i++);
+            char next = i < length ? regex.charAt(i) : 0;
+            if (c >= 0x80 || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+                out.append(c);
+            } else if (c >= '0' && c <= '9') {
+                if (beginQuote) out.append("\\x3");
+                out.append(c);
+            } else if (c != '\\') {
+                if (inQuote) out.append('\\');
+                out.append(c);
+            } else if (inQuote) {
+                if (next == 'E') {
+                    i++;
+                    inQuote = false;
+                } else {
+                    out.append("\\\\");
+                }
+            } else if (next == 'Q') {
+                i++;
+                inQuote = true;
+                beginQuote = true;
+                continue;
+            } else {
+                out.append(c);
+                if (i < length) out.append(regex.charAt(i++));
+            }
+            beginQuote = false;
+        }
+        return out.toString();
     }
 
     /** The index after the escape that starts at {@code backslash}, with the braces of {@code \p{..}} and its kin. */

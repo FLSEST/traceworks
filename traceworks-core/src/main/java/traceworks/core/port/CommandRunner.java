@@ -306,9 +306,18 @@ public interface CommandRunner {
     /**
      * A bind mount of a host directory into the container.
      *
-     * @param readOnly whether the container may only read it
+     * @param readOnly  whether the container may only read it
+     * @param toolCache whether this is the cache folder the engine itself mounts for a tool step's image
+     *                  ({@code cache_dir}). No text of a workflow sets it: a {@code mounts} entry is never one, so
+     *                  the mount check lets only such a mount name a folder of the tool caches
      */
-    record Mount(String hostPath, String containerPath, boolean readOnly) {}
+    record Mount(String hostPath, String containerPath, boolean readOnly, boolean toolCache) {
+
+        /** A mount a block declared, or one of the run's own: no tool cache. */
+        public Mount(String hostPath, String containerPath, boolean readOnly) {
+            this(hostPath, containerPath, readOnly, false);
+        }
+    }
 
     /**
      * What a container asked its egress proxy for: the connections to one target that got one verdict.

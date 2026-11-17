@@ -170,6 +170,53 @@ class RunDirectoryGuardTest {
                 .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /var/"));
     }
 
+    /**
+     * {@code /dev} is refused as a run's directory like the other system paths, but for a folder in
+     * {@code /dev/shm}: a memory disk is an honest place for a build's workspace or a package. What stays refused
+     * is {@code /dev/shm} itself, which holds the shared memory of other programs, the rest of {@code /dev}, and a
+     * path that only passes through {@code /dev/shm}.
+     */
+    @Test
+    void aFolderInTheMemoryDisk_isAllowedAsARunDirectory_theRestOfDevIsNot() throws IOException {
+        Path shm = Path.of("/dev/shm");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isDirectory(shm) && Files.isWritable(shm)
+                && shm.toRealPath().equals(shm), "no /dev/shm to write here");
+        Path build = Files.createTempDirectory(shm, "traceworks-test-");
+        try {
+            Path work = Files.createDirectories(build.resolve("work"));
+            assertThat(refusal(build)).as("a folder in /dev/shm").isEmpty();
+            assertThat(refusal(work)).as("a folder deeper in /dev/shm").isEmpty();
+            assertThat(guard.check(work).realPath()).isEqualTo(work.toString());
+            assertThat(refusal(build.resolve("../../pts"))).as("through /dev/shm into /dev")
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+            Path link = Files.createSymbolicLink(build.resolve("terminals"), Path.of("/dev/pts"));
+            assertThat(refusal(link)).as("a link in /dev/shm to /dev/pts")
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        } finally {
+            Files.deleteIfExists(build.resolve("terminals"));
+            Files.deleteIfExists(build.resolve("work"));
+            Files.deleteIfExists(build);
+        }
+        for (String refused : List.of("/dev", "/dev/shm", "/dev/pts", "/dev/shm/../pts")) {
+            assertThat(refusal(Path.of(refused))).as(refused)
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        }
+    }
+
+    /**
+     * A named pipe or a device node directly in a run's directory is a line to a process or to the host, as a
+     * socket there is: the directory is refused, by the same one-level rule.
+     */
+    @Test
+    void aDirectoryThatDirectlyHoldsANamedPipe_isRefused() throws Exception {
+        Path project = Files.createDirectories(outside.resolve("project/sub"));
+        assertThat(new ProcessBuilder("mkfifo", project.resolve("pipe").toString()).inheritIO().start().waitFor())
+                .isZero();
+
+        assertThat(refusal(project)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+        assertThat(refusal(project.getParent())).as("two levels down is not looked at").isEmpty();
+    }
+
     /** The storage of a runtime holds the images and containers later runs use. */
     @Test
     void theRuntimesStorage_isRefused() throws IOException {

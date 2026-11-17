@@ -151,7 +151,7 @@ record SealClosure(String digest, List<String> children, List<String> violations
                 children.add((child.id() == null ? "" : child.id()) + "\u0000" + owner.digest() + "\u0000"
                         + (owner.sealJson() == null ? "-" : EventChain.sha256Hex(owner.sealJson())));
             } else if (!owner.directory().equals(root.directory())
-                    && root.directory().relativize(owner.directory()).getName(0).toString().equals(".git")) {
+                    && mayNameGit(root.directory().relativize(owner.directory()).getName(0).toString())) {
                 violations.add(label + " names the workflow " + ref.strip() + " under the package's .git directory,"
                         + " which the package digest leaves out, so a seal cannot cover it: move the workflow out"
                         + " of .git");
@@ -161,6 +161,25 @@ record SealClosure(String digest, List<String> children, List<String> violations
                 packages.putIfAbsent(owner.directory(), owner);
             }
             visit(child, (PackageWorkflowResolver) resolver.forChild(child), owner);
+        }
+
+        /**
+         * Whether a file system may take {@code name} for the package's {@code .git}. The name is the one the
+         * {@code workflow_id} spells, and the loader resolves no real path; the digest's walk skips the directory
+         * by the name it has on disk. Where the two spellings differ, the child would be read from {@code .git} and
+         * covered by nothing. So the name is read as the most lenient file system reads it: without regard to case
+         * (macOS, Windows), without the characters outside printable ASCII (HFS+ ignores some of them), without
+         * blanks, without an NTFS stream suffix (what follows a {@code :}, as in
+         * {@code .git::$INDEX_ALLOCATION}), without dots at its end (NTFS), and as the short name {@code GIT~<n>}
+         * NTFS gives {@code .git}. Not covered: the hashed short name NTFS gives once {@code GIT~1} to
+         * {@code GIT~4} are taken, which no rule on the name can know.
+         */
+        private static boolean mayNameGit(String name) {
+            StringBuilder folded = new StringBuilder();
+            name.codePoints().filter(c -> c > 0x20 && c < 0x7F).forEach(c -> folded.append((char) c));
+            String plain = folded.toString().toLowerCase(java.util.Locale.ROOT).replaceAll(":.*$", "")
+                    .replaceAll("\\.+$", "");
+            return plain.equals(".git") || plain.matches("git~[0-9]+");
         }
     }
 }

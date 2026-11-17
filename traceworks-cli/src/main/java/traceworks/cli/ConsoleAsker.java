@@ -147,10 +147,21 @@ public final class ConsoleAsker implements QuestionAsker {
         if (!options.isEmpty()) {
             out.println("  one of: " + joined(options));
         }
+        // What comes back from here is the person's own answer, and the step stores it without the protection the
+        // default had (a default may be made of a step's or a model's output). An empty line therefore takes the
+        // default only when the hint shows all of it, not one cut at the limit or changed to fit a line
+        String hint = TerminalFormat.oneLine(defaultValue);
+        boolean shownWhole = hint.equals(defaultValue);
         while (true) {
-            String line = prompt(defaultValue.isEmpty() ? "" : " [" + TerminalFormat.oneLine(defaultValue) + "]");
+            String line = prompt(defaultValue.isEmpty() ? "" : " [" + hint + "]");
             if (line == null) {
                 return null;
+            }
+            if (line.isEmpty() && !shownWhole) {
+                out.println("  the default is not shown whole here (" + defaultValue.length() + " characters, or with"
+                        + " line breaks or characters a terminal does not show), so an empty line does not take it:"
+                        + " type the value");
+                continue;
             }
             String value = line.isEmpty() ? defaultValue : line;
             if (value.isEmpty() && required) {

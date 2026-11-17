@@ -1535,7 +1535,9 @@ The running process looks into the inbox every 200 ms, carries the request out a
 `approval.answered` (with the request id), `request.refused`, `run.pause_requested` or `run.cancel_requested`. The
 command waits up to 10 seconds for that record (`cancel` waits up to 30 seconds for the run to end) and prints it. When nothing is
 recorded within the wait, the command exits 10: the request is queued, not yet recorded, and `traceworks show`
-tells later what became of it. Handled requests move to `inbox/done/`.
+tells later what became of it. Handled requests move to `inbox/done/`. A request file is at most 8 MiB: a larger
+answer is refused by the command that would post it, and a larger file found in the inbox is not read: it moves to
+`inbox/done/` with `.invalid` at its name, as a file that is no request does.
 
 A request still in the inbox when a `resume` or a `cancel` takes over a run nobody ran is handled by its kind. An
 answer was bound to a question of a run that went on without it: it is refused with `request.refused` and the reason
@@ -2652,9 +2654,10 @@ Before a run is created, the start check refuses it (exit 6), with every reason 
   Traceworks home or a folder holding it, its run records, ledger, registers, seal log and caches (`<home>/runs`,
   `<home>/ledger`, `<home>/registers`, `<home>/seals`, `<home>/cache`, the folders that `runs_dir`, `ledger_dir` and `registers_dir`
   name, and everything in them or holding them), a login below the home (`~/.ssh`, ...), the paths a step's own `mounts`
-  may not name (`/etc`, `/proc`, `/sys`, `/run/user` and below, the runtimes' sockets and storage, your session's
-  sockets), a directory that does not exist or directly holds a socket, and a path with a comma, a quote or a line
-  break. The check reads the real path, with symbolic links resolved;
+  may not name (`/etc`, `/proc`, `/sys`, `/dev`, `/run/user` and below, the runtimes' sockets and storage, your session's
+  sockets), a directory that does not exist or directly holds a socket, a named pipe or a device node, and a path
+  with a comma, a quote or a line break. A folder in `/dev/shm` may be a workspace or a package (a memory disk for a
+  build); `/dev/shm` itself and the rest of `/dev` may not. The check reads the real path, with symbolic links resolved;
 - a workspace that is the package or lies inside it, when a step of the run (of a literal child workflow too) sets
   `workspace_writable: true`: the step would change the package, which every step only reads.
 
@@ -2816,4 +2819,6 @@ uncommitted changes (`git_commit`, `git_dirty`). A package may come from somewhe
 run programs that a repository's own configuration names. Traceworks therefore asks git with `core.fsmonitor`
 and the hooks switched off, without writing the index (`--no-optional-locks`), with every filter driver
 (`filter.<name>.clean`, `smudge` and `process`) emptied and not required, and with submodules ignored. A package
-that uses filter drivers, for example git-lfs, may therefore read as dirty.
+that uses filter drivers, for example git-lfs, may therefore read as dirty. A driver whose name cannot be handed
+back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied: git is then not asked for
+the state at all, and the run records neither `git_commit` nor `git_dirty`.

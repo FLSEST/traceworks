@@ -42,6 +42,40 @@ class AllowedModelsTest {
     }
 
     /** An entry without a star names one model: a longer name that starts with it is another model. */
+    /**
+     * The model is the workflow's text and has no bound of its own. An entry with two stars must not cost a time
+     * that grows with the square of its length: the stars are matched in one pass, without trying again.
+     */
+    @Test
+    @org.junit.jupiter.api.Timeout(value = 5, threadMode = org.junit.jupiter.api.Timeout.ThreadMode.SEPARATE_THREAD)
+    void aLongModelBuiltForAnEntryWithTwoStars_isJudgedInOnePass() {
+        AllowedModels allowed = new AllowedModels(List.of(new AllowedModels.Entry("CLAUDE", "claude-*-4-*")));
+        String built = "claude-" + "-4-".repeat(400_000) + "\n";
+
+        assertThat(allowed.allows("CLAUDE", built)).isFalse();
+    }
+
+    @Test
+    void starsAreMatchedInOrder_andNeverOverALineBreak() {
+        AllowedModels allowed = new AllowedModels(List.of(new AllowedModels.Entry("CLAUDE", "claude-*-4-*"),
+                new AllowedModels.Entry("CLAUDE", "*-latest"), new AllowedModels.Entry("CLAUDE", "a*b*c")));
+
+        assertThat(allowed.allows("CLAUDE", "claude-opus-4-5")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "claude--4-")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "claude-4-")).as("the two parts may not share a character").isFalse();
+        assertThat(allowed.allows("CLAUDE", "x-claude-opus-4-5")).isFalse();
+        assertThat(allowed.allows("CLAUDE", "fable-latest")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "-latest")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "fable-latest-2")).isFalse();
+        assertThat(allowed.allows("CLAUDE", "abc")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "a-b-b-c-c")).isTrue();
+        assertThat(allowed.allows("CLAUDE", "a-c-b")).isFalse();
+        assertThat(allowed.allows("CLAUDE", "acb")).isFalse();
+        for (String lineBreak : List.of("\n", "\r", "\u0085", " ", " ")) {
+            assertThat(allowed.allows("CLAUDE", "claude-opus-4-5" + lineBreak + "x")).isFalse();
+        }
+    }
+
     @Test
     void anEntryWithoutAStar_allowsExactlyThatModel() {
         AllowedModels allowed = new AllowedModels(List.of(new AllowedModels.Entry("CLAUDE", "claude-fable-5")));
