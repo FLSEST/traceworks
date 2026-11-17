@@ -20,9 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code tool-mode-socket}, docs/cli.md "Tool mode of the shell block"): a block with {@code container_image} and
  * {@code container_args} runs the image's own entrypoint with those arguments, no shell in between. The package's image
  * {@code ./images/tool} holds one POSIX {@code sh} entrypoint that behaves by its first argument. The workflow's input
- * {@code case} chooses which blocks run, so each test shows one thing. Every run of {@code tool-mode} starts with
- * {@code --no-check}: the package holds, for the case {@code untrusted}, an argument that {@code check} reports as an
- * error ({@code protected-value-outside-shell}) and that the run must refuse by itself.
+ * {@code case} chooses which blocks run, so each test shows one thing. The two runs that hand in
+ * {@code previous_chain_output} start with {@code --no-check}: with that input, the check before the run reports the
+ * argument that names it ({@code protected-value-outside-shell}), and here the run must refuse it by itself.
  *
  * <p>Not covered: {@code network: true} on a tool step, since the suite needs no network at run time (the same key on a
  * command is covered by {@link IsolationIT}).
@@ -49,7 +49,7 @@ class ToolModeIT extends IntegrationTest {
         Files.writeString(traceworks.workspace().resolve("a.txt"), "a");
         Files.writeString(traceworks.workspace().resolve("b.txt"), "b");
 
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=args", "--input", "who=trusted-input");
+        Result run = traceworks.run("tool-mode", "--input", "case=args", "--input", "who=trusted-input");
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
@@ -100,7 +100,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void withoutAnOutputFormat_theStepOutputIsWhatTheToolPrinted() {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=raw");
+        Result run = traceworks.run("tool-mode", "--input", "case=raw");
 
         assertThat(run.code()).as(run.describe()).isZero();
         assertThat(run.status()).isEqualTo("COMPLETED");
@@ -125,7 +125,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void aToolThatExitsWithACode_failsTheStepAndTheRun() {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=fail");
+        Result run = traceworks.run("tool-mode", "--input", "case=fail");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
         assertThat(run.status()).isEqualTo("FAILED");
@@ -145,7 +145,7 @@ class ToolModeIT extends IntegrationTest {
         Path temporary = Files.createDirectories(sandbox.resolve("jvm-tmp"));
         traceworks.environmentVariable("JAVA_TOOL_OPTIONS", "-Djava.io.tmpdir=" + temporary);
 
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=sarif");
+        Result run = traceworks.run("tool-mode", "--input", "case=sarif");
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
@@ -208,7 +208,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void aToolThatWritesNoSarif_isNotMeasured_andTheStepFails() {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=unmeasured");
+        Result run = traceworks.run("tool-mode", "--input", "case=unmeasured");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
         RunFolder folder = traceworks.folder(run);
@@ -230,8 +230,8 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void cacheDir_isTheSameDirectoryAcrossRuns_andPerPackageForAPackageImage() throws Exception {
-        Result first = traceworks.run("tool-mode", "--no-check", "--input", "case=cache");
-        Result second = traceworks.run("tool-mode", "--no-check", "--input", "case=cache");
+        Result first = traceworks.run("tool-mode", "--input", "case=cache");
+        Result second = traceworks.run("tool-mode", "--input", "case=cache");
 
         assertThat(first.code()).as(first.describe()).isZero();
         assertThat(second.code()).as(second.describe()).isZero();
@@ -266,7 +266,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void aSecretReachesTheTool_andIsRedactedInTheRecord() throws Exception {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=env");
+        Result run = traceworks.run("tool-mode", "--input", "case=env");
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
@@ -289,7 +289,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void aToolHasNoNetwork_andSeesTheWorkspaceReadOnly_unlessTheBlockSaysOtherwise() {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=isolation");
+        Result run = traceworks.run("tool-mode", "--input", "case=isolation");
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
@@ -313,8 +313,8 @@ class ToolModeIT extends IntegrationTest {
         Files.writeString(readOnly.resolve("given.txt"), "given-content\n");
         Path writable = Files.createDirectories(sandbox.resolve("rw-data"));
 
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=mounts",
-                "--input", "ro_dir=" + readOnly, "--input", "rw_dir=" + writable);
+        Result run = traceworks.run("tool-mode", "--input", "case=mounts", "--input", "ro_dir=" + readOnly,
+                "--input", "rw_dir=" + writable);
 
         assertThat(run.code()).as(run.describe()).isZero();
         RunFolder folder = traceworks.folder(run);
@@ -350,7 +350,7 @@ class ToolModeIT extends IntegrationTest {
 
     @Test
     void aTimeout_stopsATool_andSarifCountsAsNotMeasured() {
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=timeout");
+        Result run = traceworks.run("tool-mode", "--input", "case=timeout");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
         RunFolder folder = traceworks.folder(run);
@@ -376,7 +376,7 @@ class ToolModeIT extends IntegrationTest {
     void anOutputBeyondTheOperatorsLimit_stopsATool_andSarifCountsAsNotMeasured() {
         traceworks.configure(Map.of("output_limit_mib", 1));
 
-        Result run = traceworks.run("tool-mode", "--no-check", "--input", "case=flood");
+        Result run = traceworks.run("tool-mode", "--input", "case=flood");
 
         assertThat(run.code()).as(run.describe()).isEqualTo(3);
         RunFolder folder = traceworks.folder(run);
@@ -399,24 +399,35 @@ class ToolModeIT extends IntegrationTest {
     // ---------------------------------------------------------------- traceworks check and wrong blocks
 
     /**
-     * The one error is the point of the case {@code untrusted}: outside text in the arguments of a tool, which the
-     * run refuses and {@code check} reports before it. So every run of the package here starts with
-     * {@code --no-check}.
+     * On its own the package has no error: nothing sets {@code previous_chain_output}, so the argument that names it
+     * is text. A run that hands the name in is refused by the check before it
+     * ({@link #aRunThatHandsInChainOutput_isRefusedByTheCheck}).
      */
     @Test
-    void theToolModePackage_checksWithTheOneErrorItIsMeantToCarry() {
+    void theToolModePackage_checksWithoutAnError() {
         Result check = traceworks.exec("check", traceworks.packageDir("tool-mode").toString());
 
-        assertThat(check.code()).as(check.describe()).isEqualTo(6);
-        assertThat(check.out().lines().filter(line -> line.startsWith("ERROR"))).singleElement().asString()
-                .containsPattern("^ERROR +protected-value-outside-shell +untrusted_input \\(block 2\\): puts"
-                        + " \\{\\{ previous_chain_output }} into container_args, text from outside the run");
+        assertThat(check.code()).as(check.describe()).isZero();
+        assertThat(check.out()).doesNotContainPattern("(?m)^ERROR ");
         // Two warnings are the point of the untrusted cases: a placeholder that only a chain sets. The other three
         // name the host directories of the mounts, which only an input of the run sets (ro_dir, rw_dir)
         assertThat(check.out().lines().filter(line -> line.startsWith("WARNING") && !line.contains("unknown-variable")))
                 .hasSize(2).allMatch(line -> line.contains("chain-only-placeholder"));
         assertThat(check.out().lines().filter(line -> line.contains("unknown-variable")))
                 .hasSize(3).allMatch(line -> line.contains("{{ ro_dir }}") || line.contains("{{ rw_dir }}"));
+    }
+
+    /** The check before a run knows the run's inputs: with the chain's output handed in, the run is refused. */
+    @Test
+    void aRunThatHandsInChainOutput_isRefusedByTheCheck() {
+        Result run = traceworks.run("tool-mode", "--input", "case=untrusted", "--input",
+                "previous_chain_output=--config=/etc/x");
+
+        assertThat(run.code()).as(run.describe()).isEqualTo(6);
+        assertThat(run.err()).containsPattern("(?m)^ERROR +protected-value-outside-shell +untrusted_input"
+                + " \\(block 2\\): puts \\{\\{ previous_chain_output }} into container_args, text from outside the"
+                + " run");
+        assertThat(traceworks.folders()).as("refused before a run exists").isEmpty();
     }
 
     @Test
