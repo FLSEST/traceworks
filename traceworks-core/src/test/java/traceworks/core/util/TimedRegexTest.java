@@ -286,4 +286,104 @@ class TimedRegexTest {
         }
         assertThat(TimedRegex.repetitionProblem("#\\d{3}-[a-z{}]{2}\\cA{4}")).as("small counts stay fine").isNull();
     }
+
+    private static boolean compiles(String regex) {
+        try {
+            Pattern.compile(regex);
+            return true;
+        } catch (java.util.regex.PatternSyntaxException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The engine takes the quoting out of a pattern before it reads anything else: an empty quote {@code \Q\E}
+     * vanishes, also between the digits of a count, and quoted text becomes escaped characters. The counts are read
+     * from the pattern as it is after that, so an empty quote in a count hides nothing, in either way of counting.
+     */
+    @Test
+    void anEmptyQuoteInsideACount_hidesNothing() {
+        assertThat(Pattern.compile("a{1\\Q\\E0}").matcher("aaaaaaaaaa").matches()).as("{1\\Q\\E0} is {10}").isTrue();
+
+        for (String regex : new String[] {
+                "(?:^{10000000\\Q\\E}){10000000\\Q\\E}",
+                "(?:^{\\Q\\E10000000}){\\Q\\E10000000}",
+                "(?:^{1000\\Q\\E0000}){1000\\Q\\E\\Q\\E0000}",
+                "(?:^{1,\\Q\\E10000000}){10000000}",
+                "#(?:^{1000\\Q\\E0000}){1000\\Q\\E0000}",
+                "\\cA(?:^{1000\\Q\\E0000}){1000\\Q\\E0000}"}) {
+            assertThat(compiles(regex)).as(regex).isTrue();
+            assertThat(TimedRegex.repetitionProblem(regex)).as(regex).contains("multiply to more than");
+        }
+        // A quote that is not empty makes a count no pattern at all: its first digit becomes an escape
+        assertThat(compiles("a{\\Q1\\E0}")).isFalse();
+        assertThat(compiles("a{1\\Q0\\E}")).isFalse();
+        // Quoted braces are text, for the engine and here: no false refusal
+        assertThat(Pattern.compile("\\Q{2000000}\\E\\Q{3000000}\\E").matcher("{2000000}{3000000}").matches()).isTrue();
+        assertThat(TimedRegex.repetitionProblem("\\Q{2000000}\\E\\Q{3000000}\\E")).isNull();
+    }
+
+    /**
+     * The quoting is taken out exactly as the engine does it: a pattern and what {@link TimedRegex#withoutQuotes}
+     * makes of it compile alike and match alike, for patterns built from the pieces that matter here.
+     */
+    @Test
+    void withoutQuotes_isWhatTheEngineReads() {
+        String[] pieces = {"\\Q", "\\E", "\\", "{", "}", "1", "2", ",", "a", "[", "]", " ", "Q", "E", "x", "^"};
+        String[] texts = {"", "a", "aa", "a{1}", "{2}", "1", "\\", "a1", "[", "aaaaaaaaaaaa", "\\Q", "E", " "};
+        java.util.Random random = new java.util.Random(20261117);
+        int compiled = 0;
+        for (int n = 0; n < 200_000; n++) {
+            StringBuilder regex = new StringBuilder();
+            for (int k = random.nextInt(9) + 1; k > 0; k--) {
+                regex.append(pieces[random.nextInt(pieces.length)]);
+            }
+            String plain = TimedRegex.withoutQuotes(regex.toString());
+            assertThat(compiles(plain)).as("%s -> %s", regex, plain).isEqualTo(compiles(regex.toString()));
+            if (!compiles(plain)) continue;
+            compiled++;
+            for (String text : texts) {
+                assertThat(Pattern.compile(plain).matcher(text).matches()).as("%s -> %s on %s", regex, plain, text)
+                        .isEqualTo(Pattern.compile(regex.toString()).matcher(text).matches());
+            }
+        }
+        assertThat(compiled).as("patterns that compile").isGreaterThan(10_000);
+    }
+
+    /**
+     * The constructs next to those the reading follows, each checked against the engine: what could hide a count is
+     * no pattern for the engine at all, and braces that are no counts are not taken for one.
+     */
+    @Test
+    void theNeighbouringConstructs_neitherHideACountNorMakeOne() {
+        // No pattern for Java's engine, so whatever the reading makes of them hides nothing
+        for (String regex : new String[] {
+                "(?#[)(?:^{2000000}){3000000}",          // no (?#...) comments
+                "(?:^\\k{2000000}){3000000}", "(?:^\\g{2000000}){3000000}", "(?:^\\o{2000000}){3000000}",
+                "(?:^\\u{2000000}){3000000}",
+                "(?:^\\p\\{2000000}){3000000}", "(?:^\\x\\{2000000}){3000000}",
+                "[\\p{L](?:^{2000000}){3000000}", "(?:^\\x{20000000}){3000000}",
+                "[[:alpha:](?:^{2000000}){3000000}"}) {
+            assertThat(compiles(regex)).as(regex).isFalse();
+        }
+        // Patterns the engine takes, with counts behind constructs that end where the reading says they end
+        for (String regex : new String[] {
+                "[[:alpha:]](?:^{2000000}){3000000}",
+                "[a[b]](?:^{2000000}){3000000}",
+                "[a&&[^b]](?:^{2000000}){3000000}",
+                "[]a](?:^{2000000}){3000000}",
+                "[^]a](?:^{2000000}){3000000}",
+                "\\p{Lu}\\x{1F600}\\N{LATIN SMALL LETTER A}\\b{g}(?:^{2000000}){3000000}",
+                "(?:^{2000000}){3000000}\\\\"}) {
+            assertThat(compiles(regex)).as(regex).isTrue();
+            assertThat(TimedRegex.repetitionProblem(regex)).as(regex).isNotNull();
+        }
+        // Braces that are no counts: no false refusal
+        for (String regex : new String[] {
+                "\\x{10000}\\x{10000}\\x{10000}", "\\p{Lu}{2}\\P{L}{3}", "\\N{DIGIT ONE}{4}", "\\b{g}a{5}",
+                "[[:alpha:]{2000000}{3000000}]", "[a[b{2000000}]{3000000}]", "[a&&[^b{2000000}]{3000000}]"}) {
+            assertThat(compiles(regex)).as(regex).isTrue();
+            assertThat(TimedRegex.repetitionProblem(regex)).as(regex).isNull();
+        }
+    }
 }

@@ -355,6 +355,23 @@ class MountGuardTest {
     }
 
     /**
+     * A folder that directly holds a named pipe is refused like one that directly holds a socket, by the same rule
+     * of one level, links not followed.
+     */
+    @Test
+    void aFolderDirectlyHoldingANamedPipe_isRefused_namingIt() throws Exception {
+        Path folder = Files.createDirectories(outside.resolve("queue/in"));
+        Path pipe = folder.resolve("requests");
+        assertThat(new ProcessBuilder("mkfifo", pipe.toString()).inheritIO().start().waitFor()).isZero();
+
+        assertThat(check(folder)).hasValueSatisfying(r -> assertThat(r).contains("named pipe").contains(pipe.toString()));
+        assertThat(check(outside.resolve("queue"))).as("two levels down is not looked at").isEmpty();
+        Path links = Files.createDirectories(outside.resolve("pipe-links"));
+        Files.createSymbolicLink(links.resolve("to-pipe"), pipe);
+        assertThat(check(links)).as("a link is not followed").isEmpty();
+    }
+
+    /**
      * A writable mount of a file the host runs later (a shell's startup file, {@code ~/.local/bin}, a repository's
      * hooks) lets a step leave commands that run outside every container, as the operator. Nothing refuses it today:
      * a writable mount below the home is allowed on purpose ({@link #folderBelowHome_isAllowed_andMountedWithItsRealPath}),

@@ -61,7 +61,8 @@ import java.util.Optional;
  *       a line to a process on the host (tmux, screen, an agent), which read-only does not cut. A folder whose
  *       entries, or a file whose type, cannot be read is refused as well;</li>
  *   <li>{@code /dev} and everything in it (the terminals of the operator's session, shared memory, device nodes),
- *       and a device node or a named pipe wherever it lies.</li>
+ *       and, by the rule of the sockets, a device node or a named pipe and a folder that directly holds one (one
+ *       level, links not followed); one that lies deeper in a mounted folder is not looked for.</li>
  * </ul>
  *
  * <p>Every check reads the real path, with {@code ..} and symbolic links resolved, so {@code /tmp/../etc} or a link
@@ -356,7 +357,7 @@ public final class MountGuard {
                 return Checked.refused(ENDS_IN_WHITE_SPACE);
             }
             // As given and as its real path, so a link to /etc counts as /etc
-            String forbidden = forbiddenHostSegment(directory.toString());
+            String forbidden = forbiddenRunDirectory(directory.toString());
             if (forbidden != null) {
                 return Checked.refused("forbidden path " + forbidden);
             }
@@ -366,7 +367,7 @@ public final class MountGuard {
             }
             // And the path that is mounted: toRealPath resolves link/.. to the link target's parent, where the
             // lexical normalization above stays in the folder that holds the link
-            forbidden = forbiddenHostSegment(real.toString());
+            forbidden = forbiddenRunDirectory(real.toString());
             if (forbidden != null) {
                 return Checked.refused("forbidden path " + forbidden);
             }
@@ -524,7 +525,7 @@ public final class MountGuard {
 
     /**
      * Fail closed: neither the path nor, for a folder, one of its direct entries (links not followed) may be a
-     * socket. Whatever cannot be read is refused: a rootful runtime would mount it anyway, and in the container the
+     * socket, a named pipe or a device node. Whatever cannot be read is refused: a rootful runtime would mount it anyway, and in the container the
      * host's parent directories no longer guard it.
      *
      * @param real the real path the mount resolved to; it is not resolved again here
@@ -548,6 +549,10 @@ public final class MountGuard {
             for (Path entry : entries) {
                 if (isSocket(entry)) {
                     return Optional.of("it holds the socket " + entry + ": a line to a process on the host");
+                }
+                if (isDeviceOrPipe(entry)) {
+                    return Optional.of("it holds the device or named pipe " + entry + ": a line to the host or to a"
+                            + " process on it");
                 }
             }
         } catch (IOException | DirectoryIteratorException e) {
@@ -702,6 +707,26 @@ public final class MountGuard {
             }
         }
         return null;
+    }
+
+    /** The memory disk, where a folder may be a run's workspace or package although it lies in {@code /dev}. */
+    private static final String MEMORY_DISK = "/dev/shm";
+
+    /**
+     * {@link #forbiddenHostSegment} for one of a run's own directories, with one exception: a folder in
+     * {@value #MEMORY_DISK} is allowed, as given and as its real path. A memory disk is a common place for a
+     * build, and the operator chose the directory; {@code /dev} is forbidden because of what a workflow's own
+     * mount could reach there (the terminals, the shared memory of other programs), and a step's mount from
+     * {@code /dev} stays refused. {@value #MEMORY_DISK} itself and the rest of {@code /dev} stay forbidden here too.
+     */
+    private static String forbiddenRunDirectory(String directory) {
+        String forbidden = forbiddenHostSegment(directory);
+        if (!"/dev".equals(forbidden)) {
+            return forbidden;   // "/dev" is the last of the list: it is named only when no other path matches
+        }
+        String normalized = normalized(directory.strip());
+        String real = real(Path.of(normalized)).toString();
+        return normalized.startsWith(MEMORY_DISK + "/") && real.startsWith(MEMORY_DISK + "/") ? null : forbidden;
     }
 
     /** As given or with symbolic links resolved: {@code /var/run/docker.sock} is {@code /run/docker.sock}. */

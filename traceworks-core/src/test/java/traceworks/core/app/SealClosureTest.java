@@ -178,7 +178,8 @@ class SealClosureTest {
      */
     @Test
     void aChildUnderAnotherSpellingOfThePackagesGitDirectory_isAViolation() {
-        for (String spelling : List.of(".GIT", ".Git", ".g‌it", ".git.", ".git ", "GIT~1")) {
+        for (String spelling : List.of(".GIT", ".Git", ".g‌it", ".git.", ".git ", "GIT~1",
+                ".git::$INDEX_ALLOCATION", ".git:stream", ".GIT. ::$index_allocation", "git~2:x")) {
             Path hidden = Path.of("/pkg/spelled");
             fx.packages.put(hidden, """
                     {"id": "wf-hidden", "name": "Hidden", "blocks": [
@@ -190,7 +191,7 @@ class SealClosureTest {
             assertThat(closure(hidden).violations()).as(spelling).singleElement().asString()
                     .contains("'inside'").contains(".git").contains("digest");
         }
-        for (String other : List.of("git", ".github", ".gitlab", "x.git")) {
+        for (String other : List.of("git", ".github", ".gitlab", "x.git", "x.git:y", ".github:y")) {
             Path plain = Path.of("/pkg/plain");
             fx.packages.put(plain, """
                     {"id": "wf-plain", "name": "Plain", "blocks": [

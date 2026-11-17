@@ -169,12 +169,16 @@ record SealClosure(String digest, List<String> children, List<String> violations
          * by the name it has on disk. Where the two spellings differ, the child would be read from {@code .git} and
          * covered by nothing. So the name is read as the most lenient file system reads it: without regard to case
          * (macOS, Windows), without the characters outside printable ASCII (HFS+ ignores some of them), without
-         * blanks, without dots at its end (NTFS), and as the short name NTFS gives {@code .git}.
+         * blanks, without an NTFS stream suffix (what follows a {@code :}, as in
+         * {@code .git::$INDEX_ALLOCATION}), without dots at its end (NTFS), and as the short name {@code GIT~<n>}
+         * NTFS gives {@code .git}. Not covered: the hashed short name NTFS gives once {@code GIT~1} to
+         * {@code GIT~4} are taken, which no rule on the name can know.
          */
         private static boolean mayNameGit(String name) {
             StringBuilder folded = new StringBuilder();
             name.codePoints().filter(c -> c > 0x20 && c < 0x7F).forEach(c -> folded.append((char) c));
-            String plain = folded.toString().toLowerCase(java.util.Locale.ROOT).replaceAll("\\.+$", "");
+            String plain = folded.toString().toLowerCase(java.util.Locale.ROOT).replaceAll(":.*$", "")
+                    .replaceAll("\\.+$", "");
             return plain.equals(".git") || plain.matches("git~[0-9]+");
         }
     }
