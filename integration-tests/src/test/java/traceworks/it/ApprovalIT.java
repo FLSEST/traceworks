@@ -59,8 +59,11 @@ class ApprovalIT extends IntegrationTest {
     void aRejection_failsTheRun_withTheComment() {
         String id = traceworks.run("approval").runId();
 
-        Result approve = traceworks.exec("approve", id, "--answer", "No", "--comment", "not this week");
+        // An agent that answers under the operator's user names itself, and the record says who answered
+        Result approve = traceworks.exec("approve", id, "--answer", "No", "--comment", "not this week", "--agent",
+                "it-agent");
         assertThat(approve.code()).as(approve.describe()).isZero();
+        assertThat(approve.out()).contains("is recorded through the agent it-agent;");
         Result resume = traceworks.exec("resume", id, "--no-input");
 
         assertThat(resume.code()).as(resume.describe()).isEqualTo(3);
@@ -72,6 +75,11 @@ class ApprovalIT extends IntegrationTest {
                 .doesNotContain("released");
         assertThat(folder.blob(folder.ownEvents("approval.answered").getFirst().path("comment")))
                 .isEqualTo("not this week");
+        assertThat(folder.ownEvents("approval.answered")).as("the resumed step takes the answer over with its agent")
+                .extracting(e -> e.path("agent").asText()).containsExactly("it-agent", "it-agent");
+        assertThat(resume.out()).contains("through the agent it-agent");
+        assertThat(traceworks.exec("show", id).out()).contains("via cli through the agent it-agent");
+        assertThat(traceworks.exec("verify", id).code()).isZero();
         JsonNode finished = folder.only("run.finished");
         assertThat(finished.path("status").asText()).isEqualTo("FAILED");
         assertThat(folder.blob(finished.path("error"))).contains("Approval denied: No");

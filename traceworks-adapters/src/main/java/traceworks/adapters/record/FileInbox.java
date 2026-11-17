@@ -59,6 +59,9 @@ final class FileInbox implements Inbox {
         request.values().forEach(values::put);
         json.put("comment", request.comment());
         json.put("actor", request.actor());
+        if (request.agent() != null) {
+            json.put("agent", request.agent());
+        }
         json.put("at", request.at().toString());
         try {
             byte[] bytes = MAPPER.writeValueAsString(json).getBytes(StandardCharsets.UTF_8);
@@ -149,7 +152,8 @@ final class FileInbox implements Inbox {
                 values,
                 text(n, "comment"),
                 text(n, "actor"),
-                Instant.parse(n.get("at").asText()));
+                Instant.parse(n.get("at").asText()),
+                text(n, "agent"));
     }
 
     private static Integer integer(JsonNode n, String field) {

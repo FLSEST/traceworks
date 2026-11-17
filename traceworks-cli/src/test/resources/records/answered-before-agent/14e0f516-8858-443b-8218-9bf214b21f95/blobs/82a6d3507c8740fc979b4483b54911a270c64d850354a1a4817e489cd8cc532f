@@ -1,0 +1,4 @@
+{"id":"deploy","name":"deploy flow","blocks":[
+{"type":"shell","name":"build","config":{"command":"echo built"}},
+{"type":"approval","name":"publish","config":{"question":"Publish it?","options":["Yes","No"]}},
+{"type":"shell","name":"done","config":{"command":"echo done"}}]}

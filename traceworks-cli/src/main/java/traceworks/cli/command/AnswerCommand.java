@@ -13,9 +13,11 @@ import java.util.Map;
 /** {@code traceworks answer <run>}: answers the human input a run waits for. */
 public final class AnswerCommand implements Command {
 
-    private static final Spec SPEC = Spec.of("answer", "Answers the human input a run waits for.", "<run>")
-            .option("value", "TEXT", "the answer of a single input")
-            .repeated("field", "NAME=VALUE", "the value of one field of a form (repeatable)");
+    private static final Spec SPEC = Answers.agentOption(
+            Spec.of("answer", "Answers the human input a run waits for.", "<run>")
+                    .option("value", "TEXT", "the answer of a single input")
+                    .repeated("field", "NAME=VALUE", "the value of one field of a form (repeatable)"))
+            .note(Answers.AGENT_NOTE);
 
     @Override
     public Spec spec() {
@@ -36,6 +38,8 @@ public final class AnswerCommand implements Command {
         if ((value == null) == fields.isEmpty()) {
             throw new UsageException("'answer' needs either --value TEXT or one or more --field NAME=VALUE");
         }
-        return Answers.give(context, args.positional(), new AnswerRequest("human-input", null, value, fields, null));
+        String agent = Answers.agent(context, args);
+        return Answers.give(context, args.positional(),
+                new AnswerRequest("human-input", null, value, fields, null, agent));
     }
 }

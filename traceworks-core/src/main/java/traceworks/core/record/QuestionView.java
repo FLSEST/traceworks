@@ -66,14 +66,17 @@ public record QuestionView(int seq, int step, String kind, String blockId, BlobR
      * An {@code approval.answered}.
      *
      * @param actor   who answered; {@code null} when the event did not say
+     * @param agent   the agent that answered under the actor, as it named itself; {@code null} when the event names
+     *                none: no agent said so, or the record is of a version whose answers could not name one
+     *                ({@code records} of its {@code run.started} lacks {@code answer_agent})
      * @param source  how the answer arrived, such as {@code cli} or {@code resume}; {@code null} when not said
      * @param request the id of the inbox request that delivered it; {@code null} when none
      * @param at      when it was recorded
      * @param given   for the answer a resumed step received ({@code source} {@code resume}): the answer given while
      *                the run was parked, with who gave it, when, how and the comment; {@code null} otherwise
      */
-    public record Answer(int seq, int step, String kind, BlobRef answer, String actor, String source, String request,
-                         BlobRef comment, java.time.Instant at, Answer given) {}
+    public record Answer(int seq, int step, String kind, BlobRef answer, String actor, String agent, String source,
+                         String request, BlobRef comment, java.time.Instant at, Answer given) {}
 
     QuestionView withAnswer(Answer answer) {
         return new QuestionView(seq, step, kind, blockId, question, options, rejectOptions, inputType, defaultValue,

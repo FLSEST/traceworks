@@ -17,4 +17,14 @@ public interface QuestionAsker {
      *         single human input or the JSON object of a form; empty to leave the question to the inbox
      */
     Optional<String> ask(QuestionView question);
+
+    /**
+     * The agent that answers here under the actor of the run's process, when one said so: the name it gave itself,
+     * checked ({@link traceworks.core.register.DecisionAgent}). Every answer of this asker is recorded with it.
+     *
+     * @return the name; {@code null} when a person answers, or nobody said otherwise
+     */
+    default String agent() {
+        return null;
+    }
 }

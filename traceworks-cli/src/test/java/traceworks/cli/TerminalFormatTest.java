@@ -127,6 +127,13 @@ class TerminalFormatTest {
         assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
                 + ",\"actor\":\"flo@box\"")))
                 .isEqualTo("12:34:56 step 1  answered: Yes by flo@box");
+        assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
+                + ",\"actor\":\"flo@box\",\"agent\":\"claude-code\"")))
+                .isEqualTo("12:34:56 step 1  answered: Yes by flo@box through the agent claude-code");
+        assertThat(line(event("approval.answered", "\"step\":1,\"kind\":\"approval\",\"answer\":" + answer
+                + ",\"actor\":null,\"agent\":\"claude-code\"")))
+                .as("a line somebody edited: an agent without an actor")
+                .isEqualTo("12:34:56 step 1  answered: Yes through the agent claude-code");
     }
 
     @Test

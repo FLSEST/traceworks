@@ -11,6 +11,7 @@ import traceworks.core.record.QuestionView;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.RunRecorder;
+import traceworks.core.register.DecisionAgent;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -80,9 +81,11 @@ final class RunSession implements AutoCloseable {
      * A resumed run: top-level step {@code step} takes the answer {@code answeredBy} gave while the run was parked;
      * the step's {@code approval.answered} is attributed to them with the source {@code resume}, and its question is
      * asked of nobody.
+     *
+     * @param agent the agent the recorded answer names beside {@code answeredBy}; {@code null} for none
      */
-    void replay(int step, String answeredBy) {
-        delivery.replay(step, answeredBy);
+    void replay(int step, String answeredBy, String agent) {
+        delivery.replay(step, answeredBy, agent);
     }
 
     /** Runs the engine on this thread and watches the inbox meanwhile. */
@@ -212,7 +215,8 @@ final class RunSession implements AutoCloseable {
             return;
         }
         try {
-            delivery.deliver(new Attribution(actor, "terminal", null, null), () -> requireOpen(where),
+            // Typed at the prompt of this process: the agent, if any, is the one its asker names
+            delivery.deliver(new Attribution(actor, "terminal", null, null, asker.agent()), () -> requireOpen(where),
                     (control, attribute) -> give(control, question, answer.get(),
                             new RunControl.Question(where.run(), where.step(), where.seq()), attribute));
         } catch (IllegalStateException | IllegalArgumentException e) {
@@ -270,8 +274,16 @@ final class RunSession implements AutoCloseable {
             RunRecords.refuse(recorder, request, "unknown request kind '" + kind + "'");
             return;
         }
+        // The inbox is a folder: the name of an agent in a request is checked here as the command checks it, and a
+        // request with a name that is none is refused whole rather than recorded as a person's answer
+        String agentProblem = request.agent() == null ? null : DecisionAgent.problem(request.agent());
+        if (agentProblem != null) {
+            RunRecords.refuse(recorder, request, "the agent of the answer " + agentProblem);
+            return;
+        }
+        String agent = request.agent() == null ? null : request.agent().strip();
         try {
-            delivery.deliver(new Attribution(request.actor(), "inbox", request.id(), request.comment()),
+            delivery.deliver(new Attribution(request.actor(), "inbox", request.id(), request.comment(), agent),
                     () -> requireQuestion(request), (control, attribute) -> give(control, request, attribute));
         } catch (IllegalStateException | IllegalArgumentException e) {
             RunRecords.refuse(recorder, request, e.getMessage());

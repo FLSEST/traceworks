@@ -418,6 +418,41 @@ class RunViewTest {
         assertThat(view.lastCheckpoint().state()).isNotNull();
     }
 
+    /** The agent of an answer is in the view of the answer, of the answer a resume took over, and in the timeline. */
+    @Test
+    void anAnswerAnAgentGave_namesItInTheQuestion_inTheAnswerGivenWhileParked_andInTheTimeline() {
+        fx.emit(new StepStarted(0, "ask", "approval", 0, false),
+                new ApprovalRequested(0, "b1", "approval", "Ship it?", List.of("yes", "no"), List.of(), null, null,
+                        true, null, null, null),
+                new StepWaiting(0, true), new RunParked(0, "approval"));
+        fx.nextWriter();
+        fx.recorder.attributeNextAnswer("anna@box", "cli", "req-1", null, "claude-code");
+        fx.emit(new ApprovalAnswered(0, "approval", "yes"));
+        fx.nextWriter();
+        fx.recorder.record("run.resumed", Map.of("actor", "flo@box", "package_changed", false));
+        fx.recorder.attributeNextAnswer("anna@box", "resume", null, null, "claude-code");
+        fx.emit(new StepStarted(0, "ask", "approval", 0, false),
+                new ApprovalRequested(0, "b1", "approval", "Ship it?", List.of("yes", "no"), List.of(), null, null,
+                        false, null, null, null),
+                new ApprovalAnswered(0, "approval", "yes"),
+                new StepStarted(1, "again", "approval", 1, false),
+                new ApprovalRequested(1, "b2", "approval", "Sure?", List.of("yes", "no"), List.of(), null, null,
+                        false, null, null, null));
+        fx.recorder.attributeNextAnswer("flo@box", "inbox", "req-2", null);
+        fx.emit(new ApprovalAnswered(1, "approval", "yes"));
+
+        RunView view = view(false);
+
+        QuestionView.Answer replayed = view.steps().getFirst().questions().getFirst().answered();
+        assertThat(replayed.agent()).isEqualTo("claude-code");
+        assertThat(replayed.given().agent()).isEqualTo("claude-code");
+        assertThat(view.steps().get(1).questions().getFirst().answered().agent()).isNull();
+        assertThat(view.interventions()).extracting(RunView.Intervention::description).containsExactly(
+                "answered step 0 (approval) via cli", "resumed the run", "answered step 1 (approval) via inbox");
+        assertThat(view.interventions()).extracting(RunView.Intervention::agent)
+                .containsExactly("claude-code", null, null);
+    }
+
     @Test
     void parkApproveResume_keepsTheFirstAttempt_andTheResumedStepShowsTheAnswerGivenWhileParked() {
         fx.emit(new StepStarted(0, "ask", "approval", 0, false),
@@ -853,7 +888,7 @@ class RunViewTest {
     @Test
     void aRecordSaysWhetherItNamesOutputCuts_inItsStart_andInEveryResume() {
         assertThat(fx.events().getFirst().fields().path("records")).extracting(n -> n.asText())
-                .containsExactly("output_cut");
+                .containsExactly("output_cut", "answer_agent");
         assertThat(view(false).recordsOutputCut()).isTrue();
 
         List<RecordedEvent> ofAnEarlierVersion = fx.events();

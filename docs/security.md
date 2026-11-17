@@ -234,7 +234,11 @@ self-declared and unsigned: an agent that works with your user and leaves it out
 caller can give any name. What Traceworks does about it: the name is bounded (64 characters, ASCII letters and
 digits, `. _ - : / @ +` and single spaces), a blank one is refused instead of being taken for none, and an earlier
 version refuses a register that names an agent rather than show the decision as the actor's own
-(docs/registers.md, "Who decided").
+(docs/registers.md, "Who decided"). The answer to a question of a run is the same label: `approval.answered` names
+its actor and beside it the agent, when `approve`, `answer` or the environment of a run that asks at its prompt
+named one. It is as self-declared and as unsigned: an agent that leaves it out is recorded as you. A run record has
+no line an earlier version would refuse, so an earlier version shows such an answer with its actor alone
+(docs/events.md, "approval.answered").
 
 **The register folder of a run** (docs/registers.md, "The register folder of a run"). The run of an audit workflow
 gets what its register knew as files, in a folder of the run that every container but that of an AI step mounts
