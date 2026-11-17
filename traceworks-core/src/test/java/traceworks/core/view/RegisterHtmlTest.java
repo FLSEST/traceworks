@@ -187,7 +187,7 @@ class RegisterHtmlTest {
                 "dismissed by flo@box through the agent claude-code at 2026-11-11T10:00:00Z, made on severity HIGH:"
                         + " not ours",
                 "dismissed by flo@box at 2026-11-11T10:00:00Z, made on severity HIGH: checked",
-                "<td>finding.dismissed</td><td>id aaaaaaaa · actor flo@box · agent claude-code · note"
+                "<td>finding.dismissed</td><td>id aaaaaaaa \u00b7 actor flo@box \u00b7 agent claude-code \u00b7 note"
                         + " not ours</td>");
     }
 
@@ -195,7 +195,7 @@ class RegisterHtmlTest {
     @Test
     void theNameOfAnAgentFromAnEditedState_isEscaped_andItsDirectionMarkIsShownByItsCodePoint() {
         Finding.DispositionRecord hostile = new Finding.DispositionRecord(FindingStatus.DISMISSED, "n", "flo@box", T,
-                null, null, Severity.HIGH, "<script>x</script>‮");
+                null, null, Severity.HIGH, "<script>x</script>\u202e");
         RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
                 finding("a", "A.java", FindingStatus.DISMISSED, hostile)), 1);
 
@@ -203,7 +203,7 @@ class RegisterHtmlTest {
                 List.of()), "1.2.3");
 
         assertThat(page).contains("through the agent &lt;script&gt;x&lt;/script&gt;[U+202E] at ")
-                .doesNotContain("<script>x").doesNotContain("‮");
+                .doesNotContain("<script>x").doesNotContain("\u202e");
     }
 
     /** A decision covers the severity it was made on; where the finding has another one, the page says so. */

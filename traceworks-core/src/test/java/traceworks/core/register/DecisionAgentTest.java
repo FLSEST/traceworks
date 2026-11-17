@@ -97,7 +97,7 @@ class DecisionAgentTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("--agent takes a name of at most 64 characters, got 65");
         for (String bad : List.of("claude\ncode", "claude\u001b[2Jcode", "claude\tcode", "a  b", "a|b", "a (b)",
-                "a<b>", "a\"b", "a'b", "a,b", "a\\b", "a‮b", "a·b", "claudé", "a b", "a;b")) {
+                "a<b>", "a\"b", "a'b", "a,b", "a\\b", "a\u202eb", "a\u00b7b", "claud\u00e9", "a\u2028b", "a;b")) {
             assertThatThrownBy(() -> DecisionAgent.resolve(bad, Map.of())).as(bad)
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageStartingWith("--agent takes a name of letters, digits, the characters . _ - : / @ +"
