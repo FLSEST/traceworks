@@ -169,6 +169,40 @@ class SealClosureTest {
                 .contains("'inside'").contains(".git").contains("digest");
     }
 
+    /**
+     * The loader takes a {@code workflow_id} as it is spelled, and a file system may take another spelling for the
+     * same {@code .git}: without regard to case (macOS, Windows), with characters it ignores (HFS+), with dots or
+     * blanks at the end, or by a short name (NTFS). The digest's walk skips the directory by the name it has on
+     * disk, so a child reached by any such spelling would be covered by nothing: each is a violation. A folder whose
+     * name only resembles it is not.
+     */
+    @Test
+    void aChildUnderAnotherSpellingOfThePackagesGitDirectory_isAViolation() {
+        for (String spelling : List.of(".GIT", ".Git", ".g‌it", ".git.", ".git ", "GIT~1")) {
+            Path hidden = Path.of("/pkg/spelled");
+            fx.packages.put(hidden, """
+                    {"id": "wf-hidden", "name": "Hidden", "blocks": [
+                      {"type": "sub-workflow", "name": "inside", "config": {"workflow_id": "./%s/child"}}]}"""
+                    .formatted(spelling));
+            fx.packages.put(hidden.resolve(spelling).resolve("child"), """
+                    {"id": "wf-git-child", "name": "C", "blocks": [{"type": "shell", "name": "s", "config": {"command": "x"}}]}""");
+
+            assertThat(closure(hidden).violations()).as(spelling).singleElement().asString()
+                    .contains("'inside'").contains(".git").contains("digest");
+        }
+        for (String other : List.of("git", ".github", ".gitlab", "x.git")) {
+            Path plain = Path.of("/pkg/plain");
+            fx.packages.put(plain, """
+                    {"id": "wf-plain", "name": "Plain", "blocks": [
+                      {"type": "sub-workflow", "name": "inside", "config": {"workflow_id": "./%s/child"}}]}"""
+                    .formatted(other));
+            fx.packages.put(plain.resolve(other).resolve("child"), """
+                    {"id": "wf-child", "name": "C", "blocks": [{"type": "shell", "name": "s", "config": {"command": "x"}}]}""");
+
+            assertThat(closure(plain).violations()).as(other).isEmpty();
+        }
+    }
+
     /** The seal file of a child is left out of the child's own digest, so the caller's seal must cover it. */
     @Test
     void theSealFileOfAChildPackage_isCoveredLikeAnyOtherFile() {

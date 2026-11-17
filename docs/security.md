@@ -637,7 +637,8 @@ What a seal does not protect:
   `allowed_signers` gives it (`key` and `principals` in `run.started`). Read those to know who sealed.
 - **What the digest does not see.** An empty directory; a file that is not a regular file (a named pipe, a socket);
   permission bits other than the owner's execute bit; the top-level `.git/`. A change there breaks no seal. A
-  container does not see the package's `.git/`, and a workflow under it cannot be sealed.
+  container does not see the package's `.git/`, and a workflow under it cannot be sealed, under any spelling a
+  file system may take for that directory (`.GIT` on macOS or Windows, `.git.`, `GIT~1`).
 - **A called package is loaded again when its block runs.** The seal digest and the seals of the called packages
   are checked when the run starts and when it resumes. The engine loads a called package from disk again at the
   moment its `sub-workflow` or `foreach` block runs, and does not compare it with what the start saw. A called
