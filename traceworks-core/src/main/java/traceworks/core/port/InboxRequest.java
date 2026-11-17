@@ -18,6 +18,8 @@ import java.util.Map;
  * @param comment     a free comment; may be {@code null}
  * @param actor       who sent the request
  * @param at          when the request was made
+ * @param agent       for an answer: the name the agent that answers under the actor gave itself; {@code null} for
+ *                    none. The inbox is a folder, so the run's process checks the name before it records it
  */
 public record InboxRequest(
         String id,
@@ -29,9 +31,16 @@ public record InboxRequest(
         Map<String, String> values,
         String comment,
         String actor,
-        Instant at) {
+        Instant at,
+        String agent) {
 
     public InboxRequest {
         values = values == null ? Map.of() : Map.copyOf(values);
+    }
+
+    /** A request no agent claims. */
+    public InboxRequest(String id, String kind, String run, Integer step, Integer questionSeq, String answer,
+                        Map<String, String> values, String comment, String actor, Instant at) {
+        this(id, kind, run, step, questionSeq, answer, values, comment, actor, at, null);
     }
 }

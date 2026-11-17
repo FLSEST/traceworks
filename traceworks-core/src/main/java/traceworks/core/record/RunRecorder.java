@@ -50,11 +50,16 @@ public final class RunRecorder implements RunEvents {
     /** In {@link #RECORDS}: the end of a command names a cut of its output ({@code output_cut}). */
     public static final String OUTPUT_CUT = "output_cut";
     /**
+     * In {@link #RECORDS}: an answer names the agent that gave it under the actor ({@code agent} in
+     * {@code approval.answered}). An answer without the field, in a record that says this, was claimed by no agent.
+     */
+    public static final String ANSWER_AGENT = "answer_agent";
+    /**
      * What this version writes into a record only when it happened, so that its absence says that it did not:
      * {@code records} in {@code run.started} and {@code run.resumed}. A record of a version that did not write
      * a fact has no such name, and its silence about that fact means nothing.
      */
-    public static final List<String> RECORDS = List.of(OUTPUT_CUT);
+    public static final List<String> RECORDS = List.of(OUTPUT_CUT, ANSWER_AGENT);
 
     private static final DateTimeFormatter AT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
@@ -334,7 +339,18 @@ public final class RunRecorder implements RunEvents {
 
     /** Names who gives the next {@code approval.answered}; it applies to that one event only. */
     public synchronized void attributeNextAnswer(String actor, String source, String requestId, String comment) {
-        nextAnswer = new EventFields.Answer(actor, source, requestId, comment);
+        attributeNextAnswer(actor, source, requestId, comment, null);
+    }
+
+    /**
+     * As {@link #attributeNextAnswer(String, String, String, String)}, for an answer an agent gave under the actor.
+     *
+     * @param agent the name the agent gave itself, checked by the caller; {@code null} for none. The event names it
+     *              ({@code agent}) only when there is one ({@link #ANSWER_AGENT})
+     */
+    public synchronized void attributeNextAnswer(String actor, String source, String requestId, String comment,
+                                                 String agent) {
+        nextAnswer = new EventFields.Answer(actor, source, requestId, comment, agent);
     }
 
     /** A command runner that records every command it runs and attributes it to the running step. */

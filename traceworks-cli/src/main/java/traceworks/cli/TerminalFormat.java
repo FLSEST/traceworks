@@ -5,6 +5,7 @@ import traceworks.core.port.BlobRef;
 import traceworks.core.port.CommandRunner;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.StepView;
+import traceworks.core.register.DecisionAgent;
 
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -67,7 +68,8 @@ public final class TerminalFormat {
                     : " " + f.path("category").asText())
                     + descriptionSuffix(e.blob("description"));
             case "approval.requested" -> step + "question: " + content(e.blob("question")) + options(f.path("options"));
-            case "approval.answered" -> step + "answered: " + content(e.blob("answer")) + by(f);
+            case "approval.answered" -> step + "answered: " + content(e.blob("answer")) + by(f)
+                    + through(f);
             case "request.refused" -> "request refused: " + f.path("reason").asText("?");
             case "foreach.item.started" -> step + "item " + (f.path("item_index").asInt() + 1) + "/"
                     + f.path("total").asInt() + " started: " + content(e.blob("item"));
@@ -129,6 +131,15 @@ public final class TerminalFormat {
     private static String by(JsonNode f) {
         JsonNode actor = f.path("actor");
         return actor.isNull() || actor.isMissingNode() ? "" : " by " + actor.asText();
+    }
+
+    /**
+     * The agent an answer names beside its actor, in the register's words; nothing for an answer without one. The
+     * name is bounded where it is given; a record that was edited can hold any, so it is made safe here.
+     */
+    private static String through(JsonNode f) {
+        JsonNode agent = f.path("agent");
+        return agent.isTextual() ? DecisionAgent.through(oneLine(agent.asText())) : "";
     }
 
     /**

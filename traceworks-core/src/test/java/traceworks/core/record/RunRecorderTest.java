@@ -569,6 +569,23 @@ class RunRecorderTest {
         assertThat(n.get(1).get("comment").isNull()).isTrue();
     }
 
+    /** The answer names the agent beside the actor only when one was given: no agent is no field, not a null. */
+    @Test
+    void answerAttribution_namesTheAgent_onlyWhenOneWasGiven() throws Exception {
+        recorder.attributeNextAnswer("flo", "cli", "req-1", null, "claude-code");
+        recorder.emit(new ApprovalAnswered(1, "approval", "Yes"));
+        recorder.attributeNextAnswer("flo", "cli", "req-2", null, null);
+        recorder.emit(new ApprovalAnswered(2, "approval", "Yes"));
+        recorder.emit(new ApprovalAnswered(3, "approval", "Yes"));
+
+        List<JsonNode> n = lines();
+        assertThat(n.get(0).get("actor").asText()).isEqualTo("flo");
+        assertThat(n.get(0).get("agent").asText()).isEqualTo("claude-code");
+        assertThat(n.get(1).get("actor").asText()).isEqualTo("flo");
+        assertThat(n.get(1).has("agent")).as("answered by the actor alone").isFalse();
+        assertThat(n.get(2).has("agent")).as("a default nobody gave").isFalse();
+    }
+
     @Test
     void clearAnswerAttribution_leavesTheNextAnswerUnattributed() throws Exception {
         recorder.attributeNextAnswer("flo", "inbox", "req-1", null);

@@ -148,7 +148,7 @@ class AnswerDeliveryTest {
     /** The answer a resume replays holds the turn until its step took it, and carries the resume's attribution. */
     @Test
     void aReplayedAnswer_holdsTheTurnUntilItsStepTookIt() throws Exception {
-        delivery.replay(0, "flo@box");
+        delivery.replay(0, "flo@box", null);
         List<Throwable> failures = new java.util.concurrent.CopyOnWriteArrayList<>();
         List<String> checked = new java.util.concurrent.CopyOnWriteArrayList<>();
         Thread anna = delivering(ANNA, () -> checked.add("anna"), (control, attribute) -> {
@@ -172,7 +172,7 @@ class AnswerDeliveryTest {
     /** A replayed step that ends without its answer leaves the attribution to nobody, and the turn to the next. */
     @Test
     void aReplayedStepThatEndsWithoutItsAnswer_leavesNoAttributionBehind() throws InterruptedException {
-        delivery.replay(0, "flo@box");
+        delivery.replay(0, "flo@box", null);
 
         recorder.emit(new traceworks.core.port.RunEvent.StepFinished(0, "ask", "approval",
                 traceworks.core.model.StepStatus.FAILED, "Ship?", 0, Map.of()));
@@ -189,7 +189,7 @@ class AnswerDeliveryTest {
     /** A run that ends while the resume replays an answer lets the next delivery in, to be refused. */
     @Test
     void aRunThatEndsDuringTheReplay_refusesTheNextDelivery_insteadOfKeepingItWaiting() {
-        delivery.replay(0, "flo@box");
+        delivery.replay(0, "flo@box", null);
 
         recorder.emit(new traceworks.core.port.RunEvent.RunFinished(traceworks.core.model.RunStatus.FAILED, Map.of(),
                 "boom"));
@@ -215,7 +215,7 @@ class AnswerDeliveryTest {
 
     @Test
     void theEndOfTheRunDuringTheReplay_refusesTheNextDelivery_insteadOfKeepingItWaiting() {
-        delivery.replay(0, "flo@box");
+        delivery.replay(0, "flo@box", null);
 
         delivery.end();
 

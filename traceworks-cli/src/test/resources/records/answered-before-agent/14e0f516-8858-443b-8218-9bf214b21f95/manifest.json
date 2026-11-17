@@ -1,0 +1,23 @@
+{
+  "run_id" : "14e0f516-8858-443b-8218-9bf214b21f95",
+  "workflow" : {
+    "id" : "deploy",
+    "name" : "deploy flow"
+  },
+  "package_digest" : "d427d302f1f55597e0e7b0f085fd87a11d9113cd40946c96d534f7bf31e6bff8",
+  "seal" : "unsealed",
+  "inputs_digest" : "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "execution" : "host",
+  "images" : [ ],
+  "models" : [ ],
+  "tool_versions" : { },
+  "events" : 27,
+  "head" : "304edb8965f11911c63b28c9c9786027154efe0355ebd053fa351df1f7177285",
+  "run_started" : "f1318cb51b863c14de0fda170b31a84f2e9655b7c31098c6eb53daa4964d84c2",
+  "status" : "COMPLETED",
+  "gate" : null,
+  "started_at" : "2026-11-17T13:34:07.487Z",
+  "finished_at" : "2026-11-17T13:34:08.190Z",
+  "traceworks_version" : "0.1.0-SNAPSHOT",
+  "signature" : null
+}

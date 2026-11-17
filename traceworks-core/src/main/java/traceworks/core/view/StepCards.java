@@ -12,6 +12,7 @@ import traceworks.core.record.QuestionView;
 import traceworks.core.record.RunView;
 import traceworks.core.record.StepFiles;
 import traceworks.core.record.StepView;
+import traceworks.core.register.DecisionAgent;
 
 import java.util.regex.Matcher;
 import java.util.Map;
@@ -375,6 +376,7 @@ final class StepCards {
                 if (given.actor() != null) {
                     out.append(" by ").append(Html.line(given.actor()));
                 }
+                out.append(Html.line(DecisionAgent.through(given.agent())));
                 if (given.source() != null) {
                     out.append(" via ").append(Html.line(given.source()));
                 }
@@ -394,8 +396,12 @@ final class StepCards {
     }
 
     private static void by(StringBuilder out, QuestionView.Answer answer) {
+        // The agent in the register's words, after the actor; a line somebody edited may name one without an actor
+        String through = Html.line(DecisionAgent.through(answer.agent()));
         if (answer.actor() != null) {
-            out.append(" &middot; by ").append(Html.line(answer.actor()));
+            out.append(" &middot; by ").append(Html.line(answer.actor())).append(through);
+        } else if (!through.isEmpty()) {
+            out.append(" &middot;").append(through);
         }
         if (answer.source() != null) {
             out.append(" &middot; via ").append(Html.line(answer.source()));
