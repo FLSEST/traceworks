@@ -2391,7 +2391,9 @@ run is refused (exit 6). `run.started` records the limit a run starts with as
 budget bounds what a run holds in all (see "Output budget").
 
 A stream that goes beyond the limit stops the command at once, as a timeout does: the command and what it started get
-SIGTERM, what is left 2 seconds later SIGKILL, and its container is removed. The command has failed, whatever its own
+SIGTERM (each process before its children, so a shell does not go on to its next command because the one in flight
+ended; one whose own TERM trap does not exit does go on), what is left 2 seconds later SIGKILL in the same order,
+and its container is removed. The command has failed, whatever its own
 exit code would have been, and what ran it never reads the cut text as if it were whole:
 
 - a `shell` step, also the inner shell step of `conditional`, `retry`, `switch`, `while` and `foreach`, fails with

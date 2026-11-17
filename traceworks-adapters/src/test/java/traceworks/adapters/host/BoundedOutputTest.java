@@ -182,7 +182,8 @@ class BoundedOutputTest {
     void end_afterItsBound_closesTheStream_soTheReaderEndsAndNothingMoreIsKept(@TempDir Path dir) throws Exception {
         Path closed = dir.resolve("found-its-output-closed");
         Process process = new ProcessBuilder("/bin/sh", "-c",
-                "read go; (trap '' PIPE; while echo tick; do sleep 0.05; done; touch \"$0\") 2>/dev/null & echo first",
+                // "first" is printed before the child starts: started first, the child could print ahead of it
+                "read go; echo first; (trap '' PIPE; while echo tick; do sleep 0.05; done; touch \"$0\") 2>/dev/null &",
                 closed.toString()).redirectError(ProcessBuilder.Redirect.DISCARD).start();
         BoundedOutput output = new BoundedOutput(1024 * 1024);
         Thread reader = output.drain(process.getInputStream(), "test-output");

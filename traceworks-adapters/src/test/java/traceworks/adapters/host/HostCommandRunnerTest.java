@@ -759,8 +759,9 @@ class HostCommandRunnerTest {
         Path closed = dir.resolve("found-its-output-closed");
         long start = System.nanoTime();
 
-        CommandResult result = run("(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null; touch '" + closed
-                + "') & echo early", 30);
+        // "early" is printed before the writer starts: started first, the writer could print ahead of it
+        CommandResult result = run("echo early; (trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null; "
+                + "touch '" + closed + "') &", 30);
 
         long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
         assertThat(result.exitCode()).isZero();

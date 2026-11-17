@@ -15,6 +15,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,6 +63,38 @@ class RetryBlockExecutorTest {
 
     private static StepResult step(StepStatus status, String output) {
         return StepResult.builder().stepIndex(0).status(status).output(output).build();
+    }
+
+    /**
+     * Every shell attempt fails, and {@code stop} runs once the thread of this test waits after the first one: the
+     * attempt has returned and the thread is in a timed wait, which is the wait before the next attempt. No duration
+     * decides when the stop comes, so it cannot come before the attempt on a slow machine.
+     */
+    private void onceTheWaitAfterAFailedAttemptHasBegun(Runnable stop) {
+        Thread executing = Thread.currentThread();
+        CountDownLatch attempted = new CountDownLatch(1);
+        when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any())).thenAnswer(call -> {
+            attempted.countDown();
+            return step(StepStatus.FAILED, "error");
+        });
+        Thread.ofVirtual().start(() -> {
+            try {
+                // Without the wait there is no stop: the retries run on and the test fails on what it expects
+                if (!attempted.await(30, TimeUnit.SECONDS)) {
+                    return;
+                }
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (executing.getState() != Thread.State.TIMED_WAITING) {
+                    if (System.nanoTime() >= deadline) {
+                        return;
+                    }
+                    Thread.sleep(5);
+                }
+            } catch (InterruptedException e) {
+                return;
+            }
+            stop.run();
+        });
     }
 
     @Test
@@ -139,23 +173,14 @@ class RetryBlockExecutorTest {
     /** A cancel during the wait between two attempts ends the wait at once, and no further attempt starts. */
     @Test
     void execute_cancelDuringTheWait_endsTheWait_andStartsNoAttempt() {
-        when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
-                .thenReturn(step(StepStatus.FAILED, "error"));
-        Thread.ofVirtual().start(() -> {
-            try {
-                Thread.sleep(300);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            context.cancel();
-        });
+        onceTheWaitAfterAFailedAttemptHasBegun(() -> context.cancel());
 
         long start = System.nanoTime();
         StepResult result = executor.execute(retry(Map.of(
                 "command", "flaky", "max_retries", 1, "delay", 30, "execution_mode", "shell")), context);
         long millis = (System.nanoTime() - start) / 1_000_000;
 
-        assertThat(millis).as("the cancel came at about 300 ms, the wait is 30 s").isLessThan(5_000);
+        assertThat(millis).as("the cancel came as the wait began, the wait is 30 s").isLessThan(5_000);
         assertThat(result.getStatus()).as("the retries the cancel cut short").isEqualTo(StepStatus.CANCELLED);
         assertThat(result.getMetadata()).containsEntry("attempts", 1);
         verify(commands, times(1)).shellStep(any(), anyInt(), anyInt(), any());
@@ -164,16 +189,7 @@ class RetryBlockExecutorTest {
     /** A run whose cancel flag was set without waking anyone still ends the wait within about a second. */
     @Test
     void execute_stopFlagSetDuringTheWait_endsTheWaitWithinASecond() {
-        when(commands.shellStep(any(BlockDefinition.class), anyInt(), anyInt(), any()))
-                .thenReturn(step(StepStatus.FAILED, "error"));
-        Thread.ofVirtual().start(() -> {
-            try {
-                Thread.sleep(300);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            context.getCancelled().set(true);
-        });
+        onceTheWaitAfterAFailedAttemptHasBegun(() -> context.getCancelled().set(true));
 
         long start = System.nanoTime();
         StepResult result = executor.execute(retry(Map.of(
