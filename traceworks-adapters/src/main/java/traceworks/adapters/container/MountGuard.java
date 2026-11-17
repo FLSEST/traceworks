@@ -55,14 +55,16 @@ import java.util.Optional;
  *       mounted read-only (without {@code workspace_writable}): it would undo their read-only mounts. A read-only
  *       one shows what the step sees anyway;</li>
  *   <li>a writable mount that is, lies in or holds the {@code .git} of a workspace that is mounted writable: the
- *       run mounts its hooks and its config read-only ({@link WorkspaceGit}), and the mount would show them
- *       writable at another place;</li>
+ *       run mounts that {@code .git} read-only ({@link WorkspaceGit}), and the mount would show it writable at
+ *       another place. Not where a step may write that {@code .git}
+ *       ({@link Context#workspaceGitWritable()}: the operator's {@code workspace_git_writable}, or the run's own
+ *       checkout of its source);</li>
  *   <li>every other writable mount that lies in no folder the operator listed ({@code writable_mounts} in
  *       {@code traceworks.json}), wherever it lies: what a step writes on the host can be a file the host runs
- *       later. Without the setting no package mounts a host path writable. What Traceworks manages itself needs
+ *       later. Without the setting no package mounts a host path writable. What the step writes anyway needs
  *       no entry: the run's scratch directory, the cache folder and the output folder of a tool step, and the
- *       run's own checkout of its source while the step may write its workspace. A listed folder lifts no other
- *       refusal of this list;</li>
+ *       workspace or a folder in it while the step may write its workspace (a folder that holds the workspace
+ *       does need one). A listed folder lifts no other refusal of this list;</li>
  *   <li>a path that cannot be resolved, for any reason (it does not exist, a directory on the way cannot be read):
  *       the check fails closed, since a rootful runtime mounts it anyway and in the container the host's parent
  *       directories no longer guard it;</li>
@@ -165,6 +167,18 @@ public final class MountGuard {
         /** The Traceworks home. */
         public Path traceworksHome() {
             return layout.home();
+        }
+
+        /**
+         * Whether a step that may write the workspace may write its top-level {@code .git} as well; otherwise the
+         * container gets that {@code .git} read-only ({@link WorkspaceGit}). It may where the operator said so
+         * ({@code workspace_git_writable}), and in the run's own checkout of its source: a checkout is a run's
+         * data and no repository of the operator's, and Traceworks points no git at one that exists (it is cloned
+         * into a folder that must not exist, removed file by file, and neither a package nor a source is read
+         * from the checkouts: {@code adapters.pkg.CheckoutsDirectory}).
+         */
+        public boolean workspaceGitWritable() {
+            return layout.workspaceGitWritable() || present(checkout);
         }
 
         /** {@link #of(Path, HomeLayout, ContainerRun, List)} for a home whose places are its fixed folders. */
@@ -669,9 +683,10 @@ public final class MountGuard {
 
     /**
      * Why a writable mount is refused: one in or around the package, or the read-only workspace, would undo its
-     * read-only mount; one in or around the {@code .git} of a writable workspace would undo the read-only mounts of
-     * its hooks and its config ({@link WorkspaceGit}); and any other needs a folder the operator listed
-     * ({@link #unlistedRefusal}), unless Traceworks manages the folder itself ({@link #managedByTraceworks}).
+     * read-only mount, whatever the operator listed; one in or around the {@code .git} of a writable workspace
+     * would undo the read-only mount of that {@code .git} ({@link WorkspaceGit}), unless a step may write it
+     * ({@link Context#workspaceGitWritable()}); and any other needs a folder the operator listed
+     * ({@link #unlistedRefusal}), unless the step writes the folder anyway ({@link #writtenAnyway}).
      */
     private static Optional<String> writableRefusal(Mount mount, Path real, Context context) {
         if (!context.writableWorkspace() && overlaps(real, context.workspace())) {
@@ -681,24 +696,29 @@ public final class MountGuard {
         if (overlaps(real, context.packageDirectory())) {
             return Optional.of("a writable mount of the package would get around its read-only mount; mount it :ro");
         }
-        if (context.writableWorkspace() && present(context.workspace())
+        if (context.writableWorkspace() && !context.workspaceGitWritable() && present(context.workspace())
                 && WorkspaceGit.isInOrHolds(real, real(Path.of(context.workspace())))) {
-            return Optional.of("it is, lies in or holds the .git of the workspace, whose hooks and config a step"
-                    + " sees read-only: a writable mount would show them writable at another place; mount a folder"
-                    + " of the workspace beside it, or mount it :ro");
+            return Optional.of("it is, lies in or holds the .git of the workspace, which a step sees read-only: a"
+                    + " writable mount would show it writable at another place; mount a folder of the workspace"
+                    + " beside it or mount it :ro, or, if every package you run may write that repository, set \""
+                    + HomeLayout.WORKSPACE_GIT_WRITABLE + "\": true in "
+                    + context.layout().home().resolve("traceworks.json"));
         }
-        return managedByTraceworks(mount, real, context) ? Optional.empty()
+        return writtenAnyway(mount, real, context) ? Optional.empty()
                 : unlistedRefusal(real, context.home(), context.layout());
     }
 
     /**
-     * Whether Traceworks manages the folder a writable mount names, so that no listed folder is asked of it: the
-     * folder the engine made for a tool step's output ({@link Mount#toolOutput()}), the cache folder of a tool
-     * step's image ({@link Mount#toolCache()}, below the tool caches), the run's own scratch directory, and the
-     * run's own checkout of its source while the step may write its workspace. Every other rule of the guard was
-     * asked of the mount before this one.
+     * Whether the step writes the folder of a writable mount anyway, so that no listed folder is asked of it. What
+     * Traceworks manages itself: the folder the engine made for a tool step's output ({@link Mount#toolOutput()}),
+     * the cache folder of a tool step's image ({@link Mount#toolCache()}, below the tool caches) and the run's own
+     * scratch directory. And the workspace, or a folder in it by its real path, while the step may write its
+     * workspace: the mount shows the step nothing that its workspace mount does not let it write, and the run's
+     * own checkout of its source is such a workspace. A folder that holds the workspace is more than the workspace
+     * and needs a listed folder. Every other rule of the guard was asked of the mount before this one: the
+     * package and the {@code .git} of the workspace, where a step only reads them, are refused there.
      */
-    private static boolean managedByTraceworks(Mount mount, Path real, Context context) {
+    private static boolean writtenAnyway(Mount mount, Path real, Context context) {
         if (mount.toolOutput()) {
             return true;
         }
@@ -709,8 +729,8 @@ public final class MountGuard {
         if (present(context.scratch()) && real.startsWith(real(Path.of(context.scratch())))) {
             return true;
         }
-        return context.writableWorkspace() && present(context.checkout())
-                && real.startsWith(real(Path.of(context.checkout())));
+        return context.writableWorkspace() && present(context.workspace())
+                && real.startsWith(real(Path.of(context.workspace())));
     }
 
     /**

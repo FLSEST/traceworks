@@ -202,23 +202,6 @@ class GitSourceCheckoutTest {
 
     // ---- checkout ----
 
-    /**
-     * The clone copies no init template, so it has no hooks folder. A step that may write the checkout sees the
-     * hooks and the config of its {@code .git} read-only, and a mount needs a folder to lie on: the checkout gets
-     * an empty one.
-     */
-    @Test
-    void checkout_hasAnEmptyHooksFolder_andAConfig_forTheirReadOnlyMounts() throws Exception {
-        checkouts.checkout(source().toString(), "feature", target());
-
-        Path hooks = target().resolve(".git/hooks");
-        assertThat(hooks).isDirectory();
-        try (var entries = Files.list(hooks)) {
-            assertThat(entries.toList()).isEmpty();
-        }
-        assertThat(target().resolve(".git/config")).isRegularFile();
-    }
-
     @Test
     void checkout_ofALocalRepository_atARef_isDetachedAtItsSha() throws Exception {
         Path repo = source();
@@ -323,9 +306,7 @@ class GitSourceCheckoutTest {
                 .hasContent("version https://git-lfs.github.com/spec/v1");
         assertThat(target().resolve("sub")).isEmptyDirectory();
         assertThat(target().resolve(".git/modules")).doesNotExist();
-        assertThat(target().resolve(".git/hooks")).as("no init template: the folder the checkout made is empty")
-                .isEmptyDirectory();
-        assertThat(target().resolve(".git/info/exclude")).as("no init template").doesNotExist();
+        assertThat(target().resolve(".git/hooks")).as("no init template").doesNotExist();
     }
 
     /** What the checkout holds is the commit's bytes: no line endings converted, whatever the attributes say. */

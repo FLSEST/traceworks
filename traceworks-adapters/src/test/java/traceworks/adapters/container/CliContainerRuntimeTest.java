@@ -867,15 +867,18 @@ class CliContainerRuntimeTest {
     /**
      * The run's own directories are not checked (the run checks the workspace once at start): the scratch directory
      * lies in the Traceworks home. A declared writable mount of the workspace is checked: refused while the
-     * workspace's own mount is read-only, and with {@code workspace_writable} allowed where the operator listed the
-     * folder in {@code writable_mounts}, which the runtime takes from the home's layout.
+     * workspace's own mount is read-only, allowed with {@code workspace_writable}, where the step writes the
+     * workspace anyway. A writable mount of any other folder needs the operator's word in {@code writable_mounts},
+     * which the runtime takes from the home's layout.
      */
     @Test
     void run_checksOnlyTheDeclaredMounts_andWritableTheWorkspaceOnlyWhileItIsReadOnly() throws IOException {
         Path docker = client("docker", "exit 0");
         Path workspace = Files.createDirectories(dir.resolve("project"));
+        Path out = Files.createDirectories(dir.resolve("out"));
         Path scratch = Files.createDirectories(traceworksHome.resolve("runs/r1/scratch"));
         Mount again = new Mount(workspace.toString(), "/again", false);
+        Mount elsewhere = new Mount(out.toString(), "/out", false);
         RunDirectories directories = new RunDirectories(workspace.toString(), null, scratch.toString());
         Mount scratchMount = new Mount(scratch.toString(), "/scratch", false);
         Mount readOnly = new Mount(workspace.toString(), "/workspace", true);
@@ -884,41 +887,89 @@ class CliContainerRuntimeTest {
         CommandResult standardOnly = runtime(docker).run(run(List.of(readOnly, scratchMount), directories, Map.of()));
         CommandResult refused = runtime(docker).run(run(List.of(readOnly, scratchMount, again), directories,
                 Map.of()));
-        CommandResult unlisted = runtime(docker).run(run(List.of(writable, scratchMount, again), directories,
+        CommandResult inTheWorkspace = runtime(docker).run(run(List.of(writable, scratchMount, again), directories,
+                Map.of()));
+        CommandResult unlisted = runtime(docker).run(run(List.of(writable, scratchMount, elsewhere), directories,
                 Map.of()));
         CliContainerRuntime listing = new CliContainerRuntime(docker.toString(),
-                traceworks.adapters.config.HomeLayout.of(traceworksHome).withWritableMounts(List.of(workspace)),
+                traceworks.adapters.config.HomeLayout.of(traceworksHome).withWritableMounts(List.of(out)),
                 home, INHERITED, traceworks.adapters.host.ProcessEncoding.ofTheJvm(), 1024 * 1024);
-        CommandResult allowed = listing.run(run(List.of(writable, scratchMount, again), directories, Map.of()));
+        CommandResult allowed = listing.run(run(List.of(writable, scratchMount, elsewhere), directories, Map.of()));
 
         assertThat(standardOnly.exitCode()).isZero();
         assertThat(refused.exitCode()).isEqualTo(125);
         assertThat(refused.stderr()).contains("workspace_writable");
+        assertThat(inTheWorkspace.exitCode()).as(inTheWorkspace.stderr()).isZero();
         assertThat(unlisted.exitCode()).isEqualTo(125);
-        assertThat(unlisted.stderr()).contains("the mount " + workspace + ":/again:rw is refused", "writable_mounts",
+        assertThat(unlisted.stderr()).contains("the mount " + out + ":/out:rw is refused", "writable_mounts",
                 traceworksHome.resolve("traceworks.json").toString());
         assertThat(allowed.exitCode()).as(allowed.stderr()).isZero();
     }
 
-    /** A writable workspace whose repository has no hooks folder to hold: the container is refused, not started. */
+    /**
+     * The container of a step that may write the workspace gets the workspace's {@code .git} read-only, whatever
+     * is in it; the operator's {@code workspace_git_writable}, which the runtime takes from the home's layout,
+     * leaves it writable with the rest of the workspace.
+     */
     @Test
-    void run_refusesAWritableWorkspace_whoseGitCannotBeHeld_andStartsNothing() throws IOException {
+    void run_mountsTheGitOfAWritableWorkspaceReadOnly_unlessTheOperatorOpenedIt() throws IOException {
         Path docker = client("docker", "exit 0");
         Path workspace = Files.createDirectories(dir.resolve("repository"));
-        Files.createDirectories(workspace.resolve(".git"));
-        Files.writeString(workspace.resolve(".git/config"), "");
+        Path git = Files.createDirectories(workspace.resolve(".git"));
+        RunDirectories directories = new RunDirectories(workspace.toString(), null, null);
+        ContainerRun writable = run(List.of(new Mount(workspace.toString(), "/workspace", false)), directories,
+                Map.of());
+        String cover = "type=bind,src=" + git + ",dst=/workspace/.git,readonly";
+
+        assertThat(runtime(docker).refusal(writable)).as("no hooks folder and no config: nothing is asked").isEmpty();
+        CommandResult covered = runtime(docker).run(writable);
+        CliContainerRuntime opening = new CliContainerRuntime(docker.toString(),
+                traceworks.adapters.config.HomeLayout.of(traceworksHome).withWorkspaceGitWritable(true),
+                home, INHERITED, traceworks.adapters.host.ProcessEncoding.ofTheJvm(), 1024 * 1024);
+        CommandResult opened = opening.run(writable);
+
+        assertThat(covered.exitCode()).as(covered.stderr()).isZero();
+        assertThat(opened.exitCode()).as(opened.stderr()).isZero();
+        List<List<String>> started = calls().stream().filter(call -> call.getFirst().equals("run")).toList();
+        assertThat(started).hasSize(2);
+        assertThat(started.get(0)).containsSubsequence("--mount", "type=bind,src=" + workspace + ",dst=/workspace",
+                "--mount", cover);
+        assertThat(started.get(1)).contains("type=bind,src=" + workspace + ",dst=/workspace").doesNotContain(cover);
+        assertThat(git).as("nothing is written into the repository").isEmptyDirectory();
+    }
+
+    /** The run's own checkout of its source is a run's data: its {@code .git} is writable with the checkout. */
+    @Test
+    void run_leavesTheGitOfTheRunsOwnCheckoutWritable() throws IOException {
+        Path docker = client("docker", "exit 0");
+        Path checkout = Files.createDirectories(traceworksHome.resolve("workspaces/r1"));
+        Files.createDirectories(checkout.resolve(".git"));
+        RunDirectories directories = new RunDirectories(checkout.toString(), null, null);
+
+        CommandResult result = runtime(docker).run(run(List.of(new Mount(checkout.toString(), "/workspace", false)),
+                directories, Map.of()));
+
+        assertThat(result.exitCode()).as(result.stderr()).isZero();
+        assertThat(calls().getFirst()).contains("type=bind,src=" + checkout + ",dst=/workspace")
+                .noneMatch(argument -> argument.contains("/.git"));
+    }
+
+    /** A {@code .git} that is a symbolic link cannot be held read-only in place: refused, and nothing started. */
+    @Test
+    void run_refusesAWritableWorkspace_whoseGitIsASymbolicLink_andStartsNothing() throws IOException {
+        Path docker = client("docker", "exit 0");
+        Path workspace = Files.createDirectories(dir.resolve("repository"));
+        Files.createSymbolicLink(workspace.resolve(".git"), Files.createDirectories(dir.resolve("elsewhere.git")));
         RunDirectories directories = new RunDirectories(workspace.toString(), null, null);
         ContainerRun writable = run(List.of(new Mount(workspace.toString(), "/workspace", false)), directories,
                 Map.of());
 
-        assertThat(runtime(docker).refusal(writable))
-                .hasValueSatisfying(why -> assertThat(why).contains("mkdir " + workspace.resolve(".git/hooks")));
+        assertThat(runtime(docker).refusal(writable)).hasValueSatisfying(why -> assertThat(why)
+                .contains("symbolic link", workspace.resolve(".git").toString(), "workspace_git_writable"));
         CommandResult refused = runtime(docker).run(writable);
 
         assertThat(refused.exitCode()).isEqualTo(125);
         assertThat(calls()).as("nothing started").isEmpty();
-        Files.createDirectories(workspace.resolve(".git/hooks"));
-        assertThat(runtime(docker).refusal(writable)).isEmpty();
     }
 
     /**

@@ -725,27 +725,45 @@ class MountGuardTest {
     }
 
     /**
-     * With {@code workspace_writable} the step writes the workspace anyway, but the workspace is the operator's
-     * folder: a writable mount of it needs a listed folder like any other. The package never is writable.
+     * With {@code workspace_writable} the step writes the workspace anyway: a writable mount of the workspace or of
+     * a folder in it shows the step nothing more to write, and needs no listed folder. By the real path: a link in
+     * the workspace that leads out of it is a mount of where it leads. A folder that holds the workspace is more
+     * than the workspace, and the package never is writable.
      */
     @Test
-    void writableMountOfTheWorkspace_needsAListedFolder_alsoWhileTheWorkspaceIsWritable() throws IOException {
-        Path src = Files.createDirectories(workspace.resolve("src"));
+    void writableMountInAWritableWorkspace_needsNoListedFolder_andOneAroundItDoes() throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path src = Files.createDirectories(repository.resolve("src"));
+        Path elsewhere = Files.createDirectories(outside.resolve("elsewhere"));
+        Path out = Files.createSymbolicLink(repository.resolve("out"), elsewhere);
+        Context writable = new Context(home, listing(), scratch.toString(), repository.toString(), true,
+                packageDirectory.toString(), List.of(), null);
 
-        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writableWorkspace()))
-                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts"));
-        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writableWorkspace(workspace))).isEmpty();
-        assertThat(MountGuard.check(new Mount(workspace.toString(), "/data", false), writableWorkspace(workspace)))
+        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writable)).as("in it").isEmpty();
+        assertThat(MountGuard.check(new Mount(repository.toString(), "/data", false), writable)).as("itself")
                 .isEmpty();
+        assertThat(MountGuard.check(new Mount(out.toString(), "/data", false), writable)).as("a link out of it")
+                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts").contains(elsewhere.toString()));
+        assertThat(MountGuard.check(new Mount(repository.getParent().toString(), "/data", false), writable))
+                .as("a folder that holds it").hasValueSatisfying(r -> assertThat(r).contains("writable_mounts"));
         assertThat(MountGuard.check(new Mount(packageDirectory.toString(), "/data", false),
                 writableWorkspace(packageDirectory.getParent())))
                 .hasValueSatisfying(r -> assertThat(r).contains("package").doesNotContain("workspace_writable"));
     }
 
+    /** While the workspace is read-only for the step, no listed folder makes a mount of it writable. */
+    @Test
+    void writableMountInAReadOnlyWorkspace_isRefused_alsoInAListedFolder() throws IOException {
+        Path src = Files.createDirectories(workspace.resolve("src"));
+
+        assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), withRoots(workspace)))
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable").contains("read-only"));
+    }
+
     /**
-     * A writable workspace is mounted with the hooks and the config of its {@code .git} read-only. A writable mount
-     * of the step's own that is that {@code .git}, lies in it or holds it would show them writable at another
-     * place, so it is refused, in a listed folder too, for a {@code .git} directory and for a {@code .git} file.
+     * A writable workspace is mounted with its {@code .git} read-only as a whole. A writable mount of the step's
+     * own that is that {@code .git}, lies in it or holds it would show the repository writable at another place, so
+     * it is refused, in a listed folder too, and the refusal names the setting that opens the repository.
      */
     @Test
     void writableMountInOrAroundTheGitOfAWritableWorkspace_isRefused() throws IOException {
@@ -758,7 +776,8 @@ class MountGuardTest {
 
         for (Path host : List.of(repository, repository.resolve(".git"), hooks, toHooks, repository.getParent())) {
             assertThat(MountGuard.check(new Mount(host.toString(), "/data", false), writable)).as(host.toString())
-                    .hasValueSatisfying(r -> assertThat(r).contains(".git").contains("hooks"));
+                    .hasValueSatisfying(r -> assertThat(r).contains(".git").contains("read-only")
+                            .contains("workspace_git_writable"));
         }
         assertThat(MountGuard.check(new Mount(src.toString(), "/data", false), writable)).as("beside it").isEmpty();
         assertThat(MountGuard.check(new Mount(hooks.toString(), "/data", true), writable)).as("read-only").isEmpty();
@@ -769,7 +788,7 @@ class MountGuardTest {
 
     @Test
     void writableMountOfAWritableWorkspace_isRefused_whenItsGitIsAFile_andAllowedWithoutOne() throws IOException {
-        Context writable = writableWorkspace(workspace);
+        Context writable = writableWorkspace();
 
         assertThat(MountGuard.check(new Mount(workspace.toString(), "/data", false), writable)).as("no .git")
                 .isEmpty();
@@ -778,6 +797,56 @@ class MountGuardTest {
                 .hasValueSatisfying(r -> assertThat(r).contains(".git"));
         assertThat(MountGuard.check(new Mount(file.toString(), "/data", false), writable)).as("the file itself")
                 .hasValueSatisfying(r -> assertThat(r).contains(".git"));
+    }
+
+    /**
+     * Where the operator opened the {@code .git} of a writable workspace ({@code workspace_git_writable}), a step
+     * writes it through the workspace, so a writable mount in it is a mount in the workspace like any other: no
+     * refusal for the {@code .git}, and no listed folder asked. A folder that holds the workspace still needs one.
+     */
+    @Test
+    void writableMountInTheGitOfAWritableWorkspace_isAMountInTheWorkspace_whereTheOperatorOpenedIt()
+            throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path hooks = Files.createDirectories(repository.resolve(".git/hooks"));
+        Context opened = new Context(home, listing().withWorkspaceGitWritable(true), scratch.toString(),
+                repository.toString(), true, packageDirectory.toString(), List.of(), null);
+        Context openedReadOnly = new Context(home, listing(outside).withWorkspaceGitWritable(true),
+                scratch.toString(), repository.toString(), false, packageDirectory.toString(), List.of(), null);
+
+        assertThat(opened.workspaceGitWritable()).isTrue();
+        for (Path host : List.of(repository, repository.resolve(".git"), hooks)) {
+            assertThat(MountGuard.check(new Mount(host.toString(), "/data", false), opened)).as(host.toString())
+                    .isEmpty();
+        }
+        assertThat(MountGuard.check(new Mount(repository.getParent().toString(), "/data", false), opened))
+                .as("a folder that holds the workspace").hasValueSatisfying(r -> assertThat(r)
+                        .contains("writable_mounts").doesNotContain("workspace_git_writable"));
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/data", false), openedReadOnly))
+                .as("the setting opens nothing of a workspace the step only reads")
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable"));
+    }
+
+    /**
+     * The run's own checkout of its source is a run's data, in which Traceworks runs no git once a step could have
+     * written it: its {@code .git} is writable with the rest of it, without the operator's setting, and a writable
+     * mount in it is refused for nothing. A workspace of the operator's own is not such a checkout.
+     */
+    @Test
+    void theGitOfTheRunsOwnCheckout_isWritableWithTheCheckout_withoutTheSetting() throws IOException {
+        Path checkout = Files.createDirectories(traceworksHome.resolve("workspaces/run-1"));
+        Path hooks = Files.createDirectories(checkout.resolve(".git/hooks"));
+        Context writable = Context.of(home, traceworksHome, runIn("run-1", checkout, false), List.of());
+        Context readOnly = Context.of(home, traceworksHome, runIn("run-1", checkout, true), List.of());
+
+        assertThat(writable.workspaceGitWritable()).isTrue();
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/hooks", false), writable)).isEmpty();
+        assertThat(MountGuard.check(new Mount(checkout.toString(), "/again", false), writable)).isEmpty();
+        assertThat(MountGuard.check(new Mount(hooks.toString(), "/hooks", false), readOnly))
+                .hasValueSatisfying(r -> assertThat(r).contains("workspace_writable"));
+        assertThat(writableWorkspace().workspaceGitWritable()).as("the operator's own workspace").isFalse();
+        assertThat(Context.of(home, traceworksHome, runIn("run-2", workspace, false), List.of())
+                .workspaceGitWritable()).as("the operator's own workspace, of a run").isFalse();
     }
 
     /** A writable mount of the workspace or the package would undo its read-only standard mount. */
