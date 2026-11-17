@@ -128,10 +128,10 @@ class ConsoleAskerTest {
         for (String padded : Forged.PADDED) {
             shown.reset();
             blobs.put("q", "Deploy?\n" + padded);
-            type("yes\nflo\n");
+            type("yes\noperator\n");
 
             assertThat(asker.ask(approval(List.of("Yes", "No")))).contains("Yes");
-            assertThat(asker.ask(input(null, null))).contains("flo");
+            assertThat(asker.ask(input(null, null))).contains("operator");
 
             assertThat(shown().lines()).contains("?", "  | Deploy?", "  | x");
             Forged.assertNeverStartsATerminalLine(shown());

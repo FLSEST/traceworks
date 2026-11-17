@@ -56,12 +56,12 @@ class TerminalFormatTest {
      */
     @Test
     void runStarted_staysOnOneLine_andOnlyWhatIsFromOutsideIsGated() {
-        String rest = "\"actor\":\"flo\",\"execution\":\"container\",\"container_runtime\":{\"name\":\"docker\","
+        String rest = "\"actor\":\"operator\",\"execution\":\"container\",\"container_runtime\":{\"name\":\"docker\","
                 + "\"version\":\"29.1.3\"}";
         String printed = raw(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Security self-audit"
                 + "\"}," + rest));
         assertThat(printed).isEqualTo("12:34:56 run started: Security self-audit (run 11111111)"
-                + " by flo in containers (docker 29.1.3)");
+                + " by operator in containers (docker 29.1.3)");
         assertThat(printed.length()).as("the case: wider than the terminal").isGreaterThan(80);
 
         for (String padded : Forged.PADDED) {
@@ -70,7 +70,7 @@ class TerminalFormatTest {
             Forged.assertNeverStartsATerminalLine(forged);
             assertThat(forged.lines().count()).isGreaterThan(1);
             Forged.assertNeverStartsATerminalLine(raw(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\""
-                    + "n".repeat(31) + "\"},\"actor\":\"flo\",\"execution\":\"container\",\"container_runtime\":"
+                    + "n".repeat(31) + "\"},\"actor\":\"operator\",\"execution\":\"container\",\"container_runtime\":"
                     + "{\"name\":\"docker\",\"version\":\"" + Forged.HINT + "\"}")));
         }
     }
@@ -178,7 +178,7 @@ class TerminalFormatTest {
                 raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + blob)),
                 raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + blob
                         + ",\"options\":[\"Yes\",\"No\"]")),
-                raw(event("approval.answered", "\"step\":1,\"answer\":" + blob + ",\"actor\":\"flo\"")),
+                raw(event("approval.answered", "\"step\":1,\"answer\":" + blob + ",\"actor\":\"operator\"")),
                 raw(event("step.output", "\"step\":0,\"name\":\"x\",\"output\":" + blob)),
                 raw(event("step.command", "\"step\":0,\"command\":" + blob)),
                 raw(event("gate.reported", "\"step\":0,\"status\":\"RED\",\"description\":" + blob)),
