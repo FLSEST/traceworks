@@ -60,7 +60,7 @@ public final class TerminalFormat {
             case "step.command" -> step + "$ " + content(e.blob("command"));
             case "step.command.finished" -> step + "exit " + f.path("exit_code").asText("?") + " after "
                     + f.path("duration_ms").asLong() + " ms" + (f.path("timed_out").asBoolean() ? " (timed out)" : "")
-                    + truncated(f.path("truncated"));
+                    + truncated(f.path("truncated")) + outputCut(f.path("output_cut"));
             case "step.output" -> step + "output: " + content(e.blob("output"));
             case "gate.reported" -> step + "gate " + f.path("status").asText("?")
                     + (f.path("category").isNull() || f.path("category").isMissingNode() ? ""
@@ -140,6 +140,17 @@ public final class TerminalFormat {
         streams.forEach(stream -> names.add(oneLine(stream.asText())));
         return names.isEmpty() ? "" : " (" + String.join(", ", names) + " beyond "
                 + CommandRunner.sizeText(outputLimitMib * 1024L * 1024L) + ")";
+    }
+
+    /**
+     * The cut a command's end names, such as {@code " (output cut: stdout after 5000 ms)"}: the reading of the output
+     * ended at its bound, because something the command left behind still held it.
+     */
+    private static String outputCut(JsonNode cut) {
+        List<String> names = new ArrayList<>();
+        cut.path("streams").forEach(stream -> names.add(oneLine(stream.asText())));
+        return names.isEmpty() ? "" : " (output cut: " + String.join(", ", names) + " after "
+                + cut.path("after_ms").asLong() + " ms)";
     }
 
     private static String options(JsonNode options) {

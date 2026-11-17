@@ -44,7 +44,11 @@ import java.util.TreeSet;
  *   <li>another package digest, or other inputs (another inputs digest);</li>
  *   <li>another picked option of a model choice ({@code run.started.model_choices});</li>
  *   <li>a deterministic step whose status or output differs, or that only one run has, and a {@code foreach} item of
- *       such a step likewise. An output is compared by the hash of its blob. This holds also after an AI output that
+ *       such a step likewise. So does a deterministic step of which other commands had their output cut
+ *       ({@code output_cut}): a command is matched by its item and its order among the commands of that item, in
+ *       the latest attempt of the step. That holds only when both records can name a cut (the {@code records} of
+ *       their {@code run.started} and of every {@code run.resumed}); a record of an earlier version does not say,
+ *       so then the cuts are not compared, and a note says so when either run names one. An output is compared by the hash of its blob. This holds also after an AI output that
  *       differed: the reason then says so;</li>
  *   <li>an AI call with another setup: provider, model asked for, the model server of the operator's it went to
  *       (or none), effort, tool policy, web mode and hosts, system
@@ -53,8 +57,8 @@ import java.util.TreeSet;
  *       same.</li>
  * </ul>
  *
- * <p>What does not: the answer of an AI call, the output and status of an AI step, an AI step or call that only one
- * run has, and every other header field (version, execution, images, the operator's AI settings, models, status,
+ * <p>What does not: the answer of an AI call, the output and status of an AI step, an output cut of an AI step that
+ * differs (a note names it), an AI step or call that only one run has, and every other header field (version, execution, images, the operator's AI settings, models, status,
  * gate). They are reported.
  */
 public final class RunComparer {
@@ -63,6 +67,7 @@ public final class RunComparer {
 
     private final List<Step> steps = new ArrayList<>();
     private final List<String> differences = new ArrayList<>();
+    private final List<String> notes = new ArrayList<>();
     /** Whether an AI output differed in what was compared so far, in the order of run A's steps. */
     private boolean aiOutputDiffered;
 
@@ -74,7 +79,16 @@ public final class RunComparer {
         List<String> notes = new ArrayList<>();
         List<Field> header = comparer.header(a, b);
         List<Input> inputs = inputs(a, b, notes);
+        if (a.view().outputCuts() + b.view().outputCuts() > 0) {
+            for (RunFacts facts : List.of(a, b)) {
+                if (!facts.view().recordsOutputCut()) {
+                    notes.add("run " + facts.view().runId() + " is of a version that does not record whether an"
+                            + " output was cut: the cuts of the two runs are not compared");
+                }
+            }
+        }
         comparer.steps("", a.view(), b.view());
+        notes.addAll(comparer.notes);
         return new RunComparison(a.view().runId(), b.view().runId(), header, inputs, comparer.steps,
                 comparer.differences, notes, null);
     }
@@ -279,10 +293,49 @@ public final class RunComparer {
                 }
             }
         }
+        if (a != null && b != null && runA.recordsOutputCut() && runB.recordsOutputCut()) {
+            outputCuts(label, ai, cuts(a), cuts(b), after);
+        }
         List<AiCall> calls = calls(label, a, b);
         aiOutputDiffered |= ownOutputDiffered;
         steps.add(new Step(label, ai, statusA, statusB, output, outputA, outputB, calls, items));
         children(label, a, b, runA, runB);
+    }
+
+    /**
+     * Commands whose output was cut in one run and not, or otherwise, in the other: the step was not read the same
+     * way. A difference for a deterministic step, a note for an AI step, whose output never counts. Only for two
+     * records that can name a cut.
+     */
+    private void outputCuts(String label, boolean ai, String cutA, String cutB, String after) {
+        if (cutA.equals(cutB)) {
+            return;
+        }
+        String what = "step " + label + ": the output was cut " + (cutB.isEmpty() ? "in run A (" + cutA
+                + "), not in run B" : cutA.isEmpty() ? "in run B (" + cutB + "), not in run A"
+                : "differently (" + cutA + " in run A, " + cutB + " in run B)");
+        if (ai) {
+            notes.add(what);
+        } else {
+            differences.add(what + after);
+        }
+    }
+
+    /**
+     * The cuts the ends of a step's commands name, each with its command: the item and the order among the commands
+     * of that item, such as {@code item 2, command 1: stdout after 5000 ms}. Empty when no end names a cut.
+     */
+    private static String cuts(StepView step) {
+        Map<Integer, Integer> perItem = new LinkedHashMap<>();
+        List<String> cuts = new ArrayList<>();
+        for (traceworks.core.record.CommandView command : step.commands()) {
+            int n = perItem.merge(command.item() == null ? -1 : command.item(), 1, Integer::sum);
+            if (command.outputCut() != null) {
+                cuts.add((command.item() == null ? "" : "item " + command.item() + ", ") + "command " + n + ": "
+                        + command.outputCut().summary());
+            }
+        }
+        return String.join("; ", cuts);
     }
 
     private static boolean isAi(StepView step) {

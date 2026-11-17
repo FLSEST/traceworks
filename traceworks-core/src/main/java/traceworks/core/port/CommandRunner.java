@@ -340,6 +340,31 @@ public interface CommandRunner {
     }
 
     /**
+     * The reading of a command's output that ended before the end of the stream: at its bound, because after the
+     * command ended something it left behind still held the output, or at once, because the wait for the command was
+     * interrupted. What was written afterwards was not kept. The output may be incomplete. A mark: it fails nothing.
+     *
+     * @param streams the streams whose reading ended so, {@value CommandResult#STDOUT} before
+     *                {@value CommandResult#STDERR}; never empty, a read-only copy
+     * @param afterMs how long the runner waited for the end of the output after the command ended: the bound; 0 for
+     *                an interrupted wait
+     */
+    record OutputCut(List<String> streams, long afterMs) {
+
+        public OutputCut {
+            streams = List.copyOf(streams);
+            if (streams.isEmpty()) {
+                throw new IllegalArgumentException("A cut names the streams it happened to");
+            }
+        }
+
+        /** Such as {@code stdout after 5000 ms}. */
+        public String summary() {
+            return String.join(", ", streams) + " after " + afterMs + " ms";
+        }
+    }
+
+    /**
      * How a command ended.
      *
      * @param exitCode         the exit code of the command
@@ -359,10 +384,12 @@ public interface CommandRunner {
      * @param connections      what the container asked its egress proxy for, by target and verdict in the order of
      *                         their first appearance; empty for a command without listed hosts
      *                         ({@link Egress#hosts}); absent is empty
+     * @param outputCut        set when the reading of the output ended at its bound because something the command
+     *                         left behind still held it; {@code null} when the output was read to its end
      */
     record CommandResult(int exitCode, String stdout, String stderr, long durationMs, boolean timedOut,
                          List<String> truncatedStreams, int outputLimitBytes, String notRunReason,
-                         List<Connection> connections) {
+                         List<Connection> connections, OutputCut outputCut) {
 
         /** The name of the standard output in {@link #truncatedStreams()} and in the record. */
         public static final String STDOUT = "stdout";
@@ -378,6 +405,20 @@ public interface CommandRunner {
             connections = connections == null ? List.of() : List.copyOf(connections);
         }
 
+        /** A result of a command whose output was read to its end. */
+        public CommandResult(int exitCode, String stdout, String stderr, long durationMs, boolean timedOut,
+                             List<String> truncatedStreams, int outputLimitBytes, String notRunReason,
+                             List<Connection> connections) {
+            this(exitCode, stdout, stderr, durationMs, timedOut, truncatedStreams, outputLimitBytes, notRunReason,
+                    connections, null);
+        }
+
+        /** This result, with the mark of an output whose reading ended at its bound; {@code null} for none. */
+        public CommandResult withOutputCut(OutputCut outputCut) {
+            return new CommandResult(exitCode, stdout, stderr, durationMs, timedOut, truncatedStreams,
+                    outputLimitBytes, notRunReason, connections, outputCut);
+        }
+
         /** A result of a command that asked no egress proxy for anything. */
         public CommandResult(int exitCode, String stdout, String stderr, long durationMs, boolean timedOut,
                              List<String> truncatedStreams, int outputLimitBytes, String notRunReason) {
@@ -388,7 +429,7 @@ public interface CommandRunner {
         /** This result, with what its container asked the egress proxy for. */
         public CommandResult withConnections(List<Connection> connections) {
             return new CommandResult(exitCode, stdout, stderr, durationMs, timedOut, truncatedStreams,
-                    outputLimitBytes, notRunReason, connections);
+                    outputLimitBytes, notRunReason, connections, outputCut);
         }
 
         /** A result of a command that ran, or of which the runner cannot tell that it did not. */
@@ -414,7 +455,7 @@ public interface CommandRunner {
         /** This result, marked as one of a command that did not run, for {@code reason}. */
         public CommandResult asNotRun(String reason) {
             return new CommandResult(exitCode, stdout, stderr, durationMs, timedOut, truncatedStreams,
-                    outputLimitBytes, reason, connections);
+                    outputLimitBytes, reason, connections, outputCut);
         }
 
         /** A result of a runner with the default limit, {@link CommandRunner#OUTPUT_LIMIT_BYTES}. */

@@ -747,6 +747,7 @@ class HostCommandRunnerTest {
 
         assertThat(result.exitCode()).isZero();
         assertThat(result.stdout()).isEqualTo("early\nlate\nlater\n");
+        assertThat(result.outputCut()).as("read to its end: no cut").isNull();
     }
 
     /**
@@ -766,7 +767,11 @@ class HostCommandRunnerTest {
         long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
         assertThat(result.exitCode()).isZero();
         assertThat(result.stdout()).startsWith("early\ntick\n");
-        assertThat(millis).isBetween(HostCommandRunner.AFTER_END_MILLIS, HostCommandRunner.AFTER_END_MILLIS + 3000);
+        assertThat(result.outputCut()).as("the result says that the reading ended at the bound").isEqualTo(
+                new traceworks.core.port.CommandRunner.OutputCut(List.of(CommandResult.STDOUT),
+                        HostCommandRunner.AFTER_END_MILLIS));
+        assertThat(millis).as("the bound, not the writer's life, which has no end")
+                .isBetween(HostCommandRunner.AFTER_END_MILLIS, 30_000L);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!Files.exists(closed) && System.nanoTime() < deadline) {
             Thread.sleep(10);
@@ -809,6 +814,8 @@ class HostCommandRunnerTest {
         assertThat(result.get()).as("the result of the interrupted run").isNotNull();
         assertThat(result.get().exitCode()).isEqualTo(130);
         assertThat(result.get().stdout()).isEqualTo("Command interrupted");
+        assertThat(result.get().outputCut()).as("the output was not read to its end, and the result says so")
+                .isEqualTo(new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), 0));
         assertThat(result.get().timedOut()).isFalse();
         assertThat(interruptedAfterReturn.get()).as("interrupt flag still set for the caller").isTrue();
         assertThat(BackgroundChild.endsWithin(Long.parseLong(Files.readString(pid).trim()), Duration.ofSeconds(5)))
@@ -853,6 +860,50 @@ class HostCommandRunnerTest {
         assertThat(tracker.started()).hasSize(1);
         assertThat(tracker.finished()).hasSize(1);
         assertThat(tracker.finished().getFirst()).isSameAs(tracker.started().getFirst());
+    }
+
+    /**
+     * A writer that is out of reach of the stop (its parent had ended) holds the output after a cancel: the bound is
+     * the one after a stop, as after a timeout, not the one after a command that ended by itself.
+     */
+    @Test
+    void run_cancelled_readsTheOutputForTheBoundAfterAStop_andMarksTheCut(@TempDir Path dir) throws Exception {
+        ExecutionContext context = ExecutionContext.builder().workflowRunId("run-1").build();
+        Path started = dir.resolve("started");
+        AtomicReference<CommandResult> result = new AtomicReference<>();
+
+        Thread run = Thread.ofVirtual().start(() -> result.set(ProcessTracking.bind(context.processTracker(),
+                () -> run("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); touch '" + started + "'; sleep 30", 20))));
+        awaitFile(started);
+        context.cancel();
+        run.join(30_000);
+
+        assertThat(run.isAlive()).as("command still running after the cancel").isFalse();
+        assertThat(result.get().outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
+    }
+
+    /** The same after a timeout: the command is timed out as ever, and the cut is marked with the bound after a stop. */
+    @Test
+    void run_timeout_withAWriterOutOfReach_isTimedOut_andMarksTheCutAfterTheShorterBound() {
+        CommandResult result = run("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); sleep 60", 1);
+
+        assertThat(result.timedOut()).isTrue();
+        assertThat(result.exitCode()).isEqualTo(124);
+        assertThat(result.stdout()).startsWith("tick\n");
+        assertThat(result.outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
+    }
+
+    /** And after an output beyond the limit: both are named, the limit as truncated and the bound as the cut. */
+    @Test
+    void run_outputBeyondTheLimit_withAWriterOutOfReach_namesTheLimitAndTheCut() {
+        CommandResult result = limitedTo(64 * 1024).run(shell("(sh -c \"trap '' PIPE; while echo tick; do sleep 0.05; done\" 2>/dev/null &); exec yes", null, 120));
+
+        assertThat(result.exitCode()).isEqualTo(CommandRunner.OUTPUT_LIMIT_EXIT_CODE);
+        assertThat(result.truncatedStreams()).containsExactly("stdout");
+        assertThat(result.outputCut()).isEqualTo(
+                new CommandRunner.OutputCut(List.of(CommandResult.STDOUT), HostCommandRunner.AFTER_STOP_MILLIS));
     }
 
     @Test

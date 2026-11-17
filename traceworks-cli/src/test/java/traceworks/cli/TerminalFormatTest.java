@@ -92,6 +92,14 @@ class TerminalFormatTest {
                 .isEqualTo("12:34:56 step 0  output: hi there");
     }
 
+    /** An output whose reading ended at the bound after the command's end is named, with the streams and the bound. */
+    @Test
+    void anOutputCutAtTheBound_isNamed() {
+        assertThat(line(event("step.command.finished", "\"step\":0,\"exit_code\":0,\"duration_ms\":5100,"
+                + "\"timed_out\":false,\"truncated\":[],\"output_cut\":{\"streams\":[\"stdout\"],\"after_ms\":5000}")))
+                .isEqualTo("12:34:56 step 0  exit 0 after 5100 ms (output cut: stdout after 5000 ms)");
+    }
+
     /** A cut stream is named with the limit the run records: in run.started, and again in run.resumed. */
     @Test
     void cutStreams_nameTheLimitTheRunRecords() {

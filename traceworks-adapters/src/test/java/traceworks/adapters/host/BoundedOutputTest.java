@@ -195,7 +195,8 @@ class BoundedOutputTest {
         long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before);
         String kept = output.text();
 
-        assertThat(waited).as("the bound, not the child's life").isBetween(300L, 3000L);
+        assertThat(waited).as("the bound, not the child's life, which has no end").isBetween(300L, 30_000L);
+        assertThat(output.cut()).as("the reading ended at the bound").isTrue();
         assertThat(kept).startsWith("first\ntick\n");
         reader.join(10_000);
         assertThat(reader.isAlive()).as("the reader still runs").isFalse();
@@ -216,5 +217,73 @@ class BoundedOutputTest {
         output.end(5000);
 
         assertThat(output.text()).isEqualTo("abc");
+        assertThat(output.cut()).as("read to its end").isFalse();
+    }
+
+    /** A stream that goes beyond the limit and ends is not cut at the bound: the limit is another matter. */
+    @Test
+    void end_ofAStreamBeyondTheLimitThatEnds_isNotCut() throws InterruptedException {
+        BoundedOutput output = new BoundedOutput(2);
+        output.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+
+        output.end(5000);
+
+        assertThat(output.exceeded()).isTrue();
+        assertThat(output.cut()).isFalse();
+    }
+
+    /** A reading that is ended at once, as after an interrupted wait, is cut; one that reached its end is not. */
+    @Test
+    void endNow_cutsAStreamThatHasNotEnded_andNotOneThatHas() throws Exception {
+        Process process = new ProcessBuilder("/bin/sh", "-c", "echo first; exec sleep 300")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            BoundedOutput open = new BoundedOutput(1024);
+            open.drain(process.getInputStream(), "test-output");
+            BoundedOutput ended = new BoundedOutput(8);
+            ended.drain(new ByteArrayInputStream(utf8("abc")), "test-output");
+            ended.end(30_000);
+
+            assertThat(open.endNow()).isTrue();
+            assertThat(open.cut()).isTrue();
+            assertThat(ended.endNow()).isFalse();
+            assertThat(ended.cut()).isFalse();
+            assertThat(new BoundedOutput(8).endNow()).as("nothing is read yet").isFalse();
+        } finally {
+            process.destroyForcibly();
+        }
+    }
+
+    /**
+     * The limit of the mark: a child that holds the output and never writes. The close does not wake a read that
+     * waits, so the reader stays until the child ends; the wait still ends at the bound, the cut is marked then, and
+     * what came before is kept.
+     */
+    @Test
+    void end_ofAStreamAHolderNeverWritesTo_isCutAtTheBound_thoughItsReaderStays() throws Exception {
+        Process process = new ProcessBuilder("/bin/sh", "-c", "read go; sleep 300 & echo $!")
+                .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        BoundedOutput output = new BoundedOutput(1024);
+        Thread reader = output.drain(process.getInputStream(), "test-output");
+        process.getOutputStream().close();
+        assertThat(process.waitFor(10, TimeUnit.SECONDS)).as("the shell ended").isTrue();
+        try {
+            long before = System.nanoTime();
+            output.end(300);
+            long waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - before);
+
+            assertThat(waited).as("the bound, not the holder's life of 300 s").isBetween(300L, 30_000L);
+            assertThat(output.cut()).as("marked at the bound").isTrue();
+            assertThat(output.text()).as("the holder's pid, written before").matches("\\d+\n");
+            assertThat(reader.isAlive()).as("the reader waits for the holder").isTrue();
+        } finally {
+            // The holder's pid, if it came: a failure above must not be hidden by one here
+            String pid = output.text().strip();
+            if (pid.matches("\\d+")) {
+                ProcessHandle.of(Long.parseLong(pid)).ifPresent(ProcessHandle::destroyForcibly);
+            }
+        }
+        reader.join(10_000);
+        assertThat(reader.isAlive()).as("the reader ends with the holder").isFalse();
     }
 }
