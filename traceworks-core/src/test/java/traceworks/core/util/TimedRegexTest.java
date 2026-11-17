@@ -262,4 +262,28 @@ class TimedRegexTest {
         assertThat(TimedRegex.repetitionProblem("(?x) a{1 0} b{2 , 3} # {999999999}{999999999}")).isNotNull();
         assertThat(TimedRegex.repetitionProblem("(?x) a{1 0} b{2 , 3}")).isNull();
     }
+
+    /**
+     * Two things the reading of classes cannot follow. A control escape takes the character after it, so
+     * {@code \c[} is the escape character and opens no class, and {@code \c\} takes the backslash that would
+     * escape a brace or a bracket. And in comments mode, which a pattern can switch on for a part of itself, a
+     * {@code [} after a {@code #} is in a comment. A pattern with either has every brace counted, whatever stands
+     * before it: more than the engine counts, never less.
+     */
+    @Test
+    void aControlEscapeOrAComment_cannotHideACountBehindAClassThatIsNone() {
+        assertThat(Pattern.compile("\\c[").matcher("\u001b").matches()).as("\\c[ is one character").isTrue();
+        assertThat(Pattern.compile("(?x)a#[\nb").matcher("ab").matches()).as("a [ in a comment").isTrue();
+
+        for (String regex : new String[] {
+                "\\c[?(?:^{2000000}){3000000}",
+                "(?:^\\c\\{2000000}){3000000}",
+                "[\\c\\](?:^{2000000}){3000000}",
+                "(?x)#[\n(?:^{2000000}){3000000}",
+                "(?x:#[\n)#(?:^{2000000}){3000000}"}) {
+            Pattern.compile(regex);   // each is a pattern the engine takes
+            assertThat(TimedRegex.repetitionProblem(regex)).as(regex).contains("multiply to more than");
+        }
+        assertThat(TimedRegex.repetitionProblem("#\\d{3}-[a-z{}]{2}\\cA{4}")).as("small counts stay fine").isNull();
+    }
 }

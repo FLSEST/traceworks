@@ -791,7 +791,9 @@ this setting is the usual one for Docker hosts and has not been verified here.
   busy until the Traceworks process ends (a thread inside the regex engine cannot be stopped). A pattern whose
   counts (`{n}`, `{n,}`, `{n,m}`) multiply to more than 1,000,000,000,000 is refused before any match, with a
   message that says so; a count written with white space or a comment in it, which `(?x)` allows, is read as the
-  engine reads it.
+  engine reads it. A brace that is escaped, in a character class or in quoted text counts nothing, unless the
+  pattern holds a control escape (`\c`) or a `#`: either can make a class or an escape look like one where the
+  engine reads none, so in such a pattern every brace counts.
 - **A token in a `--source` URL** is an argument of `git clone`, so every process on the machine can read it in the
   process list while the clone runs. Use a credential helper instead.
 - **A gitfile that points into a checkout.** A local source whose `.git` is a file (`gitdir: ...`) that points into a

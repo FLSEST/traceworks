@@ -47,14 +47,22 @@ public final class TimedRegex {
      * ({@code \Q...\E}) and the braces of {@code \p{...}} or {@code \x{...}} count nothing. Where the reading
      * here and the engine's could differ (a {@code ]} right after {@code [}), the class is taken to end early, so
      * a count is never missed.
+     *
+     * <p>Two things this reading cannot follow, so a pattern with either has every brace counted, also an escaped
+     * one, one in a class and one in quoted text: a control escape, which takes the character after it
+     * ({@code \c[} is one character and opens no class, {@code \c\} takes the backslash that would escape a brace),
+     * and a {@code #}, which starts a comment in comments mode, and a pattern can switch that mode on for a part
+     * of itself ({@code (?x)}), so that a {@code [} after it opens nothing. Every count the engine takes is a brace
+     * in the text, so that reading misses none.
      */
     public static String repetitionProblem(String regex) {
+        boolean everyBrace = regex.contains("\\c") || regex.indexOf('#') >= 0;
         long product = 1;
         int classDepth = 0;
         int i = 0;
         while (i < regex.length()) {
             char c = regex.charAt(i);
-            if (c == '\\') {
+            if (c == '\\' && !everyBrace) {
                 if (regex.startsWith("\\Q", i)) {
                     int end = regex.indexOf("\\E", i + 2);
                     if (end < 0) break;   // quoted to the end
@@ -64,7 +72,7 @@ public final class TimedRegex {
                 }
                 continue;
             }
-            if (c == '[') {
+            if (c == '[' && !everyBrace) {
                 classDepth++;
             } else if (c == ']') {
                 if (classDepth > 0) classDepth--;
