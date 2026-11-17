@@ -156,12 +156,32 @@ public final class RegisterWriter {
      */
     public RegisterState disposition(RegisterState after, Finding finding, FindingStatus kind, String note,
                                      String actor, java.time.Instant at, java.time.Instant until) {
+        return disposition(after, finding, kind, note, actor, null, at, until);
+    }
+
+    /**
+     * As {@link #disposition(RegisterState, Finding, FindingStatus, String, String, java.time.Instant,
+     * java.time.Instant)}, for a decision an agent made under the actor: its line names the agent ({@code agent})
+     * beside the actor, after the one line that says the register holds such a decision
+     * ({@link RegisterEvents#DECISION_AGENT}).
+     *
+     * @param agent the name the agent gave itself ({@link DecisionAgent}); {@code null} for none
+     */
+    public RegisterState disposition(RegisterState after, Finding finding, FindingStatus kind, String note,
+                                     String actor, String agent, java.time.Instant at, java.time.Instant until) {
         RegisterState recorded = kind == FindingStatus.OPEN ? after : requiringDecisionSeverity(after);
+        if (agent != null) {
+            requiringDecisionAgent();
+        }
         BlobRef state = blobs.put(StateJson.write(recorded));
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("id", finding.id());
         fields.put("note", note);
         fields.put("actor", actor);
+        if (agent != null) {
+            // Beside the actor, never in its place; a line without the key is a decision that named no agent
+            fields.put("agent", agent);
+        }
         if (kind == FindingStatus.ACCEPTED_RISK) {
             fields.put("until", until == null ? null : until.toString());
             fields.put("evidence", finding.disposition() == null ? null : finding.disposition().evidence());
@@ -195,6 +215,23 @@ public final class RegisterWriter {
         }
         log.append(RegisterEvents.REQUIRES, Map.of("feature", RegisterEvents.DECISION_SEVERITY));
         return state.namingDecidedSeverity();
+    }
+
+    /**
+     * Before the first line of a register that names an agent: {@code register.requires} with the feature
+     * {@value RegisterEvents#DECISION_AGENT}. A version that does not know the field {@code agent} would fold the
+     * decision as the actor's own, show it so, and find the state the line recorded different from its fold; it
+     * refuses the log at this line instead. Once for a log: the log itself says whether it has the line, since no
+     * state keeps it (a reopening by an agent leaves no decision in the state).
+     */
+    private void requiringDecisionAgent() {
+        for (RegisterEvent event : log.read()) {
+            if (RegisterEvents.REQUIRES.equals(event.type())
+                    && RegisterEvents.DECISION_AGENT.equals(event.text("feature"))) {
+                return;
+            }
+        }
+        log.append(RegisterEvents.REQUIRES, Map.of("feature", RegisterEvents.DECISION_AGENT));
     }
 
     /** A report the register did not take: the reason, and the parser's errors if any. */
