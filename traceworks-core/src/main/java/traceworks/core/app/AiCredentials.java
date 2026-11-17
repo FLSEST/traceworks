@@ -50,20 +50,9 @@ final class AiCredentials {
      * @param values   where the values come from; asked only when the definition uses a provider with a CLI. A
      *                 credentials file that cannot be used refuses the run, reported by the first check that needs
      *                 the values ({@link SecretSource})
+     * @param picks    the run's picks of its model choices: a step that refers to a choice needs the credential of
+     *                 the picked option's provider and backend, and none of an option the run did not pick
      * @return the credentials with a value, by provider id and name; empty when the run is refused
-     */
-    static Map<String, Map<String, String>> check(WorkflowDefinition definition, WorkflowResolver children,
-                                                   List<AiCli> clis, SecretSource values,
-                                                   Preflight preflight) {
-        return check(definition, children, clis, values, preflight, WorkflowUses.Picks.of(definition, null));
-    }
-
-    /**
-     * {@link #check(WorkflowDefinition, WorkflowResolver, List, SecretSource, Preflight)} of a run with picked model
-     * choices: a step that refers to a choice needs the credential of the picked option's provider and backend, and
-     * none of an option the run did not pick.
-     *
-     * @param picks the run's picks
      */
     static Map<String, Map<String, String>> check(WorkflowDefinition definition, WorkflowResolver children,
                                                    List<AiCli> clis, SecretSource values,
