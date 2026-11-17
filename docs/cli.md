@@ -2820,5 +2820,6 @@ run programs that a repository's own configuration names. Traceworks therefore a
 and the hooks switched off, without writing the index (`--no-optional-locks`), with every filter driver
 (`filter.<name>.clean`, `smudge` and `process`) emptied and not required, and with submodules ignored. A package
 that uses filter drivers, for example git-lfs, may therefore read as dirty. A driver whose name cannot be handed
-back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied, and a listing of the configuration beyond 16 MiB is not read to its end: git is then not asked for
-the state at all, and the run records neither `git_commit` nor `git_dirty`.
+back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied: git is then not asked for the state at all. Each of the three git calls (the commit, the listing
+of the filter drivers, the status) keeps at most 16 MiB of git's output; one that prints more is ended. In all
+these cases the run records neither `git_commit` nor `git_dirty`: the state reads as unknown, never as dirty.
