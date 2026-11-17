@@ -20,9 +20,10 @@ import java.util.List;
  * part of the text of another.
  *
  * <p><b>The kinds.</b> A {@code String}, a number, a {@code Boolean} or an {@code Enum} handed to {@link #of} is
- * Traceworks' own: write only literals and what Traceworks derived there (a run id, a setting's name, a count, a
+ * Traceworks' own: write only literals and what Traceworks derived there (a setting's name, a count, a
  * digest, a path it built below its home). Any other object (a {@code Path}, say) and every value of
- * {@link #quoted} is from outside. {@link #typed} is for what the operator typed on this command line and nothing
+ * {@link #quoted} is from outside; so is the id of a stored run, which for a run named by its path is the name of
+ * its folder. {@link #typed} is for what the operator typed on this command line and nothing
  * else could set: it is shown whole, so that it can be copied.
  */
 public final class Message {
