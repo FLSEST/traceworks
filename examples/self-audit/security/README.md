@@ -234,6 +234,13 @@ touch share one. Neighbouring areas of one file that fit 160 lines together beco
 few calls and with its context. At most 200 areas are judged; the rest are listed as cut. A hit's line is the line of
 the method name, also at the end of a long fluent chain.
 
+The same pass notes who calls whom: for every member, the members of the sources it calls, creates or refers to,
+by the type the compiler resolved, and for a method every method of the sources that overrides it. No rule and no
+step of this package reads that. The short check beside this audit,
+[`security-changes`](../security-changes/README.md), takes its neighbours from it: it judges only the areas that
+changed since a commit and the areas one call away, with `areas find --changes`, and keeps a copy of this tool, the
+rule file and the catalog, which a test holds to the same bytes. Change the tool here and copy it there.
+
 ## The rule file
 
 `rules/security.rules` names what the tool looks for. A rule points at areas; it decides nothing.

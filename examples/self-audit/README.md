@@ -1,6 +1,6 @@
 # The self-audits: Traceworks checks itself
 
-Five workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
+Six workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
 (deterministic steps first, an AI only where a judgement is needed, every claim checked, findings kept across runs),
 and they are how this repository is kept in shape. None of them needs anything the tool does not give every
 workflow.
@@ -8,6 +8,7 @@ workflow.
 | Package | The question | Measured by a tool | Judged by an AI | Register |
 |---|---|---|---|---|
 | [`security`](security/README.md) | Does an untrusted workflow, model or file get past a guarantee of `docs/security.md`? | the areas where it could: call sites found by resolved type | one verdict per area | `security` |
+| [`security-changes`](security-changes/README.md) | The same question, asked only of what changed since a commit and of what is one call away | the changed lines (git), the areas they lie in, and the neighbours by resolved call | one verdict per changed or neighbouring area | `security-changes` |
 | [`architecture`](architecture/README.md) | Do the sources keep to `docs/architecture.md`? | package graph, layer rules, direct I/O, size, complexity | fine, split or move, per candidate file | `architecture` |
 | [`build`](build/README.md) | Is the build reproducible and are the dependencies in order? | Maven and image facts | nothing | none |
 | [`functionality`](functionality/README.md) | Does the tool do what its documentation says? | commands, options, exit codes and examples, docs against code | one verdict per docs section | `functionality` |
@@ -235,11 +236,46 @@ report a partial snapshot that the register rejects: the envelope lists the item
 takes the verdicts of the other items, and the item keeps what the register knew of it. On 2026-11-13 one failed
 call of 116 had thrown a security run of two hours away.
 
+## The short check beside the long audit
+
+`security` judges every area of the sources, and a first run of it takes about 110 calls. After that its register
+keeps it short: a run judges what changed, by the digest of each area. It still looks at the whole project every
+time, and it sees a change only where the changed lines lie in an area.
+
+[`security-changes`](security-changes/README.md) is the check for the time between two long audits, after a day's
+work or before a merge. It compares the files of the workspace with a base commit (`--input since=<commit|tag|date>`, or
+without the input the commit of the last run of the check). The tool that compiles the files decides what changed,
+from content: git hands it the trees and the blobs it asks for by id and never sees a path of the workspace, since
+a workspace can make git's diff say less. It maps the changed lines to the areas the same finder produces, and adds the
+areas one call away from a changed member, in both directions and through an interface to every implementation:
+a helper that no rule points at brings in the areas that call it. The model judges only those, each with the
+changed code it is connected with in its prompt. Without a base the run refuses, and so it does for a base that is the workspace commit itself or
+that would leave commits after the last run unjudged (`skip=yes` goes on knowingly, and the gate is not GREEN
+then).
+
+```bash
+traceworks run examples/self-audit/security-changes --input since=v0.1.0
+traceworks run examples/self-audit/security-changes        # since the workspace commit of the last run of this check
+```
+
+Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
+changed file it cannot judge (a script, a workflow, a build file, Java code outside the source roots) is named and
+keeps the gate from GREEN for that run; tests and documentation are counted. A changed import or class head
+picks every area of its file and makes the areas that call into it neighbours, the digest of an area holds what
+its calls resolve to, and the base moves only when the run judged everything a run can judge. It
+has a register of its own, `security-changes`, whose items are the areas the check ever picked. An open finding
+there is asked about in every run until an answer says it is gone or a person decides, whatever the base of the
+run, and an area whose call failed is judged by the next run: the register holds nothing that no run comes back
+to. It does not replace the long audit: a change two calls away, a changed constant and code that was never
+audited before the base are outside it ([security-changes/README.md](security-changes/README.md), "What it does
+not see").
+
 ## Cost
 
 The steps before and after the AI cost seconds. The verdict steps make one call per item, one after the other:
 about 110 for a first run of `security`, 20 for `architecture`, 34 for `functionality` and 30 for `testing` on these
-sources (the last two have a cap in their rule file). A later run calls only for the items that changed or are
+sources (the last two have a cap in their rule file); `security-changes` calls once per changed or neighbouring
+area, and once per area with an open finding. A later run calls only for the items that changed or are
 open; `testing` needs some runs of 30 until every class was judged once.
 
 Which model judges: `security` opens a model choice, `judge`, and a run picks one of its options with

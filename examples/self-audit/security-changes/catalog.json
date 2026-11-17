@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "rules": {
+    "process_start": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "container_flag": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "path_check": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "env_pass": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "redaction": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "terminal_output": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "html_render": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "parser": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "git_call": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "integrity": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "temp_file": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "redos": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "network": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "reflection": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true},
+    "other": {"severity": {"min": "LOW", "max": "HIGH"}, "judged": true}
+  }
+}
