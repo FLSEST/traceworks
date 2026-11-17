@@ -191,7 +191,7 @@ class RunSnapshotJsonTest {
         assertThat(root.at("/context/variables").properties()).extracting(Map.Entry::getKey)
                 .containsExactly("big", "count", "flag", "form", "items", "nothing", "ratio", "step_9_output");
         assertThat(root.at("/context/variables/step_9_output").asInt()).as("no text: inline").isEqualTo(9);
-        assertThat(root.at("/context/variables/form/name").asText()).as("a map: inline").isEqualTo("Flo");
+        assertThat(root.at("/context/variables/form/name").asText()).as("a map: inline").isEqualTo("Operator");
         assertThat(root.at("/context/variables/nothing").isNull()).as("null: inline").isTrue();
         assertThat(root.at("/steps/0").has("context_delta")).as("no delta").isFalse();
         assertThat(root.at("/context").has("step_output_variables")).isFalse();
@@ -480,7 +480,7 @@ class RunSnapshotJsonTest {
         variables.put("flag", true);
         variables.put("nothing", null);
         variables.put("items", List.of("a", Map.of("nested", List.of(1, 2))));
-        variables.put("form", Map.of("name", "Flo", "tags", List.of("x")));
+        variables.put("form", Map.of("name", "Operator", "tags", List.of("x")));
 
         SourceStep original = new SourceStep("build", "step-0", 0, "shell", StepStatus.COMPLETED, 0, 1500L, null);
         SourceStep compressed = new SourceStep("short", "step-1", 1, "compress", StepStatus.COMPLETED, null, null,

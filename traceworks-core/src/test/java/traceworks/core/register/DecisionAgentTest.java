@@ -53,9 +53,9 @@ class DecisionAgentTest {
 
     private static RegisterState dismiss(RegisterWriter writer, RegisterState state, String subject, String agent,
                                          Instant at) {
-        Finding after = Disposition.dismiss(of(state, subject), "not ours", "flo@host", at, agent);
+        Finding after = Disposition.dismiss(of(state, subject), "not ours", "operator@host", at, agent);
         return writer.disposition(state.with(replacing(state, after)), after, FindingStatus.DISMISSED, "not ours",
-                "flo@host", agent, at, null);
+                "operator@host", agent, at, null);
     }
 
     private static void holds(RegisterStore.Opened opened) {
@@ -127,9 +127,9 @@ class DecisionAgentTest {
             RegisterState state = writer.applied(empty, report(opened, "A.java", "B.java"), null, "head-1").state();
 
             state = dismiss(writer, state, "A.java", "claude-code", T1);
-            Finding accepted = Disposition.accept(of(state, "B.java"), "known", "flo@host", T2, null, "pi astra");
+            Finding accepted = Disposition.accept(of(state, "B.java"), "known", "operator@host", T2, null, "pi astra");
             state = writer.disposition(state.with(replacing(state, accepted)), accepted, FindingStatus.ACCEPTED_RISK,
-                    "known", "flo@host", "pi astra", T2, accepted.disposition().until());
+                    "known", "operator@host", "pi astra", T2, accepted.disposition().until());
             opened.writeState(StateJson.write(state));
 
             List<RegisterEvent> events = log.read();
@@ -137,12 +137,12 @@ class DecisionAgentTest {
                     "register.requires", "report.applied", "finding.new", "finding.new", "register.requires",
                     "finding.dismissed", "finding.accepted");
             assertThat(events.get(5).text("feature")).isEqualTo("decision_agent");
-            assertThat(events.get(6).text("actor")).as("the actor is who it always was").isEqualTo("flo@host");
+            assertThat(events.get(6).text("actor")).as("the actor is who it always was").isEqualTo("operator@host");
             assertThat(events.get(6).text("agent")).isEqualTo("claude-code");
-            assertThat(events.get(7).text("actor")).isEqualTo("flo@host");
+            assertThat(events.get(7).text("actor")).isEqualTo("operator@host");
             assertThat(events.get(7).text("agent")).isEqualTo("pi astra");
             assertThat(of(state, "A.java").disposition().agent()).isEqualTo("claude-code");
-            assertThat(of(state, "A.java").disposition().actor()).isEqualTo("flo@host");
+            assertThat(of(state, "A.java").disposition().actor()).isEqualTo("operator@host");
             JsonNode json = JSON.readTree(StateJson.write(state));
             assertThat(json.path("findings")).allSatisfy(f -> assertThat(f.path("disposition").path("agent").asText())
                     .isIn("claude-code", "pi astra"));
@@ -189,9 +189,9 @@ class DecisionAgentTest {
             RegisterState state = writer.applied(empty, report(opened, "A.java", "B.java"), null, "head-1").state();
             state = dismiss(writer, state, "A.java", null, T1);
 
-            Finding open = Disposition.reopen(of(state, "A.java"), "look again", "flo@host", T2);
+            Finding open = Disposition.reopen(of(state, "A.java"), "look again", "operator@host", T2);
             state = writer.disposition(state.with(replacing(state, open)), open, FindingStatus.OPEN, "look again",
-                    "flo@host", "claude-code", T2, null);
+                    "operator@host", "claude-code", T2, null);
             state = dismiss(writer, state, "A.java", "claude-code", T2);
             state = dismiss(writer, state, "B.java", "claude-code", T2);
             opened.writeState(StateJson.write(state));
@@ -234,7 +234,7 @@ class DecisionAgentTest {
     @Test
     void theFilesOfARun_andTheListForAScript_nameTheAgent_ofAListedAndOfAResolvedFinding() throws IOException {
         Finding.DispositionRecord byAgent = new Finding.DispositionRecord(FindingStatus.DISMISSED, "not ours",
-                "flo@host", T1, null, null, Severity.LOW, "claude-code");
+                "operator@host", T1, null, null, Severity.LOW, "claude-code");
         Finding listed = new Finding("a".repeat(64), "size", "A.java", Severity.LOW, "A is long", "d", "E1",
                 List.of(), FindingStatus.DISMISSED, new Finding.Seen("run-1", T1), new Finding.Seen("run-1", T1), 1, 0,
                 false, null, byAgent);
@@ -247,7 +247,7 @@ class DecisionAgentTest {
 
         for (String name : List.of(RegisterFiles.FINDINGS, RegisterFiles.RESOLVED)) {
             JsonNode disposition = JSON.readTree(files.get(name)).path("disposition");
-            assertThat(disposition.path("actor").asText()).as(name).isEqualTo("flo@host");
+            assertThat(disposition.path("actor").asText()).as(name).isEqualTo("operator@host");
             assertThat(disposition.path("agent").asText()).as(name).isEqualTo("claude-code");
         }
         JsonNode list = JSON.readTree(StateJson.findings(List.of(listed)));
