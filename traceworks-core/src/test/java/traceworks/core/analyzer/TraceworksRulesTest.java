@@ -207,6 +207,31 @@ class TraceworksRulesTest {
         }
 
         /**
+         * The step that runs a child copies the child's output, and a gate marker in a copy sets no gate
+         * ({@code GateSources}): an audit whose report block is such a step ends without a gate of its report.
+         */
+        @Test
+        void aReportBlockThatRunsAChildWorkflow_getsAHintThatItsMarkersSetNoGate() {
+            Map<String, Object> audit = audit("enabled", true, "key", "k", "category", "c", "report_block", "report");
+            BlockDefinition child = block("sub-workflow", "report", Map.of("workflow_id", "./report"));
+            BlockDefinition loop = block("foreach", "report", Map.of("workflow_id", "./report", "items", List.of("a")));
+            BlockDefinition commands = block("foreach", "report", Map.of("execution_mode", "shell",
+                    "items", List.of("a"), "command", "echo {{ item }}"));
+
+            assertThat(findings("report-from-child-sets-no-gate", workflow(null, audit, null, child)))
+                    .singleElement().satisfies(f -> {
+                        assertThat(f.severity()).isEqualTo(Severity.INFO);
+                        assertThat(f.blockName()).isEqualTo("report");
+                        assertThat(f.detail()).contains("gate_status", "child");
+                    });
+            assertThat(findings("report-from-child-sets-no-gate", workflow(null, audit, null, loop))).hasSize(1);
+            assertThat(findings("report-from-child-sets-no-gate", workflow(null, audit, null, commands))).isEmpty();
+            assertThat(findings("report-from-child-sets-no-gate", workflow(null, audit, null, report))).isEmpty();
+            assertThat(findings("report-from-child-sets-no-gate", workflow(null, null, null, child)))
+                    .as("no audit, no report block").isEmpty();
+        }
+
+        /**
          * Decided 2026-11-11: outside an audit workflow the placeholder is an error, not a literal
          * (docs/workflow-format.md).
          */

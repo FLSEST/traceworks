@@ -185,6 +185,11 @@ class AnalyzerFindingLanguagesTest {
                 block("simple", "prev", Map.of("command", "Compare with {{ previous_report }}"))), null, null, null,
                 null, Map.of("audit", Map.of("enabled", true, "key", "k", "category", "c", "report_block", "summary")),
                 null, null, null, null), null));
+        // An audit whose report block runs a child workflow: report-from-child-sets-no-gate
+        out.addAll(analyzer.analyze(new WorkflowDefinition("id", "audit", null, List.of(
+                block("sub-workflow", "report", Map.of("workflow_id", "./report"))), null, null, null, null,
+                Map.of("audit", Map.of("enabled", true, "key", "k", "category", "c", "report_block", "report")),
+                null, null, null, null), null));
         // The register folder outside an audit workflow: register-dir-outside-audit
         out.addAll(analyzer.analyze(new WorkflowDefinition("id", "no audit", null, List.of(
                 block("shell", "known", Map.of("command", "set -euo pipefail\nwc -l {{ register_dir }}/findings.jsonl"))),
