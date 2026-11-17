@@ -33,8 +33,8 @@ limit Registers
   quote Lines appended after the last anchor are accepted.
   quote But they can **add** to both
   quote **Who decided is a label, not a proof.**
-  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed. The agent named beside a decision's actor is self-declared and unsigned: it can be left out, or be any name within its bounds.
-  digest 2c95d3cc38f1fa0b
+  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed. The agent beside the actor of a decision or of a run's answer is self-declared and unsigned: it can be left out or be any name within its bounds.
+  digest 8d9436d603a9a5af
 
 limit The register folder of a run
   quote In a host run nothing keeps a command from writing the folder

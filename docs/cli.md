@@ -215,13 +215,46 @@ seal"). No flag gets a run past a seal that does not hold.
 
 ### approve and answer
 
-`traceworks approve <run> --answer OPTION [--comment TEXT]` answers the approval a run waits for. `OPTION` must
-be one of the offered options.
+`traceworks approve <run> --answer OPTION [--comment TEXT] [--agent NAME]` answers the approval a run waits for.
+`OPTION` must be one of the offered options.
 
-`traceworks answer <run> [--value TEXT] [--field NAME=VALUE ...]` answers a human input: `--value` for a single
-input, `--field` (repeatable) for the fields of a form.
+`traceworks answer <run> [--value TEXT] [--field NAME=VALUE ...] [--agent NAME]` answers a human input: `--value`
+for a single input, `--field` (repeatable) for the fields of a form.
 
 Both work on a parked run and on a running run. See "The inbox".
+
+**An agent that answers names itself.** An AI agent that works with your user is your user to the machine, so the
+actor alone would record its answer as yours. Both commands take `--agent NAME`, and without the option the
+environment variable `TRACEWORKS_AGENT`, which a harness sets once for its agent; the option wins. It is the same
+option, the same variable and the same name as for a decision in a register ("findings"): at most 64 characters,
+ASCII letters and digits, `. _ - : / @ +` and single spaces. A blank or bad name of the one that counts is a usage
+error (exit 2): nothing is recorded, and the question still waits. The record names the agent beside the actor
+(`agent` in `approval.answered`), and the views say it after the actor:
+
+```
+$ traceworks approve 56e7c2a8-... --answer Yes --agent claude-code
+The answer to step 1 of run 56e7c2a8-... is recorded through the agent claude-code; continue the run with traceworks resume 56e7c2a8-...
+$ traceworks resume 56e7c2a8-...
+12:34:56 step 1  answered: Yes by anna@laptop through the agent claude-code
+$ traceworks show 56e7c2a8-...
+Interventions
+  2026-11-17T12:34:50Z  anna@laptop  answered step 1 (approval) via cli through the agent claude-code
+```
+
+Every way an answer reaches a run, and what it records:
+
+| The answer comes from | `source` | `agent` |
+|---|---|---|
+| `approve` or `answer` on a parked run | `cli` | `--agent`, else `TRACEWORKS_AGENT` of the command |
+| `approve` or `answer` on a running run | `inbox` | the same; it travels with the request, and the run's process checks the name again and refuses the request with a bad one (`request.refused`; the question stays open) |
+| the prompt of a `run` or `resume` in the foreground | `terminal` | `TRACEWORKS_AGENT` of that process, and no option: whoever types there is the agent the harness named. A blank or bad value refuses the command before the run starts (exit 2); with `--no-input`, or without a terminal, the variable is not looked at |
+| a resumed step that takes the answer given while the run was parked | `resume` | the agent of that answer, unchanged, whoever resumes |
+| nobody: a default, a timeout | none | none |
+
+The name is what the caller says, unsigned: an answer without it reads as a person's, and an agent that leaves it
+out is recorded as you (docs/security.md, "Registers"). A start, a resume, a pause and a cancel take no agent: the
+actor is all they name. A record written before this, and an earlier version reading a newer one: docs/events.md,
+"approval.answered".
 
 ### pause
 
@@ -1127,8 +1160,9 @@ Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17
 - **An earlier version of Traceworks refuses a register in which an agent decided** (`register.requires` with the
   feature `decision_agent`), so that it cannot show such a decision as yours.
 
-The answer to an `approval` or a `human-input` of a run (`traceworks approve`, `traceworks answer`) takes no
-`--agent` and does not read the variable: `approval.answered` names the actor alone.
+The answer to an `approval` or a `human-input` of a run (`traceworks approve`, `traceworks answer`) takes the same
+option and reads the same variable ("approve and answer"). There no earlier version refuses the record: it shows
+such an answer with its actor alone.
 
 A `list` line is the first 8 characters of the finding's id, its status, severity, rule key, subject and title,
 sorted by status (`OPEN`, `AWAITING_VERIFICATION`, `ACCEPTED_RISK`, `DISMISSED`, `RESOLVED`), severity, rule key and
@@ -2620,9 +2654,10 @@ Every run, answer, resume and cancel is attributed to an actor. It is, in this o
 
 The actor is only a label for the record. Traceworks does not authenticate it.
 
-An AI agent that works with your user has your actor. For a decision in a register it can name itself beside the
-actor (`--agent NAME` or `TRACEWORKS_AGENT`; "findings"); for a run, an answer, a resume and a cancel there is no
-such name, and the record names the actor alone.
+An AI agent that works with your user has your actor. For a decision in a register and for the answer to a
+question of a run it can name itself beside the actor (`--agent NAME` or `TRACEWORKS_AGENT`; "findings", "approve
+and answer"); for the start of a run, a resume, a pause and a cancel there is no such name, and the record names
+the actor alone. The name is as little authenticated as the actor.
 
 ## Output limit
 
