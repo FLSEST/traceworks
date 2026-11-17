@@ -295,6 +295,11 @@ The details are in [docs/architecture.md](docs/architecture.md#building-and-test
 [integration-tests/README.md](integration-tests/README.md); [CONTRIBUTING.md](CONTRIBUTING.md) says how to
 contribute, and [SECURITY.md](SECURITY.md) how to report a vulnerability.
 
+## Where it comes from
+
+Traceworks was extracted from a larger private project by the same author and reworked as a tool of its own. The
+history before the first commit of this repository is not published.
+
 ## License
 
 `SPDX-License-Identifier: GPL-3.0-only`
