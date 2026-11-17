@@ -35,7 +35,9 @@ import java.util.regex.Pattern;
  * filter driver runs, not even one the operator's own configuration defines for an attribute the source names
  * (git-lfs: an LFS file stays its pointer), and the checkout holds the commit's bytes, with no {@code $Id$}
  * expansion, no line endings converted ({@code -text}, which also switches {@code eol} off) and no
- * {@code working-tree-encoding}. A source or a ref never becomes an option of git.
+ * {@code working-tree-encoding}. A source or a ref never becomes an option of git. The checkout gets an empty
+ * {@code .git/hooks}: the container of a step that may write the checkout mounts the hooks and the config of its
+ * {@code .git} read-only, and a mount needs a folder to lie on.
  *
  * <p>Allowed sources ({@link Source#parse}): an absolute local path, and the URLs {@code https://}, {@code ssh://},
  * {@code file://} and the scp-like {@code user@host:path}. A source is fetched with the operator's credentials, so a
@@ -178,6 +180,9 @@ public final class GitSourceCheckout implements SourceCheckout {
             }
             Path info = Files.createDirectories(target.resolve(".git").resolve("info"));
             Files.writeString(info.resolve("attributes"), NO_CONVERSION + "\n", StandardCharsets.UTF_8);
+            // No init template, so no hooks folder: a step that may write the checkout gets the hooks and the
+            // config of its .git read-only, and the mount of the hooks needs a folder to lie on
+            Files.createDirectories(target.resolve(".git").resolve("hooks"));
             String sha = resolve(parsed, ref, target);
             call(parsed, target, "cannot check " + sha + " out of " + parsed.recorded(),
                     List.of("checkout", "--quiet", "--no-recurse-submodules", "--detach", sha, "--"));

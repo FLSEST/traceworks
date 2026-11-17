@@ -900,6 +900,27 @@ class CliContainerRuntimeTest {
         assertThat(allowed.exitCode()).as(allowed.stderr()).isZero();
     }
 
+    /** A writable workspace whose repository has no hooks folder to hold: the container is refused, not started. */
+    @Test
+    void run_refusesAWritableWorkspace_whoseGitCannotBeHeld_andStartsNothing() throws IOException {
+        Path docker = client("docker", "exit 0");
+        Path workspace = Files.createDirectories(dir.resolve("repository"));
+        Files.createDirectories(workspace.resolve(".git"));
+        Files.writeString(workspace.resolve(".git/config"), "");
+        RunDirectories directories = new RunDirectories(workspace.toString(), null, null);
+        ContainerRun writable = run(List.of(new Mount(workspace.toString(), "/workspace", false)), directories,
+                Map.of());
+
+        assertThat(runtime(docker).refusal(writable))
+                .hasValueSatisfying(why -> assertThat(why).contains("mkdir " + workspace.resolve(".git/hooks")));
+        CommandResult refused = runtime(docker).run(writable);
+
+        assertThat(refused.exitCode()).isEqualTo(125);
+        assertThat(calls()).as("nothing started").isEmpty();
+        Files.createDirectories(workspace.resolve(".git/hooks"));
+        assertThat(runtime(docker).refusal(writable)).isEmpty();
+    }
+
     /**
      * The start check judges the run's own directories once. A step with a writable workspace can rename a folder
      * above the package afterwards and leave a link in its place; the next container would get whatever the link

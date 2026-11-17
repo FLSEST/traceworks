@@ -183,6 +183,14 @@ final class ContainerArguments {
             Mount mount = run.mounts().get(i);
             String source = i < own ? MountGuard.realRunDirectory(mount.hostPath()) : declaredRealPaths.get(i - own);
             arguments.addAll(List.of("--mount", bind(mount, source)));
+            if (i < own && isWritableWorkspace(mount, run)) {
+                // After the workspace's own mount: the hooks and the config of its .git, held read-only
+                for (WorkspaceGit.Hold hold : WorkspaceGit.holds(Path.of(source))) {
+                    arguments.addAll(List.of("--mount", bind(new Mount(hold.source().toString(),
+                            inside(mount.containerPath(), hold.inWorkspace()), hold.readOnly()),
+                            hold.source().toString())));
+                }
+            }
             if (isPackageWithGitDirectory(mount, run, source)) {
                 arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + GIT_COVER));
             } else if (i < own) {
@@ -367,6 +375,17 @@ final class ContainerArguments {
         String base = mount.containerPath().endsWith("/") ? mount.containerPath() : mount.containerPath() + "/";
         String place = base + holder.relativize(real);
         return run.mounts().stream().anyMatch(other -> other.containerPath().equals(place)) ? null : place;
+    }
+
+    /** Whether {@code mount} is the run's own mount of its workspace, and a step may write it. */
+    private static boolean isWritableWorkspace(Mount mount, ContainerRun run) {
+        String workspace = run.directories() == null ? null : run.directories().workspace();
+        return workspace != null && !workspace.isBlank() && workspace.equals(mount.hostPath()) && !mount.readOnly();
+    }
+
+    /** The container path of {@code relative} inside the mount at {@code containerPath}. */
+    private static String inside(String containerPath, String relative) {
+        return (containerPath.endsWith("/") ? containerPath : containerPath + "/") + relative;
     }
 
     /** @param source the host side as it is mounted: the real path that was judged */

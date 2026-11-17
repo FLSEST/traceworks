@@ -514,4 +514,121 @@ class ContainerArgumentsTest {
         assertThat(arguments).doesNotContain("/package/.git:ro,size=4k,mode=555");
         assertThat(arguments.stream().filter("--tmpfs"::equals)).hasSize(1);
     }
+
+    // --- the .git of a workspace a step may write (docs/security.md, "A writable workspace") ---
+
+    /** A run whose workspace is mounted at {@code at}, writable or not, with a scratch directory. */
+    private static ContainerRun inWorkspace(Path workspace, String at, boolean readOnly) {
+        return new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, "/bin/bash", List.of("-c", "true"), at,
+                List.of(new Mount(workspace.toString(), at, readOnly), new Mount("/s", "/scratch", false)),
+                new RunDirectories(workspace.toString(), null, "/s"), false, Map.of(), null, 60,
+                ContainerLimits.DEFAULTS);
+    }
+
+    private static Path repository(Path home) throws IOException {
+        Path workspace = Files.createDirectories(home.resolve("ws"));
+        Files.createDirectories(workspace.resolve(".git/hooks"));
+        Files.writeString(workspace.resolve(".git/config"), "[core]\n");
+        return workspace;
+    }
+
+    /**
+     * What a step leaves in the hooks or the config of the workspace's repository, the operator's next git command
+     * there runs on the host. So a writable workspace gets three more mounts: its {@code .git} once more at its
+     * place, writable, which makes it a mount point no step can rename or replace, and in it the hooks and the
+     * config, read-only. A step can still commit.
+     */
+    @Test
+    void arguments_holdTheHooksAndTheConfigOfAWritableWorkspacesGit_readOnly(@TempDir Path home) throws IOException {
+        Path workspace = repository(home);
+        Path git = workspace.resolve(".git");
+
+        List<String> arguments = arguments(Client.DOCKER, inWorkspace(workspace, "/workspace", false));
+
+        assertThat(arguments).containsSubsequence(
+                "--mount", "type=bind,src=" + workspace + ",dst=/workspace",
+                "--mount", "type=bind,src=" + git + ",dst=/workspace/.git",
+                "--mount", "type=bind,src=" + git.resolve("hooks") + ",dst=/workspace/.git/hooks,readonly",
+                "--mount", "type=bind,src=" + git.resolve("config") + ",dst=/workspace/.git/config,readonly",
+                "--mount", "type=bind,src=/s,dst=/scratch");
+        assertThat(arguments.stream().filter("--mount"::equals)).hasSize(5);
+        assertThat(arguments(Client.PODMAN, inWorkspace(workspace, "/workspace", false)))
+                .contains("type=bind,src=" + git.resolve("hooks") + ",dst=/workspace/.git/hooks,readonly");
+    }
+
+    /** A host run mounts the workspace at its own path: the three mounts lie there. */
+    @Test
+    void arguments_holdTheGitOfAWritableWorkspace_whereverTheWorkspaceIsMounted(@TempDir Path home)
+            throws IOException {
+        Path workspace = repository(home);
+
+        List<String> arguments = arguments(Client.DOCKER, inWorkspace(workspace, workspace.toString(), false));
+
+        assertThat(arguments).contains("type=bind,src=" + workspace.resolve(".git/config") + ",dst=" + workspace
+                + "/.git/config,readonly");
+    }
+
+    @Test
+    void arguments_addNothing_forAReadOnlyWorkspace_andForOneWithoutAGit(@TempDir Path home) throws IOException {
+        Path workspace = repository(home);
+        Path plain = Files.createDirectories(home.resolve("plain"));
+
+        assertThat(arguments(Client.DOCKER, inWorkspace(workspace, "/workspace", true)).stream()
+                .filter("--mount"::equals)).as("read-only: no step writes it").hasSize(2);
+        assertThat(arguments(Client.DOCKER, inWorkspace(plain, "/workspace", false)).stream()
+                .filter("--mount"::equals)).as("no repository").hasSize(2);
+    }
+
+    /**
+     * A linked worktree or a submodule has a {@code .git} file that names its git directory. A step that could
+     * rewrite it would point the operator's git at a directory of its own making, so the file is mounted
+     * read-only.
+     */
+    @Test
+    void arguments_holdAGitFileOfAWritableWorkspace_readOnly(@TempDir Path home) throws IOException {
+        Path workspace = Files.createDirectories(home.resolve("worktree"));
+        Path file = Files.writeString(workspace.resolve(".git"), "gitdir: /repo/.git/worktrees/worktree\n");
+
+        List<String> arguments = arguments(Client.DOCKER, inWorkspace(workspace, "/workspace", false));
+
+        assertThat(arguments).containsSubsequence("--mount", "type=bind,src=" + workspace + ",dst=/workspace",
+                "--mount", "type=bind,src=" + file + ",dst=/workspace/.git,readonly");
+        assertThat(arguments.stream().filter("--mount"::equals)).hasSize(3);
+    }
+
+    /**
+     * A mount needs something to lie on: hooks or a config that do not exist cannot be held, and a step could make
+     * them. Traceworks writes nothing into the operator's repository; it refuses the container and says what to
+     * create. A link at one of the three places cannot be held in place either.
+     */
+    @Test
+    void arguments_refuseAWritableWorkspace_whoseGitHasNoHooksOrNoConfig_orALinkThere(@TempDir Path home)
+            throws IOException {
+        Path noHooks = Files.createDirectories(home.resolve("no-hooks"));
+        Files.createDirectories(noHooks.resolve(".git"));
+        Files.writeString(noHooks.resolve(".git/config"), "");
+        Path noConfig = Files.createDirectories(home.resolve("no-config"));
+        Files.createDirectories(noConfig.resolve(".git/hooks"));
+        Path linkedHooks = Files.createDirectories(home.resolve("linked-hooks"));
+        Files.createDirectories(linkedHooks.resolve(".git"));
+        Files.writeString(linkedHooks.resolve(".git/config"), "");
+        Files.createSymbolicLink(linkedHooks.resolve(".git/hooks"), Files.createDirectories(home.resolve("shared")));
+        Path linkedGit = Files.createDirectories(home.resolve("linked-git"));
+        Files.createSymbolicLink(linkedGit.resolve(".git"), repository(home).resolve(".git"));
+
+        assertThatThrownBy(() -> arguments(Client.DOCKER, inWorkspace(noHooks, "/workspace", false)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("workspace_writable")
+                .hasMessageContaining("mkdir " + noHooks.resolve(".git/hooks"));
+        assertThatThrownBy(() -> arguments(Client.DOCKER, inWorkspace(noConfig, "/workspace", false)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("touch " + noConfig.resolve(".git/config"));
+        assertThatThrownBy(() -> arguments(Client.DOCKER, inWorkspace(linkedHooks, "/workspace", false)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("symbolic link")
+                .hasMessageContaining(linkedHooks.resolve(".git/hooks").toString());
+        assertThatThrownBy(() -> arguments(Client.DOCKER, inWorkspace(linkedGit, "/workspace", false)))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("symbolic link")
+                .hasMessageContaining(linkedGit.resolve(".git").toString());
+        assertThat(arguments(Client.DOCKER, inWorkspace(noHooks, "/workspace", true))).as("read-only: nothing to hold")
+                .isNotEmpty();
+    }
 }
