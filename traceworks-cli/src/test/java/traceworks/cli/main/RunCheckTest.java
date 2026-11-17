@@ -158,6 +158,33 @@ class RunCheckTest {
         assertThat(noRunExists()).isTrue();
     }
 
+    /**
+     * A place besides a shell line that takes no step output ({@code protected-value-outside-shell}): the check
+     * refuses the run before it exists, and without the check the run itself fails the step, as it always did.
+     */
+    @Test
+    void run_ofAWorkflowIdThatNamesAStepOutput_isRefusedByTheCheck_andWithoutItByTheRun() throws IOException {
+        Path pkg = pkg("picked", "{}", """
+                {"type":"shell","name":"pick","config":{"command":"set -euo pipefail\\necho child"}},
+                {"type":"sub-workflow","name":"start","config":{"workflow_id":"./{{ block.pick.output }}"}}""");
+
+        Result run = run(pkg);
+
+        assertThat(run.code()).as(run.all()).isEqualTo(6);
+        assertThat(run.out()).as("nothing started").isEmpty();
+        assertThat(run.err())
+                .containsPattern("(?m)^ERROR   protected-value-outside-shell start \\(block 1\\): names"
+                        + " \\{\\{ block\\.pick\\.output }} in workflow_id, a step output")
+                .contains("check reports 1 error;");
+        assertThat(noRunExists()).as("no run was created").isTrue();
+
+        Result unchecked = run(pkg, "--no-check");
+
+        assertThat(unchecked.code()).as(unchecked.all()).isEqualTo(3);
+        assertThat(unchecked.all()).contains("workflow_id may only use trusted context variables, not"
+                + " {{ block.pick.output }}");
+    }
+
     @Test
     void run_noCheck_startsTheRun_andPrintsNoFinding() throws IOException {
         Result run = run(typos(), "--no-check");

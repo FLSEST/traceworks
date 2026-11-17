@@ -45,6 +45,8 @@ import java.util.Set;
  *       {@code unsupported-mcp-servers}, and {@code invalid-config-value} for {@code tools};</li>
  *   <li>shell quoting ({@link QuotingRules}): {@code quoted-placeholder}, {@code placeholder-self-compare},
  *       {@code heredoc-placeholder}, {@code protected-value-in-shell};</li>
+ *   <li>a protected value in the arguments of a tool, a mount or a {@code workflow_id}
+ *       ({@link ProtectedPlaceRules}): {@code protected-value-outside-shell};</li>
  *   <li>the shell variables of a block ({@link ValueRules}): {@code invalid-value-name}, {@code unused-value};</li>
  *   <li>the isolation setting {@code workspace} ({@link WorkspaceRules}): {@code legacy-install-npm},
  *       {@code unknown-workspace-mode}, {@code workspace-not-on-first-block}, {@code build-in-project-path};</li>
@@ -225,6 +227,7 @@ public final class WorkflowAnalyzer {
             SecretRules.apply(blocks, findings);
             ValueRules.apply(blocks, findings);
             QuotingRules.apply(blocks, children, findings);
+            ProtectedPlaceRules.apply(blocks, children, findings);
             WorkspaceRules.apply(workflow, findings);
             TraceworksRules.apply(blocks, metadata, registry.knownTypes(), findings);
             ParkingRules.apply(blocks, children, findings);
