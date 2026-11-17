@@ -84,4 +84,33 @@ class WorkflowOutlineTest {
         assertThat(WorkflowOutline.block(0, "a", "shell", java.util.Map.of()).shownType()).isEqualTo("shell");
         assertThat(WorkflowOutline.block(0, "a", null, null).shownType()).isEqualTo("?");
     }
+
+    /** The blocks of the case a switch step ran, by the case its metadata names: what show prints under the step. */
+    @Test
+    void caseBlocks_areTheBlocksOfTheCaseThatRan_orOfTheDefault() {
+        byte[] workflow = """
+                {"blocks":[
+                  {"type":"shell","name":"first","config":{"command":"true"}},
+                  {"type":"switch","name":"route","config":{"expression":"{{ mode }}","cases":[
+                    {"value":"fast|quick","blocks":[
+                      {"type":"shell","name":"case_fast","config":{"command":"echo fast"}},
+                      {"type":"simple","name":"case_ask","config":{"command":"Say","provider":"PI"}}]},
+                    {"value":"slow","blocks":[{"type":"shell","config":{"command":"echo slow"}}]}],
+                    "default":[{"type":"shell","name":"case_default","config":{"command":"echo d"}}]}}]}
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThat(WorkflowOutline.caseBlocks(workflow, 1, "fast|quick"))
+                .extracting(WorkflowOutline.Block::name, WorkflowOutline.Block::shownType)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("case_fast", "shell"),
+                        org.assertj.core.groups.Tuple.tuple("case_ask", "simple (PI)"));
+        assertThat(WorkflowOutline.caseBlocks(workflow, 1, "slow")).extracting(WorkflowOutline.Block::name)
+                .containsExactly((String) null);
+        assertThat(WorkflowOutline.caseBlocks(workflow, 1, "default")).extracting(WorkflowOutline.Block::name)
+                .containsExactly("case_default");
+        // No case of that value, no switch at that position, no such position, no JSON: nothing to name
+        assertThat(WorkflowOutline.caseBlocks(workflow, 1, "none")).isEmpty();
+        assertThat(WorkflowOutline.caseBlocks(workflow, 0, "fast|quick")).isEmpty();
+        assertThat(WorkflowOutline.caseBlocks(workflow, 7, "slow")).isEmpty();
+        assertThat(WorkflowOutline.caseBlocks("no json".getBytes(StandardCharsets.UTF_8), 1, "slow")).isEmpty();
+    }
 }

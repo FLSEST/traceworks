@@ -1,0 +1,75 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a01",
+  "name": "IT combo-pipeline",
+  "description": "Every block that holds a command or blocks, one after the other, each adding a line to one file in the scratch directory: a shell step, a foreach over the lines of a command, a switch case, a conditional, a child workflow with a while and a retry, a compress of the child's output, and a shell step that takes the earlier outputs as values.",
+  "default_context": {"mode": "fast"},
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "seed",
+      "config": {"command": "echo seed > \"{{ scratch_dir }}/trail.txt\"; echo seeded"}
+    },
+    {
+      "type": "foreach",
+      "name": "gather",
+      "config": {
+        "execution_mode": "shell",
+        "items_source": "command",
+        "items_command": "printf 'red\\ngreen\\n'",
+        "variable_name": "colour",
+        "command": "echo item {{ colour }} >> \"{{ scratch_dir }}/trail.txt\"; echo added {{ colour }}"
+      }
+    },
+    {
+      "type": "switch",
+      "name": "route",
+      "config": {
+        "expression": "{{ mode }}",
+        "cases": [
+          {"value": "fast", "blocks": [
+            {"type": "shell", "name": "case_fast", "config": {"command": "echo case fast >> \"{{ scratch_dir }}/trail.txt\"; echo routed fast"}}
+          ]}
+        ],
+        "default": [
+          {"type": "shell", "name": "case_default", "config": {"command": "echo case default >> \"{{ scratch_dir }}/trail.txt\"; echo routed default"}}
+        ]
+      }
+    },
+    {
+      "type": "conditional",
+      "name": "check",
+      "config": {
+        "execution_mode": "shell",
+        "condition": "grep -q '^case fast$' \"{{ scratch_dir }}/trail.txt\"",
+        "then_command": "echo then >> \"{{ scratch_dir }}/trail.txt\"; echo the trail has the fast case",
+        "else_command": "echo else >> \"{{ scratch_dir }}/trail.txt\"; echo the trail has no fast case"
+      }
+    },
+    {
+      "type": "sub-workflow",
+      "name": "child",
+      "config": {"workflow_id": "./child"}
+    },
+    {
+      "type": "compress",
+      "name": "items_only",
+      "config": {"source": "child", "stages": [{"op": "lines.filter", "include": ["^item "]}]}
+    },
+    {
+      "type": "shell",
+      "name": "final",
+      "config": {
+        "values": {
+          "GATHERED": "{{ block.gather.output }}",
+          "CASE": "{{ block.case_fast.output }}",
+          "ROUTED": "{{ block.route.output }}",
+          "CHECKED": "{{ block.check.output }}",
+          "ITEMS": "{{ block.items_only.output }}"
+        },
+        "command": "printf 'gathered=%s\\ncase=%s\\nrouted=%s\\nchecked=%s\\n' \"$GATHERED\" \"$CASE\" \"$ROUTED\" \"$CHECKED\"; echo \"items=$(printf '%s\\n' \"$ITEMS\" | grep -c '^item ')\"; echo \"lines=$(wc -l < \"{{ scratch_dir }}/trail.txt\")\""
+      }
+    }
+  ]
+}

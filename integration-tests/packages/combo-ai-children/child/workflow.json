@@ -1,0 +1,16 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a21",
+  "name": "IT combo-ai-children child",
+  "description": "Asks the fake Claude once; the call asks its proxy for the address its parent names.",
+  "blocks": [
+    {
+      "type": "simple",
+      "name": "child_ask",
+      "config": {
+        "command": "[fake:connect=192.0.2.{{ last }}:443] asked by child {{ last }}"
+      }
+    }
+  ]
+}

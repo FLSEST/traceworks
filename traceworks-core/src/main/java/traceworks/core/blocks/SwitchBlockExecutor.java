@@ -40,6 +40,12 @@ import java.util.Set;
  */
 public class SwitchBlockExecutor implements BlockExecutor {
 
+    /**
+     * Step metadata: whether a case ran. {@code matchedCase} alone does not say: it is {@code none} both when no
+     * case ran and for a case whose value is {@code none}. A record of an earlier version has no such key.
+     */
+    public static final String CASE_MATCHED = "caseMatched";
+
     private final WrapperCommands commands;
 
     public SwitchBlockExecutor() {
@@ -97,6 +103,8 @@ public class SwitchBlockExecutor implements BlockExecutor {
             result.setStatus(StepStatus.COMPLETED);
             StepAiMetadata.put(result, "expression", resolvedExpression);
             StepAiMetadata.put(result, "matchedCase", "none");
+            // A case may be called "none" too: this says that none ran
+            StepAiMetadata.put(result, CASE_MATCHED, false);
             return finish(result, context);
         }
 
@@ -149,6 +157,7 @@ public class SwitchBlockExecutor implements BlockExecutor {
         }
         StepAiMetadata.put(result, "expression", resolvedExpression);
         StepAiMetadata.put(result, "matchedCase", matchedCase);
+        StepAiMetadata.put(result, CASE_MATCHED, true);
         return finish(result, context);
     }
 

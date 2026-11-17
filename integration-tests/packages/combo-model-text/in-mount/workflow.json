@@ -1,0 +1,27 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a13",
+  "name": "IT combo-model-text in-mount",
+  "description": "Names what its parent handed over, text a model wrote, as the host path of a mount: the mount is refused.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "mounted",
+      "config": {
+        "mounts": [
+          "{{ previous_output }}:/data:ro"
+        ],
+        "command": "ls /data",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo the child went past a refused mount"
+      }
+    }
+  ]
+}

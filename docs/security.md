@@ -686,6 +686,25 @@ What a seal does not protect:
   package only when its `allowed_signers` allows the key that signed, and refuses it otherwise (docs/cli.md, "seal,
   unseal and seals").
 
+### Child workflows
+
+- **A child workflow is not a boundary.** A child run (`sub-workflow`, a `foreach` with `workflow_id`) is part of
+  the run that started it: it gets the same workspace and the same scratch directory, its containers carry that
+  run's label and name, and its AI calls use that run's two networks and credentials. It can read whatever the
+  parent's steps wrote into the scratch directory, overwrite it before the parent's next step reads it, and it gets
+  the parent's variables, the protected ones as protected. Nothing a parent does keeps a child from a file, and
+  nothing a child writes is marked as the child's. Do not run a workflow you would not run yourself as a child of
+  one that handles what it must not see: start it as a run of its own, with its own workspace.
+- **The parent's package decides which workflows run.** A `workflow_id` is a path below the package or a workflow
+  id, written out or filled in from a trusted variable, an input of the run included; it never takes a protected
+  value. So whoever writes the package, or picks such an input, picks the code that runs with the run's secrets and
+  workspace. A seal covers the package and every package it names by a literal `workflow_id` (`traceworks seal`);
+  a package whose child is named through a placeholder cannot be sealed, since the seal could not say what runs.
+- **A child's gate does not reach the run.** A child that is RED, or that completed with errors, leaves its parent
+  `COMPLETED` without a gate unless a step of the parent states the verdict (docs/cli.md, "When a step fails"). A
+  pipeline that gates on the exit code or on `--fail-on-gate` of a parent whose checks live in children passes when
+  they fail.
+
 ### Images and containers
 
 - **A package image's `RUN` steps run at build time.** `traceworks images build <package>` builds the package's

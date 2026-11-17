@@ -1,5 +1,7 @@
 package traceworks.cli.command;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
@@ -16,30 +18,50 @@ import traceworks.core.record.AiCallView;
 import traceworks.core.record.CommandView;
 import traceworks.core.record.FileView;
 import traceworks.core.record.GateView;
+import traceworks.core.record.ItemView;
 import traceworks.core.record.RunView;
 import traceworks.core.record.StepFiles;
 import traceworks.core.record.StepView;
 import traceworks.core.record.WorkflowOutline;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** {@code traceworks show [<run>]}: what the record of a run says; without a run, of the one that is running now. */
 public final class ShowCommand implements Command {
 
     private static final int OUTPUT_LIMIT = 2000;
 
+    /**
+     * How many child runs of one step are listed with their steps. A step that started more lists those that did
+     * not complete, at most this many, and counts the rest; {@code --children} lists each.
+     */
+    private static final int CHILD_RUNS_SHOWN = 10;
+
+    /** What the lines under a step start with; the steps of a child run stand that much further in. */
+    private static final String UNDER = "      ";
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     private static final Spec SPEC = Spec.of("show", "Shows a run: status, steps, gate and the question it waits for.",
                     "[<run>]")
             .positionals(0, 1)
             .flag("outputs", "add each step's output, cut at " + OUTPUT_LIMIT + " characters")
             .flag("full", "add each step's output whole")
+            .flag("children", "list the steps of every child run, also of a step that started more than "
+                    + CHILD_RUNS_SHOWN)
             .note(RunningRun.NOTE);
 
     @Override
@@ -81,16 +103,17 @@ public final class ShowCommand implements Command {
             // What the run of an audit knew of earlier runs: the head of the register's log it started from
             out.println("Register  " + TerminalFormat.safe(view.register().summary()));
         }
-        egress(out, view);
+        egress(out, view, args.has("children"));
         if (view.error() != null) {
             out.println("Error     " + TerminalFormat.oneLine(text.apply(view.error().sha256())));
         }
         workflow(out, view, services, ref);
-        steps(out, view, text, args.has("outputs") || args.has("full"), args.has("full"));
+        byte[] definition = view.definition() == null ? null
+                : services.content(ref, view.definition().sha256()).orElse(null);
+        steps(out, view, text, new Shown(args.has("outputs") || args.has("full"), args.has("full"),
+                args.has("children")), definition);
         interventions(out, view);
         gate(out, view.gate(), text);
-        view.children().forEach((id, child) -> out.println("Child     " + TerminalFormat.safe(TerminalFormat.shortId(id)) + " "
-                + child.status()));
         RunReport.waiting(out, folder != null ? folder : view.runId(), view, view.pendingQuestion(), text,
                 services.resumeNeedsHostFlag(view));
         return view.status() == RunStatus.INTERRUPTED ? ExitCodes.INTERRUPTED : ExitCodes.OK;
@@ -100,7 +123,7 @@ public final class ShowCommand implements Command {
      * Where the run's AI containers could connect, and what they asked the egress proxy for in the whole run, with
      * the denied connections counted: an observation that fails nothing, but must not be overlooked.
      */
-    private static void egress(PrintStream out, RunView view) {
+    private static void egress(PrintStream out, RunView view, boolean everyChild) {
         if (view.aiNetwork() != null) {
             StringBuilder line = new StringBuilder(TerminalFormat.safe(view.aiNetwork()));
             if (view.aiNetwork().equals("open")) {
@@ -120,13 +143,41 @@ public final class ShowCommand implements Command {
         }
         int cuts = view.outputCuts();
         if (cuts > 0) {
-            // The steps below mark the commands of their latest attempt; the line says how many more it counts
-            int elsewhere = cuts - view.outputCutsOfLatestAttempts();
+            // The steps below, those of the child runs that are listed too, mark the commands of their latest
+            // attempt; the line says how many more it counts
+            int elsewhere = cuts - markedCuts(view, everyChild, new HashSet<>());
             out.println("Output    " + cuts + (cuts == 1 ? " command" : " commands")
                     + " whose output was CUT before the end of its stream: it may be incomplete"
                     + (elsewhere == 0 ? "" : " (" + elsewhere + " of them in earlier attempts of a step or in child"
-                    + " runs, which are not marked below)"));
+                    + " runs that are not listed, which are not marked below)"));
         }
+    }
+
+    /**
+     * How many commands with a cut output the steps section marks: those of the latest attempt of each step of
+     * {@code run} and of each child run that is listed under its step ({@link #listed}), at every level.
+     */
+    private static int markedCuts(RunView run, boolean everyChild, Set<String> drawn) {
+        int marked = run.outputCutsOfLatestAttempts();
+        for (StepView step : run.steps()) {
+            for (String id : listed(run, step, everyChild)) {
+                RunView child = run.children().get(id);
+                if (child != null && drawn.add(id)) {
+                    marked += markedCuts(child, everyChild, drawn);
+                }
+            }
+        }
+        return marked;
+    }
+
+    /**
+     * The child runs of {@code step} that are listed with their steps: all of them, or of more than
+     * {@value #CHILD_RUNS_SHOWN} those that did not complete, at most that many.
+     */
+    private static List<String> listed(RunView run, StepView step, boolean everyChild) {
+        List<String> ids = step.childRunIds();
+        return everyChild || ids.size() <= CHILD_RUNS_SHOWN ? ids
+                : ids.stream().filter(id -> !completed(run.children().get(id))).limit(CHILD_RUNS_SHOWN).toList();
     }
 
     /**
@@ -208,31 +259,166 @@ public final class ShowCommand implements Command {
         }
     }
 
-    private static void steps(PrintStream out, RunView view, Function<String, String> text, boolean outputs,
-                              boolean full) {
+    /**
+     * What of a step is shown besides its line.
+     *
+     * @param outputs  each step's output
+     * @param full     the outputs whole
+     * @param children the steps of every child run, however many a step started
+     */
+    private record Shown(boolean outputs, boolean full, boolean children) {}
+
+    private static void steps(PrintStream out, RunView view, Function<String, String> text, Shown shown,
+                              byte[] definition) {
         if (view.steps().isEmpty()) {
             return;
         }
         out.println();
         out.println("Steps");
-        for (StepView step : view.steps()) {
+        stepLines(out, view, text, shown, definition, new HashSet<>());
+    }
+
+    /**
+     * The steps of {@code run}, one line each with what belongs to it; under a {@code switch} the case that ran,
+     * and under a step that started child runs each child run with its steps, further in, at every level. The child
+     * runs are those {@code run.html} draws under the step: the same view of the record.
+     *
+     * @param definition the recorded {@code workflow.json} of {@code run}; {@code null} for a child run, whose
+     *                   definition the record does not hold
+     * @param drawn      the child runs listed so far: a child run is listed once
+     */
+    private static void stepLines(PrintStream out, RunView run, Function<String, String> text, Shown shown,
+                                  byte[] definition, Set<String> drawn) {
+        for (StepView step : run.steps()) {
             String badge = "[" + TerminalFormat.safe(step.blockType()) + (step.ai() ? ", ai" : "") + "]";
             out.println(String.format("  %-3d %-24s %-16s %-17s %s", step.stepIndex(),
                     TerminalFormat.oneLine(step.label()), badge, step.shownStatus(), duration(step)
                             + (step.interrupted() ? "  (interrupted)" : "")
                             // The loop a pause stopped between two items: nothing runs now
-                            + (view.paused() && step.status() == StepStatus.RUNNING ? "  (paused)" : "")
+                            + (run.paused() && step.status() == StepStatus.RUNNING ? "  (paused)" : "")
                             + (step.attempts() > 1 ? "  (" + step.attempts() + " attempts)" : "")));
             aiCalls(out, step.aiCalls(), text);
             egress(out, step.commands());
             outputCuts(out, step.commands());
-            values(out, step.commands(), text, outputs, full);
+            values(out, step.commands(), text, shown.outputs(), shown.full());
             files(out, step.files());
             BlobRef output = step.output();
-            if (outputs && output != null) {
-                shown(out, text.apply(output.sha256()), full);
+            if (shown.outputs() && output != null) {
+                shown(out, text.apply(output.sha256()), shown.full());
+            }
+            switchCase(out, step, text, definition);
+            childRuns(out, run, step, text, shown, drawn);
+        }
+    }
+
+    /** Under a {@code switch} that finished: the case it ran and the blocks of that case, as the definition has them. */
+    private static void switchCase(PrintStream out, StepView step, Function<String, String> text, byte[] definition) {
+        if (!"switch".equals(step.blockType()) || step.metadata() == null) {
+            return;
+        }
+        String matched;
+        JsonNode ran;
+        try {
+            JsonNode metadata = JSON.readTree(text.apply(step.metadata().sha256()));
+            matched = metadata.path("matchedCase").isTextual() ? metadata.path("matchedCase").asText() : null;
+            ran = metadata.path("caseMatched");
+        } catch (IOException e) {
+            return;   // a deleted or damaged metadata blob: nothing to name
+        }
+        if (matched == null) {
+            return;
+        }
+        // "none" is what the step says when no case ran, and may be the value of a case that did. The step says
+        // which (caseMatched); a record of an earlier version does not, and there only a case ran a command or a call
+        boolean noCase = ran.isBoolean() ? !ran.asBoolean()
+                : matched.equals("none") && step.commands().isEmpty() && step.aiCalls().isEmpty();
+        if (noCase) {
+            out.println(UNDER + "no case matched");
+            return;
+        }
+        List<WorkflowOutline.Block> blocks = definition == null ? List.of()
+                : WorkflowOutline.caseBlocks(definition, step.position(), matched);
+        out.println(UNDER + "case " + TerminalFormat.oneLine(matched) + (blocks.isEmpty() ? "" : ": " + blocks.stream()
+                .map(block -> TerminalFormat.oneLine(block.name() == null ? StepView.UNNAMED : block.name()) + " ["
+                        + TerminalFormat.safe(block.shownType()) + "]")
+                .collect(Collectors.joining(", "))));
+    }
+
+    /**
+     * Under a step that started child runs: each child run with its status, its item for a {@code foreach}, and its
+     * gate, then its steps. Of more than {@value #CHILD_RUNS_SHOWN} child runs only those that did not complete are
+     * listed, at most that many, and the others are counted, unless every one is asked for.
+     */
+    private static void childRuns(PrintStream out, RunView run, StepView step, Function<String, String> text,
+                                  Shown shown, Set<String> drawn) {
+        List<String> ids = step.childRunIds();
+        if (ids.isEmpty()) {
+            return;
+        }
+        List<String> listed = listed(run, step, shown.children());
+        Map<String, ItemView> items = new HashMap<>();
+        step.items().forEach(item -> {
+            if (item.subRun() != null) {
+                items.putIfAbsent(item.subRun(), item);
+            }
+        });
+        PrintStream inner = indented(out, UNDER);
+        for (String id : listed) {
+            ItemView item = items.get(id);
+            String label = UNDER + (item == null ? "" : "item " + (item.index() + 1) + "/" + item.total() + "  ")
+                    + "child run " + TerminalFormat.safe(TerminalFormat.shortId(id));
+            RunView child = run.children().get(id);
+            if (child == null) {
+                out.println(label + " (not in the record)");
+            } else if (!drawn.add(id)) {
+                // Only a record nobody's run wrote names a child twice
+                out.println(label + " (listed above, under the step that names it first)");
+            } else {
+                GateView gate = child.gate();
+                out.println(label + " " + child.status() + (gate == null ? "" : "  gate "
+                        + TerminalFormat.safe(gate.status())
+                        + (gate.category() == null ? "" : " (" + TerminalFormat.safe(gate.category()) + ")")));
+                stepLines(inner, child, text, shown, null, drawn);
             }
         }
+        int more = ids.size() - listed.size();
+        if (more > 0) {
+            Map<String, Integer> byStatus = new TreeMap<>();
+            ids.stream().filter(id -> !listed.contains(id)).forEach(id -> byStatus.merge(
+                    run.children().get(id) == null ? "not in the record" : run.children().get(id).status().name(),
+                    1, Integer::sum));
+            String statuses = byStatus.size() == 1 ? "all " + byStatus.keySet().iterator().next()
+                    : byStatus.entrySet().stream().map(entry -> entry.getValue() + " " + entry.getKey())
+                            .collect(Collectors.joining(", "));
+            out.println(UNDER + more + " more child run" + (more == 1 ? "" : "s") + ", " + statuses
+                    + " (show --children lists each)");
+        }
+    }
+
+    private static boolean completed(RunView child) {
+        return child != null && child.status() == RunStatus.COMPLETED;
+    }
+
+    /** A stream that writes each line to {@code out} after {@code indent}. */
+    private static PrintStream indented(PrintStream target, String indent) {
+        byte[] prefix = indent.getBytes(StandardCharsets.UTF_8);
+        // On the bytes, so that it holds for whatever is printed and however: a line starts after each line feed,
+        // and gets the indent before its first byte; an empty line gets none
+        return new PrintStream(new OutputStream() {
+            private boolean atLineStart = true;
+
+            @Override
+            public void write(int b) {
+                if (atLineStart && b != '\n' && b != '\r') {
+                    target.write(prefix, 0, prefix.length);
+                    atLineStart = false;
+                }
+                target.write(b);
+                if (b == '\n') {
+                    atLineStart = true;
+                }
+            }
+        }, true, StandardCharsets.UTF_8);
     }
 
     /**

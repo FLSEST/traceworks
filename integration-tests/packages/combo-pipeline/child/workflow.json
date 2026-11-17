@@ -1,0 +1,34 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a02",
+  "name": "IT combo-pipeline child",
+  "description": "The child of IT combo-pipeline: a while that counts twice and a retry that passes at its second attempt, both into the file its parent began in the scratch directory, and a step that prints the file.",
+  "blocks": [
+    {
+      "type": "while",
+      "name": "count_up",
+      "config": {
+        "execution_mode": "shell",
+        "condition_command": "test \"$(grep -c '^pass ' \"{{ scratch_dir }}/trail.txt\")\" -lt 2",
+        "command": "n=$(( $(grep -c '^pass ' \"{{ scratch_dir }}/trail.txt\") + 1 )); echo pass $n >> \"{{ scratch_dir }}/trail.txt\"; echo pass $n",
+        "max_iterations": 5
+      }
+    },
+    {
+      "type": "retry",
+      "name": "flaky",
+      "config": {
+        "execution_mode": "shell",
+        "max_retries": 3,
+        "delay": 0,
+        "command": "n=$(( $(grep -c '^attempt ' \"{{ scratch_dir }}/trail.txt\") + 1 )); echo attempt $n >> \"{{ scratch_dir }}/trail.txt\"; if [ $n -lt 2 ]; then echo attempt $n fails; exit 1; fi; echo attempt $n passes"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "read_trail",
+      "config": {"command": "cat \"{{ scratch_dir }}/trail.txt\""}
+    }
+  ]
+}

@@ -85,6 +85,36 @@ final class RunFolder {
         return found.getFirst();
     }
 
+    /** The lines of {@code type} of run {@code runId}: the run itself or one of its child runs. */
+    List<JsonNode> eventsOf(String runId, String type) {
+        return events(type).stream().filter(event -> runId.equals(event.path("run").asText())).toList();
+    }
+
+    /** The names of the steps run {@code runId} started, in order: the run itself or one of its child runs. */
+    List<String> stepNamesOf(String runId) {
+        return eventsOf(runId, "step.started").stream().map(event -> event.path("name").asText()).toList();
+    }
+
+    /** The last {@code step.finished} of step {@code name} of run {@code runId}, a child run for example. */
+    JsonNode finishedOf(String runId, String name) {
+        return eventsOf(runId, "step.finished").stream().filter(event -> name.equals(event.path("name").asText()))
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("No step.finished of step " + name + " in run " + runId));
+    }
+
+    /** The metadata of step {@code name} of run {@code runId}, as JSON. */
+    JsonNode metadataOf(String runId, String name) {
+        return json(blob(finishedOf(runId, name).path("metadata")));
+    }
+
+    /** The output of step {@code name} of run {@code runId}: the blob of its last {@code step.output}. */
+    String outputOf(String runId, String name) {
+        JsonNode output = eventsOf(runId, "step.output").stream()
+                .filter(event -> name.equals(event.path("name").asText())).reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("No step.output of step " + name + " in run " + runId));
+        return blob(output.path("output"));
+    }
+
     /** The event types of the run itself, in order. */
     List<String> types() {
         return events().stream().filter(event -> id().equals(event.path("run").asText()))

@@ -14,7 +14,8 @@ class AiCheckIT extends IntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"ai-simple", "ai-tools", "ai-wrapper-tools", "ai-agentic", "ai-compress", "ai-branches", "ai-isolation",
-            "ai-marker", "ai-timeout", "ai-gates", "ai-egress", "ai-egress-slow", "ai-web"})
+            "ai-marker", "ai-timeout", "ai-gates", "ai-egress", "ai-egress-slow", "ai-web", "ai-interrupt-loop",
+            "combo-model-text", "combo-ai-children", "combo-model-choice"})
     void everyAiPackage_checksWithoutAnError(String name) {
         Result check = traceworks.exec("check", traceworks.packageDir(name).toString());
 

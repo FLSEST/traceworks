@@ -7,6 +7,7 @@ import traceworks.core.engine.ExecutionMode;
 import traceworks.core.engine.PlatformVariables;
 import traceworks.core.engine.RunVariables;
 import traceworks.core.engine.RunRequirements;
+import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.model.AuditConfig;
 import traceworks.core.register.Catalog;
 import traceworks.core.model.BlockDefinition;
@@ -69,6 +70,9 @@ import java.util.regex.Pattern;
  *   <li>{@code invalid-audit-config}, {@code invalid-audit-key}, {@code report-block-missing},
  *       {@code catalog-invalid} ({@code ERROR}): a {@code metadata.audit} or {@code catalog.json} the register cannot
  *       use ({@link #auditRules}, {@link #catalog}).</li>
+ *   <li>{@code report-from-child-sets-no-gate} ({@code INFO}): the report block of an audit runs a child
+ *       workflow ({@code sub-workflow}, {@code foreach} with {@code workflow_id}), whose gate markers set no gate
+ *       of the run.</li>
  *   <li>{@code register-dir-outside-audit} ({@code ERROR}): {@code register_dir} in a workflow that feeds no
  *       register, so its run has no register folder and the placeholder would stay as text.</li>
  *   <li>{@code register-dir-in-ai-prompt} ({@code ERROR}): {@code register_dir} in the prompt of an AI call, whose
@@ -128,6 +132,21 @@ final class TraceworksRules {
                 && config.reportBlock().equals(block.getName()))) {
             out.add(AnalyzerFinding.of("report-block-missing", Severity.ERROR, -1, null, "metadata.audit.report_block '"
                     + config.reportBlock() + "' names no top-level block, so no run has a report to feed the register"));
+        }
+        if (config != null) {
+            List<BlockDefinition> all = workflow.blocks();
+            for (int i = 0; i < all.size(); i++) {
+                BlockDefinition block = all.get(i);
+                if (block != null && config.reportBlock().equals(block.getName())
+                        && ChildWorkflows.runsAChild(block.getType(), block.getConfig())) {
+                    out.add(AnalyzerFinding.of("report-from-child-sets-no-gate", Severity.INFO, i, block.getName(),
+                            "the report block runs a child workflow: its output is a copy of the child's, and a"
+                                    + " gate_status marker in a copy sets no gate of this run — the child's gate"
+                                    + " stays the child's. Let a step of this workflow print the report and its"
+                                    + " gate, or add one after this block that states the gate"));
+                    break;
+                }
+            }
         }
         registerDirInPrompts(workflow, out);
         if (config == null && AuditConfig.problems(metadata).isEmpty()) {

@@ -80,6 +80,12 @@ public final class ChildWorkflows {
         }
     }
 
+    /** Whether a block of {@code type} with {@code config} runs a child workflow: it sets a {@code workflow_id}. */
+    public static boolean runsAChild(String type, Map<String, Object> config) {
+        return config != null && ("sub-workflow".equals(type) || "foreach".equals(type))
+                && config.get("workflow_id") instanceof String ref && !ref.isBlank();
+    }
+
     /**
      * The {@code workflow_id} a block runs as a child, when it is literal, without its edge spaces, as the block reads
      * it ({@code SubWorkflowLauncher.resolveWorkflowId}); {@code null} otherwise.

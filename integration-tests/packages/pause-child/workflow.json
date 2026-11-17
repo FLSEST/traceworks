@@ -1,0 +1,23 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a40",
+  "name": "IT pause-child",
+  "description": "A child workflow whose one step notes its start in the workspace and then waits for a file of the test, and a step after it: for a pause and an interrupt while the child runs.",
+  "blocks": [
+    {
+      "type": "sub-workflow",
+      "name": "slow_child",
+      "config": {
+        "workflow_id": "./child"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo after the child"
+      }
+    }
+  ]
+}

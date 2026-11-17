@@ -1,0 +1,24 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "b7a0f6d2-51c4-4c0e-9a3b-6f1d2e8c4a12",
+  "name": "IT combo-model-text in-line",
+  "description": "Names what its parent handed over, text a model wrote, in a shell line: the line is refused, and on_failure: continue does not get the child past it.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "inject",
+      "config": {
+        "command": "echo {{ previous_output }}",
+        "on_failure": "continue"
+      }
+    },
+    {
+      "type": "shell",
+      "name": "after",
+      "config": {
+        "command": "echo the child went past a refused line"
+      }
+    }
+  ]
+}
