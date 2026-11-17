@@ -220,7 +220,7 @@ dl.pattern > div.limit dd { color: var(--muted); }
     <div><dt>What it does</dt><dd>A package is a directory with a <code>workflow.json</code>: the blocks in their order,
       each with its command or its prompt. Next to it lie what the blocks use: scripts, rule files, a Dockerfile per
       image under <code>images/&lt;name&gt;/</code>, and for an audit a <code>catalog.json</code> with its rules.
-      Traceworks reads the package and adds the same frame to every run. The five audits this repository runs on
+      Traceworks reads the package and adds the same frame to every run. The four audits this repository runs on
       itself are such packages, and none of them needs anything the tool does not give every workflow.</dd></div>
     <div><dt>Where you see it</dt><dd><pre><span class="c"># a package is what the directory holds</span>
 examples/hello/workflow.json
@@ -247,8 +247,8 @@ $ traceworks check examples/hello</pre>
       starts, with <code>--workspace</code> or with <code>--source</code> for a new checkout of a git repository at one
       commit. Each run has the same steps, the same rules and the same kind of record. A workflow can also run inside
       another one, as a <code>sub-workflow</code> block. The self-audits are packages shipped with the repository,
-      under <code>examples/self-audit/</code>: <code>security</code>, <code>architecture</code>, <code>build</code>,
-      <code>functionality</code> and <code>testing</code>.</dd></div>
+      under <code>examples/self-audit/</code>: <code>security</code>, <code>security-changes</code>,
+      <code>architecture</code> and <code>build</code>.</dd></div>
     <div><dt>Where you see it</dt><dd><pre><span class="c"># the same package on two directories</span>
 $ traceworks run examples/audit-hello --workspace /some/dir
 $ traceworks run examples/audit-hello --workspace /another/dir

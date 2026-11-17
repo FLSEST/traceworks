@@ -29,8 +29,6 @@
         <module>examples/self-audit/tests</module>
         <module>examples/self-audit/tests-architecture</module>
         <module>examples/self-audit/tests-build</module>
-        <module>examples/self-audit/tests-functionality</module>
-        <module>examples/self-audit/tests-testing</module>
     </modules>
 
     <properties>

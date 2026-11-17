@@ -7,8 +7,7 @@ A vulnerability is not reported in an issue: see [SECURITY.md](SECURITY.md).
 
 ## Build and test
 
-You need Java 21, Maven, git and `python3` (the tests of two self-audit packages run their scripts with it). The
-container tests also need `docker` or `podman`.
+You need Java 21, Maven and git. The container tests also need `docker` or `podman`.
 
 ```bash
 mvn verify                                                    # unit and component tests, and the jar; no container

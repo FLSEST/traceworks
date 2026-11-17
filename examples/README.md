@@ -34,10 +34,10 @@ audit and opens a GitHub issue for each new or reopened finding.
 
 ## How Traceworks checks itself
 
-[`self-audit/`](self-audit/README.md) holds six real audits of this code base. They show the loop of a register at
+[`self-audit/`](self-audit/README.md) holds four real audits of this code base. They show the loop of a register at
 full size: each run feeds a register, a person checks each new finding against the code and decides, and the next
 run knows the decisions. They are written for this repository: their instructions, rule files and facts name its
-modules, documents and threat model. Five of them call a model, from none to about 110 times in a run.
+modules, documents and threat model. Three of them call a model, from none to about 110 times in a run.
 
 | Package | What it checks | AI | To use it on another project |
 |---|---|---|---|
@@ -45,8 +45,6 @@ modules, documents and threat model. Five of them call a model, from none to abo
 | [`architecture`](self-audit/architecture/README.md) | the package graph, layer rules, direct I/O and size; a model says fine, split or move per candidate file | yes | a rule file with your packages and layers (`rules/architecture.rules`) |
 | [`security`](self-audit/security/README.md) | the code against the threat model in `docs/security.md`, one verdict per area | yes | new instructions (your threat model) and new rules |
 | [`security-changes`](self-audit/security-changes/README.md) | the same, for what changed since a commit and the code one call away | yes | the same as `security` |
-| [`functionality`](self-audit/functionality/README.md) | `docs/cli.md` against the code, one verdict per section | yes | specific to Traceworks: it reads the headings of its documents and its classes |
-| [`testing`](self-audit/testing/README.md) | the tests: per risky class, a one-line change no test would notice | yes | specific to Traceworks: its rules name this repository's modules |
 
 The test modules next to them (`self-audit/tests` and `self-audit/tests-*`) test the tools and scripts of the
 audits, with no container and no model; they run in every `mvn verify`.

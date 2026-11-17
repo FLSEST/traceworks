@@ -62,9 +62,9 @@ rule `todo_item` whose subject is its title; a reworded title is a new finding. 
 of an envelope: a title over 2000 or a description over 20 000 characters rejects the report. That is the simple form for a workflow whose findings are tasks (GitHub issues, Jira), not measurements.
 
 `examples/audit-hello` is the smallest audit: three shell steps and no AI. `examples/self-audit/architecture` feeds
-the register `architecture` with its measured findings and its verified verdicts. `examples/self-audit/security`,
-`functionality` and `testing` feed registers of their own; `examples/self-audit/README.md` shows how the audits, the
-registers and the triage of their findings make a loop. `examples/self-audit/security-changes` is an audit whose
+the register `architecture` with its measured findings and its verified verdicts. `examples/self-audit/security`
+feeds a register of its own; `examples/self-audit/README.md` shows how the audits, the registers and the triage of
+their findings make a loop. `examples/self-audit/security-changes` is an audit whose
 runs each judge a part of the project (what changed since a commit): it lists every item its register knows in
 every report, and takes every item that is open or was not judged into its next run.
 

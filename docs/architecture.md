@@ -326,8 +326,6 @@ defaults protect and what they do not.
 | `examples/self-audit/tests` | the tests of the tools that the self-audit packages build into their images; the sources stay in the package (`examples/self-audit/security/images/areas/src`). Not part of `traceworks.jar` | the JDK only (`jdk.compiler`) |
 | `examples/self-audit/tests-architecture` | the tests of the tool that the architecture self-audit builds into its image; the sources stay in the package (`examples/self-audit/architecture/images/architecture/src`). Not part of `traceworks.jar` | the JDK only (`jdk.compiler`) |
 | `examples/self-audit/tests-build` | the tests of the tool that the build self-audit package builds into its image; the sources stay in the package (`examples/self-audit/build/images/facts/src`). Not part of `traceworks.jar` | the JDK only |
-| `examples/self-audit/tests-functionality` | the tests of the scripts of the functionality self-audit (`examples/self-audit/functionality/scripts`), run with `python3` on small source trees. Not part of `traceworks.jar` | none (the tests need `python3` on the build machine) |
-| `examples/self-audit/tests-testing` | the tests of the scripts of the testing self-audit (`examples/self-audit/testing/scripts`), run with `python3` on small source trees. Not part of `traceworks.jar` | none (the tests need `python3` on the build machine) |
 
 
 ## Building and testing

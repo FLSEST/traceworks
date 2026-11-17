@@ -313,11 +313,11 @@ $ traceworks findings
           <td>A finding a model judged stays open until a run names it as gone.</td></tr>
       <tr><td><strong>110 model calls</strong> per security run, clean areas included, every run.</td>
           <td>Items with a digest. A settled item is not sent to the model.</td></tr>
-      <tr><td>The testing audit could not end: <strong>51 findings gone, 52 new</strong>, in the same 30 classes.</td>
+      <tr><td>An earlier self-audit of the tests could not end: <strong>51 findings gone, 52 new</strong>, in the same 30 classes.</td>
           <td>A verdict may say "fine" and what it tried. Settled classes free their places for the next ones.</td></tr>
       <tr><td><strong>8 of 13</strong> findings checked by hand were refuted by code outside the area the model saw.</td>
           <td>A verdict call gets read-only tools, and every finding must quote a line that exists.</td></tr>
-      <tr><td><strong>32 of the first 64</strong> testing findings were rated low, and counted like the others.</td>
+      <tr><td><strong>32 of the first 64</strong> findings of that audit were rated low, and counted like the others.</td>
           <td>A low finding stays in the report of the run. The gate counts settled items, not findings.</td></tr>
       <tr><td><strong>22 verdicts lost</strong> when a usage limit stopped a long run.</td>
           <td>A run can pause and go on. A resumed loop takes over the items its record holds as finished.</td></tr>
@@ -332,9 +332,9 @@ $ traceworks findings
 <section id="status">
   <h2>Where this stands <small>2026-11-13</small></h2>
   <ul class="plain">
-    <li><strong>Built:</strong> items in the register. The four audits that ask a model use them:
-      <code>security</code>, <code>testing</code>, <code>functionality</code> and <code>architecture</code>. Their
-      gates follow the settled number, and low findings stay in the report of the run.</li>
+    <li><strong>Built:</strong> items in the register. The self-audits <code>security</code> and
+      <code>architecture</code> use them. Their gates follow the settled number, and low findings stay in the report
+      of the run.</li>
     <li><strong>Tested with stand-ins for the model only.</strong> No real run has used items yet, so the saving on a real
       repository is not measured.</li>
     <li><strong>Not built yet:</strong> a step that confirms a finding mechanically before a person looks at it, and an

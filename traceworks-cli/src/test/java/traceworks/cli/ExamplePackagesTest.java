@@ -38,8 +38,7 @@ class ExamplePackagesTest {
 
         assertThat(packages).extracting(p -> EXAMPLES.relativize(p).toString().replace('\\', '/'))
                 .contains("hello", "ai-hello", "audit-hello", "mutation-testing", "mutation-testing-grounded",
-                        "self-audit/security", "self-audit/security-changes", "self-audit/architecture", "self-audit/build",
-                        "self-audit/functionality", "self-audit/testing");
+                        "self-audit/security", "self-audit/security-changes", "self-audit/architecture", "self-audit/build");
         return packages;
     }
 

@@ -10,8 +10,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The commands no other integration test runs, through the jar as a user runs them (docs/cli.md): {@code describe},
- * {@code credentials} and {@code watch}. The testing self-audit lists a command without an integration test
- * ({@code command-without-integration-test}); this class is what answers it for these three.
+ * {@code credentials} and {@code watch}.
  */
 class CommandsIT extends IntegrationTest {
 

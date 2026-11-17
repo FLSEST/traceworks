@@ -1,6 +1,6 @@
 # The self-audits: Traceworks checks itself
 
-Six workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
+Four workflow packages audit the Traceworks sources with Traceworks. They are examples of what the tool is for
 (deterministic steps first, an AI only where a judgement is needed, every claim checked, findings kept across runs),
 and they are how this repository is kept in shape. None of them needs anything the tool does not give every
 workflow.
@@ -11,8 +11,6 @@ workflow.
 | [`security-changes`](security-changes/README.md) | The same question, asked only of what changed since a commit and of what is one call away | the changed lines (git), the areas they lie in, and the neighbours by resolved call | one verdict per changed or neighbouring area | `security-changes` |
 | [`architecture`](architecture/README.md) | Do the sources keep to `docs/architecture.md`? | package graph, layer rules, direct I/O, size, complexity | fine, split or move, per candidate file | `architecture` |
 | [`build`](build/README.md) | Is the build reproducible and are the dependencies in order? | Maven and image facts | nothing | none |
-| [`functionality`](functionality/README.md) | Does the tool do what its documentation says? | commands, options, exit codes and examples, docs against code | one verdict per docs section | `functionality` |
-| [`testing`](testing/README.md) | Would the tests notice when the code breaks? | classes without a test, tests that assert nothing, commands without an integration test | per risky class, one change no test would catch | `testing` |
 
 ## One shape
 
@@ -40,8 +38,8 @@ flowchart LR
   not count, set the gate or write what the register reads.
 - **A finding counts only when its evidence holds.** Every finding quotes a line, and the report step looks the
   line up. A finding whose quote is not there is shown as unverified and is not in the register.
-- **The register remembers.** It knows a finding of an earlier run by its rule and its subject (a class, a member,
-  a command, a section; never a line number), and hands the next run what is open and what a person decided, so a
+- **The register remembers.** It knows a finding of an earlier run by its rule and its subject (an area of the
+  code, a file; never a line number), and hands the next run what is open and what a person decided, so a
   dismissed finding does not come back, unless a run states it with a higher severity than it was dismissed on: a
   decision covers the severity it was made on (docs/registers.md, "What a decision covers"). What a tool measured is resolved when a full snapshot no longer holds it.
   What a model judged is resolved only when a run says that it is gone (below, "The register is the memory").
@@ -51,8 +49,8 @@ flowchart LR
   An open finding the register holds is answered as before, whatever its severity, and what a tool measured keeps
   its path. The severity is the model's word: a model that rates everything low hides nothing from the report of
   the run, but keeps it out of the register.
-- **The loop can end.** The four audits with an AI list every item they could judge, and the register remembers
-  which of them are settled. The next run judges only what changed, was never judged or has an open finding
+- **The loop can end.** `security` and `architecture` list every item they could judge, and `security-changes`
+  every item its register knows; the register remembers which of them are settled. The next run judges only what changed, was never judged or has an open finding
   (below, "A run judges what needs a verdict").
 
 `traceworks describe examples/self-audit/<topic>` prints each of these workflows before it runs, and
@@ -77,9 +75,7 @@ keeps neither the issue nor the fix, which are a model's words.
 
 Triage is the step that is nobody's workflow: someone checks each new finding against the code before it is
 accepted or dismissed, by reproducing it where that is possible. A security finding gets a probe (a package or a
-copied run that shows the gap). A testing finding names a change of one line: apply it and run the tests. Green
-means the gap is real, and the fix is the test that goes red; red means the finding is wrong, and it is dismissed
-with the name of the test that caught the change.
+copied run that shows the gap).
 
 When an agent does the triage, it says so. An agent that works with your user is your user to the machine, and
 its decision would read as yours. It names itself with `--agent`, or its harness sets `TRACEWORKS_AGENT` once:
@@ -107,9 +103,9 @@ these audits, findings vanished from the registers that nobody had fixed: the mo
 full snapshot that does not state a finding resolved it. So the register tells two kinds of rules apart
 (`"judged": true` in a package's `catalog.json`; [docs/registers.md](../../docs/registers.md), "Reconciliation"):
 
-- **A measured finding** (a layer violation, an undocumented option, a class without a test) is resolved at once
+- **A measured finding** (a layer violation, a package cycle, direct I/O where it is forbidden) is resolved at once
   when the snapshot no longer states it. The tool looked, and it is not there.
-- **A judged finding** (a security finding, a split or move verdict, a contradiction, an uncaught change) stays
+- **A judged finding** (a security finding, a split or move verdict) stays
   open until a run says explicitly that it is gone. Silence says nothing.
 
 For that, each run asks. The fact step gets what the register knows (`{{ audit_findings }}`, or in `security` and
@@ -140,8 +136,8 @@ Two things keep a person from findings that cost time for nothing, both in `secu
 | `ACCEPTED_RISK` | no: it is decided, and the prompt says so | its review date passes (then it is asked about again), a run states it with a higher severity than it was accepted on (then it is open), or a person reopens it |
 | `DISMISSED` | no | a run states it with a higher severity than it was dismissed on (then it is open), or a person reopens it |
 
-What needs no model is not asked of one: when the member, the file, the section, the class or the quoted line a
-finding was about is no longer there, the fact step names the finding as gone itself. An open finding whose item
+What needs no model is not asked of one: when the member, the file or the quoted line a finding was about is no
+longer there, the fact step names the finding as gone itself. An open finding whose item
 exists but is not judged in a run (a cap cut it, or its call failed) is not asked about and stays open.
 
 ## A run judges what needs a verdict
@@ -150,11 +146,10 @@ A page to step through, with a drawing of the loop: [docs/audit-loop.html](../..
 browser; it loads nothing from the network.
 
 Findings alone cannot say "nothing was found here". An audit that only knows findings asks about every item in
-every run, and a model that is asked for a defect finds one: in two rounds of `testing`, 51 findings were answered
-as gone and 52 new ones came, in the same 30 classes. So the audits treat what they judge as **items**
-([docs/registers.md](../../docs/registers.md), "Items"): an area of the code, a candidate file, a section of the
-documentation, a class. The fact step gives each
-item a digest of what a verdict about it sees, the envelope lists every item with its digest and whether this run
+every run, and a model that is asked for a defect finds one: in two rounds of an earlier self-audit of the tests,
+51 findings were answered as gone and 52 new ones came, in the same 30 classes. So the audits treat what they judge as
+**items** ([docs/registers.md](../../docs/registers.md), "Items"): an area of the code, a candidate file. The fact
+step gives each item a digest of what a verdict about it sees, the envelope lists every item with its digest and whether this run
 judged it, and the register keeps the digest and the run of each item's last verdict. The next run gets that back
 as `{{ audit_items }}`, and its fact step compares:
 
@@ -166,7 +161,7 @@ as `{{ audit_items }}`, and its fact step compares:
 
 ```bash
 traceworks findings                 # per register: items 87 of 110 settled: 71 clean, 16 decided; 20 open, 3 not judged
-traceworks findings testing items   # each class with its state and the digest of its last verdict
+traceworks findings security items  # each area with its state and the digest of its last verdict
 ```
 
 The number has a goal: every item settled. An item comes back when it changes, so a fix is asked about in the next
@@ -176,11 +171,9 @@ run, and when the question changes:
 |---|---|---|---|
 | `security` | an area: `<file>#<first member>` | the rules that picked the area and its code | `--verdict-version` in `workflow.json` |
 | `architecture` | a candidate file: its path | what the prompt shows of the file: the code, the reasons, the measured findings, the computed context (without the type counts of the packages) | `--verdict-version` in `workflow.json` |
-| `functionality` | a section of `docs/cli.md`, or a part of a long one: `<document>#<heading>` | the text of the section and the files that declare its commands | `verdict_version` in `functionality.rules` |
-| `testing` | a class: its name | the file of the class and every test file that names it | `verdict_version` in `testing.rules` |
 
-A digest holds what the fact step hands the verdict, not everything a model with `tools: read` may open: a section
-of the documentation is not judged again because code changed that the files of its commands only call. Raise the
+A digest holds what the fact step hands the verdict, not everything a model with `tools: read` may open: an area of
+`security` is not judged again because code changed that the area only calls. Raise the
 version of the question to have everything judged again.
 
 **The gate follows the items.** The number of findings cannot reach a goal: it grows with attention. The number of
@@ -194,7 +187,7 @@ fact step read of the register and what the run judged, and the gate follows tha
 | GREEN | every item is settled: clean or decided |
 
 A run that finds nothing while items wait is not green. Nor is one while the register holds an open finding that
-no item carries: a class that is still there but is no item any more, or a subject the register shows cut. No run
+no item carries: a subject that is still there but is no item any more, or one the register shows cut. No run
 asks about such a finding and none names it as gone, so the report lists it under a heading of its own for a person
 to decide, and the gate is YELLOW over it, RED when it is high. Every gate description ends with the same words,
 `87 of 110 items settled (71 clean, 16 decided; 20 open, 3 not judged)`, and the report of the run has the line
@@ -221,8 +214,7 @@ The gate counts what the run states, and the report says where the register will
   by default (`decided on MEDIUM, stated as HIGH, which is above it: the register opens the finding again`, or
   `... not above it: the register keeps the decision`), and says that the gate counts them in this run. What a
   model judged is in an envelope once per rule and subject: `security` states the highest severity of an area's findings of a
-  rule, `architecture` gives one verdict of a kind per file, and `functionality` and `testing` keep the first
-  finding of a subject. A person then looks at the register (`findings <topic> show <id>` prints the severity
+  rule, and `architecture` gives one verdict of a kind per file. A person then looks at the register (`findings <topic> show <id>` prints the severity
   and the evidence the decision was made on) and reopens the finding (`findings <topic> reopen <id>`) or sees that
   it is the one that was decided. The cost where the register keeps the decision: a run that reports the finding
   again shows its item open, and the gate not GREEN, for that run. The register calls the item decided and judged,
@@ -237,21 +229,16 @@ The gate counts what the run states, and the report says where the register will
   decided rows first, and ends with `(+N more: ...)` when it left rows out. Open findings can be among them: their
   item is asked without them, and a verdict that finds nothing would make it read clean. Nothing is lost in the
   register, which keeps a judged finding open until a run names it as gone, but the report would say more than it
-  knows. So each fact step records the number (`known_missing`, `knownMissing`), and the report step concludes
+  knows. So each fact step records the number (`knownMissing`), and the report step concludes
   nothing from a row that is not there: the gate is not GREEN, the description says `N findings of the register not
   shown to this run`. The block's last line says how many of the missing rows are open (`OPEN 3`), not whose they
-  are. So while any open row is missing (`known_missing_open`, `knownMissingOpen`), an item the register calls open
+  are. So while any open row is missing (`knownMissingOpen`), an item the register calls open
   stays open in the report, whatever was shown of it and whatever was answered; when only decided rows are missing,
   every open finding was shown and the items settle as they would. A finding is still named as gone only by a row
   that was there. Decide or fix findings until the block holds all.
 
-An item name is there once: a second area of one member and a heading that a document has twice get a number
-(`...~2`). A class name that two source roots hold is two items in `testing`: one keeps the plain name, the other
-is named by its source root (`p.Plain~lib/src/main/java`), so no name depends on the order of the files. The plain
-name stays with the class the register knows by it: the one whose file the register's findings of that name quote,
-else the one whose digest the register's item holds, else the first in the order of the files. A class that is
-alone has its plain name. A name over the register's 300 characters is cut and ends with a digest of the whole, in
-every package. The register takes at most 1000 items in a report. A longer list
+An item name is there once: a second area of one member gets a number (`...~2`). A name over the register's 300
+characters is cut and ends with a digest of the whole, in every package. The register takes at most 1000 items in a report. A longer list
 is sent in part, the items of the run first, and without `expectedItems`: the register then keeps every item it
 knows, and the report says so.
 
@@ -298,20 +285,19 @@ not see").
 ## Cost
 
 The steps before and after the AI cost seconds. The verdict steps make one call per item, one after the other:
-about 110 for a first run of `security`, 20 for `architecture`, 34 for `functionality` and 30 for `testing` on these
-sources (the last two have a cap in their rule file); `security-changes` calls once per changed or neighbouring
-area, and once per area with an open finding. A later run calls only for the items that changed or are
-open; `testing` needs some runs of 30 until every class was judged once.
+about 110 for a first run of `security` and 20 for `architecture` on these sources; `security-changes` calls once
+per changed or neighbouring area, and once per area with an open finding. A later run calls only for the items that
+changed or are open.
 
 Which model judges: `security` opens a model choice, `judge`, and a run picks one of its options with
 `--input judge=fable` (the default, `claude-fable-5-2` through Claude), `judge=opus` (`claude-opus-5-5` through
 Claude) or `judge=astra` (`openai/gpt-6-astra` through Pi); a run needs the image and the credential of the provider
 it picked only. All three feed the register `security`, where a finding is the same finding whoever reported it, and
 a verdict of one judge settles an item for the next ([security/README.md](security/README.md), "The model that
-judges"). The other three judge with `claude-opus-5-5`, named in their `workflow.json`.
+judges"). `security-changes` opens the same choice, and `architecture` judges with
+`claude-opus-5-5`, named in its `workflow.json`.
 
 ## Tests
 
 The tools the packages build into their images, and the scripts they run, are tested in the Maven modules
-`tests`, `tests-architecture`, `tests-build`, `tests-functionality` and `tests-testing` next to the packages,
-without a container and without an AI.
+`tests`, `tests-architecture` and `tests-build` next to the packages, without a container and without an AI.

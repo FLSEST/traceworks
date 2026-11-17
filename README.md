@@ -212,10 +212,10 @@ in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `reso
   steps, no AI.
 - [examples/audit](examples/audit) holds the two testing audits above.
 - [examples/self-audit](examples/self-audit/README.md) holds the packages Traceworks checks itself with:
-  `security`, `architecture`, `build`, `functionality` and `testing`. They share one shape: a script measures and
-  chooses, a model judges one item per call, and a script checks every quote, counts and sets the gate; `build`
-  asks no model at all. The four that ask a model each feed a register, so the next run knows what was found and
-  decided and asks only about what changed, was never judged or is still open. Beside `security` stands a short
+  `security`, `architecture` and `build`. They share one shape: a script measures and chooses, a model judges one
+  item per call, and a script checks every quote, counts and sets the gate; `build` asks no model at all. The two
+  that ask a model each feed a register, so the next run knows what was found and decided and asks only about what
+  changed, was never judged or is still open. Beside `security` stands a short
   check for the time between two full audits,
   [`security-changes`](examples/self-audit/security-changes/README.md), with a register of its own. It judges only
   the code that changed since a commit and the code one call away. It never says GREEN, since it did not look at
@@ -231,7 +231,7 @@ The version is `0.1.0-SNAPSHOT`. There is no release.
 Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), the run record and the ledger with
 `verify`, `show`, `watch`, `run.html` and `diff`, pause and resume, secrets and their redaction, AI steps with
 Claude Code and Pi behind the allowlist proxy, Pi on a model server of the operator's own, model choices, named
-values for shell steps, seals, registers with `traceworks findings`, the five self-audit packages, the short
+values for shell steps, seals, registers with `traceworks findings`, the three self-audit packages, the short
 security check beside them and the two testing audits.
 
 **Not built yet:**
