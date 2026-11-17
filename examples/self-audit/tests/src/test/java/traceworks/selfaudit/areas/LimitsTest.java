@@ -27,6 +27,8 @@ class LimitsTest {
     /** The document and the heading whose every part is a stated limit. */
     private static final String LIMITS_DOCUMENT = "docs/security.md";
     private static final String LIMITS_HEADING = "What they do not protect";
+    /** The section of the guarantees: a sentence in it that states a limit is named by its passage, and quoted. */
+    private static final String GUARANTEES_HEADING = "What the defaults protect";
 
     private static Limits limits() throws IOException {
         return Limits.parse(Files.readString(SECURITY.resolve("rules/security.limits")));
@@ -47,7 +49,7 @@ class LimitsTest {
         String document = document(LIMITS_DOCUMENT);
 
         assertThat(limits.sections().stream().filter(s -> s.source().equals(LIMITS_DOCUMENT))
-                .map(Limits.Section::heading).toList())
+                .map(Limits.Section::heading).filter(heading -> !heading.equals(GUARANTEES_HEADING)).toList())
                 .as("the headings below \"" + LIMITS_HEADING + "\" of " + LIMITS_DOCUMENT + ": a new one needs a"
                         + " section in rules/security.limits")
                 .isEqualTo(Limits.subsections(document, LIMITS_HEADING));
@@ -68,7 +70,12 @@ class LimitsTest {
 
         assertThat(limits.entries().stream().filter(Limits.Entry::limit)).hasSizeGreaterThan(40);
         for (Limits.Entry entry : limits.entries()) {
-            Map<String, String> bullets = Limits.bullets(Limits.section(document(entry.source()), entry.section()));
+            String document = document(entry.source());
+            // A list of limits is read bullet by bullet; a limit inside a section of guarantees by its passage
+            boolean listOfLimits = entry.source().equals(LIMITS_DOCUMENT)
+                    && Limits.subsections(document, LIMITS_HEADING).contains(entry.section());
+            Map<String, String> bullets = listOfLimits ? Limits.bullets(Limits.section(document, entry.section()))
+                    : Limits.passages(Limits.section(document, entry.section()));
             assertThat(bullets).as(entry.source() + ", \"" + entry.section() + "\"").containsKey(entry.lead());
             for (String quote : entry.quotes()) {
                 assertThat(bullets.get(entry.lead())).as("the limit \"" + entry.lead() + "\" of " + entry.source()
@@ -94,8 +101,9 @@ class LimitsTest {
         // For whoever changes the file: the list as it goes between the quotes of a JSON string
         Files.writeString(Path.of("target/security-limits.json-text"), Json.write(rendered).replaceAll("^\"|\"$", ""));
 
-        assertThat(rendered).startsWith("From docs/security.md, \"AI steps\":\nL1. ")
-                .contains("\nFrom docs/security.md, \"Seals\":\n", "\nFrom docs/events.md, \"Redaction\":\nL")
+        assertThat(rendered).startsWith("From docs/security.md, \"What the defaults protect\":\nL1. ")
+                .contains("\nFrom docs/security.md, \"AI steps\":\n", "\nFrom docs/security.md, \"Seals\":\n",
+                        "\nFrom docs/events.md, \"Redaction\":\nL")
                 .doesNotContain("Many containers on a desktop machine");
         for (Path pkg : List.of(SECURITY, CHANGES)) {
             String instructions = String.valueOf(((Map<?, ?>) Json.parse(Files.readString(pkg.resolve("workflow.json"))))
@@ -154,6 +162,10 @@ class LimitsTest {
                 Map.entry("First.", "- **First.** a b - *nested* c"), Map.entry("Second", "- **Second** (d). e After."));
         assertThat(Limits.bullets(Limits.section(document, "Two"))).isEmpty();
         assertThatThrownBy(() -> Limits.bullets(List.of("- no lead"))).hasMessageContaining("without a bold lead");
+        assertThat(Limits.passages(List.of("**Registers** (x). A.", "B. **Bold inside.** C.", "", "- no lead", "  more",
+                "- **What nothing finds:** d", "### H", "lost"))).containsExactly(
+                Map.entry("Registers", "**Registers** (x). A. B. **Bold inside.** C. - no lead more"),
+                Map.entry("What nothing finds:", "- **What nothing finds:** d"));
         assertThatThrownBy(() -> Limits.section(document, "Three")).hasMessageContaining("no heading 'Three'");
     }
 }

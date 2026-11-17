@@ -3,10 +3,37 @@
 # The format is described in the package's README.md ("The stated limits"). A test pins this file to the documents:
 # every heading and every bullet of "What they do not protect" in docs/security.md is named here, in the documents'
 # order, as a limit or as an aside (a point that says nothing about what the code does), and every quote is still in
-# its bullet. The numbered list in the instructions of workflow.json is made from the "says" lines, and a test
+# its bullet. A limit that stands elsewhere, in the middle of the guarantees ("What the defaults protect") or in
+# another document, is named by the bold lead of its passage and pinned by its quotes only. The numbered list in the instructions of workflow.json is made from the "says" lines, and a test
 # holds the two together.
 
 source docs/security.md
+
+section What the defaults protect
+
+limit Mounts.
+  quote a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused
+  says  A workspace or a package may lie in the Traceworks home outside runs, ledger, registers, seals and cache, may be a folder in /dev/shm, and is not refused for holding a credential store of its own (.ssh, .aws).
+
+limit Hooks
+  quote with the operator's whole environment
+  quote the tail of its standard error, unredacted, so a hook must not print a secret
+  says  A hook is the operator's code from traceworks.json: it runs on the host with the operator's whole environment, and the tail of its standard error goes to the register's log and page unredacted.
+
+limit Registers
+  quote Lines appended after the last anchor are accepted.
+  quote But they can **add** to both
+  says  A line appended to a register's log after its last anchor is accepted and named as unproven, and whoever can write the register's folder and the ledger can append a forged decision with its anchor without a trace: decisions are not signed.
+
+limit The register folder of a run
+  quote In a host run nothing keeps a command from writing the folder
+  quote An audit package you run is trusted with the names of the people who decided on its findings.
+  says  In a host run nothing keeps a command from writing the run's register folder: it is compared before each command, not while it is read. Every shell and tool step of an audit can read the folder, the names of who decided included.
+
+limit What nothing in this version finds:
+  quote the ledger is not signed
+  quote a record cut to its first line
+  says  The ledger is not signed: a well-formed entry committed by hand, a record cut to its first line, a ledger moved aside for a new one and a run in a place this ledger does not see are not found.
 
 section AI steps
 
@@ -40,7 +67,8 @@ limit A model with tools can read its own credential.
 
 limit A model's answer in a shell command.
   quote Traceworks guarantees that the value is in the variable and nowhere in the code.
-  says  A protected value reaches a shell step as a variable (values); what the author's command does with it is the author's: unquoted, evaluated (eval, bash -c, arithmetic) or exported, it can run or leak a model's text.
+  quote What the prompt shows, the person has seen and answers for.
+  says  A protected value reaches a shell step as a variable (values), and what the author's command does with it is the author's: unquoted, evaluated or exported it can run or leak a model's text. A default a person takes at the console with an empty line, shown whole, is the person's answer and trusted.
 
 limit A gate from an AI step.
   quote a model steered by what it reads can therefore set a gate too
@@ -111,11 +139,13 @@ limit The `signer` of a seal is a declared name.
 
 limit What the digest does not see.
   quote A change there breaks no seal.
-  says  The seal digest does not see an empty directory, a file that is not a regular file, permission bits other than the owner's execute bit, or the top-level .git/.
+  quote It does not hold for the hashed short name NTFS gives `.git`
+  says  The seal digest does not see an empty directory, a file that is not a regular file, permission bits other than the owner's execute bit, or the top-level .git/ in the spellings a file system may take for it; the hashed short name NTFS can give .git is not recognised.
 
 limit A called package is loaded again when its block runs.
   quote A called package changed in between runs changed.
-  says  A called package is checked when the run starts and resumes, and is loaded from disk again when its block runs, without a comparison: changed in between, it runs changed. A workflow an unsealed package names through a placeholder is not checked at all.
+  quote a called package that lies in the workspace can be rewritten by a step
+  says  A called package is checked when the run starts and resumes and loaded again when its block runs, without a comparison: changed in between, also by a step of the run in a writable workspace, it runs changed with the run's secrets. A workflow an unsealed package names through a placeholder is not checked at all.
 
 limit Whoever writes the home is the operator.
   quote What is not guarded is what the settings do not name
@@ -190,9 +220,17 @@ limit A mount is checked, then mounted.
   quote a process that can write one of its parent directories could still swap a part of it in between
   says  The host side of a mount is resolved once and the runtime gets the checked real path; a process that can write a parent directory of it can still swap a part before the runtime opens it.
 
-limit Sockets deeper down.
-  quote a folder with a socket two or more levels down is not
-  says  A socket file and a folder that directly holds one are refused as a mount; a folder with a socket two or more levels down is not.
+limit A writable mount below the home.
+  quote it does not refuse a writable mount (`:rw`) of any other file or folder of yours
+  says  The mount check refuses the home as a whole, the logins below it and the listed places, not a writable mount of any other file or folder of the operator, such as ~/.bashrc or the .git/hooks of a repository.
+
+limit The tool caches are shared between runs.
+  quote What one run's tool wrote there, a later run's tool reads.
+  says  A tool step's cache folder (cache_dir) belongs to an image name and is shared by every package that names that image: what one run's tool wrote, a later run's tool reads.
+
+limit Sockets, pipes and devices deeper down.
+  quote but a folder with one of them two or more levels down is not
+  says  A socket file, a named pipe, a device node and a folder that directly holds one are refused as a mount; a folder with one of them two or more levels down is not.
 
 limit Runtime storage elsewhere.
   quote is not refused as a mount
@@ -214,7 +252,8 @@ limit git on the host gets a reduced environment.
 
 limit Patterns and reports are read under a time limit.
   quote the thread is left behind, busy until the Traceworks process ends
-  says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends.
+  quote it refuses some patterns the engine would match quickly
+  says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends, and the check of a pattern's counts multiplies them all, so it refuses some patterns the engine would match quickly.
 
 limit A token in a `--source` URL
   quote every process on the machine can read it in the process list while the clone runs
@@ -223,6 +262,10 @@ limit A token in a `--source` URL
 limit A gitfile that points into a checkout.
   quote do not use a directory that steps could write as a `--source`
   says  A local --source whose .git is a file that points into a run's checkout is not refused.
+
+limit A source path is checked, then cloned.
+  quote git resolves the path again when it clones
+  says  A local --source is judged on the path as it resolves at the check, and git resolves it again when it clones: a part of the path that does not exist yet can be made a link by a step of a run going on at that moment.
 
 limit Paths in a package.
   quote may name its workflow by any path on the machine

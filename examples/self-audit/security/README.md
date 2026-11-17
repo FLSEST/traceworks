@@ -151,7 +151,7 @@ guarantees and not the limits, so it reported what the documents already say, an
 that out.
 
 **The stated limits** are in `rules/security.limits`, and the instructions carry them as a numbered list of one
-line each, under the document and the heading they come from (`L1` to `L49`). The judge is told how to use them:
+line each, under the document and the heading they come from (`L1` to `L57`, about 10 KB). The judge is told how to use them:
 
 - A behaviour that a limit states is not a finding. An open finding of an earlier run that describes only such a
   behaviour is answered `gone`, with the number of the limit in the reason.
@@ -182,8 +182,11 @@ aside The private key is yours to keep.
 `docs/security.md` gets a heading or a bullet the file does not name, when a bullet the file names is gone or
 moved, when a quote is no longer in its bullet, and when the list in the instructions of this package or of
 `security-changes` is not the one the file gives. It writes the list as it goes into `workflow.json` to
-`target/security-limits.json-text`. A limit stated elsewhere (the one of `docs/events.md` is in the file) is pinned
-by its quote only: nothing finds a new one there.
+`target/security-limits.json-text`. A limit stated elsewhere is named by the bold lead of its passage and pinned
+by its quotes only, and nothing finds a new one there: the five that stand among the guarantees ("What the defaults
+protect": a workspace with a credential store of its own, a hook's environment and output, lines after a
+register's last anchor, the register folder in a host run, what the ledger does not find) and the one of
+`docs/events.md`. A guarantee is not copied as a limit.
 
 **Why a file of the package, and not the documents at run time.** The workspace is untrusted input, and this text
 tells the judge what not to report: read from the workspace, a line added to its `docs/security.md` would switch
@@ -273,6 +276,15 @@ findings that are gone", each finding with its old subject (`FACT report_known_g
 
 A finding's subject is `<file>#<members>`, and it is compared with the subjects of the areas the sources have now.
 No model is asked about a finding whose code is not there: it cannot hold as it was stated.
+
+**A finding whose rule left the catalog** (a rule renamed or removed in the rule file and `catalog.json`) is shown
+to no run: the files of the register folder list the findings of the catalog's rules. It does not stay open
+unseen. A rule the catalog does not hold is no judged rule, so the register takes its finding as a measurement, and
+the next applied report, a full snapshot that cannot state it (a report that names a rule outside the catalog is
+rejected whole), resolves it; a decided one is resolved the same way
+([docs/registers.md](../../../docs/registers.md), "catalog.json" and "Reconciliation"). A defect that is still there
+comes back under the new rule, whose area the same run judges. `EngineRoundTripTest` runs that through the
+register.
 
 **A renamed or moved member is not lost with its finding.** Its code is still in the sources, in an area whose
 name or digest the register does not know, so the same run judges that area: a defect that is still there is

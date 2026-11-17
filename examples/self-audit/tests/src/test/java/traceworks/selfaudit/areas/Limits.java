@@ -185,6 +185,33 @@ final class Limits {
         return bullets;
     }
 
+    private static final Pattern PASSAGE = Pattern.compile("^(?:- )?\\*\\*(.+?)\\*\\*");
+
+    /**
+     * The passages of a section that is not a list of limits, by their bold lead, each with its whole text on one
+     * line: a paragraph or a bullet that starts a line with {@code **lead**}, with everything up to the next such
+     * line or heading, a list without leads included. A section of guarantees states a limit here and there, in the
+     * middle of a paragraph; a limits file names the passage and quotes the sentence. Nothing says that such a
+     * section is named whole: only the quotes are pinned.
+     */
+    static Map<String, String> passages(List<String> section) {
+        Map<String, String> passages = new LinkedHashMap<>();
+        String lead = null;
+        for (String line : section) {
+            Matcher found = PASSAGE.matcher(line);
+            if (found.find()) {
+                lead = found.group(1);
+                passages.merge(lead, line, (a, b) -> a + " " + b);
+            } else if (HEADING.matcher(line).matches()) {
+                lead = null;
+            } else if (lead != null) {
+                passages.merge(lead, line, (a, b) -> a + " " + b);
+            }
+        }
+        passages.replaceAll((name, text) -> text.replaceAll("\\s+", " "));
+        return passages;
+    }
+
     /** The headings one level below {@code heading}, in order. */
     static List<String> subsections(String document, String heading) {
         List<String> found = new ArrayList<>();

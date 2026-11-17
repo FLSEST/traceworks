@@ -619,6 +619,49 @@ class EngineRoundTripTest {
                 .doesNotContain("NOT intact");
     }
 
+    /**
+     * No finding stays open where no run sees it. The files of the register folder list the findings of the rules
+     * the catalog holds, so a finding whose rule left the catalog (a rule renamed or removed in the rule file and the
+     * catalog) is shown to no run and never asked about. It does not stay open for that: a rule the catalog does not
+     * hold is no judged rule, so the register takes the finding as a measurement, and the next applied report, a
+     * full snapshot that does not state it, resolves it. No report can state it either: one that names a rule
+     * outside the catalog is rejected whole. The defect, if it is still there, is found again under the new rule,
+     * whose area the register does not know and the same run judges.
+     */
+    @Test
+    void aFindingWhoseRuleLeftTheCatalog_isShownToNoRun_andIsResolvedByTheNextAppliedReport() throws IOException {
+        Path work = Files.createDirectories(temp.resolve("work/app/src/main/java/p"));
+        Files.writeString(work.resolve("A.java"), "package p;\nclass A {\n"
+                + "    void run(String c) throws Exception { new ProcessBuilder(c).start(); }\n}\n");
+        Path asked = temp.resolve("asked-rule.txt");
+        Path pkg = standInForThePackage(asked);
+        Path home = Files.createDirectories(temp.resolve("home-rule"));
+        Map<String, String> env = new HashMap<>(System.getenv());
+        env.put("TRACEWORKS_ACTOR", "tester");
+        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+                home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
+        Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[{\"rule\":\"process_start\","
+                + "\"severity\":\"high\",\"line\":3,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\","
+                + "\"fix\":\"f\"}]}");
+        assertThat(cli(env, run)).contains("register security: 1 new, 0 resolved, 0 reopened, 1 open now");
+
+        // The rule gets another name, in the rule file and in the catalog
+        for (String file : List.of("rules/security.rules", "catalog.json")) {
+            String text = Files.readString(pkg.resolve(file));
+            assertThat(text).contains("process_start");
+            Files.writeString(pkg.resolve(file), text.replace("process_start", "process_begin"));
+        }
+        Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[]}");
+        String second = cli(env, run);
+
+        assertThat(Files.readString(newest(home, "areas.jsonl"))).as("the run was not shown the finding")
+                .contains("\"known\":[]").doesNotContain("process_start");
+        assertThat(second).contains("register security: 0 new, 1 resolved, 0 reopened, 0 open now")
+                .doesNotContain("not mentioned by this report");
+        assertThat(cli(env, "findings", "security", "list", "--all", "--home", home.toString()).lines().toList())
+                .singleElement().satisfies(line -> assertThat(line).contains("RESOLVED", "process_start"));
+    }
+
     /** A pick the package does not declare starts no run: no step runs, nobody is asked, nothing is reported. */
     @Test
     void aPickThePackageDoesNotDeclare_startsNoRun_andNoVerdictIsAskedFor() throws IOException {
