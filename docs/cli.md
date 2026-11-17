@@ -2620,7 +2620,7 @@ Before a run is created, the start check refuses it (exit 6), with every reason 
   Traceworks home or a folder holding it, its run records, ledger, registers, seal log and caches (`<home>/runs`,
   `<home>/ledger`, `<home>/registers`, `<home>/seals`, `<home>/cache`, the folders that `runs_dir`, `ledger_dir` and `registers_dir`
   name, and everything in them or holding them), a login below the home (`~/.ssh`, ...), the paths a step's own `mounts`
-  may not name (`/etc`, `/proc`, `/sys`, `/run/user` and below, the runtimes' sockets and storage, your session's
+  may not name (`/etc`, `/proc`, `/sys`, `/dev`, `/run/user` and below, the runtimes' sockets and storage, your session's
   sockets), a directory that does not exist or directly holds a socket, and a path with a comma, a quote or a line
   break. The check reads the real path, with symbolic links resolved;
 - a workspace that is the package or lies inside it, when a step of the run (of a literal child workflow too) sets

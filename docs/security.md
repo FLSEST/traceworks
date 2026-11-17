@@ -95,8 +95,10 @@ workspace holds the package, the container sees the package read-only at its pla
 writable workspace inside the package is refused, so no step changes the package. A block's own `mounts`
 must state `:ro` or `:rw`, and each host path is checked on its real path, with `..` and symbolic links resolved: the
 home directory, logins below it (`~/.ssh`, the AI CLIs' logins, ...), the runtimes' sockets and storage, your
-session's sockets, socket files and folders that directly hold one, the Traceworks home (but for the tool caches of
-the tool mode, the run's own scratch directory and its own checkout) with its `runs/`, `ledger/`, `registers/`,
+session's sockets, socket files and folders that directly hold one, `/dev` (the terminals of your session, shared
+memory, device nodes) and any device node or named pipe, the Traceworks home (but for the run's own scratch
+directory and its own checkout; of the tool caches a tool step gets the one folder of its image through `cache_dir`,
+and a `mounts` entry names none of them) with its `runs/`, `ledger/`, `registers/`,
 `seals/` and `cache/` also where a link or a setting (`runs_dir`, `ledger_dir`, `registers_dir` in `traceworks.json`) puts them
 elsewhere, and a path that does not exist or cannot be resolved are refused. The forbidden
 paths are compared with the path as written and with the real path, so `link/..` counts as the folder the kernel
@@ -732,6 +734,16 @@ What a seal does not protect:
   was checked, so a link that replaces a part of the path as written changes nothing. What is left is the runtime
   itself, which opens that real path a moment later: a process that can write one of its parent directories could
   still swap a part of it in between. Do not declare mounts below directories that others can write.
+- **A writable mount below the home.** The mount check refuses the home as a whole, the logins below it and the
+  places listed above; it does not refuse a writable mount (`:rw`) of any other file or folder of yours. A workflow
+  that declares `~/.bashrc:/x:rw`, `~/.local/bin:/x:rw`, `~/.config/systemd/user:/x:rw` or the `.git/hooks` of one of your
+  repositories gets it, and its step, which runs as you, can leave commands there that your shell, your session or
+  git runs later outside every container. `traceworks describe <package>` shows every mount of every block before
+  anything runs: read it for a package you did not write, and run no package whose writable mounts you would not
+  hand to its author.
+- **The tool caches are shared between runs.** A tool step's cache folder (`cache_dir`) belongs to an image name,
+  and every package that names that image, or gives its own package and image the same names, shares it. What one
+  run's tool wrote there, a later run's tool reads.
 - **Sockets deeper down.** A socket file and a folder that directly holds one are refused (all of `/tmp` is, since it
   holds the X11 socket directory), but a folder with a socket two or more levels down is not. Mount the narrowest
   directory a step needs.

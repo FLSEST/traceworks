@@ -46,9 +46,11 @@ import java.util.Optional;
  *       A login inside a mount is not covered with an empty tmpfs; Traceworks refuses the mount
  *       instead. The same holds for a rootless runtime's {@linkplain HostSecrets#HOME_STORAGE storage} below the
  *       home;</li>
- *   <li>the Traceworks home and anything in it, except {@code <home>/cache/tools/} (the tool caches), the run's
- *       own scratch directory and the run's own checkout of its source ({@code <home>/workspaces/<run-id>}, its
- *       workspace, where the workspace's rules apply), and a folder that holds the Traceworks home;</li>
+ *   <li>the Traceworks home and anything in it, except the run's own scratch directory, the run's own checkout of
+ *       its source ({@code <home>/workspaces/<run-id>}, its workspace, where the workspace's rules apply) and the
+ *       one folder below {@code <home>/cache/tools/} that a tool step mounts for its image
+ *       ({@link Mount#toolCache()}; a workflow's own {@code mounts} entry names no tool cache), and a folder that
+ *       holds the Traceworks home;</li>
  *   <li>a writable mount in or around the run's package, and in or around its workspace while the workspace is
  *       mounted read-only (without {@code workspace_writable}): it would undo their read-only mounts. A read-only
  *       one shows what the step sees anyway;</li>
@@ -57,7 +59,9 @@ import java.util.Optional;
  *       directories no longer guard it;</li>
  *   <li>a socket file, also through a link, and a folder that directly holds one (one level, links not followed):
  *       a line to a process on the host (tmux, screen, an agent), which read-only does not cut. A folder whose
- *       entries, or a file whose type, cannot be read is refused as well.</li>
+ *       entries, or a file whose type, cannot be read is refused as well;</li>
+ *   <li>{@code /dev} and everything in it (the terminals of the operator's session, shared memory, device nodes),
+ *       and a device node or a named pipe wherever it lies.</li>
  * </ul>
  *
  * <p>Every check reads the real path, with {@code ..} and symbolic links resolved, so {@code /tmp/../etc} or a link
@@ -84,7 +88,8 @@ public final class MountGuard {
             "/etc",
             "/root",
             "/proc",
-            "/sys");
+            "/sys",
+            "/dev");
 
     /**
      * The credential stores whose presence marks a folder as a copy of a home wherever it lies: a mount that has one
@@ -105,9 +110,12 @@ public final class MountGuard {
     private static final String ENDS_IN_WHITE_SPACE = "its path begins or ends with white space, which a mount"
             + " cannot name reliably: rename the directory";
 
-    /** The file type bits of {@code unix:mode}, and the type of a socket ({@code stat.h}). */
+    /** The file type bits of {@code unix:mode}, and the types of a socket, a named pipe and a device ({@code stat.h}). */
     private static final int S_IFMT = 0170000;
     private static final int S_IFSOCK = 0140000;
+    private static final int S_IFIFO = 0010000;
+    private static final int S_IFCHR = 0020000;
+    private static final int S_IFBLK = 0060000;
 
     private MountGuard() {
     }
@@ -265,7 +273,7 @@ public final class MountGuard {
         IOException why = unresolved;
         Optional<String> refusal = sessionRefusal(real, context)
                 .or(() -> homeRefusal(real, context.home(), true, "mount a directory below it"))
-                .or(() -> traceworksHomeRefusal(real, context))
+                .or(() -> traceworksHomeRefusal(real, context, mount.toolCache()))
                 // After the home, as for a run's directory, so the home is named as the home; and whatever the
                 // rule of the Traceworks home lets through (its tool cache, the run's scratch) is still asked here
                 .or(() -> sealFilesRefusal(real, context.layout()))
@@ -526,6 +534,10 @@ public final class MountGuard {
             if (isSocket(real)) {
                 return Optional.of("it is a socket: a line to a process on the host, which read-only does not cut");
             }
+            if (isDeviceOrPipe(real)) {
+                return Optional.of("it is a device or a named pipe: a line to the host or to a process on it, which"
+                        + " read-only does not cut");
+            }
             if (!Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
                 return Optional.empty();
             }
@@ -598,16 +610,36 @@ public final class MountGuard {
     }
 
     /**
-     * The Traceworks home: refused but for the tool caches, the run's own scratch directory and the run's own checkout
-     * of its source, which is its workspace: a mount in that one follows the rules of a mount in a workspace
-     * ({@link #writableRefusal}).
+     * Whether the file at {@code path} itself is a character or block device or a named pipe; {@code false} where
+     * the file system does not tell.
+     *
+     * @throws IOException if its attributes cannot be read
      */
-    private static Optional<String> traceworksHomeRefusal(Path real, Context context) {
+    private static boolean isDeviceOrPipe(Path path) throws IOException {
+        try {
+            int type = (Integer) Files.getAttribute(path, "unix:mode", LinkOption.NOFOLLOW_LINKS) & S_IFMT;
+            return type == S_IFIFO || type == S_IFCHR || type == S_IFBLK;
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            return false;   // isSocket has refused everything there that is no file, folder or link
+        }
+    }
+
+    /**
+     * The Traceworks home: refused but for the run's own scratch directory, the run's own checkout of its source,
+     * which is its workspace (a mount in that one follows the rules of a mount in a workspace,
+     * {@link #writableRefusal}), and a folder below the tool caches when the engine mounts it as the cache of a tool
+     * step's image. The tool caches are kept per image and later runs of other packages execute or trust what is in
+     * them, so a workflow's own mount names neither their root nor a folder in it.
+     *
+     * @param toolCache whether the mount is a tool step's cache folder ({@link Mount#toolCache()})
+     */
+    private static Optional<String> traceworksHomeRefusal(Path real, Context context, boolean toolCache) {
         Path traceworksHome = real(context.traceworksHome());
         if (traceworksHome.startsWith(real)) {
             return Optional.of("it is or contains the Traceworks home " + context.traceworksHome());
         }
-        if (real.startsWith(real(context.layout().toolCache()))
+        Path caches = real(context.layout().toolCache());
+        if (toolCache && real.startsWith(caches) && !real.equals(caches)
                 || present(context.scratch()) && real.startsWith(real(Path.of(context.scratch())))
                 || present(context.checkout()) && real.startsWith(real(Path.of(context.checkout())))) {
             return Optional.empty();
@@ -616,9 +648,9 @@ public final class MountGuard {
             // The records may lie elsewhere through a link (runs on another disk): their real paths count too
             return recordsRefusal(real, context.layout());
         }
-        return Optional.of("it lies in the Traceworks home " + context.traceworksHome() + "; only "
-                + context.layout().toolCache() + "/, the run's own scratch directory and the run's"
-                + " own checkout of its source may be mounted from there");
+        return Optional.of("it lies in the Traceworks home " + context.traceworksHome() + "; only the run's own"
+                + " scratch directory and the run's own checkout of its source may be mounted from there, and a tool"
+                + " step gets the cache folder of its image with cache_dir");
     }
 
     /** A writable mount in or around the package, or the read-only workspace, would undo its read-only mount. */

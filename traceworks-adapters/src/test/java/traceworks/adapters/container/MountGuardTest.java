@@ -290,8 +290,8 @@ class MountGuardTest {
         Path cache = Files.createDirectories(traceworksHome.resolve("cache/tools/aquasec_trivy"));
         Path otherScratch = Files.createDirectories(traceworksHome.resolve("runs/run-2/scratch"));
 
-        assertThat(check(cache.toString(), "/cache", false)).isEmpty();
-        assertThat(check(traceworksHome.resolve("cache/tools").toString(), "/cache", false)).isEmpty();
+        assertThat(MountGuard.check(new Mount(cache.toString(), "/cache", false, true), context))
+                .as("the cache folder a tool step mounts for its image").isEmpty();
         assertThat(check(scratch.toString(), "/out", false)).as("the run's own scratch").isEmpty();
         assertThat(check(Files.createDirectories(scratch.resolve("reports")).toString(), "/out", false)).isEmpty();
         assertThat(check(otherScratch.toString(), "/out", true)).as("another run's scratch")
@@ -301,6 +301,75 @@ class MountGuardTest {
         assertThat(check(Files.createDirectories(traceworksHome.resolve("cache/toolsx")).toString(), "/cache", true))
                 .hasValueSatisfying(r -> assertThat(r).contains("Traceworks home"));
         assertThat(check(traceworksHome.getParent().toString(), "/x", true)).isPresent();
+    }
+
+    /**
+     * The tool caches are kept per image, and a later run of another package executes or trusts what is in them (a
+     * Maven repository, a scanner's database). So only the folder a tool step mounts for its own image
+     * ({@code cache_dir}) passes: a workflow's own {@code mounts} entry names neither the cache root nor a folder in
+     * it, read-only or not, directly or through a link.
+     */
+    @Test
+    void theToolCaches_areNoMountOfAWorkflow_onlyTheCacheFolderOfAToolStep() throws IOException {
+        Path root = Files.createDirectories(traceworksHome.resolve("cache/tools"));
+        Path other = Files.createDirectories(root.resolve("aquasec_trivy"));
+        Path link = Files.createSymbolicLink(scratch.resolve("caches"), root);
+
+        for (Path named : List.of(root, other, link)) {
+            for (boolean readOnly : List.of(true, false)) {
+                assertThat(check(named.toString(), "/c", readOnly)).as(named + " readOnly=" + readOnly)
+                        .hasValueSatisfying(r -> assertThat(r).contains("Traceworks home").contains("cache_dir"));
+            }
+        }
+        assertThat(MountGuard.check(new Mount(other.toString(), "/cache", false, true), context)).isEmpty();
+        assertThat(MountGuard.check(new Mount(root.toString(), "/cache", false, true), context))
+                .as("the cache root is no image's folder").isPresent();
+        Path otherScratch = Files.createDirectories(traceworksHome.resolve("runs/run-2/scratch"));
+        assertThat(MountGuard.check(new Mount(otherScratch.toString(), "/cache", false, true), context))
+                .as("a cache mount outside the tool caches is judged like any mount").isPresent();
+    }
+
+    /**
+     * {@code /dev} holds the terminals of the operator's session ({@code /dev/pts}), shared memory
+     * ({@code /dev/shm}) and device nodes: a step that opens one talks to the host, which read-only does not cut.
+     */
+    @Test
+    void devAndWhatIsInIt_isRefused_onEitherSide() {
+        for (String host : List.of("/dev", "/dev/pts", "/dev/shm", "/dev/null", "/tmp/../dev/pts")) {
+            assertThat(check(host, "/x", true)).as(host)
+                    .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+        }
+        assertThat(check(outside.toString(), "/dev/shm", true)).as("on the container side")
+                .hasValueSatisfying(r -> assertThat(r).contains("forbidden path /dev"));
+    }
+
+    /** A named pipe is a line to whatever process holds its other end, as a socket is: no regular file or folder. */
+    @Test
+    void aNamedPipe_isRefused_alsoThroughALink() throws Exception {
+        Path pipe = outside.resolve("pipe");
+        assertThat(new ProcessBuilder("mkfifo", pipe.toString()).inheritIO().start().waitFor()).isZero();
+        Path link = Files.createSymbolicLink(outside.resolve("pipe-link"), pipe);
+
+        assertThat(check(pipe.toString(), "/p", true)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+        assertThat(check(link.toString(), "/p", true)).hasValueSatisfying(r -> assertThat(r).contains("named pipe"));
+    }
+
+    /**
+     * A writable mount of a file the host runs later (a shell's startup file, {@code ~/.local/bin}, a repository's
+     * hooks) lets a step leave commands that run outside every container, as the operator. Nothing refuses it today:
+     * a writable mount below the home is allowed on purpose ({@link #folderBelowHome_isAllowed_andMountedWithItsRealPath}),
+     * and a list of such files could not be complete. What would close it is the operator's own list of the folders
+     * a workflow may mount writable, a new setting.
+     */
+    @Test
+    @org.junit.jupiter.api.Disabled("security audit 2026-11-17, A014: needs a decision first; the sound fix is an"
+            + " operator's allowlist of writable mount roots in traceworks.json, a new setting")
+    void aWritableMountOfAFileTheHostRuns_isRefused() throws IOException {
+        Path startup = Files.writeString(home.resolve(".bashrc"), "# the operator's\n");
+        Path bin = Files.createDirectories(home.resolve(".local/bin"));
+
+        assertThat(check(startup.toString(), "/x", false)).as("~/.bashrc, writable").isPresent();
+        assertThat(check(bin.toString(), "/x", false)).as("~/.local/bin, writable").isPresent();
     }
 
     /** The operator's Traceworks home may be a link: a mount is judged against its real path. */
