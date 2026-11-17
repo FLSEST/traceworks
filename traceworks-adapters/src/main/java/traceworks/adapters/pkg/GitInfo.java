@@ -25,6 +25,13 @@ record GitInfo(String commit, Boolean dirty) {
 
     static final int TIMEOUT_SECONDS = 10;
 
+    /**
+     * How many bytes of git's output a call keeps at most, of stdout and of stderr each. git reads the package's own
+     * configuration here, and a configuration can repeat its keys without end (includes); a listing beyond the
+     * limit ends the call, and the git state counts as unknown.
+     */
+    static final int OUTPUT_LIMIT = traceworks.core.port.CommandRunner.OUTPUT_LIMIT_BYTES;
+
     static GitInfo of(Path directory) {
         return of(directory, "git", TIMEOUT_SECONDS * 1000L);
     }
@@ -113,7 +120,8 @@ record GitInfo(String commit, Boolean dirty) {
     /** The exit code and standard output of a git call; {@code null} when git could not run or timed out. */
     private static Output run(Path directory, String gitExecutable, long timeoutMillis, Map<String, String> parentEnvironment,
             String... args) {
-        GitProcess git = new GitProcess(gitExecutable, NO_TRANSPORT, parentEnvironment, NO_PROTOCOL, timeoutMillis);
+        GitProcess git = new GitProcess(gitExecutable, NO_TRANSPORT, parentEnvironment, NO_PROTOCOL, timeoutMillis,
+                OUTPUT_LIMIT);
         try {
             GitProcess.Result result = git.run(directory, List.of(args));
             return new Output(result.exitCode(), result.outputText());

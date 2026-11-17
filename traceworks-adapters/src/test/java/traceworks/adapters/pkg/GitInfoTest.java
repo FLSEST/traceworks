@@ -133,6 +133,31 @@ class GitInfoTest {
     }
 
     /**
+     * git reads the package's own configuration, which nobody checked, and what it prints is kept in memory: a
+     * listing beyond the output limit (a config that repeats its keys through includes) ends the call, the git
+     * state is unknown and no {@code git status} runs.
+     */
+    @Test
+    void aListingBeyondTheOutputLimit_endsTheCall_andTheGitStateIsUnknown() throws Exception {
+        Path pkg = Files.createDirectories(temp.resolve("pkg"));
+        Path status = temp.resolve("status-ran");
+        Path fake = temp.resolve("fake-git");
+        Files.writeString(fake, "#!/bin/sh\ncase \"$*\" in\n"
+                + "  *rev-parse*) echo " + "c".repeat(40) + ";;\n"
+                // Whole lines, each a well-formed key of 15 bytes, a little more than the limit in all
+                + "  *--get-regexp*) yes filter.x.clean | head -n " + (GitInfo.OUTPUT_LIMIT / 15 + 70_000) + ";;\n"
+                + "  *status*) touch '" + status + "';;\n"
+                + "esac\n");
+        assertEquals(true, fake.toFile().setExecutable(true));
+
+        GitInfo info = GitInfo.of(pkg, fake.toString(), 30_000L, Map.of());
+
+        assertEquals(false, Files.exists(status), "git status ran");
+        assertNull(info.commit());
+        assertNull(info.dirty());
+    }
+
+    /**
      * A driver name is bytes to git, and it reaches {@code -c} as text: a name that is no valid UTF-8 (here the one
      * byte 0xFF) would come back as U+FFFD, so the {@code -c} would empty a driver of another name and
      * {@code git status} would run the package's own. Such a name leaves the drivers unknown: no status runs.

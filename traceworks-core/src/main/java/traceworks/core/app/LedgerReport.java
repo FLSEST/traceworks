@@ -533,12 +533,29 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             traceworks.core.record.ChainReport chain =
                     traceworks.core.record.ChainVerifier.verify(id, lines, run.blobs());
             if (!chain.intact()) {
-                return "the record does not verify (" + chain.problems().getFirst() + "; it ends with the line "
+                // The sentence is what an acknowledgement covers, so it names the whole record as it is: a digest
+                // of every line and of every problem (a changed blob's problem names what the blob holds). Whatever
+                // changes in the record afterwards is another sentence
+                java.security.MessageDigest all = java.security.MessageDigest.getInstance("SHA-256");
+                for (byte[] line : lines) {
+                    all.update(line);
+                    all.update((byte) '\n');
+                }
+                for (String problem : chain.problems()) {
+                    all.update(problem.getBytes(StandardCharsets.UTF_8));
+                    all.update((byte) '\n');
+                }
+                return "the record does not verify (" + chain.problems().getFirst() + "; "
+                        + chain.problems().size() + (chain.problems().size() == 1 ? " problem" : " problems")
+                        + " in all; its lines and problems have the SHA-256 "
+                        + java.util.HexFormat.of().formatHex(all.digest()) + "; it ends with the line "
                         + chain.head() + "): traceworks verify " + id + " says more";
             }
             return Verification.matches(end, RunRecords.view(id, RunRecords.parse(id, lines), false), run.blobs())
                     ? null : "the end entry of the ledger is not the manifest the record gives (the record ends with"
                     + " the line " + chain.head() + "): traceworks verify " + id + " says more";
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         } catch (RuntimeException e) {
             return "the record cannot be read (" + e.getMessage() + ")";
         }

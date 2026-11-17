@@ -306,6 +306,37 @@ final class RunPreparation {
     }
 
     /**
+     * A refusal of a resume's start check as it may be printed: with each value of a secret the run redacts
+     * replaced by its {@code [redacted:<NAME>]}. The check judges the real paths ({@link #realPath}) and names
+     * them in its reasons, before the run has a redactor; a refusal names a path as the record does.
+     *
+     * @param names the names the run redacts; asked only when {@code recorded} holds a replacement
+     * @param recorded the paths as the record holds them; without a replacement in any, nothing was made real
+     */
+    RunRefusedException asRecorded(RunRefusedException refusal, Supplier<? extends Collection<String>> names,
+                                   String... recorded) {
+        if (java.util.Arrays.stream(recorded).noneMatch(path -> path != null && path.contains(Redactor.MARKER))) {
+            return refusal;
+        }
+        Map<String, String> values = new java.util.TreeMap<>();
+        try {
+            SecretValues source = values();
+            names.get().forEach(name -> source.value(name).filter(value -> !value.isEmpty())
+                    .ifPresent(value -> values.put(name, value)));
+        } catch (RunRefusedException e) {
+            return refusal;   // no value could be read, so none was put into a path
+        }
+        String message = String.valueOf(refusal.getMessage());
+        // The longest value first: a value that is part of another must not break the longer one's replacement
+        List<Map.Entry<String, String>> longestFirst = new ArrayList<>(values.entrySet());
+        longestFirst.sort((a, b) -> b.getValue().length() - a.getValue().length());
+        for (Map.Entry<String, String> entry : longestFirst) {
+            message = message.replace(entry.getValue(), Redactor.MARKER + entry.getKey() + "]");
+        }
+        return message.equals(refusal.getMessage()) ? refusal : new RunRefusedException(message);
+    }
+
+    /**
      * Refuses a recorded path or source that holds a replacement the redactor of the run did not write. The record
      * of a run holds a replacement only for a name the run redacts: a start refuses a path or source that holds
      * {@value Redactor#MARKER} itself ({@link #refuseAReplacement}). So any other one is from a record that was

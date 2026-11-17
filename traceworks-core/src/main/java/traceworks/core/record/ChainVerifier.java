@@ -117,7 +117,9 @@ public final class ChainVerifier {
         if (content.isEmpty()) {
             deleted.add(ref.sha256());
         } else if (!EventChain.sha256Hex(content.get()).equals(ref.sha256())) {
-            problems.add(where + ": blob " + ref.sha256() + " of " + field + " has other content");
+            // With what it holds now: a blob changed once more is another problem than the one that was seen
+            problems.add(where + ": blob " + ref.sha256() + " of " + field + " has other content (SHA-256 "
+                    + EventChain.sha256Hex(content.get()) + ")");
         } else if (content.get().length != ref.size()) {
             problems.add(where + ": blob " + ref.sha256() + " of " + field + " has another size than recorded");
         } else {

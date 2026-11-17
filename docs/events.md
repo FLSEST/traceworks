@@ -1121,7 +1121,10 @@ record: one commit `run <run-id> ACKNOWLEDGED sha256:<hex>` adds a line to `acks
 Only a run the check reports can be acknowledged, one run per call; the anchors of a register are acknowledged
 under the name `registers.<key>`. The acknowledgement covers exactly those problems, by what was said: the check
 lists them under `acknowledged` with the note, for good, and does not fail for them. A problem that comes later,
-also one of the same kind with another content, is open again. The line is not signed, like everything in the
+also one of the same kind with another content, is open again. For a record that does not verify (`record-broken`)
+the sentence names the whole record as it was: the number of its problems and one SHA-256 over all its lines and
+all its problems, each changed blob with the SHA-256 of what it holds. So a record that changes once more after it
+was acknowledged is open again. The line is not signed, like everything in the
 ledger.
 
 ### The anchors of a register
