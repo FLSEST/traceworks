@@ -855,6 +855,19 @@ class ExecutionContextTest {
                 .isInstanceOf(ShellLineRefusedException.class);
     }
 
+    /** The prompt flag is its own mark: it outlives the end of the block and taints the next output recorded. */
+    @Test
+    void platformPrompt_flagSurvivesTheEndOfTheBlock_andTaintsTheNextRecordedOutput() {
+        context.setUntrustedPlatformVariable("previous_report", "report");
+
+        context.resolvePromptTemplate("Rate: {{ previous_report }}");
+        context.blockEnded();
+        context.recordOutput("late", "a | b");
+
+        assertThatThrownBy(() -> context.resolveShellTemplate("{{ block.late.output }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+    }
+
     /** Sub-workflow hand-over and resume carry the tainted output via {@code __untrusted_outputs}. */
     @Test
     void exportTaint_afterAPlatformPrompt_carriesTheTaintedOutput() {
