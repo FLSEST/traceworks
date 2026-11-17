@@ -626,7 +626,7 @@ from before the ledger, not ended (1)
   0d2c44f1-7a9e-4b53-8c10-e5f6a7b8c9d0  folder PARKED
 acknowledged (1)
   7be01d22-0c4e-4a67-8a3b-52d1c9e7f004  started, never ended, and the folder is gone
-    by operator@box at 2026-11-16T15:04:10.220Z: deleted by hand, the disk was full
+    by alex@box at 2026-11-16T15:04:10.220Z: deleted by hand, the disk was full
 problems (2)
   c40e7d1a-93b5-4e1f-a0d2-6b8f5e3c9a77  started, never ended, and the folder is gone
   5b1f0e9d-8c7a-4f6e-9d5c-4b3a2f1e0d9c  the record says the ledger noted the start (PARKED), and the ledger holds no start entry of the run
@@ -1146,7 +1146,7 @@ $ traceworks findings security list
 9d3692a8  DISMISSED  LOW       path_check  core/Mounts.java#Mounts.check(Path)  A link gets past the path check  (through the agent claude-code)
 $ traceworks findings security show 9d3692a8
 ...
-Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17T10:02:11.418Z, made on severity LOW
+Decision  DISMISSED by alex@host through the agent claude-code at 2026-11-17T10:02:11.418Z, made on severity LOW
 ```
 
 - **The name:** at most 64 characters, each an ASCII letter or digit, one of `. _ - : / @ +`, or a single space

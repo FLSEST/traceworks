@@ -1136,7 +1136,7 @@ although nothing was hidden. `traceworks verify --acknowledge <run> --note "..."
 record: one commit `run <run-id> ACKNOWLEDGED sha256:<hex>` adds a line to `acks/<run-id>.jsonl`:
 
 ```json
-{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"operator@box","note":"deleted by hand, the disk was full","problems":[{"problem":"lost","said":"started, never ended, and the folder is gone (the ledger noted run.started b7a1…)"}]}
+{"run_id":"7be01d22-…","at":"2026-11-16T15:04:10.220Z","actor":"alex@box","note":"deleted by hand, the disk was full","problems":[{"problem":"lost","said":"started, never ended, and the folder is gone (the ledger noted run.started b7a1…)"}]}
 ```
 
 `actor` and `at` are who acknowledged and when, as a decision in a register records them; `note` is required;
