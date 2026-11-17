@@ -218,7 +218,7 @@ contexts (`ExecutionContext`, used by 41 types, and `Resuming`) were cut.
 ## The rule file
 
 `rules/architecture.rules` holds the layer rules and the I/O rule, filled from docs/architecture.md and from the layer
-rules of the support audit this package replaces. A violation is a measured finding and turns the gate RED.
+rules of an earlier architecture review. A violation is a measured finding and turns the gate RED.
 
 ```
 prefix traceworks
@@ -255,13 +255,13 @@ an `allow` that matches no I/O and a pattern that matches no package, so a rule 
 
 ## Limits
 
-- **Not measured in this version:** churn and hotspots from git history, and duplicated code (what PMD CPD found for
-  the support audit). The tool reads no git, so a large file that has stopped changing looks the same as one that
+- **Not measured in this version:** churn and hotspots from git history, and duplicated code (what PMD CPD found in
+  an earlier review). The tool reads no git, so a large file that has stopped changing looks the same as one that
   changes every week.
 - **A verdict cannot see a sequence repeated in another file, or a mechanism that already exists elsewhere.** The
   context shows the neighbours by their description, not their code. That is enough to judge the file's own
   responsibilities, and for a `split` all its members are in the prompt. But when a method of one file runs the same
-  steps as a method of another (the support audit found `RunServices.start` repeating the run execution of
+  steps as a method of another (an earlier review found `RunServices.start` repeating the run execution of
   `Resuming.resume`), the model sees only that the one file uses the other, not the repeated lines; and a `move`
   towards an existing mechanism rests on the one-line descriptions alone. A duplicate finder that puts the other
   place's lines into the context would close this gap; this version has none.

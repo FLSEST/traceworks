@@ -1,5 +1,5 @@
 # The rules of the architecture self-audit: which package must not depend on which, and where direct I/O is forbidden.
-# They come from docs/architecture.md ("Modules") and from the layer rules of the support audit this package replaces.
+# They come from docs/architecture.md ("Modules") and from the layer rules of an earlier architecture review.
 # A rule decides: a violation is a measured finding and turns the gate RED. The format is described in README.md.
 
 prefix traceworks
