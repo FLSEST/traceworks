@@ -77,14 +77,92 @@ final class Report {
     record Outcome(List<Finding> verified, List<Finding> unverified, List<NotJudged> notJudged, int areas, int judged,
                    String gate, String description, String markdown, String envelope, String findingsJsonl,
                    List<Gone> gone, List<String> notAnswered, List<Finding> low, String nextBase,
-                   String details) {
+                   String details, List<Covered> covered) {
     }
+
+    /** How a finding is gone: {@code find} measured it, the judge answered so, a stated limit closed a low one. */
+    static final String MEASURED = "measured";
+    static final String ANSWERED = "answered";
+    static final String BY_LIMIT = "by limit";
+    /** Stated again under the subject its area has now: an area took in a finding whose subject is no area's. */
+    static final String RESTATED = "restated";
 
     /**
      * An open finding of an earlier run that is gone: the answer for its area said so, with a reason, or no area has
-     * its subject any more ({@code area} is empty then).
+     * its subject any more ({@code area} is empty then), or it is stated under another subject now.
+     *
+     * @param kind one of {@link #MEASURED}, {@link #ANSWERED}, {@link #BY_LIMIT} and {@link #RESTATED}
      */
-    record Gone(String rule, String subject, String area, String reason) {
+    record Gone(String rule, String subject, String area, String reason, String kind) {
+    }
+
+    /**
+     * An open finding of medium or high severity that the judge holds a stated limit covers. It is not gone: a
+     * model's answer never closes such a finding by a limit. The envelope states it again, with the limit as its
+     * note, and a person decides.
+     *
+     * @param limit the number of the limit, {@code L<limit>}
+     * @param says  the line of that limit, from the list the run got
+     */
+    record Covered(String area, String rule, String subject, String severity, String evidence, int limit,
+                   String says) {
+    }
+
+    /**
+     * How many of {@code gone} are gone for {@code measured}, one of the two reasons {@code find} measures
+     * ({@link Known#FILE_GONE}, {@link Known#MEMBER_GONE}); with {@code null}, how many the judge answered as gone
+     * in its own words. A measured one names no area: a model's reason in the same words is still the model's.
+     */
+    static long goneFor(List<Gone> gone, String measured) {
+        return gone.stream().filter(g -> measured == null ? g.kind().equals(ANSWERED)
+                : g.kind().equals(MEASURED) && g.reason().equals(measured)).count();
+    }
+
+    /** How many of {@code gone} are of {@code kind}. */
+    static long goneOfKind(List<Gone> gone, String kind) {
+        return gone.stream().filter(g -> g.kind().equals(kind)).count();
+    }
+
+    private static final java.util.regex.Pattern CITED =
+            java.util.regex.Pattern.compile("(?<![A-Za-z0-9_])L(\\d{1,6})(?![0-9])");
+    private static final java.util.regex.Pattern CITED_FIELD =
+            java.util.regex.Pattern.compile("\\s*[Ll](\\d{1,6})\\s*");
+    private static final java.util.regex.Pattern STATED_LIMIT =
+            java.util.regex.Pattern.compile("(?i)\\bstated limits?\\b");
+
+    /**
+     * The limit a "gone" answer cites: {@code -1} when it cites none (no {@code limit} field, no {@code L<n>} and no
+     * "stated limit" in its reason), {@code 0} when it cites one that cannot be taken (not one number, or a number
+     * outside the list, or a run without the list), else the number.
+     */
+    static int citation(Map<String, Object> answer, List<String> limits) {
+        Object field = answer.get("limit");
+        String reason = text(answer.get("reason"));
+        Set<Integer> numbers = new java.util.TreeSet<>();
+        boolean cites = field != null || STATED_LIMIT.matcher(reason).find();
+        boolean bad = false;
+        if (field != null) {
+            java.util.regex.Matcher named = CITED_FIELD.matcher(field instanceof String s ? s : "");
+            if (named.matches()) numbers.add(Integer.parseInt(named.group(1)));
+            else bad = true;
+        }
+        java.util.regex.Matcher inReason = CITED.matcher(reason);
+        while (inReason.find()) {
+            cites = true;
+            numbers.add(Integer.parseInt(inReason.group(1)));
+        }
+        if (!cites) return -1;
+        if (bad || limits == null || numbers.size() != 1) return 0;
+        int number = numbers.iterator().next();
+        return number >= 1 && number <= limits.size() ? number : 0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> limits(Map<String, Object> summary) {
+        if (!(summary.get("limits") instanceof List<?> list)) return null;
+        List<String> lines = new ArrayList<>();
+        for (Object line : list) lines.add(normalized(String.valueOf(line)));
+        return lines;
     }
 
     /** An answer that calls an open finding gone, before it is known whether the answer can be taken. */
@@ -138,6 +216,13 @@ final class Report {
         boolean highUnanswered = false;
         List<SaidGone> saidGone = new ArrayList<>();
         List<Unanswered> knownWithoutAnswer = new ArrayList<>();
+        // A "gone" that cites a stated limit: one of medium or high stays open for a person, a low one is closed,
+        // and one whose citation cannot be taken is no answer, so that its area is not judged
+        List<String> limits = limits(summary);
+        List<Covered> covered = new ArrayList<>();
+        Set<String> badCitation = new HashSet<>();
+        // A known finding an area took in under another subject: a verified finding of its rule there restates it
+        List<Gone> restatable = new ArrayList<>();
         for (int i = 0; i < areas.size(); i++) {
             Map<String, Object> area = areas.get(i);
             String id = text(area.get("id"));
@@ -193,14 +278,38 @@ final class Report {
                 String rule = text(known.get("rule"));
                 Map<String, Object> settled = answers.get(knownId);
                 String status = settled == null ? "" : text(settled.get("status")).strip().toLowerCase(Locale.ROOT);
+                // The subject the register knows the finding by: the area's, or an old one the area took in
+                String knownSubject = text(known.get("subject")).isBlank() ? subject : text(known.get("subject"));
+                boolean takenIn = !Known.shown(knownSubject).equals(Known.shown(subject));
+                String knownSeverity = text(known.get("severity")).strip().toUpperCase(Locale.ROOT);
+                boolean high = HIGH.contains(knownSeverity);
+                if (takenIn) {
+                    restatable.add(new Gone(rule, knownSubject, id, "restated under " + subject, RESTATED));
+                }
                 if (status.equals("holds")) {
                     // Stated again under the rule the register knows it by, after the check a new finding gets
                     Finding finding = check(id, subject, area, settled, code, first, last, ruleIds, rule);
                     (finding.problem() == null ? verified : unverified).add(finding);
                     if (finding.problem() == null) continue;
                 } else if (status.equals("gone")) {
-                    saidGone.add(new SaidGone(new Gone(rule, subject, id, text(settled.get("reason"))), knownId,
-                            HIGH.contains(text(known.get("severity")))));
+                    int limit = citation(settled, limits);
+                    if (limit < 0) {
+                        saidGone.add(new SaidGone(new Gone(rule, knownSubject, id, text(settled.get("reason")),
+                                ANSWERED), knownId, high));
+                    } else if (limit == 0) {
+                        badCitation.add(id);
+                        notAnswered.add(id + " " + knownId + " " + rule + ": the answer called it covered by a stated"
+                                + " limit, but names no single limit of the list ("
+                                + (limits == null ? "none: this run has no list"
+                                : limits.isEmpty() ? "it is empty" : "L1 to L" + limits.size()) + ")");
+                        highUnanswered |= high;
+                    } else if (knownSeverity.equals("LOW")) {
+                        saidGone.add(new SaidGone(new Gone(rule, knownSubject, id, "L" + limit + ": "
+                                + limits.get(limit - 1), BY_LIMIT), knownId, false));
+                    } else {
+                        covered.add(new Covered(id, rule, knownSubject, knownSeverity, text(known.get("evidence")),
+                                limit, limits.get(limit - 1)));
+                    }
                     continue;
                 }
                 knownWithoutAnswer.add(new Unanswered(id, rule, id + " " + knownId + " " + rule,
@@ -235,14 +344,28 @@ final class Report {
         }
         for (Object entry : list(summary.get("knownGone"))) {
             Map<String, Object> orphan = object(entry);
+            // The reason is one of the two find measured; anything else in its place is not printed
+            String measured = text(orphan.get("reason"));
             calledGone.add(new Gone(text(orphan.get("ruleKey")), text(orphan.get("subject")), "",
-                    "no area has this subject any more"));
+                    measured.equals(Known.FILE_GONE) || measured.equals(Known.MEMBER_GONE) ? measured
+                            : Known.MEMBER_GONE, MEASURED));
+        }
+        // A finding an area took in under its old subject, and that the report states under the area's subject now
+        // (it holds, or a verified finding of its rule is there): the old subject is gone, the finding is not
+        for (Gone moved : restatable) {
+            if (statedRules.contains(moved.area() + "\n" + moved.rule())) calledGone.add(moved);
         }
         // What the report states is not gone: a new finding of the same rule in the area is the register's finding
         Set<String> stated = new HashSet<>();
         for (Finding f : verified) stated.add(f.rule() + "\n" + Known.shown(f.subject()));
+        Set<String> once = new HashSet<>();
         List<Gone> gone = calledGone.stream()
-                .filter(g -> !stated.contains(g.rule() + "\n" + Known.shown(g.subject()))).toList();
+                .filter(g -> !stated.contains(g.rule() + "\n" + Known.shown(g.subject())))
+                .filter(g -> once.add(g.rule() + "\n" + Known.shown(g.subject()))).toList();
+        // A finding a stated limit covers, in the judge's view, stays open: stated again, unless the report states
+        // it anyway, and its area is open
+        List<Covered> coveredNow = covered.stream()
+                .filter(c -> !stated.contains(c.rule() + "\n" + Known.shown(c.subject()))).toList();
         int judged = areas.size() - notJudged.size();
         // Each area is an item of the audit; the ones with an answer that was read are the items judged in this run
         Map<String, String> itemOfArea = new HashMap<>();
@@ -252,6 +375,8 @@ final class Report {
         // An answer with a finding that did not verify is no verdict to keep: the register never sees that finding,
         // so the area would read clean and leave the loop. It is listed as not judged, and the next run asks again
         for (Finding f : unverified) withoutAnswer.add(f.area());
+        // So is an answer that called a finding covered by a limit it could not name
+        withoutAnswer.addAll(badCitation);
         for (Map<String, Object> area : areas) {
             String item = text(area.get("item"));
             if (item.isEmpty()) continue;
@@ -285,14 +410,17 @@ final class Report {
             }
         }
         for (Finding f : verified) openNow.add(f.area());
+        for (Covered c : coveredNow) openNow.add(c.area());
         for (Finding f : unverified) doubtful.add(f.area());
+        doubtful.addAll(badCitation);
         int missing = number(summary.get("knownMissing"));
         // An older summary names no count of the open ones: then every missing row may be open
         boolean openMissing = (summary.containsKey("knownMissingOpen") ? number(summary.get("knownMissingOpen"))
                 : missing) > 0;
         States.Counts states = States.of(States.items(summary.get("items"), areas, list(summary.get("cut")), "subject"),
                 numberOf, answered, doubtful, openNow, resolved,
-                highUnanswered || unownedHigh(summary) || verified.stream().anyMatch(f -> f.severity().equals("high")),
+                highUnanswered || unownedHigh(summary) || verified.stream().anyMatch(f -> f.severity().equals("high"))
+                        || coveredNow.stream().anyMatch(c -> HIGH.contains(c.severity())),
                 openMissing);
         String gate = gate(states, summary);
         // The one place where a check of the changes is kept from saying GREEN, when the run was started so
@@ -307,6 +435,7 @@ final class Report {
         Set<String> noVerdict = new HashSet<>();
         for (NotJudged a : notJudged) noVerdict.add(a.id());
         for (Finding f : unverified) noVerdict.add(f.area());
+        noVerdict.addAll(badCitation);
         // For a check of the changes the description is the scope, in one line; the counts are the details
         String description = changes(summary) == null ? details
                 : (noGreen ? "nothing found in what changed (this check does not say GREEN): " : "")
@@ -318,14 +447,66 @@ final class Report {
         List<String> holds = holds(summary, withoutVerdict);
         String markdown = markdown(verified, unverified, low, notJudged, gone, notAnswered, areas.size(), judged, summary,
                 gate, description, states, areas, holds, details) + unowned(summary, "findings", "area", register)
-                + decided(decided, register) + unseen(missing, "area");
+                + decided(decided, register) + unseen(missing, "area") + coveredSection(coveredNow, gone, register)
+                + rulesLeft(summary, register);
         // An area without a verdict (its call failed, or it got no place) is an item not judged, which the envelope
         // says. Only a file nobody could read makes the snapshot partial: nothing looked for findings there
         boolean complete = list(summary.get("notRead")).isEmpty();
         return new Outcome(List.copyOf(verified), List.copyOf(unverified), List.copyOf(notJudged), areas.size(), judged,
-                gate, description, markdown, envelope(verified, gone, complete, summary, itemOfArea, judgedItems),
+                gate, description, markdown, envelope(verified, gone, complete, summary, itemOfArea, judgedItems, coveredNow),
                 findingsJsonl(verified, itemOfArea, Judge.fromJson(summary.get("judge"))), gone, List.copyOf(notAnswered), List.copyOf(low),
-                nextBase(summary, holds), details);
+                nextBase(summary, holds), details, List.copyOf(coveredNow));
+    }
+
+    /**
+     * The findings a stated limit covers in the judge's view, for a person: the open ones of medium or high
+     * severity, which stay open, and the low ones the limit closed. Empty when there are none.
+     */
+    private static String coveredSection(List<Covered> covered, List<Gone> gone, String register) {
+        List<Gone> closed = gone.stream().filter(g -> g.kind().equals(BY_LIMIT)).toList();
+        if (covered.isEmpty() && closed.isEmpty()) return "";
+        StringBuilder md = new StringBuilder("\n## Covered by a stated limit, for a person (")
+                .append(covered.size() + closed.size()).append(")\n\nThe judge holds that a limit the documents state"
+                        + " covers each of these. A model's answer does not close a medium or high finding that way: it"
+                        + " stays open, with the limit as its note, until a person decides it (`traceworks findings "
+                        + register + " accept <id> --note \"L<n>\"`, or `dismiss`). Read the limit and the code: a"
+                        + " finding is one when the code does more than the limit says.\n\n");
+        for (Covered c : covered) {
+            md.append("- ").append(plain(c.severity())).append(' ').append(ruleId(c.rule())).append(' ')
+                    .append(code(c.subject())).append(": the judge holds that L").append(c.limit())
+                    .append(" covers it: ").append(plain(c.says()))
+                    .append(" It stays open until a person accepts or dismisses it.\n");
+        }
+        for (Gone g : closed) {
+            int colon = g.reason().indexOf(": ");
+            md.append("- LOW ").append(ruleId(g.rule())).append(' ').append(code(g.subject()))
+                    .append(": the judge holds that ").append(g.reason(), 0, colon).append(" covers it: ")
+                    .append(plain(g.reason().substring(colon + 2))).append(" Closed, since it is low.\n");
+        }
+        return md.toString();
+    }
+
+    /**
+     * The rules that left the rule file since the previous report, as {@code find} found them: the register resolves
+     * every finding of them when it applies this report. Their findings cannot be named here: the register folder,
+     * like {@code {{ audit_findings }}}, lists the findings of catalogued rules only, resolved ones too
+     * ({@code RegisterFiles}), and a report that names a rule outside the catalog is rejected. Empty when there are
+     * none.
+     */
+    private static String rulesLeft(Map<String, Object> summary, String register) {
+        List<?> left = list(summary.get("rulesLeft"));
+        if (left.isEmpty()) return "";
+        StringBuilder md = new StringBuilder("\n## Rules that left the catalog (").append(left.size())
+                .append(")\n\nIn the rules of the previous report and not in the rule file now. No run sees their")
+                .append(" findings: the register folder lists the findings of catalogued rules only, resolved ones")
+                .append(" too. A defect that is still there comes back under the rule that took the place of its rule,")
+                .append(" without the decision.\n\n");
+        for (Object rule : left) {
+            md.append("- ").append(ruleId(String.valueOf(rule))).append(": the register resolves every finding of it")
+                    .append(" when it applies this report, a decided one too. `traceworks findings ").append(register)
+                    .append(" list --all` shows them as RESOLVED.\n");
+        }
+        return md.toString();
     }
 
     /**
@@ -425,8 +606,27 @@ final class Report {
      */
     private static String envelope(List<Finding> verified, List<Gone> gone, boolean complete,
                                    Map<String, Object> summary, Map<String, String> itemOfArea,
-                                   Set<String> judgedItems) {
+                                   Set<String> judgedItems, List<Covered> covered) {
         List<Map<String, Object>> findings = new ArrayList<>();
+        String register = summary.get("register") instanceof String key && key.matches("[a-z0-9][a-z0-9._-]{0,127}")
+                ? key : "security";
+        // A finding the judge holds a stated limit covers stays open, stated as the register has it, with the limit
+        // as its note: the limit's line is the package's text, the judge's reason is left out
+        for (Covered c : covered) {
+            Map<String, Object> finding = new LinkedHashMap<>();
+            int hash = c.subject().indexOf('#');
+            finding.put("ruleKey", c.rule());
+            finding.put("subject", c.subject());
+            finding.put("severity", c.severity());
+            finding.put("title", c.rule() + " finding in " + (hash < 0 ? c.subject()
+                    : c.subject().substring(0, hash) + ", " + c.subject().substring(hash + 1)));
+            finding.put("description", "The judge holds that limit L" + c.limit() + " covers this: " + c.says()
+                    + " A person decides: traceworks findings " + register + " accept <id> --note \"L" + c.limit()
+                    + "\", or dismiss.");
+            finding.put("evidence", c.evidence());
+            if (itemOfArea.containsKey(c.area())) finding.put("item", itemOfArea.get(c.area()));
+            findings.add(finding);
+        }
         for (List<Finding> group : grouped(verified)) {
             Finding first = group.getFirst();
             String severity = severity(group);
@@ -885,11 +1085,23 @@ final class Report {
             md.append("\n");
         }
         if (!gone.isEmpty()) {
-            md.append("## Earlier findings that are gone\n\nOpen in the register, checked in this run and no longer ")
-                    .append("there. The register resolves them. The reason is the model's, not checked.\n\n");
+            md.append("## Earlier findings that are gone (").append(gone.size()).append(")\n\nOpen in the register ")
+                    .append("and dropped by this run: the register resolves them. Two reasons are measured, without ")
+                    .append("a model: no source file has the finding's path any more, or no area of its file has any ")
+                    .append("of its members. A finding whose members an area of its file still has is asked about ")
+                    .append("there; one that holds is stated under the area's subject, and its old subject is listed ")
+                    .append("here. The judge's reasons are its word, not checked; a low finding it holds a stated ")
+                    .append("limit covers is closed by that limit.\n\n| Why | Findings |\n|---|---|\n");
+            row(md, "The file is gone", String.valueOf(goneFor(gone, Known.FILE_GONE)));
+            row(md, "No area has this subject any more", String.valueOf(goneFor(gone, Known.MEMBER_GONE)));
+            row(md, "Stated under the subject of its area now", String.valueOf(goneOfKind(gone, RESTATED)));
+            row(md, "The judge answered that it is gone", String.valueOf(goneFor(gone, null)));
+            row(md, "Closed by a stated limit (low)", String.valueOf(goneOfKind(gone, BY_LIMIT)));
+            md.append("\n");
             for (Gone g : gone) {
                 md.append("- ").append(ruleId(g.rule())).append(" ").append(code(g.subject())).append(": ")
-                        .append(plain(g.reason())).append("\n");
+                        .append(g.kind().equals(RESTATED) ? "restated under " + code(g.reason().substring(
+                                "restated under ".length())) : plain(g.reason())).append("\n");
             }
             md.append("\n");
         }

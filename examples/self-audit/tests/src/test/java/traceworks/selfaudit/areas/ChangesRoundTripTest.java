@@ -106,6 +106,7 @@ class ChangesRoundTripTest {
         Files.createDirectories(stand.resolve("rules"));
         Files.createDirectories(stand.resolve("scripts"));
         Files.copy(source.resolve("rules/security.rules"), stand.resolve("rules/security.rules"));
+        Files.copy(source.resolve("rules/security.limits"), stand.resolve("rules/security.limits"));
         Files.copy(source.resolve("catalog.json"), stand.resolve("catalog.json"));
         Files.copy(source.resolve("scripts/changes.sh"), stand.resolve("scripts/changes.sh"));
         String jvm = ProcessHandle.current().info().command().orElse("java");

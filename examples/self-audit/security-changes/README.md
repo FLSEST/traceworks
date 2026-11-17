@@ -370,8 +370,13 @@ path or an option is refused. Not tried: other versions of git, and the steps in
   counted; one that is in no commit is seen only when it is a `.java` file, since nothing else tells a new source
   from the output of a build.
 - **A member that is gone with its file.** A finding whose member is no area any more is named as gone by the
-  tool, without a model: the code it quoted is not in the compiled sources. The exception is above (Java code
-  changed or came where the finder does not read). A member moved to another class of the compiled sources is a
+  tool, without a model: the code it quoted is not in the compiled sources. The report says which of the two was
+  measured, "the file is gone" or "no area has this subject any more", and counts both beside the findings the
+  judge answered as gone. A finding whose members an area of its file still has is not named gone: that area is
+  carried into the run with it as a known finding, whatever changed, and the judge answers for it there. The
+  findings are read from `findings.jsonl` of the register folder, so a subject of any length is compared
+  whole ([../security/README.md](../security/README.md), "How a finding leaves the register"). The exception is
+  above (Java code changed or came where the finder does not read). A member moved to another class of the compiled sources is a
   new area, and a defect that moved with it is found again only when that area is picked and judged; it is
   picked, since its lines are new.
 - **A sparse checkout.** A file the base has and the workspace does not is removed, whatever the reason.
@@ -381,10 +386,22 @@ path or an option is refused. Not tried: other versions of git, and the steps in
 
 ## How it shares the tool
 
-`images/areas`, `rules/security.rules` and `catalog.json` are copies of the security package's, so the image's
-build context stays inside this package; a test keeps them the same bytes (`ChangesPackageTest`). The tool reads
-the changes with `areas find --changes <folder> --items-file <items.jsonl> --register <key>`; without `--changes`
-it is the long audit's finder. Change the tool in `../security/images/areas/src` and copy it here.
+`images/areas`, `rules/security.rules`, `rules/security.limits` and `catalog.json` are copies of the security
+package's, so the image's build context stays inside this package; a test keeps them the same bytes
+(`ChangesPackageTest`). The tool reads the changes with `areas find --changes <folder> --items-file <items.jsonl>
+--known-file <findings.jsonl> --register <key>`; without `--changes` it is the long audit's finder. Change the tool
+in `../security/images/areas/src` and copy it here.
+
+**The same judge, the same question.** The instructions hold the stated limits of `rules/security.limits` as the
+long audit's do, with the same rules for their use ([../security/README.md](../security/README.md), "What the judge
+is told"), and a test holds the list to the file in both packages. A `gone` that cites a limit closes no medium or
+high finding here either: it stays open for a person. `--verdict-version` is 2 here too. In this check that judges
+nothing by itself: an area the register calls settled and that no change picks stays as it is, and one that a
+change picks is judged with the limits.
+
+**What the instructions cost.** 19.6 KB in every call, about 4 900 input tokens, 3 600 of them the limits. A check
+of the changes makes one call per changed, neighbouring or carried area: on the commits of November 2026 between 0
+and 57 calls a run, so at most about 280 000 instruction tokens, most of them read from a provider's prompt cache.
 
 ## Tests
 
