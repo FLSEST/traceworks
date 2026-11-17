@@ -33,7 +33,7 @@ import java.util.stream.Stream;
  * find   --rules FILE --root DIR [--source-root DIR]... --out AREAS --summary SUMMARY
  *        [--known FILE | --known-file FILE] [--items FILE | --items-file FILE]
  *        [--verdict-version 1] [--max-areas 200] [--max-lines 160] [--context 15] [--judge NAME --judge-provider ID --judge-model MODEL]
- *        [--changes DIR] [--register KEY] [--green yes|no] [--limits FILE] [--previous-report FILE]
+ *        [--changes DIR] [--register KEY] [--limits FILE] [--previous-report FILE]
  * changed --changes DIR --root DIR                                         (writes DIR/wanted)
  * report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT   (and findings.jsonl next to REPORT)
  * </pre>
@@ -57,8 +57,7 @@ import java.util.stream.Stream;
  * ({@code items.jsonl}), which no cap cuts, in place of {@code --items}, and {@code --known-file} the findings the
  * same way ({@code findings.jsonl}) in place of {@code --known}, the text of {@code {{ audit_findings }}}: every
  * finding with its whole subject, so that one whose file or member is gone is found and named gone. {@code --register} is the key of the
- * audit's register, for the commands the report names. {@code --green no} makes a check of the changes say YELLOW
- * where it would say GREEN: its best word is then "nothing found in what changed". Every name from the workspace is escaped on
+ * audit's register, for the commands the report names. Every name from the workspace is escaped on
  * standard output, and no text of a model reaches it, so neither can add a line of its own. {@code --limits} is the limits file
  * ({@link Limits}): the report checks against it a verdict that calls a finding covered by a stated limit.
  * {@code --previous-report} is the last report the register kept: the rules it printed tell which rules left the
@@ -72,7 +71,7 @@ public final class Main {
                               [--known FILE | --known-file FILE] [--items FILE | --items-file FILE]
                               [--verdict-version N] [--max-areas N] [--max-lines N] [--context N]
                               [--judge NAME --judge-provider ID --judge-model MODEL]
-                              [--changes DIR] [--register KEY] [--green yes|no]
+                              [--changes DIR] [--register KEY]
                               [--limits FILE] [--previous-report FILE]
                    areas changed --changes DIR --root DIR
                    areas report --areas AREAS --summary SUMMARY --verdicts FILE|- --out REPORT""";
@@ -138,11 +137,6 @@ public final class Main {
         // Before anything is written: what the run was told about its judge must be something a report can name
         Judge judge = judged ? Judge.of(required(options, "judge"), required(options, "judge-provider"),
                 required(options, "judge-model")) : null;
-        String sayGreen = options.containsKey("green") ? required(options, "green") : "yes";
-        if (!sayGreen.isEmpty() && !sayGreen.equals("yes") && !sayGreen.equals("no")) {
-            throw new Usage("--green is yes or no");
-        }
-        boolean green = !sayGreen.equals("no");
         String register = options.containsKey("register") ? required(options, "register") : "security";
         if (!register.matches("[a-z0-9][a-z0-9._-]{0,127}")) throw new Usage("--register is no key of a register");
         if (options.containsKey("items") && options.containsKey("items-file")) {
@@ -424,8 +418,6 @@ public final class Main {
             changes.put("removedJavaFiles", (long) kinds.removedJava().size());
             changes.put("removedJava", named(kinds.removedJava()));
             changes.putAll(new java.util.TreeMap<>(handed.more()));
-            // Whether this check may say GREEN at all, as the run was started (the input green)
-            changes.put("green", green);
 
             changes.put("changedMembers", (long) Changes.changedMembers(result, base.lines()).size());
             changes.put("areasOfProject", (long) all.size());
@@ -567,7 +559,7 @@ public final class Main {
         Set<String> known = switch (args[0]) {
             case "find" -> Set.of("rules", "root", "source-root", "out", "summary", "max-areas", "max-lines",
                     "context", "known", "items", "verdict-version", "judge", "judge-provider", "judge-model",
-                    "changes", "items-file", "known-file", "register", "green", "limits", "previous-report");
+                    "changes", "items-file", "known-file", "register", "limits", "previous-report");
             case "report" -> Set.of("areas", "summary", "verdicts", "out");
             case "changed" -> Set.of("changes", "root");
             default -> throw new IllegalArgumentException("unknown command '" + args[0] + "'");

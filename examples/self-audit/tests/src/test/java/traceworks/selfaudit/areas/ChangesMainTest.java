@@ -182,7 +182,6 @@ class ChangesMainTest {
                 Map.entry("cannotJudgeFiles", 0L), Map.entry("cannotJudge", List.of()),
                 Map.entry("removedJavaFiles", 0L), Map.entry("removedJava", List.of()),
                 Map.entry("commits", ""), Map.entry("fullAudit", ""), Map.entry("fullAuditBehind", ""),
-                Map.entry("green", true),
                 Map.entry("baseDate", "2026-11-10T09:00:00Z"), Map.entry("skipped", ""),
                 Map.entry("removedFiles", 0L), Map.entry("unmappable", List.of()),
                 Map.entry("outsideMembers", 0L), Map.entry("outside", List.of()),
@@ -270,13 +269,13 @@ class ChangesMainTest {
 
         String described = "of the changes since aaaaaaaaaaaa: no verified finding; 2 of 2 areas judged; 2 of 2 items"
                 + " settled (2 clean, 0 decided; 0 open, 0 not judged); 1 of 3 areas of the project not looked at";
-        assertThat(details()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: " + described
+        assertThat(details()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: " + described
                 + "\nFACT changes_base: " + BASE + "\nFACT changes_head: " + HEAD + "\nFACT changes_areas_changed: 1\n"
                 + "FACT changes_areas_neighbours: 1\nFACT changes_areas_carried: 0\n"
                 + "FACT changes_areas_not_looked_at: 1\n");
         assertThat(out()).contains("\"expectedItems\":2,\"items\":[{\"name\":\"" + CALLER + "\"");
         assertThat(reportText()).startsWith("# Security check of the changes\n\n"
-                        + "**Gate:** GREEN: " + described + "\n\n**This gate speaks about the changes only.** It says"
+                        + "**Gate:** YELLOW: " + described + "\n\n**This gate speaks about the changes only.** It says"
                         + " nothing about the 1 of 3 areas of the project that this run did not look at; the long"
                         + " audit judges every area.\n\n## What was looked at\n")
                 .contains("| Base: the commit the changes are measured from | `" + BASE
@@ -308,7 +307,7 @@ class ChangesMainTest {
                 work.resolve("areas-summary.json").toString(), "--verdicts", "-", "--out",
                 work.resolve("report.md").toString())).isZero();
 
-        assertThat(details()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: nothing"
+        assertThat(details()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: nothing"
                 + " changed since aaaaaaaaaaaa: ").contains("\nFACT changes_head: " + HEAD + "\n",
                 "3 of 3 areas of the project not looked at");
         assertThat(Files.readString(work.resolve("report.md"))).contains("No area: nothing changed in an area or next"
@@ -427,7 +426,7 @@ class ChangesMainTest {
         changes("README.md", "app/src/test/java/p/RunnerTest.java");
         run("", find());
         assertThat(report()).isZero();
-        assertThat(details()).startsWith("gate_status: GREEN\n");
+        assertThat(details()).startsWith("gate_status: YELLOW\n");
     }
 
     /**
@@ -826,10 +825,11 @@ class ChangesMainTest {
 
         run("", find());
         assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
-        assertThat(out()).startsWith("gate_status: GREEN\ngate_category: changes\ngate_description: 2 areas picked"
-                + " since aaaaaaaaaaaa (3 commits), all judged, nothing found\nDETAILS: of the changes since ");
+        assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: "
+                + "nothing found in what changed (this check does not say GREEN): 2 areas"
+                + " picked since aaaaaaaaaaaa (3 commits), all judged, nothing found\nDETAILS: of the changes since ");
         assertThat(Files.readString(work.resolve("report.md"))).startsWith("# Security check of the changes\n\n"
-                + "**Gate:** GREEN: 2 areas picked since aaaaaaaaaaaa (3 commits), all judged, nothing found\n\n"
+                + "**Gate:** YELLOW: nothing found in what changed (this check does not say GREEN): 2 areas picked since aaaaaaaaaaaa (3 commits), all judged, nothing found\n\n"
                 + "**Details:** of the changes since aaaaaaaaaaaa: no verified finding; ");
 
         assertThat(report(verdicts(CLEAN))).isZero();
@@ -857,14 +857,15 @@ class ChangesMainTest {
         Files.delete(changes().resolve("commits"));
         run("", find());
         assertThat(report("")).isZero();
-        assertThat(scope()).isEqualTo("nothing changed since aaaaaaaaaaaa, no area picked");
+        assertThat(scope()).isEqualTo("nothing found in what changed (this check does not say GREEN): nothing changed since aaaaaaaaaaaa, no area"
+                + " picked");
     }
 
     @Test
-    void withGreenNo_whatWouldBeGreenIsYellow_andSaysThatThisCheckDoesNotSayGreen() throws IOException {
+    void aRunThatFindsNothingIsYellow_andSaysThatThisCheckDoesNotSayGreen() throws IOException {
         changes(SRC + "Runner.java");
 
-        assertThat(run("", find("--green", "no"))).as(err.toString()).isZero();
+        assertThat(run("", find())).as(err.toString()).isZero();
         assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
         assertThat(out()).startsWith("gate_status: YELLOW\ngate_category: changes\ngate_description: nothing found in"
                 + " what changed (this check does not say GREEN): 2 areas picked since aaaaaaaaaaaa, all judged,"
@@ -874,11 +875,15 @@ class ChangesMainTest {
         assertThat(report(verdicts(CLEAN))).isZero();
         assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa, 1 not judged, nothing found; the base does"
                 + " not move");
-        // The default says GREEN, and anything but yes or no is refused
-        assertThat(run("", find("--green", "yes"))).isZero();
-        assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
-        assertThat(out()).startsWith("gate_status: GREEN\n");
-        assertThat(run("", find("--green", "maybe"))).isEqualTo(2);
+    }
+
+    @Test
+    void theOptionGreenIsGone_andIsRefusedLikeAnyUnknownOption() throws IOException {
+        changes(SRC + "Runner.java");
+
+        assertThat(run("", find("--green", "no"))).isEqualTo(2);
+        assertThat(err.toString()).contains("unknown option '--green'");
+        assertThat(run("", find("--green", "yes"))).isEqualTo(2);
     }
 
     @Test
@@ -916,7 +921,7 @@ class ChangesMainTest {
                 "FACT changes_files_java_not_compiled: 0\n");
         assertThat(report(verdicts(CLEAN, CLEAN))).isZero();
 
-        assertThat(out()).startsWith("gate_status: GREEN\n");
+        assertThat(out()).startsWith("gate_status: YELLOW\n");
         assertThat(headLine()).isEqualTo("FACT changes_head: " + HEAD);
     }
 
@@ -947,8 +952,8 @@ class ChangesMainTest {
                 + "\"low\",\"line\":4,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\",\"fix\":\"f\"}]}")))
                 .isZero();
 
-        assertThat(out()).startsWith("gate_status: GREEN\n");
-        assertThat(scope()).isEqualTo("2 areas picked since aaaaaaaaaaaa, all judged, nothing for the register (1 low"
-                + " finding in the report only)");
+        assertThat(out()).startsWith("gate_status: YELLOW\n");
+        assertThat(scope()).isEqualTo("nothing found in what changed (this check does not say GREEN): 2 areas picked since aaaaaaaaaaaa, all"
+                + " judged, nothing for the register (1 low finding in the report only)");
     }
 }
