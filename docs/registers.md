@@ -632,7 +632,7 @@ With `hooks.register_changed` in `traceworks.json`, a program of the operator ru
 run whose report changed the register (something new, resolved, reopened or due for review) or was rejected:
 
 ```json
-{"hooks": {"register_changed": ["/path/to/register-todos.sh"], "timeout_seconds": 60}}
+{"hooks": {"register_changed": ["/path/to/examples/hooks/github-issues.sh", "owner/repo"], "timeout_seconds": 60}}
 ```
 
 It is started without a shell, with the operator's own environment, in the register's folder, after the register's
@@ -650,9 +650,9 @@ Each finding carries `id`, `rule_key`, `subject`, `severity`, `title`, `descript
 CRITICAL` for an accepted or dismissed finding stated above the severity its decision was made on). The
 hook's exit code, duration and the tail of its standard error are recorded as `hook.ran`; a timeout is exit 124, a
 program that does not start 127; the summary says `hook ran` or `hook exited N`. A failing hook never changes the
-run's exit code. `examples/hooks/todo-service.sh` posts the diff to a TODO service over HTTP; the
-same shape serves GitHub Issues or Jira. A workflow never configures a hook: the diff of a run is the operator's to
-act on.
+run's exit code. `examples/hooks/github-issues.sh` opens a GitHub issue per new or reopened finding with the GitHub
+CLI; the same shape serves another tracker. A workflow never configures a hook: the diff of a run is the operator's
+to act on.
 
 ## The register folder
 
