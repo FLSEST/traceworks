@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.core.app.RunServices;
 import traceworks.core.compare.LineDiff;
 import traceworks.core.compare.RunComparison;
@@ -63,8 +63,9 @@ public final class DiffCommand implements Command {
         String refB = args.positionals().get(1);
         RunComparison comparison = services.compare(refA, refB);
         PrintStream out = context.out();
-        out.println("Run A     " + TerminalFormat.safe(comparison.runA()));
-        out.println("Run B     " + TerminalFormat.safe(comparison.runB()));
+        // What the two records hold is text from outside, whoever's runs they are
+        TerminalText.println(out, "Run A     ", TerminalText.word(comparison.runA()));
+        TerminalText.println(out, "Run B     ", TerminalText.word(comparison.runB()));
         header(out, comparison);
         inputs(out, comparison);
         // The outputs are read by the references as given: a run folder outside the home has no id the home knows
@@ -79,12 +80,18 @@ public final class DiffCommand implements Command {
         }
         out.println("differs: run B did not reproduce run A");
         List<String> reasons = comparison.differences();
-        reasons.stream().limit(REASONS_SHOWN).forEach(reason -> out.println("  " + TerminalFormat.oneLine(reason)));
+        reasons.stream().limit(REASONS_SHOWN)
+                .forEach(reason -> TerminalText.println(out, "  ", TerminalText.oneLine(reason)));
         if (reasons.size() > REASONS_SHOWN) {
             out.println("  ... and " + (reasons.size() - REASONS_SHOWN) + " more");
         }
         return ExitCodes.DIFFERS;
     }
+
+    /** The header fields whose names are words of Traceworks, as {@code RunComparer} writes them. */
+    private static final java.util.Set<String> OWN_FIELDS = java.util.Set.of("workflow id", "workflow name",
+            "package digest", "package commit", "inputs digest", "Traceworks version", "execution", "ai_network",
+            "models", "status", "gate");
 
     /** The header fields that differ, with both values, then one line that names the fields that are the same. */
     private static void header(PrintStream out, RunComparison comparison) {
@@ -92,11 +99,13 @@ public final class DiffCommand implements Command {
         out.println("Header");
         for (Field field : comparison.header()) {
             if (!field.same()) {
-                both(out, field.name(), value(field.a()), value(field.b()));
+                // The fields Traceworks names itself are its own words; one named after a model choice is not
+                both(out, OWN_FIELDS.contains(field.name()) ? field.name() : TerminalText.safe(field.name()),
+                        value(field.a()), value(field.b()));
             }
         }
         same(out, comparison.header().stream().filter(Field::same).map(Field::name).toList());
-        comparison.notes().forEach(note -> out.println("  note: " + TerminalFormat.oneLine(note)));
+        comparison.notes().forEach(note -> TerminalText.println(out, "  note: ", TerminalText.oneLine(note)));
     }
 
     /** The inputs that differ, key by key, then one line that names the ones that are the same. */
@@ -111,32 +120,34 @@ public final class DiffCommand implements Command {
                 continue;
             }
             if (input.hidden()) {
-                out.println(String.format("  %-20s differs (a redacted value is not shown)", name(input.key())));
+                TerminalText.println(out, "  ", name(input.key()).padded(20),
+                        " differs (a redacted value is not shown)");
             } else {
                 both(out, name(input.key()), value(input.a()), value(input.b()));
             }
         }
-        same(out, comparison.inputs().stream().filter(Input::same).map(input -> name(input.key())).toList());
+        same(out, comparison.inputs().stream().filter(Input::same).map(Input::key).toList());
     }
 
-    private static void both(PrintStream out, String name, String a, String b) {
-        out.println(String.format("  %-20s A %s", TerminalFormat.safe(name), a));
-        out.println(String.format("  %-20s B %s", "", b));
+    private static void both(PrintStream out, Object name, TerminalText a, TerminalText b) {
+        TerminalText.println(out, "  ", name instanceof TerminalText text ? text.padded(20)
+                : String.format("%-20s", name), " A ", a);
+        TerminalText.println(out, String.format("  %-20s B ", ""), b);
     }
 
     private static void same(PrintStream out, List<String> names) {
         if (!names.isEmpty()) {
-            out.println("  same: " + TerminalFormat.safe(String.join(", ", names)));
+            TerminalText.println(out, "  same: ", TerminalText.oneLine(String.join(", ", names)));
         }
     }
 
     /** The name of an input; one the record redacted is shown as that. */
-    private static String name(String key) {
-        return TerminalFormat.oneLine(key);
+    private static TerminalText name(String key) {
+        return TerminalText.oneLine(key);
     }
 
-    private static String value(String value) {
-        return value == null ? "-" : TerminalFormat.oneLine(value);
+    private static TerminalText value(String value) {
+        return TerminalText.oneLine(value == null ? "-" : value);
     }
 
     /**
@@ -151,14 +162,17 @@ public final class DiffCommand implements Command {
         out.println();
         out.println("Steps");
         for (Step step : comparison.steps()) {
-            String label = TerminalFormat.oneLine(step.label()) + (step.ai() ? "  [ai]" : "");
+            TerminalText name = TerminalText.oneLine(step.label());
+            String ai = step.ai() ? "  [ai]" : "";
+            Object label = TerminalText.seq("  ", name,
+                    ai + " ".repeat(Math.max(0, 30 - name.width() - ai.length())) + " ");
             if (!step.inBoth()) {
-                out.println(String.format("  %-30s only in run %s (%s)", label, step.statusA() == null ? "B" : "A",
-                        step.statusA() == null ? step.statusB() : step.statusA()));
+                TerminalText.println(out, label, "only in run " + (step.statusA() == null ? "B" : "A") + " (",
+                        TerminalText.safe(step.statusA() == null ? step.statusB() : step.statusA()), ")");
             } else {
                 String status = step.statusA().equals(step.statusB()) ? step.statusA()
                         : step.statusA() + " / " + step.statusB();
-                out.println(String.format("  %-30s %-17s %s", label, status, words(step.output())));
+                TerminalText.println(out, label, TerminalText.safe(status).padded(17), " " + words(step.output()));
             }
             calls(out, step.calls());
             items(out, step.items());
@@ -192,17 +206,20 @@ public final class DiffCommand implements Command {
                 folded++;
                 continue;
             }
-            String verdict;
+            Object verdict;
             if (!call.inBoth()) {
                 verdict = "only in run " + (call.a() == null ? "B" : "A");
             } else {
-                verdict = (call.setupDifferences().isEmpty() ? "same setup"
-                        : "SETUP DIFFERS (" + String.join(", ", call.setupDifferences()) + ")")
-                        + ", " + (call.promptSame() ? "prompt same" : call.promptFollowsAiOutput()
+                verdict = TerminalText.seq(call.setupDifferences().isEmpty() ? "same setup"
+                        : TerminalText.seq("SETUP DIFFERS (",
+                                TerminalText.oneLine(String.join(", ", call.setupDifferences())), ")"),
+                        ", " + (call.promptSame() ? "prompt same" : call.promptFollowsAiOutput()
                         ? "prompt differs (it follows an AI output that differed)" : "prompt differs")
-                        + ", " + words(call.output());
+                        + ", " + words(call.output()));
             }
-            out.println("      " + call.label() + "  " + verdict);
+            // The label is Traceworks' own where it has the form the comparison gives it
+            TerminalText.println(out, "      ", call.label().matches("(item \\d{1,9}, )?AI call \\d{1,9}") ? call.label()
+                    : TerminalText.oneLine(call.label()), "  ", verdict);
             side(out, "A", call.a());
             side(out, "B", call.b());
         }
@@ -219,14 +236,14 @@ public final class DiffCommand implements Command {
         if (call == null) {
             return;
         }
-        out.println("        " + run + "  " + TerminalFormat.safe(call.provider())
-                + "  model " + (call.model() == null ? "(default)" : TerminalFormat.safe(call.model()))
-                + (call.local() == null ? "" : "  " + TerminalFormat.safe(call.local()))
-                + "  answered by " + (call.answeredBy() == null ? "-" : TerminalFormat.safe(call.answeredBy()))
-                + (call.effort() == null ? "" : "  effort " + TerminalFormat.safe(call.effort()))
-                + "  tools " + TerminalFormat.safe(call.tools())
-                + "  web " + TerminalFormat.safe(call.web())
-                + "  " + tokens(call.inputTokens(), call.outputTokens())
+        TerminalText.println(out, "        " + run + "  ", TerminalText.safe(call.provider()),
+                "  model ", call.model() == null ? "(default)" : TerminalText.safe(call.model()),
+                call.local() == null ? "" : TerminalText.seq("  ", TerminalText.safe(call.local())),
+                "  answered by ", call.answeredBy() == null ? "-" : TerminalText.safe(call.answeredBy()),
+                call.effort() == null ? "" : TerminalText.seq("  effort ", TerminalText.safe(call.effort())),
+                "  tools ", TerminalText.safe(call.tools()),
+                "  web ", TerminalText.safe(call.web()),
+                "  " + tokens(call.inputTokens(), call.outputTokens())
                 + "  cost " + (call.costUsd() == null ? "-" : usd(call.costUsd())));
     }
 
@@ -271,10 +288,10 @@ public final class DiffCommand implements Command {
             } else if (item.statusA() == null || item.statusB() == null) {
                 out.println("      item " + item.index() + "  only in run " + (item.statusA() == null ? "B" : "A"));
             } else {
-                out.println("      item " + item.index() + "  " + (item.sameItem() ? "same item" : "another item")
-                        + ", " + (item.statusA().equals(item.statusB()) ? TerminalFormat.safe(item.statusA())
-                        : TerminalFormat.safe(item.statusA()) + " / " + TerminalFormat.safe(item.statusB()))
-                        + ", " + words(item.output()));
+                TerminalText.println(out, "      item " + item.index() + "  "
+                        + (item.sameItem() ? "same item" : "another item") + ", ",
+                        TerminalText.safe(item.statusA().equals(item.statusB()) ? item.statusA()
+                                : item.statusA() + " / " + item.statusB()), ", " + words(item.output()));
             }
         }
         if (same > 0 && same < items.size()) {
@@ -291,15 +308,18 @@ public final class DiffCommand implements Command {
             out.println("      | (the output of run " + (textA == null ? "A" : "B") + " is deleted from its record)");
             return;
         }
-        List<String> linesA = TerminalFormat.printable(textA).lines().toList();
-        List<String> linesB = TerminalFormat.printable(textB).lines().toList();
+        List<String> linesA = textA.lines().toList();
+        List<String> linesB = textB.lines().toList();
         Optional<List<LineDiff.Line>> diff = LineDiff.of(linesA, linesB);
         if (diff.isEmpty()) {
             out.println("      | (too large for a line diff (" + linesA.size() + " and " + linesB.size()
                     + " lines); traceworks show <run> --full prints each output whole)");
             return;
         }
-        LineDiff.fold(diff.get(), CONTEXT).forEach(line -> out.println("      | " + line));
+        // Every line of the diff is a line of an output behind the mark; one wider than the terminal is broken
+        // and each part marked, since the terminal would break it without
+        LineDiff.fold(diff.get(), CONTEXT).forEach(line -> TerminalText.block("      ",
+                line.isEmpty() ? " " : line).forEach(out::println));
     }
 
     /** The text of an output; empty for a step without one, {@code null} when its blob was deleted. */
@@ -315,9 +335,9 @@ public final class DiffCommand implements Command {
             return;
         }
         out.println();
-        out.println("Findings (register " + TerminalFormat.safe(delta.register()) + ")");
+        TerminalText.println(out, "Findings (register ", TerminalText.safe(delta.register()), ")");
         if (delta.note() != null) {
-            out.println("  not compared: " + TerminalFormat.oneLine(delta.note()));
+            TerminalText.println(out, "  not compared: ", TerminalText.oneLine(delta.note()));
             return;
         }
         if (delta.added().isEmpty() && delta.resolved().isEmpty() && delta.reopened().isEmpty()) {
@@ -331,10 +351,12 @@ public final class DiffCommand implements Command {
 
     private static void findings(PrintStream out, String what, List<Finding> findings) {
         for (Finding finding : findings) {
-            out.println(String.format("  %-9s %s", what, Stream.of(finding.id() == null ? null
+            List<Object> line = new java.util.ArrayList<>(List.of(String.format("  %-9s", what)));
+            Stream.of(finding.id() == null ? null
                             : finding.id().substring(0, Math.min(8, finding.id().length())), finding.severity(),
                     finding.subject(), finding.title()).filter(java.util.Objects::nonNull)
-                    .map(TerminalFormat::oneLine).collect(Collectors.joining("  "))));
+                    .forEach(text -> line.addAll(List.of(line.size() == 1 ? " " : "  ", TerminalText.oneLine(text))));
+            TerminalText.println(out, line);
         }
     }
 }

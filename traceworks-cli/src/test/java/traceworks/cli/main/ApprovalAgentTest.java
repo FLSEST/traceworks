@@ -78,7 +78,8 @@ class ApprovalAgentTest {
                 new PrintStream(err, true, StandardCharsets.UTF_8), Map.copyOf(env), work,
                 console == null ? null : new ByteArrayInputStream(console.getBytes(StandardCharsets.UTF_8)),
                 RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)));
     }
 
     private static String idOf(Result result) {

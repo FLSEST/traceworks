@@ -592,6 +592,39 @@ class RunServicesSealTest {
         assertRefused(request(MAIN), "seal-missing", "wf-tools", "called by");
     }
 
+    /**
+     * A child under the caller's own .git/ is what a seal of the caller cannot cover. It is a called package all the
+     * same: a changed copy of a sealed workflow there runs under no seal, and so does a sealed package only it calls.
+     */
+    @Test
+    void aChildUnderAnUnsealedParentsGitDirectory_keepsItsSeal_andSoDoesWhatItCalls() {
+        services().seals().seal(LIB, null);
+        Path front = Path.of("/pkg/front");
+        fx.packages.put(front, """
+                {"id": "wf-front", "name": "Front", "blocks": [
+                  {"type": "sub-workflow", "name": "copy", "config": {"workflow_id": "./.git/copy"}}
+                ]}""");
+        fx.packages.put(front.resolve(".git/copy"), """
+                {"id": "wf-tools", "name": "Tools", "blocks": [
+                  {"type": "shell", "name": "t", "config": {"command": "echo changed"}}
+                ]}""");
+
+        assertRefused(request(front), "seal-missing", "wf-tools", "/pkg/front/.git/copy", "called by");
+
+        Path relay = Path.of("/pkg/relay");
+        fx.packages.put(relay, """
+                {"id": "wf-relay", "name": "Relay", "blocks": [
+                  {"type": "sub-workflow", "name": "on", "config": {"workflow_id": "./.GIT/on"}}
+                ]}""");
+        fx.packages.put(relay.resolve(".GIT/on"), """
+                {"id": "wf-on", "name": "On", "blocks": [
+                  {"type": "sub-workflow", "name": "tools", "config": {"workflow_id": "../../../../lib/tools"}}
+                ]}""");
+        fx.packages.script(LIB, "echo changed");
+
+        assertRefused(request(relay), "changed", "/lib/tools", "changed since it was sealed", "called by");
+    }
+
     // ---- the seal log does not grow with a refusal that repeats ----
 
     @Test

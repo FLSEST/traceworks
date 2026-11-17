@@ -5,11 +5,12 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.LedgerReport;
 import traceworks.core.app.VerifyReport;
 import traceworks.core.record.ChainReport;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 
@@ -51,16 +52,16 @@ public final class VerifyCommand implements Command {
         String acknowledge = args.option("acknowledge");
         if (acknowledge != null) {
             if (args.positional() != null) {
-                throw new UsageException("--acknowledge names its run itself; give no other run");
+                throw new UsageException(Message.of("--acknowledge names its run itself; give no other run"));
             }
             if (args.option("note") == null || args.option("note").isBlank()) {
-                throw new UsageException("--acknowledge needs --note \"...\": why this run is no lost run");
+                throw new UsageException(Message.of("--acknowledge needs --note \"...\": why this run is no lost run"));
             }
             LedgerReport after = context.services().acknowledge(acknowledge, args.option("note"));
             return args.has("json") ? json(context, after) : ledger(context, after);
         }
         if (args.option("note") != null) {
-            throw new UsageException("--note goes with --acknowledge <run>");
+            throw new UsageException(Message.of("--note goes with --acknowledge <run>"));
         }
         if (args.positional() == null) {
             LedgerReport home = context.services().ledgerReport(!args.has("quick"));
@@ -72,20 +73,21 @@ public final class VerifyCommand implements Command {
         }
         ChainReport chain = report.chain();
         PrintStream out = context.out();
-        out.println("chain     " + (chain.intact() ? "ok (" + chain.events() + " events, head " + TerminalFormat.safe(chain.head()) + ")"
-                : "BROKEN"));
-        chain.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem)));
+        // What the check says quotes the record and its folder: text from outside, as the record is
+        TerminalText.println(out, "chain     ", chain.intact() ? TerminalText.seq("ok (" + chain.events()
+                + " events, head ", TerminalText.safe(chain.head()), ")") : "BROKEN");
+        chain.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.safe(problem)));
         if (!chain.deletedBlobs().isEmpty()) {
             out.println("blobs     " + chain.deletedBlobs().size() + " deleted (not a failure)");
         }
-        out.println("manifest  " + TerminalFormat.safe(report.manifest()));
-        out.println("ledger    " + TerminalFormat.safe(report.ledger())
-                + (report.ledgerReason() == null ? "" : " (" + TerminalFormat.safe(report.ledgerReason()) + ")"));
-        out.println("start     " + TerminalFormat.safe(report.start()));
-        out.println("seal      " + TerminalFormat.safe(report.seal()));
+        TerminalText.println(out, "manifest  ", TerminalText.safe(report.manifest()));
+        TerminalText.println(out, "ledger    ", TerminalText.safe(report.ledger()), report.ledgerReason() == null ? ""
+                : TerminalText.seq(" (", TerminalText.safe(report.ledgerReason()), ")"));
+        TerminalText.println(out, "start     ", TerminalText.safe(report.start()));
+        TerminalText.println(out, "seal      ", TerminalText.safe(report.seal()));
         if (!VerifyReport.NOT_CHECKED.equals(report.register())) {
             // Only the run of an audit workflow has a register folder
-            out.println("register  " + TerminalFormat.safe(report.register()));
+            TerminalText.println(out, "register  ", TerminalText.safe(report.register()));
         }
         out.println(report.ok() ? "verified" : "verification FAILED");
         return report.ok() ? ExitCodes.OK : ExitCodes.VERIFY_FAILED;
@@ -101,35 +103,36 @@ public final class VerifyCommand implements Command {
                 + count(report.earlier(), "run folder") + " from before the ledger");
         out.println("started, not ended (" + report.open().size() + ")");
         for (LedgerReport.Open run : report.open()) {
-            out.println("  " + TerminalFormat.safe(run.runId()) + "  "
-                    + (run.startedAt() == null ? "-" : TerminalFormat.safe(run.startedAt())) + "  "
-                    + (run.workflowId() == null ? "-" : TerminalFormat.safe(run.workflowId())) + "  folder "
-                    + TerminalFormat.safe(run.folder()));
+            TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
+                    TerminalText.safe(run.startedAt() == null ? "-" : run.startedAt()), "  ",
+                    TerminalText.safe(run.workflowId() == null ? "-" : run.workflowId()), "  folder ",
+                    TerminalText.safe(run.folder()));
         }
         out.println("ended, folder gone (" + report.endedGone().size() + ")");
-        report.endedGone().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  "
-                + TerminalFormat.safe(run.detail())));
+        report.endedGone().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
+                TerminalText.safe(run.detail())));
         if (!report.earlierOpen().isEmpty()) {
             out.println("from before the ledger, not ended (" + report.earlierOpen().size() + ")");
-            report.earlierOpen().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  folder "
-                    + TerminalFormat.safe(run.detail())));
+            report.earlierOpen().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()),
+                    "  folder ", TerminalText.safe(run.detail())));
         }
         if (!report.inFlight().isEmpty()) {
             out.println("in flight (" + report.inFlight().size() + ")");
-            report.inFlight().forEach(run -> out.println("  " + TerminalFormat.safe(run.runId()) + "  "
-                    + TerminalFormat.safe(run.detail()) + "; its process is alive"));
+            report.inFlight().forEach(run -> TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
+                    TerminalText.safe(run.detail()), "; its process is alive"));
         }
         out.println("acknowledged (" + report.acknowledged().size() + ")");
         for (LedgerReport.Acknowledged run : report.acknowledged()) {
-            out.println("  " + TerminalFormat.safe(run.runId()) + "  " + TerminalFormat.safe(String.valueOf(run.said()))
-                    + (run.covers() ? "" : " [no longer what the check finds]"));
-            out.println("    by " + TerminalFormat.safe(String.valueOf(run.actor())) + " at "
-                    + TerminalFormat.safe(String.valueOf(run.at())) + ": "
-                    + TerminalFormat.oneLine(String.valueOf(run.note())));
+            TerminalText.println(out, "  ", TerminalText.word(run.runId()), "  ",
+                    TerminalText.safe(String.valueOf(run.said())),
+                    run.covers() ? "" : " [no longer what the check finds]");
+            TerminalText.println(out, "    by ", TerminalText.safe(String.valueOf(run.actor())), " at ",
+                    TerminalText.safe(String.valueOf(run.at())), ": ",
+                    TerminalText.oneLine(String.valueOf(run.note())));
         }
         out.println("problems (" + report.problems().size() + ")");
-        report.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem.runId()) + "  "
-                + TerminalFormat.safe(problem.text())));
+        report.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.word(problem.runId()),
+                "  ", TerminalText.safe(problem.text())));
         if (!report.records()) {
             out.println("records   not verified (--quick): only traceworks verify <run> checks the record of a run");
         }

@@ -27,6 +27,7 @@ import traceworks.core.port.StoredRun;
 import traceworks.core.port.WorkflowResolver;
 import traceworks.core.record.Redactor;
 import traceworks.core.record.RunRecorder;
+import traceworks.core.util.Message;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -388,7 +389,7 @@ final class RunPreparation {
         try {
             return secrets.get();
         } catch (IllegalArgumentException | UncheckedIOException e) {
-            throw new RunRefusedException("The values to redact cannot be read: " + e.getMessage());
+            throw new RunRefusedException(Message.of("The values to redact cannot be read: ", Message.of(e)));
         }
     }
 
@@ -419,8 +420,8 @@ final class RunPreparation {
         try {
             return run.writeRegisterFiles(prepared.register().files());
         } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
-            throw new RunRefusedException("The register folder of the run cannot be written, so the run is not"
-                    + " started: " + e.getMessage());
+            throw new RunRefusedException(Message.of("The register folder of the run cannot be written, so the run is not"
+                    + " started: ", Message.of(e)));
         }
     }
 
@@ -432,7 +433,7 @@ final class RunPreparation {
         try {
             return containers.directories().realPath(Path.of(folder));
         } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 
@@ -486,25 +487,27 @@ final class RunPreparation {
     private Mounted checkMachine(RunTarget target, ContainerRuntime runtime, LoadedPackage pkg, Path workspace,
                               WorkflowResolver children, WorkflowUses.Picks picks, Preflight preflight) {
         if (runtime == null && target == RunTarget.CONTAINER) {
-            preflight.refuse("no container runtime found: " + (settings.containerRuntime() == null
+            preflight.refuse(Message.of("no container runtime found: ", settings.containerRuntime() == null
                     ? "neither podman nor docker answers 'version'"
-                    : "container_runtime " + settings.containerRuntime() + " in traceworks.json does not answer"
-                    + " 'version'") + "; install and start podman or docker, or run on the host with"
-                    + " --allow-host-execution");
+                    : Message.of("container_runtime ", Message.quoted(settings.containerRuntime()),
+                    " in traceworks.json does not answer 'version'"), "; install and start podman or docker, or run"
+                    + " on the host with --allow-host-execution"));
         }
         if (runtime != null) {
-            preflight.refuse(images(runtime).missing(pkg, target == RunTarget.CONTAINER, children, picks));
+            preflight.refuse(images(runtime).missingParts(pkg, target == RunTarget.CONTAINER, children, picks));
         }
         // Each directory is resolved once: the path that is judged here is the path the run mounts
         HostDirectories.Checked checkedWorkspace = workspace == null ? null
                 : containers.directories().check(workspace, HostDirectories.Role.WORKSPACE);
         if (checkedWorkspace != null && checkedWorkspace.isRefused()) {
-            preflight.refuse("the workspace " + workspace + " cannot be mounted: " + checkedWorkspace.refusal());
+            preflight.refuse(Message.of("the workspace ", Message.quoted(workspace), " cannot be mounted: ",
+                    Message.quoted(checkedWorkspace.refusal())));
         }
         HostDirectories.Checked checkedPackage = containers.directories().check(pkg.directory(),
                 HostDirectories.Role.PACKAGE);
         if (checkedPackage.isRefused()) {
-            preflight.refuse("the package " + pkg.directory() + " cannot be mounted: " + checkedPackage.refusal());
+            preflight.refuse(Message.of("the package ", Message.quoted(pkg.directory()), " cannot be mounted: ",
+                    Message.quoted(checkedPackage.refusal())));
         }
         // A writable mount the workflow writes out: asked here, so that no step runs before the one it refuses. A
         // step that may write its workspace is asked with the workspace, where its mount needs no listed folder
@@ -521,15 +524,17 @@ final class RunPreparation {
                 && RunPaths.within(mounted.workspace(), mounted.packageDirectory() + "/.git")) {
             // The package's .git is covered wherever a container sees the package; a workspace in it would be no
             // part of the package's mount, and every step would see it uncovered
-            preflight.refuse("the workspace " + workspace + " lies in the .git of the package " + pkg.directory()
-                    + ", which the package digest leaves out and no step sees: run from a directory outside it");
+            preflight.refuse(Message.of("the workspace ", Message.quoted(workspace),
+                    " lies in the .git of the package ", Message.quoted(pkg.directory()),
+                    ", which the package digest leaves out and no step sees: run from a directory outside it"));
         }
         if (mounted.workspace() != null && mounted.packageDirectory() != null
                 && writesTheWorkspace(pkg.definition(), children)
                 && RunPaths.within(mounted.workspace(), mounted.packageDirectory())) {
-            preflight.refuse("the workspace " + workspace + " lies inside the package " + pkg.directory() + ", which"
-                    + " every step sees read-only, and a step sets workspace_writable: true, so it would change the"
-                    + " package: run from a directory outside the package, or pass --workspace");
+            preflight.refuse(Message.of("the workspace ", Message.quoted(workspace), " lies inside the package ",
+                    Message.quoted(pkg.directory()), ", which every step sees read-only, and a step sets"
+                    + " workspace_writable: true, so it would change the package: run from a directory outside the"
+                    + " package, or pass --workspace"));
         }
         return mounted;
     }
@@ -590,7 +595,7 @@ final class RunPreparation {
         try {
             return containers.directories().realPath(Path.of(run.prepareScratchDirectory()));
         } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 

@@ -53,7 +53,8 @@ class ExamplePackagesTest {
                         : new String[] {"describe", pkg.toString(), "--home", home.resolve("none").toString()};
                 int code = Main.run(args, new PrintStream(out, true, StandardCharsets.UTF_8),
                         new PrintStream(err, true, StandardCharsets.UTF_8), Map.of(), work, null, RuntimeSource.NONE);
-                String printed = out.toString(StandardCharsets.UTF_8);
+                // As it reads: the path of a package can be longer than a line of the terminal
+                String printed = Unbroken.of(out.toString(StandardCharsets.UTF_8));
 
                 assertThat(code).as(pkg + "\n" + printed + err.toString(StandardCharsets.UTF_8)).isZero();
                 assertThat(err.toString(StandardCharsets.UTF_8)).as(pkg.toString()).isEmpty();

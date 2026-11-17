@@ -1022,6 +1022,47 @@ class CliContainerRuntimeTest {
     }
 
     /**
+     * A run directory that cannot be resolved any more is not taken at its word. It resolved when the run's start
+     * checked it, so a link planted at its place whose target the operator cannot reach (a folder without the
+     * permission to pass, a target that is not there yet, a loop) is a replacement too: a runtime that runs as root
+     * would follow the link and mount what nothing judged.
+     */
+    @Test
+    void run_refusesARunDirectoryThatCanNoLongerBeResolved() throws IOException {
+        Path docker = client("docker", "exit 0");
+        Path workspace = Files.createDirectories(dir.resolve("project"));
+        Path locked = Files.createDirectories(dir.resolve("locked"));
+        Files.createDirectories(locked.resolve("x"));
+        java.util.Map<String, Path> targets = new java.util.LinkedHashMap<>();
+        targets.put("it or a folder on the way to it is gone", dir.resolve("not-there-yet"));
+        targets.put("the system does not resolve it", workspace.resolve("case-1/pkg"));   // a link to itself
+        targets.put("permission denied", locked.resolve("x"));
+        Files.setPosixFilePermissions(locked, java.util.Set.of());
+        try {
+            int number = 0;
+            for (var target : targets.entrySet()) {
+                boolean reachable = Files.isDirectory(target.getValue());   // only where the tests run as root
+                Path above = Files.createDirectories(workspace.resolve("case-" + number++));
+                Path pkg = Files.createSymbolicLink(above.resolve("pkg"), target.getValue());
+                RunDirectories directories = new RunDirectories(workspace.toString(), pkg.toString(), null);
+                List<Mount> mounts = List.of(new Mount(workspace.toString(), "/workspace", false),
+                        new Mount(pkg.toString(), "/package", true));
+
+                CommandResult result = runtime(docker).run(run(mounts, directories, Map.of()));
+
+                assertThat(result.exitCode()).as(target.getKey()).isEqualTo(125);
+                if (!reachable) {
+                    assertThat(result.stderr()).contains("the package", pkg.toString(), "can no longer be resolved",
+                            target.getKey(), "Something replaced or removed it", "put the directory back");
+                }
+                assertThat(calls()).as("no container was started").noneMatch(call -> call.contains("run"));
+            }
+        } finally {
+            Files.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    /**
      * A run directory is mounted under the name it was checked under. Cutting white space off its end, as a step's
      * own mount is read, would mount another entry: here the link {@code wf} beside the directory {@code "wf "}.
      */

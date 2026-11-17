@@ -35,7 +35,9 @@ final class WaitingHints {
         f.path("options").forEach(o -> options.add(o.asText()));
         List<String> names = new ArrayList<>();
         f.path("fields").forEach(field -> names.add(field.path("variable_name").asText()));
-        AnswerCommands.of(rootRunId, f.path("kind").asText(), options, names)
-                .forEach(command -> out.println("waiting for an answer: " + command));
+        AnswerCommands.of(LEAD, rootRunId, f.path("kind").asText(), options, names)
+                .forEach(line -> out.println(LEAD + line));
     }
+
+    private static final String LEAD = "waiting for an answer: ";
 }

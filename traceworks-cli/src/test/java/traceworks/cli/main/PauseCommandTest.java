@@ -66,7 +66,8 @@ class PauseCommandTest {
         int code = Main.run(all.toArray(String[]::new), new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), Map.of("TRACEWORKS_ACTOR", "tester"), work,
                 null, RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)));
     }
 
     private Path pkg(String name, String blocks) throws IOException {

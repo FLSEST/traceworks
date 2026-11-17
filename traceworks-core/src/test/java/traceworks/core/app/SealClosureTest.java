@@ -169,6 +169,27 @@ class SealClosureTest {
                 .contains("'inside'").contains(".git").contains("digest");
     }
 
+    /** The violation is the caller's; the child and what it calls are still packages whose own seals a run respects. */
+    @Test
+    void aChildUnderThePackagesGitDirectory_isStillACalledPackage_andIsWalked() {
+        Path hidden = Path.of("/pkg/hidden");
+        fx.packages.put(hidden, """
+                {"id": "wf-hidden", "name": "Hidden", "blocks": [
+                  {"type": "sub-workflow", "name": "inside", "config": {"workflow_id": "./.git/child"}}]}""");
+        fx.packages.put(hidden.resolve(".git/child"), """
+                {"id": "wf-git-child", "name": "C", "blocks": [
+                  {"type": "sub-workflow", "name": "out", "config": {"workflow_id": "../../../../lib/other"}},
+                  {"type": "shell", "name": "s", "config": {"command": "x", "container_image": "registry.example/t:1"}}]}""");
+
+        SealClosure closure = closure(hidden);
+
+        assertThat(closure.childPackages()).extracting(p -> p.definition().id())
+                .containsExactlyInAnyOrder("wf-git-child", "wf-other");
+        assertThat(closure.violations()).hasSize(2)
+                .anySatisfy(v -> assertThat(v).contains("'inside'", ".git"))
+                .anySatisfy(v -> assertThat(v).contains("'s'", "wf-git-child", "without a digest"));
+    }
+
     /**
      * The loader takes a {@code workflow_id} as it is spelled, and a file system may take another spelling for the
      * same {@code .git}: without regard to case (macOS, Windows), with characters it ignores (HFS+), with dots or

@@ -35,6 +35,29 @@ class TimedRegexTest {
         }
     }
 
+    /**
+     * The check itself runs on the caller's thread, before any time limit: a pattern of a workflow may not keep it
+     * busy. Each of these made the count of every brace read on to the end of the pattern.
+     */
+    @Test
+    void aPatternOfAnyLength_isJudgedAtOnce_andOneTooLongIsRefusedWithItsLength() {
+        int braces = 100 * 1024;
+        for (String regex : new String[] {
+                "{#".repeat(braces),
+                "{#".repeat(braces) + "\n" + " ".repeat(braces),
+                "{#".repeat(braces) + "\n" + "1".repeat(braces),
+                "\\Q" + "{#".repeat(braces)}) {
+            String[] problem = new String[1];
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> problem[0] = TimedRegex.repetitionProblem(regex));
+            assertThat(problem[0]).contains("longer than 4,096 characters").contains("shorten the pattern");
+        }
+        assertThat(TimedRegex.repetitionProblem("a".repeat(TimedRegex.MAX_PATTERN_LENGTH))).isNull();
+        assertThat(TimedRegex.repetitionProblem("a".repeat(TimedRegex.MAX_PATTERN_LENGTH + 1))).isNotNull();
+        // The longest pattern that is still read costs nothing to speak of, whatever it holds
+        String longest = "{#".repeat(TimedRegex.MAX_PATTERN_LENGTH / 2);
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> TimedRegex.repetitionProblem(longest));
+    }
+
     /** The counts are a first line with a clear message; the limit is far above what a real pattern multiplies to. */
     @Test
     void countsThatMultiplyBeyondTheLimit_areNamedBeforeTheMatch_andCountsSideBySideOfARealPatternAreNot() {

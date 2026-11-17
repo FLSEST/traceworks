@@ -173,7 +173,9 @@ class ModelChoicePackageTest {
         env.put("TRACEWORKS_ACTOR", "tester");
         traceworks.cli.main.Main.run(args, new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), env, temp, null, runtime);
-        return out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8);
+        // As it reads: a line Traceworks broke for an 80 column terminal goes on behind "|+"
+        return (out.toString(StandardCharsets.UTF_8) + err.toString(StandardCharsets.UTF_8))
+                .replaceAll("\\R *\\|\\+", "");
     }
 
     /** A stand-in for a container runtime: it answers, has no image, and starts nothing. */

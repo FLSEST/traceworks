@@ -29,6 +29,7 @@ import traceworks.core.record.RunStart;
 import traceworks.core.record.SealView;
 import traceworks.core.record.StartEntry;
 import traceworks.core.seal.Seal;
+import traceworks.core.util.Message;
 
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -99,12 +100,12 @@ final class Starting {
      */
     RunResult start(LoadedPackage pkg, StartRequest request, Consumer<RecordedEvent> listener, QuestionAsker asker) {
         if (request.inputs().containsKey(PACKAGE_DIR)) {
-            throw new RunRefusedException("The input " + PACKAGE_DIR + " is reserved: Traceworks sets it to the"
-                    + " package directory");
+            throw new RunRefusedException(Message.of("The input " + PACKAGE_DIR + " is reserved: Traceworks sets it to the"
+                    + " package directory"));
         }
         if (request.inputs().containsKey(REGISTER_DIR)) {
-            throw new RunRefusedException("The input " + REGISTER_DIR + " is reserved: Traceworks sets it to the"
-                    + " register folder of the run of an audit workflow");
+            throw new RunRefusedException(Message.of("The input " + REGISTER_DIR + " is reserved: Traceworks sets it to the"
+                    + " register folder of the run of an audit workflow"));
         }
         // The seal first: a sealed package that changed is refused whatever else this machine has or lacks, before
         // anything of the package is used, cloned or created. The refusal is recorded in the seal log
@@ -212,8 +213,8 @@ final class Starting {
         try {
             ledger.prepare();
         } catch (RuntimeException e) {
-            throw new RunRefusedException("The ledger cannot take an entry, so the run is not started: "
-                    + e.getMessage());
+            throw new RunRefusedException(Message.of("The ledger cannot take an entry, so the run is not started: ",
+                    Message.of(e)));
         }
     }
 
@@ -288,15 +289,15 @@ final class Starting {
     static Map<String, Object> recordedInputs(StoredRun earlier) {
         List<RecordedEvent> events = RunRecords.events(earlier);
         if (events.isEmpty() || !RecordTypes.RUN_STARTED.equals(events.getFirst().type())) {
-            throw new RunRefusedException("Run " + earlier.runId() + " has no run.started, so its inputs are not known");
+            throw new RunRefusedException(Message.of("Run " + earlier.runId() + " has no run.started, so its inputs are not known"));
         }
         BlobRef ref = events.getFirst().blob("inputs");
         // Checked against the name and the size the record gives: the new run names this run as the origin of its
         // inputs, so they must be what its record says, as for a resume
         byte[] bytes = ref == null ? null : RunRecords.checkedContent(earlier, ref, "inputs").orElse(null);
         if (bytes == null) {
-            throw new RunRefusedException("The inputs of run " + earlier.runId() + " are deleted from its record, so"
-                    + " --inputs-from cannot take them");
+            throw new RunRefusedException(Message.of("The inputs of run " + earlier.runId() + " are deleted from its record, so"
+                    + " --inputs-from cannot take them"));
         }
         return RunRecords.inputs(earlier.runId(), bytes);
     }

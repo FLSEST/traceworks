@@ -6,6 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.UsageException;
 import traceworks.core.app.AnswerRequest;
+import traceworks.core.util.Message;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -31,12 +32,12 @@ public final class AnswerCommand implements Command {
         for (String field : args.options("field")) {
             int eq = field.indexOf('=');
             if (eq <= 0) {
-                throw new UsageException("--field takes NAME=VALUE, got '" + field + "'");
+                throw new UsageException(Message.of("--field takes NAME=VALUE, got '", Message.typed(field), "'"));
             }
             fields.put(field.substring(0, eq), field.substring(eq + 1));
         }
         if ((value == null) == fields.isEmpty()) {
-            throw new UsageException("'answer' needs either --value TEXT or one or more --field NAME=VALUE");
+            throw new UsageException(Message.of("'answer' needs either --value TEXT or one or more --field NAME=VALUE"));
         }
         String agent = Answers.agent(context, args);
         return Answers.give(context, args.positional(),

@@ -21,7 +21,7 @@ section What the defaults protect
 limit Mounts.
   quote a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused
   says  A workspace or a package is refused when it is, or holds, the runs, ledger, registers, seals or cache folder (also where a setting puts them), but may lie elsewhere in the Traceworks home or in a folder of /dev/shm, and is not refused for holding a credential store of its own (.ssh, .aws); a block's own mount stays under the whole mount check.
-  digest e2ee679333d09bc2
+  digest d2f716d51235e4b3
 
 limit Hooks
   quote with the operator's whole environment
@@ -46,7 +46,7 @@ limit What nothing in this version finds:
   quote the ledger is not signed
   quote a record cut to its first line
   says  The ledger check does not find what was before a new ledger, a well-formed entry or acknowledgement committed by hand (the ledger is not signed), a record cut to its first line, or an audit run in a place this ledger does not see; what the bullets before it list is found.
-  digest 5d1d25922cbb8aad
+  digest f9a960dfde8f0cb5
 
 section AI steps
 
@@ -89,7 +89,7 @@ limit A model's answer in a shell command.
   quote Traceworks guarantees that the value is in the variable and nowhere in the code.
   quote What the prompt shows, the person has seen and answers for.
   says  Traceworks never writes a protected value into shell code: it reaches a shell step as a variable (values), and Traceworks guarantees that the value is in the variable and nowhere in the code. What the author's command does with the variable is the author's: unquoted, evaluated or exported it can run or leak a model's text. A default taken at the console with an empty line is a person's answer only when the prompt showed it whole.
-  digest 9a72496d9c717b7c
+  digest ff792efd0936dc6c
 
 limit A gate from an AI step.
   quote a model steered by what it reads can therefore set a gate too
@@ -346,7 +346,7 @@ limit Patterns and reports are read under a time limit.
   quote the thread is left behind, busy until the Traceworks process ends
   quote it refuses some patterns the engine would match quickly
   says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends, and the check of a pattern's counts multiplies them all, so it refuses some patterns the engine would match quickly.
-  digest 573d07610ab60212
+  digest 97c7421834e500f3
 
 limit A token in a `--source` URL
   quote every process on the machine can read it in the process list while the clone runs

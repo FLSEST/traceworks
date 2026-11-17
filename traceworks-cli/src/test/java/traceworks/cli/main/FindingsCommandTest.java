@@ -51,7 +51,8 @@ class FindingsCommandTest {
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         int code = Main.run(all.toArray(String[]::new), new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8), env, work, null, RuntimeSource.NONE);
-        return new Result(code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
+        return new Result(code, traceworks.cli.Unbroken.of(out.toString(StandardCharsets.UTF_8)),
+                traceworks.cli.Unbroken.of(err.toString(StandardCharsets.UTF_8)));
     }
 
     /** An audit package whose report step prints an envelope with one finding per subject. */
@@ -202,9 +203,9 @@ class FindingsCommandTest {
         assertThat(show.out()).contains("Title     Big A.java", "Occurrences 1")
                 .containsPattern("Detail    from findings.jsonl of run [0-9a-f-]{36}")
                 .contains("  item      A001", "  file      src/A.java:12", "  quote     mount(path);",
-                        "  severity  medium",
-                        "  the model's words, not checked:", "    issue   " + ISSUE + " ?[2J second line",
-                        "    fix     check the real path first")
+                        "| severity  medium",
+                        "  the model's words, not checked:", "  | issue   " + ISSUE + " ?[2J second line",
+                        "  | fix     check the real path first")
                 .doesNotContain("\u001b").doesNotContain("not this one").doesNotContain("other()");
     }
 

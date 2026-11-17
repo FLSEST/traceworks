@@ -114,7 +114,9 @@ a run's checkout may lie elsewhere in it), a folder that holds one of the places
 it is, and a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused. Each of
 them, and the checkout of a `--source`, is resolved once: the real path the check judged is the path the run mounts,
 so a directory that something replaces by a link after the check is not what the containers get, and every container
-start refuses a run directory that no longer resolves to that path. The full list
+start refuses a run directory that no longer resolves to that path, or that cannot be resolved at all any more (a
+link planted at its place to where you may not look, to nothing or to itself): the refusal names the directory and
+why, and the run goes on once the directory is back. The full list
 is in the row on declared mounts of [docs/workflow-format.md](workflow-format.md).
 
 **Writable mounts.** A block's own mount that is writable (`:rw`) is refused unless its real path lies in or below a
@@ -342,7 +344,16 @@ three groups:
   only a run whose start entry is in the pushed ledger.
 
 `run.html` has no scripts and loads
-nothing, and the terminal shows text from a run with its control characters made harmless. A run folder opened by
+nothing, and the terminal shows text from a run with its control characters made harmless. No such text starts a
+terminal line of its own, where it would read as a line of Traceworks: a text of a workflow, a step, a model, a
+record or a report that would cross the end of a line of 80 columns, or that holds a run of blanks, goes on lines
+that begin with `|+`, and one that begins a line has `| ` in front of it (docs/cli.md, "Text from outside on the
+terminal"). Traceworks' own words are printed whole: a message says which of its parts quote a value from outside,
+beside its text and never in it, so no quoted value can make itself Traceworks' words and no record, event,
+register or JSON holds a mark; a message that does not say its parts counts as from outside as a whole. What the
+operator typed on the command line is shown whole unless it holds a run of blanks, and a field Traceworks writes
+itself (a status, the runtime's version) counts as its own only as one short word. The width is fixed: a terminal
+narrower than 80 columns breaks any line. A run folder opened by
 its path may come from anyone, so its `blobs` folder counts only as a real directory and a blob only as a regular
 file: nothing is read through a symbolic link at either, which would show a file from outside the folder as the run's
 content, and no blob is written through one.
@@ -532,9 +543,10 @@ content, and no blob is written through one.
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
     static `items` of a `foreach`, a person's answer. A default that a person takes at the console with an empty
-    line is such an answer, so the console takes it only when its prompt showed the whole default: one that is
-    longer than the 200 characters shown, or has a line break or a character a terminal does not show, must be
-    typed. What the prompt shows, the person has seen and answers for.
+    line is such an answer, so the console takes it only when its prompt showed the whole default on its line: one
+    that is longer than the 200 characters shown, that does not fit the prompt's line of 80 columns, or has a line
+    break, a run of blanks or a character a terminal does not show, must be typed. What the prompt shows, the
+    person has seen and answers for.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
@@ -887,7 +899,9 @@ this setting is the usual one for Docker hosts and has not been verified here.
   answer is refused or the `compress` step fails, the pattern is not tried again, and the thread is left behind,
   busy until the Traceworks process ends (a thread inside the regex engine cannot be stopped). A pattern whose
   counts (`{n}`, `{n,}`, `{n,m}`) multiply to more than 1,000,000,000,000 is refused before any match, with a
-  message that says so; a count written with white space or a comment in it, which `(?x)` allows, is read as the
+  message that says so, and so is a pattern longer than 4,096 characters, which is not read at all (the check of
+  the counts runs before any time limit, and its time grows with the square of the pattern's length: shorten the
+  pattern); a count written with white space or a comment in it, which `(?x)` allows, is read as the
   engine reads it, and so is quoting: the counts are read after `\Q...\E` is taken out the way the engine takes it
   out, so an empty `\Q\E` between the digits of a count hides nothing. A brace that is escaped, in a character
   class or in quoted text counts nothing, unless the pattern holds a control escape (`\c`) or a `#`: either can

@@ -1,5 +1,7 @@
 package traceworks.core.app;
 
+import traceworks.core.util.Message;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -11,23 +13,36 @@ import java.util.List;
  */
 public final class Preflight {
 
-    private final List<String> refusals = new ArrayList<>();
+    private final List<Message> refusals = new ArrayList<>();
 
-    /** Adds one reason the run cannot go ahead. */
+    /**
+     * Adds one reason the run cannot go ahead, as a text that says nothing about its parts: it counts as quoted
+     * from outside as a whole.
+     */
     public Preflight refuse(String reason) {
+        refusals.add(Message.of(Message.quoted(reason)));
+        return this;
+    }
+
+    /** Adds one reason the run cannot go ahead, which says what it quotes. */
+    public Preflight refuse(Message reason) {
         refusals.add(reason);
         return this;
     }
 
-    /** Adds every reason of a contributor; an empty list adds nothing. */
-    public Preflight refuse(List<String> reasons) {
-        refusals.addAll(reasons);
+    /**
+     * Adds every reason of a contributor, each a {@link Message} or a text ({@link #refuse(String)}); an empty
+     * list adds nothing.
+     */
+    public Preflight refuse(List<?> reasons) {
+        reasons.forEach(reason -> refusals.add(reason instanceof Message message ? message
+                : Message.of(Message.quoted(reason))));
         return this;
     }
 
     /** The reasons so far, in the order they were added. */
     public List<String> refusals() {
-        return List.copyOf(refusals);
+        return refusals.stream().map(Message::text).toList();
     }
 
     /**
@@ -36,7 +51,7 @@ public final class Preflight {
      */
     public void check(String what) {
         if (!refusals.isEmpty()) {
-            throw new RunRefusedException(what + ": " + String.join("; ", refusals));
+            throw new RunRefusedException(Message.of(what + ": ", Message.join("; ", refusals)));
         }
     }
 }

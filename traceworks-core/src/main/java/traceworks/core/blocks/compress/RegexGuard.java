@@ -55,7 +55,10 @@ public final class RegexGuard {
         // The deadline is checked where a character is read, and such a pattern repeats without reading one
         String problem = TimedRegex.repetitionProblem(regex);
         if (problem != null) {
-            throw new CompressionException(where + ": invalid regular expression '" + regex + "' (" + problem + ")");
+            // A pattern refused for its length is not printed whole: the message goes to a terminal and a record
+            String shown = regex.length() > TimedRegex.MAX_PATTERN_LENGTH
+                    ? regex.substring(0, safeCut(regex, 80)) + "..." : regex;
+            throw new CompressionException(where + ": invalid regular expression '" + shown + "' (" + problem + ")");
         }
         try {
             Pattern compiled = Pattern.compile(regex, flags);

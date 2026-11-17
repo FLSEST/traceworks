@@ -6,6 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import com.fasterxml.jackson.databind.JsonNode;
 import traceworks.core.app.FindingDetails;
@@ -22,14 +23,18 @@ import traceworks.core.register.ItemsText;
 import traceworks.core.register.FindingStatus;
 import traceworks.core.register.RegisterState;
 import traceworks.core.register.StateJson;
+import traceworks.core.util.Message;
 
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * {@code traceworks findings [<key> list|show|items|verify]}: what a register holds (docs/registers.md). Without a
@@ -54,8 +59,9 @@ public final class FindingsCommand implements Command {
                     findings                    the registers of this home, each with its counts by status, and
                                                 for an audit that lists its items how many of them are settled
                     findings <key> list         the findings of the register that are not resolved: id, status,
-                                                severity, rule key, subject and title; sorted by status, severity,
-                                                rule key and subject; --json prints them as a JSON array
+                                                severity, rule key, subject and title (no title that only repeats
+                                                the rule key and the subject); sorted by status, severity, rule
+                                                key and subject; --json prints them as a JSON array
                     findings <key> show <id>    one finding, by its id or a prefix of at least 8 characters, and
                                                 its detail (what is wrong, the fix, the quoted line) from
                                                 findings.jsonl of the run that last reported it
@@ -98,18 +104,20 @@ public final class FindingsCommand implements Command {
         }
         String key = words.get(0);
         if (!findings.keys().contains(key)) {
-            throw new UsageException("No register '" + key + "'" + (findings.keys().isEmpty()
-                    ? "; no audit run has fed one" : "; the registers are " + String.join(", ", findings.keys())));
+            throw new UsageException(Message.of("No register '", Message.typed(key), "'", findings.keys().isEmpty()
+                    ? "; no audit run has fed one" : Message.of("; the registers are ",
+                    Message.join(", ", findings.keys().stream().map(known -> Message.of(Message.quoted(known)))
+                            .toList()))));
         }
         String action = words.size() > 1 ? words.get(1) : "list";
         if (args.option("agent") != null && !List.of("accept", "dismiss", "reopen").contains(action)) {
-            throw new UsageException("--agent belongs to accept, dismiss and reopen: it names who decides");
+            throw new UsageException(Message.of("--agent belongs to accept, dismiss and reopen: it names who decides"));
         }
         return switch (action) {
             case "list" -> list(context.out(), findings.state(key), args);
             case "show" -> {
                 if (words.size() < 3) {
-                    throw new UsageException("findings " + key + " show needs the id of a finding");
+                    throw new UsageException(Message.of("findings ", Message.typed(key), " show needs the id of a finding"));
                 }
                 yield show(context, findings.state(key), findings.events(key), words.get(2));
             }
@@ -125,16 +133,17 @@ public final class FindingsCommand implements Command {
                 yield ExitCodes.OK;
             }
             case "verify" -> verify(context.out(), key, findings.verified(key));
-            default -> throw new UsageException("unknown findings command '" + action
-                    + "'; the commands are 'list', 'show', 'items', 'accept', 'dismiss', 'reopen', 'render' and"
-                    + " 'verify'");
+            default -> throw new UsageException(Message.of("unknown findings command '", Message.typed(action),
+                    "'; the commands are 'list', 'show', 'items', 'accept', 'dismiss', 'reopen', 'render' and"
+                    + " 'verify'"));
         };
     }
 
     private static int decide(PrintStream out, Findings findings, String key, String action, List<String> words,
                               Parsed args, Map<String, String> env) {
         if (words.size() < 3) {
-            throw new UsageException("findings " + key + " " + action + " needs the id of a finding");
+            throw new UsageException(Message.of("findings ", Message.typed(key), " " + action
+                    + " needs the id of a finding"));
         }
         // Who decides under the actor: the option, else the variable of a harness. A blank or bad name is refused
         // here, before anything is asked of the register: it must not be recorded as a person's decision
@@ -142,22 +151,24 @@ public final class FindingsCommand implements Command {
         try {
             agent = DecisionAgent.resolve(args.option("agent"), env);
         } catch (IllegalArgumentException e) {
-            throw new UsageException(e.getMessage());
+            throw new UsageException(Message.of(e));
         }
         String note = args.option("note");
         String untilText = args.option("until");
         if (!action.equals("reopen") && (note == null || note.isBlank())) {
-            throw new UsageException("findings " + key + " " + action + " needs --note \"why\"");
+            throw new UsageException(Message.of("findings ", Message.typed(key), " " + action
+                    + " needs --note \"why\""));
         }
         if (!action.equals("accept") && untilText != null) {
-            throw new UsageException("--until belongs to accept only");
+            throw new UsageException(Message.of("--until belongs to accept only"));
         }
         java.time.Instant until = null;
         if (untilText != null) {
             try {
                 until = java.time.LocalDate.parse(untilText).atStartOfDay(java.time.ZoneOffset.UTC).toInstant();
             } catch (java.time.format.DateTimeParseException e) {
-                throw new UsageException("--until takes a date as YYYY-MM-DD, got '" + untilText + "'");
+                throw new UsageException(Message.of("--until takes a date as YYYY-MM-DD, got '",
+                        Message.typed(untilText), "'"));
             }
         }
         Finding finding = switch (action) {
@@ -167,13 +178,13 @@ public final class FindingsCommand implements Command {
         };
         String id = finding.id().substring(0, 8);
         // The agent as it was recorded, so a harness sees that its name arrived; nothing more for a person
-        String through = TerminalFormat.safe(DecisionAgent.through(agent));
-        out.println(switch (action) {
-            case "accept" -> "accepted " + id + " as a risk" + through + ", review by "
-                    + finding.disposition().until().atZone(java.time.ZoneOffset.UTC).toLocalDate();
-            case "dismiss" -> "dismissed " + id + through;
-            default -> "reopened " + id + through;
-        });
+        Object through = TerminalFormat.through(agent);
+        switch (action) {
+            case "accept" -> TerminalText.println(out, "accepted " + id + " as a risk", through, ", review by "
+                    + finding.disposition().until().atZone(java.time.ZoneOffset.UTC).toLocalDate());
+            case "dismiss" -> TerminalText.println(out, "dismissed " + id, through);
+            default -> TerminalText.println(out, "reopened " + id, through);
+        }
         return ExitCodes.OK;
     }
 
@@ -187,16 +198,17 @@ public final class FindingsCommand implements Command {
             RegisterState state = findings.state(key);
             Map<FindingStatus, Integer> counts = new EnumMap<>(FindingStatus.class);
             state.findings().forEach(f -> counts.merge(f.status(), 1, Integer::sum));
-            StringBuilder line = new StringBuilder(TerminalFormat.safe(key)).append("  ")
-                    .append(state.category() == null ? "-" : TerminalFormat.oneLine(state.category()));
+            // The key is the name of a folder of the home; the category is the workflow's word
+            List<Object> line = new ArrayList<>(List.of(TerminalText.whole(key), "  ",
+                    state.category() == null ? "-" : TerminalText.oneLine(state.category())));
             for (FindingStatus status : ORDER) {
                 if (counts.containsKey(status)) {
-                    line.append("  ").append(status).append(' ').append(counts.get(status));
+                    line.add("  " + status + ' ' + counts.get(status));
                 }
             }
-            out.println(line);
+            TerminalText.println(out, line);
             if (!state.items().isEmpty()) {
-                out.println("  items " + ItemsText.summary(state));
+                TerminalText.println(out, "  items ", ItemsText.summary(state));
             }
         }
         return ExitCodes.OK;
@@ -218,8 +230,9 @@ public final class FindingsCommand implements Command {
         int width = listed.stream().mapToInt(i -> i.verdictDigest() == null ? 1 : i.verdictDigest().length()).max()
                 .orElse(1);
         for (Item item : listed) {
-            out.println(String.format("%-10s  %-" + width + "s  %s", ItemState.of(item, state.findings()).word(),
-                    item.verdictDigest() == null ? "-" : item.verdictDigest(), TerminalFormat.safe(item.name())));
+            TerminalText.println(out, String.format("%-10s  ", ItemState.of(item, state.findings()).word()),
+                    TerminalText.safe(item.verdictDigest() == null ? "-" : item.verdictDigest()).padded(width), "  ",
+                    TerminalText.safe(item.name()));
         }
         return ExitCodes.OK;
     }
@@ -237,10 +250,56 @@ public final class FindingsCommand implements Command {
             out.flush();
             return ExitCodes.OK;
         }
-        listed.forEach(f -> out.println(String.format("%s  %-9s  %-8s  %s  %s  %s%s", f.id().substring(0, 8),
-                f.status(), f.severity(), TerminalFormat.oneLine(f.ruleKey()),
-                TerminalFormat.oneLine(f.subject()), TerminalFormat.oneLine(f.title()), decisionNote(f))));
+        listed.forEach(f -> row(out, f));
         return ExitCodes.OK;
+    }
+
+    /**
+     * One row of the list. The rule, the subject and the title are a report's text: a row too long goes on on
+     * marked lines. A title that says nothing the row does not say ({@link #repeats}) is left out; and under a
+     * subject that did not fit its line the title begins a line of its own, marked as a text that begins one, so
+     * that a reader sees where the subject ends.
+     */
+    private static void row(PrintStream out, Finding f) {
+        List<Object> row = new ArrayList<>(List.of(String.format("%s  %-9s  %-8s  ", f.id().substring(0, 8),
+                f.status(), f.severity()), TerminalText.oneLine(f.ruleKey()), "  ", TerminalText.oneLine(f.subject())));
+        if (repeats(f.title(), f.ruleKey(), f.subject())) {
+            TerminalText.println(out, row, decisionNote(f));
+        } else if (TerminalText.lines(row).size() > 1) {
+            TerminalText.println(out, row);
+            TerminalText.println(out, "    ", TerminalText.oneLine(f.title()), decisionNote(f));
+        } else {
+            TerminalText.println(out, row, "  ", TerminalText.oneLine(f.title()), decisionNote(f));
+        }
+    }
+
+    /** What a title may hold beside the rule and the subject and still say nothing of its own. */
+    private static final Set<String> FILLER = Set.of("finding", "findings", "in", "of", "for", "at", "on", "the", "a",
+            "an");
+    /** Where a rule key, a subject and a title are taken apart: white space and the separators between parts. */
+    private static final Pattern PARTS = Pattern.compile("[\\s#,/:_-]+");
+
+    /**
+     * Whether a title only repeats its row. The title, the rule key and the subject are each put in lower case
+     * and taken apart at white space and at {@code # , / : _ -}; the title repeats the row when each of its parts
+     * is a part of the rule key or of the subject, or one of the filler words {@code finding}, {@code findings},
+     * {@code in}, {@code of}, {@code for}, {@code at}, {@code on}, {@code the}, {@code a} and {@code an}, in any
+     * order. So {@code path_check finding in a/Mount.java, Mount.check(Path)} repeats the subject
+     * {@code a/Mount.java#Mount.check(Path)}, as {@code Package cycle: core.x} repeats the rule
+     * {@code package-cycle} and the subject {@code core.x}, and an empty title repeats any row. Any other part
+     * keeps the title: a word of its own, and a number too ({@code 2 path_check findings in ...}), since the row
+     * says the count nowhere else. The comparison reads the texts and prints nothing.
+     */
+    static boolean repeats(String title, String ruleKey, String subject) {
+        Set<String> known = new HashSet<>(FILLER);
+        known.addAll(parts(ruleKey));
+        known.addAll(parts(subject));
+        return known.containsAll(parts(title));
+    }
+
+    private static List<String> parts(String text) {
+        return text == null ? List.of() : PARTS.splitAsStream(text.toLowerCase(Locale.ROOT))
+                .filter(part -> !part.isEmpty()).toList();
     }
 
     /**
@@ -251,22 +310,23 @@ public final class FindingsCommand implements Command {
      * the agent, so that nobody reads the status as a person's decision: {@code (through the agent claude-code)},
      * or inside one of the two notes above. Empty otherwise.
      */
-    private static String decisionNote(Finding f) {
+    private static Object decisionNote(Finding f) {
         if (f.disposition() == null) {
             return "";
         }
         String kind = f.disposition().kind() == FindingStatus.ACCEPTED_RISK ? "accepted" : "dismissed";
         String on = f.disposition().severity() == null ? "" : " on " + f.disposition().severity();
         // The name is bounded where it is given; a log that was edited can hold any, so it is made safe here
-        String agent = TerminalFormat.oneLine(DecisionAgent.through(f.disposition().agent()));
-        String through = agent.isEmpty() ? "" : " " + agent;
+        String name = f.disposition().agent();
+        Object through = TerminalFormat.through(name);
         if (!f.decisionInForce()) {
-            return "  (" + kind + on + through + " before, not in force)";
+            return TerminalText.seq("  (" + kind + on, through, " before, not in force)");
         }
         if (f.decidedOnOtherSeverity() != null) {
-            return "  (decided on " + f.decidedOnOtherSeverity() + through + ")";
+            return TerminalText.seq("  (decided on " + f.decidedOnOtherSeverity(), through, ")");
         }
-        return agent.isEmpty() ? "" : "  (" + agent + ")";
+        return name == null ? "" : TerminalText.seq("  (" + DecisionAgent.through("").strip() + " ",
+                TerminalText.oneLine(name), ")");
     }
 
     private static FindingStatus status(String value) {
@@ -276,39 +336,44 @@ public final class FindingsCommand implements Command {
         try {
             return FindingStatus.valueOf(value.toUpperCase(Locale.ROOT).replace('-', '_'));
         } catch (IllegalArgumentException e) {
-            throw new UsageException("--status takes one of " + List.of(FindingStatus.values()) + ", got '" + value + "'");
+            throw new UsageException(Message.of("--status takes one of " + List.of(FindingStatus.values())
+                    + ", got '", Message.typed(value), "'"));
         }
     }
 
     private static int show(Context context, RegisterState state, List<RegisterEvent> events, String reference) {
         PrintStream out = context.out();
         if (reference.length() < 8) {
-            throw new UsageException("a finding is named by its id or a prefix of at least 8 characters");
+            throw new UsageException(Message.of("a finding is named by its id or a prefix of at least 8 characters"));
         }
         List<Finding> matches = state.findings().stream().filter(f -> f.id().startsWith(reference)).toList();
         if (matches.size() != 1) {
-            throw new UsageException(matches.isEmpty() ? "No finding of " + state.key() + " starts with " + reference
-                    : matches.size() + " findings of " + state.key() + " start with " + reference);
+            throw new UsageException(Message.of(matches.isEmpty() ? "No finding of " : matches.size()
+                    + " findings of ", Message.typed(state.key()), matches.isEmpty() ? " starts with "
+                    : " start with ", Message.typed(reference)));
         }
         Finding f = matches.getFirst();
         out.println("Finding   " + f.id());
-        out.println("Register  " + TerminalFormat.safe(state.key()));
+        TerminalText.println(out, "Register  ", TerminalText.whole(state.key()));
         out.println("Status    " + f.status());
         out.println("Severity  " + f.severity());
-        out.println("Rule      " + TerminalFormat.oneLine(f.ruleKey()));
-        out.println("Subject   " + TerminalFormat.oneLine(f.subject()));
-        out.println("Title     " + TerminalFormat.oneLine(f.title()));
+        TerminalText.println(out, "Rule      ", TerminalText.oneLine(f.ruleKey()));
+        TerminalText.println(out, "Subject   ", TerminalText.oneLine(f.subject()));
+        TerminalText.println(out, "Title     ", TerminalText.oneLine(f.title()));
         if (f.description() != null) {
-            out.println("About     " + TerminalFormat.oneLine(f.description()));
+            TerminalText.println(out, "About     ", TerminalText.oneLine(f.description()));
         }
         if (f.evidence() != null) {
-            out.println("Evidence  " + TerminalFormat.oneLine(f.evidence()) + (f.unverifiedEvidence() ? " (unverified)" : ""));
+            TerminalText.println(out, "Evidence  ", TerminalText.oneLine(f.evidence()),
+                    f.unverifiedEvidence() ? " (unverified)" : "");
         }
         if (!f.tags().isEmpty()) {
-            out.println("Tags      " + TerminalFormat.oneLine(String.join(", ", f.tags())));
+            TerminalText.println(out, "Tags      ", TerminalText.oneLine(String.join(", ", f.tags())));
         }
-        out.println("First     run " + TerminalFormat.safe(f.firstSeen().runId()) + " at " + f.firstSeen().at());
-        out.println("Last      run " + TerminalFormat.safe(f.lastSeen().runId()) + " at " + f.lastSeen().at());
+        TerminalText.println(out, "First     run ", TerminalText.safe(f.firstSeen().runId()),
+                " at " + f.firstSeen().at());
+        TerminalText.println(out, "Last      run ", TerminalText.safe(f.lastSeen().runId()),
+                " at " + f.lastSeen().at());
         out.println("Occurrences " + f.occurrences());
         out.println("Regressions " + f.regressions());
         if (f.absentReports() > 0 && (f.status() == FindingStatus.OPEN
@@ -323,16 +388,16 @@ public final class FindingsCommand implements Command {
         if (f.disposition() != null) {
             Finding.DispositionRecord d = f.disposition();
             String madeOn = Disposition.madeOn(f);
-            out.println("Decision  " + d.kind() + " by " + TerminalFormat.safe(d.actor())
-                    + TerminalFormat.safe(DecisionAgent.through(d.agent())) + " at " + d.at()
+            TerminalText.println(out, "Decision  " + d.kind() + " by ", TerminalText.safe(d.actor()),
+                    TerminalFormat.through(d.agent()), " at " + d.at()
                     + (d.until() == null ? "" : ", review by " + d.until())
                     + (madeOn == null ? "" : ", " + madeOn)
                     + (f.status() == d.kind() ? "" : "; not in force: the finding is " + f.status()));
             String evidence = decidedEvidence(events, f);
             if (evidence != null && !evidence.equals(f.evidence())) {
-                out.println("Made on   evidence: " + TerminalFormat.oneLine(evidence));
+                TerminalText.println(out, "Made on   evidence: ", TerminalText.oneLine(evidence));
             }
-            out.println("Note      " + TerminalFormat.oneLine(d.note() == null ? "(no note)" : d.note()));
+            TerminalText.println(out, "Note      ", TerminalText.oneLine(d.note() == null ? "(no note)" : d.note()));
         }
         detail(out, FindingDetails.of(context.services(), f));
         return ExitCodes.OK;
@@ -367,13 +432,14 @@ public final class FindingsCommand implements Command {
      */
     private static void detail(PrintStream out, FindingDetails.Detail detail) {
         if (detail.missing() != null) {
-            out.println("Detail    none: " + TerminalFormat.oneLine(detail.missing()));
+            TerminalText.println(out, "Detail    none: ", TerminalText.oneLine(detail.missing()));
             return;
         }
-        out.println("Detail    from " + FindingDetails.FILE + " of run " + TerminalFormat.safe(detail.runId()));
+        TerminalText.println(out, "Detail    from " + FindingDetails.FILE + " of run ",
+                TerminalText.safe(detail.runId()));
         for (JsonNode entry : detail.entries()) {
             if (entry.hasNonNull("item")) {
-                out.println("  item      " + TerminalFormat.oneLine(entry.get("item").asText()));
+                TerminalText.println(out, "  item      ", TerminalText.oneLine(entry.get("item").asText()));
             }
             int shown = 0;
             for (JsonNode place : entry.path("details")) {
@@ -381,30 +447,30 @@ public final class FindingsCommand implements Command {
                     continue;
                 }
                 if (place.hasNonNull("file")) {
-                    out.println("  file      " + TerminalFormat.oneLine(place.get("file").asText()
+                    TerminalText.println(out, "  file      ", TerminalText.oneLine(place.get("file").asText()
                             + (place.hasNonNull("line") ? ":" + place.get("line").asText() : "")));
                 }
                 if (place.hasNonNull("quote")) {
-                    out.println("  quote     " + TerminalFormat.oneLine(place.get("quote").asText()));
+                    TerminalText.println(out, "  quote     ", TerminalText.oneLine(place.get("quote").asText()));
                 }
-                fields(place, "  ", 9).forEach(out::println);
-                List<String> words = fields(place.path("model"), "    ", 7);
+                fields(place, "  ", 9).forEach(line -> TerminalText.println(out, line));
+                List<List<Object>> words = fields(place.path("model"), "    ", 7);
                 if (!words.isEmpty()) {
                     out.println("  the model's words, not checked:");
-                    words.forEach(out::println);
+                    words.forEach(line -> TerminalText.println(out, line));
                 }
             }
         }
     }
 
     /** The scalar fields of {@code object} that say something, one line each: the name, padded, and the value. */
-    private static List<String> fields(JsonNode object, String indent, int width) {
-        List<String> lines = new ArrayList<>();
+    private static List<List<Object>> fields(JsonNode object, String indent, int width) {
+        List<List<Object>> lines = new ArrayList<>();
         object.fieldNames().forEachRemaining(name -> {
             JsonNode value = object.get(name);
             if (!PLACE.contains(name) && !value.isNull() && !value.isContainerNode() && !value.asText().isBlank()) {
-                lines.add(indent + String.format("%-" + width + "s", TerminalFormat.oneLine(name)) + " "
-                        + TerminalFormat.oneLine(value.asText()));
+                lines.add(List.of(indent, TerminalText.oneLine(name).padded(width), " ",
+                        TerminalText.oneLine(value.asText())));
             }
         });
         return lines;
@@ -415,10 +481,11 @@ public final class FindingsCommand implements Command {
      * which it took and recorded), and that the ledger did not take its own anchor; the write stays either way.
      */
     private static void unanchored(PrintStream err, Findings findings, String key, String what) {
-        findings.anchorNote().ifPresent(note -> err.println("traceworks: note: " + TerminalFormat.safe(note)));
-        findings.unanchored().ifPresent(why -> err.println("traceworks: warning: " + what + " is not anchored in the"
-                + " ledger (" + TerminalFormat.oneLine(why) + "); 'traceworks findings " + TerminalFormat.safe(key)
-                + " render' anchors it once the ledger can be written"));
+        findings.anchorNote().ifPresent(note -> TerminalText.println(err, "traceworks: note: ",
+                TerminalText.safe(note)));
+        findings.unanchored().ifPresent(why -> TerminalText.println(err, "traceworks: warning: " + what
+                + " is not anchored in the ledger (", TerminalText.oneLine(why), "); 'traceworks findings ",
+                TerminalText.whole(key), " render' anchors it once the ledger can be written"));
     }
 
     /**
@@ -427,24 +494,26 @@ public final class FindingsCommand implements Command {
      */
     private static int verify(PrintStream out, String key, Findings.Verified verified) {
         ChainReport report = verified.report();
-        String anchor = verified.anchor() == null ? null : "anchor    " + TerminalFormat.safe(verified.anchor());
+        Object anchor = verified.anchor() == null ? null
+                : TerminalText.seq("anchor    ", TerminalText.safe(verified.anchor()));
         if (report.intact()) {
-            out.println("chain     ok (" + report.events() + " events, head " + TerminalFormat.safe(report.head()) + ")");
+            TerminalText.println(out, "chain     ok (" + report.events() + " events, head ",
+                    TerminalText.safe(report.head()), ")");
             if (anchor != null) {
-                out.println(anchor);
+                TerminalText.println(out, anchor);
             }
             out.println("verified");
             return ExitCodes.OK;
         }
         // By what the chain's own check found, never by the words of a problem: a key may be any word
-        out.println(verified.chainHolds() ? "chain     ok (" + report.events() + " events, head "
-                + TerminalFormat.safe(report.head()) + ")" : "chain     NOT intact (" + report.events()
+        TerminalText.println(out, verified.chainHolds() ? TerminalText.seq("chain     ok (" + report.events()
+                + " events, head ", TerminalText.safe(report.head()), ")") : "chain     NOT intact (" + report.events()
                 + " events read)");
         if (anchor != null) {
-            out.println(anchor);
+            TerminalText.println(out, anchor);
         }
-        report.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem)));
-        out.println("register " + TerminalFormat.safe(key) + " does not verify");
+        report.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.safe(problem)));
+        TerminalText.println(out, "register ", TerminalText.whole(key), " does not verify");
         return ExitCodes.VERIFY_FAILED;
     }
 }

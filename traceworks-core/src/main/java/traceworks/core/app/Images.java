@@ -11,6 +11,7 @@ import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.PackageImage;
 import traceworks.core.port.PackageLoader;
 import traceworks.core.port.WorkflowResolver;
+import traceworks.core.util.Message;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -112,8 +113,8 @@ public final class Images {
     static String repositoryId(String packageId) {
         String id = packageId == null ? "" : packageId.toLowerCase(Locale.ROOT);
         if (!REPOSITORY_ID.matcher(id).matches()) {
-            throw new RunRefusedException("The package id \"" + packageId + "\" cannot name its images: in lowercase it"
-                    + " must match [a-z0-9][a-z0-9._-]* (letters, digits, '.', '_' and '-')");
+            throw new RunRefusedException(Message.of("The package id \"", Message.quoted(packageId), "\" cannot name its images: in lowercase it"
+                    + " must match [a-z0-9][a-z0-9._-]* (letters, digits, '.', '_' and '-')"));
         }
         return id;
     }
@@ -225,17 +226,26 @@ public final class Images {
      */
     List<String> missing(LoadedPackage pkg, boolean containerRun, WorkflowResolver children,
                          WorkflowUses.Picks picks) {
+        return missingParts(pkg, containerRun, children, picks).stream().map(Message::text).toList();
+    }
+
+    /**
+     * {@link #missing(LoadedPackage, boolean, WorkflowResolver, WorkflowUses.Picks)}, each line with its parts: the
+     * command to copy is Traceworks' own, the name of an image a workflow gives is quoted.
+     */
+    List<Message> missingParts(LoadedPackage pkg, boolean containerRun, WorkflowResolver children,
+                               WorkflowUses.Picks picks) {
         ImageCatalog catalog;
         try {
             catalog = catalog(pkg);
         } catch (RunRefusedException e) {
-            return List.of(e.getMessage());
+            return List.of(Message.of(e));
         }
-        String packageCommand = BUILD_COMMAND + " " + pkg.directory();
+        Message packageCommand = Message.of(BUILD_COMMAND + " ", Message.quoted(pkg.directory()));
         Set<String> seen = new LinkedHashSet<>();
-        List<String> lines = new ArrayList<>();
+        List<Message> lines = new ArrayList<>();
         if (containerRun) {
-            check(catalog.builtInTags().get(ImageCatalog.SHELL), BUILD_COMMAND, seen, lines);
+            check(catalog.builtInTags().get(ImageCatalog.SHELL), true, Message.of(BUILD_COMMAND), seen, lines);
         }
         Set<String> providers = WorkflowUses.providers(pkg.definition(), children, picks);
         for (String name : AI_IMAGES) {
@@ -244,15 +254,15 @@ public final class Images {
             }
             String operatorImage = aiImages.get(name);
             if (operatorImage == null) {
-                check(catalog.builtInTags().get(name), BUILD_COMMAND, seen, lines);
+                check(catalog.builtInTags().get(name), true, Message.of(BUILD_COMMAND), seen, lines);
             } else if (seen.add(operatorImage) && !present(operatorImage, lines)) {
-                lines.add("image " + operatorImage + " is missing: it is the image of " + name + " in ai_images of"
-                        + " traceworks.json, which Traceworks never builds or pulls; build or pull it yourself,"
-                        + " or remove the entry to use the built-in image");
+                lines.add(Message.of("image ", Message.quoted(operatorImage), " is missing: it is the image of "
+                        + name + " in ai_images of traceworks.json, which Traceworks never builds or pulls; build or"
+                        + " pull it yourself, or remove the entry to use the built-in image"));
             }
         }
         if (!aiNetwork.open() && AI_IMAGES.stream().anyMatch(providers::contains)) {
-            check(catalog.builtInTags().get(ImageCatalog.EGRESS), BUILD_COMMAND, seen, lines);
+            check(catalog.builtInTags().get(ImageCatalog.EGRESS), true, Message.of(BUILD_COMMAND), seen, lines);
         }
         for (ChildWorkflows.Reached reached : ChildWorkflows.reached(pkg.definition(), children)) {
             if (!reached.otherPackage()) {
@@ -261,9 +271,10 @@ public final class Images {
             WorkflowDefinition child = reached.definition();
             for (String image : WorkflowUses.literalImages(child)) {
                 if (image.startsWith(ImageCatalog.PACKAGE_IMAGE_PREFIX) && seen.add(child.id() + " " + image)) {
-                    lines.add("image " + image + " of the child workflow " + child.id() + " names an image of"
-                            + " another package than the run's, and a run resolves ./images/ against its own package"
-                            + " only: give the image a registry name, or run " + child.id() + " as a run of its own");
+                    lines.add(Message.of("image ", Message.quoted(image), " of the child workflow ",
+                            Message.quoted(child.id()), " names an image of another package than the run's, and a"
+                            + " run resolves ./images/ against its own package only: give the image a registry name,"
+                            + " or run ", Message.quoted(child.id()), " as a run of its own"));
                 }
             }
         }
@@ -273,27 +284,30 @@ public final class Images {
                 if (!ImageCatalog.validPackageImageName(image)) {
                     if (seen.add(image)) {
                         String name = image.substring(ImageCatalog.PACKAGE_IMAGE_PREFIX.length());
-                        lines.add("image " + image + ": \"" + name + "\" is not a valid package image name ("
-                                + ImageCatalog.NAME_SYNTAX + ")");
+                        lines.add(Message.of("image ", Message.quoted(image), ": \"", Message.quoted(name),
+                                "\" is not a valid package image name (" + ImageCatalog.NAME_SYNTAX + ")"));
                     }
                 } else if (tag == null) {
                     if (seen.add(image)) {
-                        lines.add("image " + image + " has no Dockerfile: " + pkg.directory() + "/images/"
-                                + image.substring(ImageCatalog.PACKAGE_IMAGE_PREFIX.length()) + "/Dockerfile");
+                        lines.add(Message.of("image ", Message.quoted(image), " has no Dockerfile: ",
+                                Message.quoted(pkg.directory() + "/images/"
+                                + image.substring(ImageCatalog.PACKAGE_IMAGE_PREFIX.length()) + "/Dockerfile")));
                     }
                 } else {
-                    check(tag, packageCommand, seen, lines);
+                    check(tag, false, packageCommand, seen, lines);
                 }
             } else {
-                check(image, packageCommand, seen, lines);
+                check(image, false, packageCommand, seen, lines);
             }
         }
         return lines;
     }
 
-    private void check(String reference, String command, Set<String> seen, List<String> lines) {
+    /** @param builtIn whether the reference is a tag Traceworks made itself, and not what a workflow names */
+    private void check(String reference, boolean builtIn, Message command, Set<String> seen, List<Message> lines) {
         if (reference != null && seen.add(reference) && !present(reference, lines)) {
-            lines.add("image " + reference + " is missing: run '" + command + "'");
+            lines.add(Message.of("image ", builtIn ? reference : Message.quoted(reference), " is missing: run '",
+                    command, "'"));
         }
     }
 
@@ -301,10 +315,10 @@ public final class Images {
      * Whether the image is present. A lookup that could not tell, such as one that timed out, is no missing image:
      * its own reason becomes the line, and the image counts as present for the caller.
      */
-    private boolean present(String reference, List<String> lines) {
+    private boolean present(String reference, List<Message> lines) {
         ContainerRuntime.ImageLookup lookup = runtime.lookup(reference);
         if (lookup.failure() != null) {
-            lines.add(lookup.failure());
+            lines.add(Message.of(Message.quoted(lookup.failure())));
             return true;
         }
         return lookup.imageId() != null;
@@ -314,7 +328,7 @@ public final class Images {
         try {
             return packages.load(location);
         } catch (IllegalArgumentException e) {
-            throw new RunRefusedException(e.getMessage());
+            throw new RunRefusedException(Message.of(e));
         }
     }
 }

@@ -10,6 +10,7 @@ import traceworks.core.port.StoredRun;
 import traceworks.core.record.RecordTypes;
 import traceworks.core.record.RecordedEvent;
 import traceworks.core.record.Redactor;
+import traceworks.core.util.Message;
 
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -83,20 +84,20 @@ final class Checkouts {
         try {
             checkout = sources.checkout(source, ref, directory);
         } catch (IllegalArgumentException | IllegalStateException | UncheckedIOException e) {
-            throw new RunRefusedException("The run is refused: " + e.getMessage());
+            throw new RunRefusedException(Message.of("The run is refused: ", Message.of(e)));
         }
         try {
             // One resolution, judged and handed on: the workspace is the path the check saw
             HostDirectories.Checked checked = directories.check(directory);
             if (checked.isRefused()) {
-                throw new RunRefusedException("The run is refused: its checkout " + directory + " cannot be mounted: "
-                        + checked.refusal());
+                throw new RunRefusedException(Message.of("The run is refused: its checkout " + directory + " cannot be mounted: ",
+                        Message.quoted(checked.refusal())));
             }
             return new Started(checked.realPath(), checkout);
         } catch (RuntimeException e) {
             removeAfter(directory, e);
             throw e instanceof RunRefusedException ? e
-                    : new RunRefusedException("The run is refused: " + e.getMessage());
+                    : new RunRefusedException(Message.of("The run is refused: ", Message.of(e)));
         }
     }
 

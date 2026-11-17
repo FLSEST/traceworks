@@ -1,10 +1,11 @@
 package traceworks.cli.command;
 
-import traceworks.cli.Context;
 import traceworks.cli.TerminalFormat;
+import traceworks.cli.Context;
 import traceworks.cli.UsageException;
 import traceworks.core.model.RunStatus;
 import traceworks.core.record.RunView;
+import traceworks.core.util.Message;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -38,15 +39,17 @@ final class RunningRun {
             return running.getFirst().runId();
         }
         if (running.isEmpty()) {
-            throw new UsageException("no run is running now, so '" + command + "' needs <run>; 'traceworks runs'"
-                    + " lists the runs");
+            throw new UsageException(Message.of("no run is running now, so '" + command + "' needs <run>;"
+                    + " 'traceworks runs' lists the runs"));
         }
-        throw new UsageException(running.size() + " runs are running now, so '" + command + "' needs one of them: "
-                + running.stream().map(RunningRun::named).collect(Collectors.joining(", ")));
+        throw new UsageException(Message.of(running.size() + " runs are running now, so '" + command
+                + "' needs one of them: ", Message.join(", ", running.stream().map(RunningRun::named).toList())));
     }
 
-    private static String named(RunView run) {
-        String name = run.workflowName() == null ? "" : " (" + TerminalFormat.oneLine(run.workflowName()) + ")";
-        return TerminalFormat.safe(TerminalFormat.shortId(run.runId())) + name;
+    private static Message named(RunView run) {
+        // The id is Traceworks' own; the name is the workflow's, and quoted
+        return run.workflowName() == null ? Message.of(TerminalFormat.shortId(run.runId()))
+                : Message.of(TerminalFormat.shortId(run.runId()) + " (", Message.quoted(run.workflowName().strip()),
+                        ")");
     }
 }

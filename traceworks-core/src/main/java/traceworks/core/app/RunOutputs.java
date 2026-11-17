@@ -7,6 +7,7 @@ import traceworks.core.record.ChainVerifier;
 import traceworks.core.record.Manifest;
 import traceworks.core.record.RunView;
 import traceworks.core.record.StartEntry;
+import traceworks.core.util.Message;
 import traceworks.core.view.RunHtml;
 
 import java.util.ArrayList;
@@ -83,9 +84,9 @@ final class RunOutputs {
     List<String> complete(StoredRun run, byte[] catalogJson) {
         String id = run.runId();
         if (!run.inStore()) {
-            throw new RunRefusedException("Run " + id + " has finished, and its folder is not in the runs folder of"
-                    + " this home, so this home's ledger does not record it; check the copy with traceworks verify "
-                    + run.location());
+            throw new RunRefusedException(Message.of("Run " + id + " has finished, and its folder is not in the runs folder of"
+                    + " this home, so this home's ledger does not record it; check the copy with traceworks verify ",
+                    Message.typed(run.location())));
         }
         Optional<byte[]> manifest = run.readManifest();
         Optional<byte[]> copy = ledger.find(id);
@@ -144,9 +145,9 @@ final class RunOutputs {
                 ledger.recordStart(id, StartEntry.of(run.events().readAll().getFirst()).toJson());
             }
         } catch (RuntimeException e) {
-            throw new RunRefusedException("Run " + id + " cannot resume: the ledger holds no start entry of it and"
-                    + " could not take one now, and no step runs in a run the ledger does not name: "
-                    + e.getMessage());
+            throw new RunRefusedException(Message.of("Run " + id + " cannot resume: the ledger holds no start entry of it and"
+                    + " could not take one now, and no step runs in a run the ledger does not name: ",
+                    Message.of(e)));
         }
     }
 

