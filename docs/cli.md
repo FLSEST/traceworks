@@ -439,7 +439,8 @@ the provider's prompt cache held included (docs/events.md, "ai.response").
 A has, `+` for one only run B has, two lines of context, the rest counted. The outputs come from the record as
 `show --full` prints them, so with the same redaction and with control characters made harmless. The diff is
 computed in memory and bounded: when the parts that differ are larger than 4 000 000 line pairs (2 000 by 2 000
-lines, say), the command says so instead. A deleted output blob is named as such.
+lines, say), or one of the outputs has more than 200 000 lines, the command says so instead. A deleted output blob
+is named as such.
 
 **Audit runs.** For two runs of an audit workflow that feed the same register (docs/registers.md), a section
 `Findings (register <key>)` lists the findings that are `new`, `resolved` and `reopened` between the two: the state the

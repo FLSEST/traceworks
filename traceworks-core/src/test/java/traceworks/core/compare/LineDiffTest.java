@@ -68,6 +68,21 @@ class LineDiffTest {
         assertThat(diff).isEmpty();
     }
 
+    /**
+     * With one side empty the table has no cells, whatever the other side holds: a text of millions of lines would
+     * get a row of the table and a line of the diff each. So each side has a bound of its own.
+     */
+    @Test
+    void aSideOverItsOwnBound_hasNoDiff_alsoAgainstAnEmptyOne() {
+        List<String> most = java.util.Collections.nCopies(LineDiff.MAX_LINES, "x");
+        List<String> more = java.util.Collections.nCopies(LineDiff.MAX_LINES + 1, "x");
+
+        assertThat(LineDiff.of(most, List.of()).orElseThrow()).hasSize(LineDiff.MAX_LINES);
+        assertThat(LineDiff.of(more, List.of())).isEmpty();
+        assertThat(LineDiff.of(List.of(), more)).isEmpty();
+        assertThat(LineDiff.of(more, more)).as("equal texts too: every line would be a line of the diff").isEmpty();
+    }
+
     /** Long runs of equal lines are folded: the context around each change stays, the rest becomes a count. */
     @Test
     void fold_keepsTheContextAroundAChange_andCountsTheRest() {
