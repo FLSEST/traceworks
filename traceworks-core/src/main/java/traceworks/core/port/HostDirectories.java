@@ -5,7 +5,8 @@ import java.nio.file.Path;
 /**
  * Port to the host directories a run mounts into every one of its containers: the workspace and the package, which
  * the check of a step's own mounts never sees, and the run's scratch directory. The adapter reads the
- * file system: real paths, and whether a directory may be mounted at all.
+ * file system: real paths, and whether a directory may be mounted at all. It also answers, before a run starts,
+ * whether a writable mount a workflow writes out lies in a folder the operator listed.
  */
 public interface HostDirectories {
 
@@ -41,6 +42,18 @@ public interface HostDirectories {
 
     /** What a run mounts a directory as. */
     enum Role { WORKSPACE, PACKAGE }
+
+    /**
+     * Why a mount that a workflow writes out as writable ({@code host:container:rw}), with the host side
+     * {@code hostPath} as written, will be refused when its step runs for lying in no folder the operator listed
+     * ({@code writable_mounts} in {@code traceworks.json}); empty when a listed folder holds its real path, and
+     * for a host side that is no host path, which the step refuses for that. The start check of a run asks it of
+     * every such mount before any step runs. It is the rule of the listed folders alone: every other rule of a
+     * step's own mounts is asked when the step runs, where this one is asked again. By default nothing is refused.
+     */
+    default java.util.Optional<String> writableMountRefusal(String hostPath) {
+        return java.util.Optional.empty();
+    }
 
     /**
      * What {@link #check} found: a refusal, or the real path it judged.

@@ -129,7 +129,17 @@ final class AppFixture {
             checkedAs.put(directory, role);
             return check(directory);
         }
+
+        @Override
+        public java.util.Optional<String> writableMountRefusal(String hostPath) {
+            return java.util.Optional.ofNullable(unlistedWritableMounts.get(hostPath));
+        }
     };
+    /**
+     * The host sides of writable mounts that lie in no folder the operator listed, each with the refusal; any other
+     * host side lies in one.
+     */
+    final Map<String, String> unlistedWritableMounts = new LinkedHashMap<>();
     /** What the start check asked each directory as: the role it named with the check. */
     final Map<Path, HostDirectories.Role> checkedAs = new LinkedHashMap<>();
 

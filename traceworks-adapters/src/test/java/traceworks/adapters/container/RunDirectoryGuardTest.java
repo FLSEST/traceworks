@@ -396,6 +396,26 @@ class RunDirectoryGuardTest {
         }
     }
 
+    /**
+     * What the start check of a run asks of a writable mount a workflow writes out: the home's
+     * {@code writable_mounts}, by the real path, as the mount check asks it again when the step runs.
+     */
+    @Test
+    void aWritableMountAWorkflowWritesOut_isRefused_unlessAListedFolderHoldsIt() throws IOException {
+        Path out = Files.createDirectories(home.resolve("out"));
+        Files.createDirectories(home.resolve("documents"));
+        RunDirectoryGuard listing = new RunDirectoryGuard(traceworks.adapters.config.HomeLayout.of(traceworksHome)
+                .withWritableMounts(List.of(out)), home, Map.of());
+
+        assertThat(guard.writableMountRefusal("~/out")).as("without the setting")
+                .hasValueSatisfying(r -> assertThat(r).contains("writable_mounts",
+                        traceworksHome.resolve("traceworks.json").toString()));
+        assertThat(listing.writableMountRefusal("~/out")).isEmpty();
+        assertThat(listing.writableMountRefusal(out.resolve("reports").toString())).isEmpty();
+        assertThat(listing.writableMountRefusal("~/documents")).isPresent();
+        assertThat(listing.writableMountRefusal(out + "/../documents")).as("by the real path").isPresent();
+    }
+
     @Test
     void theRegistersOfTheHome_areRefused() throws IOException {
         Path register = Files.createDirectories(traceworksHome.resolve("registers/hello"));

@@ -102,6 +102,28 @@ class WorkflowDescriberTest {
                 "timeout 600 s");
     }
 
+    /**
+     * A writable mount that lies in no folder the operator listed is marked: a run of the package would be refused
+     * for it. What a placeholder names, and a read-only mount, is not asked.
+     */
+    @Test
+    void aWritableMountInNoListedFolder_isMarked() {
+        java.util.List<String> asked = new java.util.ArrayList<>();
+        WorkflowDescription described = WorkflowDescriber.describe(Described.pkg("""
+                {"id":"wf","blocks":[
+                 {"type":"shell","name":"export","config":{"command":"x","mounts":["/data:/data:ro","~/out:/out:rw",
+                  "/srv/listed:/l:rw","{{ scratch_dir }}/x:/x:rw"]}}]}"""), null, null, host -> {
+                    asked.add(host);
+                    return host.equals("~/out");
+                });
+
+        assertThat(facts(described.blocks().get(0), "shell")).contains("mounts /data:/data:ro, ~/out:/out:rw"
+                + " (writable, in no folder of writable_mounts: a run is refused), /srv/listed:/l:rw,"
+                + " {{ scratch_dir }}/x:/x:rw");
+        assertThat(asked).containsExactly("~/out", "/srv/listed");
+        assertThat(String.join("\n", DescriptionText.lines(described))).contains("in no folder of writable_mounts");
+    }
+
     /** Only the names of secrets exist in a package; no value is ever looked up. */
     @Test
     void aSecret_isNamedAndNeverResolved() {

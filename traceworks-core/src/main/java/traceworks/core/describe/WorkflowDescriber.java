@@ -80,9 +80,14 @@ public final class WorkflowDescriber {
         traceworks.core.port.LocalModels.Use of(String provider, String model);
     }
 
-    private WorkflowDescriber(Map<String, PackageImage> images, LocalServers local) {
+    /** Tells whether a writable mount lies in no folder the operator listed. */
+    private final java.util.function.Predicate<String> unlistedWritableMount;
+
+    private WorkflowDescriber(Map<String, PackageImage> images, LocalServers local,
+                              java.util.function.Predicate<String> unlistedWritableMount) {
         this.images = images;
         this.local = local == null ? LocalServers.NONE : local;
+        this.unlistedWritableMount = unlistedWritableMount == null ? host -> false : unlistedWritableMount;
     }
 
     /**
@@ -102,8 +107,21 @@ public final class WorkflowDescriber {
      * @param local finds the server of a step, from the operator's {@code local_models}
      */
     public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children, LocalServers local) {
+        return describe(pkg, children, local, null);
+    }
+
+    /**
+     * {@link #describe(LoadedPackage, WorkflowResolver, LocalServers)} in a home that lists the folders a package
+     * may mount writable: a writable mount that a block writes out and that lies in none of them is marked, since
+     * a run of the package is refused for it.
+     *
+     * @param unlistedWritableMount whether the host side of a writable mount, as the workflow writes it, lies in no
+     *                              folder the operator's {@code writable_mounts} lists; {@code null} marks none
+     */
+    public static WorkflowDescription describe(LoadedPackage pkg, WorkflowResolver children, LocalServers local,
+                                               java.util.function.Predicate<String> unlistedWritableMount) {
         WorkflowDefinition definition = pkg.definition();
-        WorkflowDescriber describer = new WorkflowDescriber(pkg.images(), local);
+        WorkflowDescriber describer = new WorkflowDescriber(pkg.images(), local, unlistedWritableMount);
         List<Block> blocks = describer.workflow(definition, children, List.of(definition));
         Map<String, String> inputs = new LinkedHashMap<>();
         definition.defaultContext().forEach((key, value) -> inputs.put(key, shown(value)));
@@ -258,7 +276,7 @@ public final class WorkflowDescriber {
             if (mounts == null) {
                 facts.add("mounts" + INVALID);
             } else if (!mounts.isEmpty()) {
-                facts.add("mounts " + String.join(", ", mounts));
+                facts.add("mounts " + String.join(", ", mounts.stream().map(this::mount).toList()));
             }
         }
         timeout(facts, settings, config);
@@ -282,6 +300,16 @@ public final class WorkflowDescriber {
         List<String> said = java.util.stream.Stream.of(facts.base(), facts.description())
                 .filter(java.util.Objects::nonNull).toList();
         return said.isEmpty() ? "" : " — " + String.join(": ", said);
+    }
+
+    /**
+     * A {@code mounts} entry as written; a writable one whose literal host side lies in no folder the operator
+     * listed says so, since a run is refused for it before its first step.
+     */
+    private String mount(String entry) {
+        String host = traceworks.core.engine.WritableMounts.literalHostOfAWritableEntry(entry);
+        return host != null && unlistedWritableMount.test(host)
+                ? entry + " (writable, in no folder of writable_mounts: a run is refused)" : entry;
     }
 
     private static String workspace(BlockSettings settings) {

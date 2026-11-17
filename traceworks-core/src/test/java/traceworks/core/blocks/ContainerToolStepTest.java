@@ -204,6 +204,7 @@ class ContainerToolStepTest {
 
         Mount output = mountAt(seen.get(), "/out");
         assertThat(output.readOnly()).isFalse();
+        assertThat(output.toolOutput()).as("the engine made it: no listed folder is asked of it").isTrue();
         assertThat(Path.of(output.hostPath()).getFileName().toString()).startsWith("traceworks-tool-");
         assertThat(Files.exists(Path.of(output.hostPath()))).isFalse();
     }

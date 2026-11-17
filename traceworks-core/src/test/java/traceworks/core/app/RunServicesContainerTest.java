@@ -365,6 +365,73 @@ class RunServicesContainerTest {
         assertThat(fx.store.runIds()).isEmpty();
     }
 
+    /**
+     * A writable mount that a workflow writes out and that lies in no folder the operator listed
+     * ({@code writable_mounts}) is refused before the run exists, with every such mount in one message: no step
+     * runs first. The step's own check refuses it again when it runs, and is the only one for a mount that a
+     * placeholder names.
+     */
+    @Test
+    void aWritableMountInNoListedFolder_isRefusedAtTheStart_beforeAnyStep() {
+        fx.withRuntime();
+        Path exports = Path.of("/pkg/exports");
+        fx.packages.put(exports, """
+                {"id": "wf-exports", "name": "Exports", "blocks": [
+                  {"type": "shell", "name": "first", "config": {"command": "./build"}},
+                  {"type": "shell", "name": "export", "config": {"command": "./export",
+                    "mounts": ["~/out:/out:rw", "/srv/in:/in:ro", "/srv/reports:/reports:rw"]}}
+                ]}""");
+        fx.unlistedWritableMounts.put("~/out", "it lies in no folder that writable_mounts lists");
+        fx.unlistedWritableMounts.put("/srv/in", "never asked: it is read-only");
+
+        assertThatThrownBy(() -> fx.services().start(request(exports), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .message().contains("Block 2 \"export\": the mount ~/out:/out:rw is refused: it lies in no folder"
+                        + " that writable_mounts lists").doesNotContain("/srv/in").doesNotContain("/srv/reports");
+        assertThat(fx.store.runIds()).as("no run, so no step").isEmpty();
+
+        fx.unlistedWritableMounts.remove("~/out");
+        assertThat(fx.services().start(request(exports), null, null).status()).isEqualTo(RunStatus.COMPLETED);
+    }
+
+    /** A resume asks again: the operator may have taken the folder from the list while the run waited. */
+    @Test
+    void aWritableMountInNoListedFolder_isRefusedAtAResume_beforeItRecordsAnything() {
+        fx.withRuntime();
+        Path exports = Path.of("/pkg/exports-later");
+        fx.packages.put(exports, """
+                {"id": "wf-exports-later", "name": "Exports later", "blocks": [
+                  {"type": "approval", "name": "go", "config": {"question": "Go?", "options": ["Yes", "No"]}},
+                  {"type": "shell", "name": "export", "config": {"command": "./export",
+                    "mounts": ["/srv/reports:/reports:rw"]}}
+                ]}""");
+        String id = fx.services().start(request(exports), null, null).runId();
+        fx.services().answer(id, new AnswerRequest("approval", 0, "Yes", null, null));
+        fx.unlistedWritableMounts.put("/srv/reports", "it lies in no folder that writable_mounts lists");
+
+        assertThatThrownBy(() -> fx.services().resume(resumeOf(id), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .message().contains("Block 2 \"export\": the mount /srv/reports:/reports:rw is refused");
+        assertThat(fx.types(id)).doesNotContain(traceworks.core.record.RecordTypes.RUN_RESUMED);
+    }
+
+    /** In a host run a command without an image runs on the host, without its mounts: nothing to refuse. */
+    @Test
+    void aWritableMountOfACommandOnTheHost_isNotAsked_inAHostRun() {
+        fx.settings = new OperatorSettings(true, null, List.of());
+        Path exports = Path.of("/pkg/exports-host");
+        fx.packages.put(exports, """
+                {"id": "wf-exports-host", "name": "Exports host", "blocks": [
+                  {"type": "shell", "name": "export", "config": {"command": "./export",
+                    "mounts": ["/srv/reports:/reports:rw"]}}
+                ]}""");
+        fx.unlistedWritableMounts.put("/srv/reports", "it lies in no folder that writable_mounts lists");
+
+        fx.services().start(request(exports), null, null);
+
+        assertThat(fx.store.runIds()).as("the run was not refused").hasSize(1);
+    }
+
     @Test
     void workspaceThatIsOrContainsTheHome_isRefused() {
         fx.withRuntime();
