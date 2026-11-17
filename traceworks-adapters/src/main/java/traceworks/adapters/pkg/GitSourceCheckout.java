@@ -338,7 +338,7 @@ public final class GitSourceCheckout implements SourceCheckout {
                 if (!source.startsWith("/")) {
                     throw new IllegalArgumentException("the source path is not absolute");
                 }
-                return new Source(source, source, true, List.of(), source);
+                return new Source(source, source, true, List.of(), withoutHostInThePath(source));
             }
             Matcher scp = SCP.matcher(source);
             if (scp.matches() && !unbracketed(scp.group(2)).startsWith("-")) {
@@ -407,7 +407,22 @@ public final class GitSourceCheckout implements SourceCheckout {
             }
             secrets.removeIf(part -> part.length() < MIN_SECRET || part.equals(recorded));
             return new Source(source, recorded, false, List.copyOf(secrets),
-                    "file".equals(scheme) ? percentDecoded(path) : null);
+                    "file".equals(scheme) ? withoutHostInThePath(percentDecoded(path)) : null);
+        }
+
+        /**
+         * The path of a local source, which must not hold {@code @[}: git looks for a host in brackets after an
+         * {@code @} in the whole source, also one that is local, and takes what follows the {@code ]} as the path
+         * (seen with git 2.43), so the checks of the path would read another one than git opens. Nothing of the
+         * source is repeated: it may hold a credential.
+         */
+        private static String withoutHostInThePath(String localPath) {
+            if (localPath.contains("@[")) {
+                throw new IllegalArgumentException("the source is a local one whose path holds '@[', after which git"
+                        + " reads a host in brackets and takes only what follows the ']' as the path; clone from a"
+                        + " path without it");
+            }
+            return localPath;
         }
 
         /**

@@ -2964,7 +2964,9 @@ without `--source`; no input sets it.
 
 **Sources.** A source is one of:
 
-- a local path; a relative one counts from the working directory, and the record has it as an absolute path;
+- a local path; a relative one counts from the working directory, and the record has it as an absolute path. A
+  local path or a `file://` URL whose path holds `@[` (also written `%40%5B`) is refused, since git reads a host in
+  brackets there and takes only what follows the `]` as the path;
 - an `https://`, `ssh://` or `file://` URL; a `file://` URL with a `?` or a `#` is refused, since git reads them as
   part of the path (write `%3F` or `%23`, or give the path itself), and so is one with a host other than
   `localhost` or with a `%` or a bracket before its path (write `file:///<path>`);
