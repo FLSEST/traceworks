@@ -792,7 +792,10 @@ What a seal does not protect:
   you, can leave commands there that your shell, your session or git runs later outside every container. The mount
   check refuses there only what it refuses everywhere (a login, a folder with a credential store of its own, a
   socket, the Traceworks home); it does not refuse a repository with its `.git/hooks` and `.git/config`, a script or
-  a folder on your `PATH`. List folders that hold results, not folders that hold what the host runs.
+  a folder on your `PATH`. A step that writes a listed folder can also put a link there while a container of a
+  second run starts, and so reach the limit "A mount is checked, then mounted" above: the mount of a path in that
+  folder may then land where the link points, outside the list. List folders that hold results, not folders that
+  hold what the host runs, and none that two runs write at once.
   `traceworks describe <package>` shows every mount of every block before anything runs.
 - **A writable workspace's `.git` beyond its hooks and its config.** With `workspace_writable: true` a container
   step sees the `hooks` and the `config` of the workspace's top-level `.git` read-only ("A writable workspace's
@@ -801,8 +804,9 @@ What a seal does not protect:
   its hooks from the directory that file names, and `.git/config.worktree` where your config sets
   `extensions.worktreeConfig`. It can write `.git/info/attributes` and `.gitattributes`, which hand more files to a
   filter, diff or merge driver your config already defines; the state of a rebase or a bisect, whose commands run
-  when you continue it; any file of the workspace your config names (`core.hooksPath`, an `include.path`, the
-  scripts of a hook manager); and the git directories of submodules (`.git/modules/`) and of repositories deeper
+  when you continue it; any file of the workspace your config or your hooks name (`core.hooksPath`, an
+  `include.path`, a script that a hook calls or links to); and the git directories of submodules
+  (`.git/modules/`) and of repositories deeper
   in the workspace, hooks and config included. In a workspace without a `.git` a step can make one, and the git
   directory that a `.git` file names is not held when it lies in the workspace. A host run holds nothing: a command
   on the host writes all of `.git`. The next git command you run there on the host can run what the step left, as

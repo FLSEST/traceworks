@@ -295,13 +295,13 @@ limit A listed folder is open to every package.
   quote inside a listed folder a package may mount any file or folder writable
   quote it does not refuse a repository with its `.git/hooks` and `.git/config`
   says  A writable mount is refused unless it lies in a folder the operator listed in writable_mounts; inside a listed folder every package may mount any file or folder writable, a repository with its .git/hooks and .git/config or a script included, and the mount check refuses there only what it refuses everywhere.
-  digest 6812034275a4417b
+  digest cfe53723a271814d
 
 limit A writable workspace's `.git` beyond its hooks and its config.
   quote a step can still create what git reads once it is there
   quote A host run holds nothing
   says  With workspace_writable: true a container step sees only the hooks and the config of the workspace's top-level .git read-only: it still writes the rest of .git, creates files git reads later (commondir, config.worktree), writes files of the workspace the config names and the git directories of submodules and deeper repositories, and makes a .git where there is none; a host run holds nothing.
-  digest 53fe409c0bd50314
+  digest 3006f8d8eb851e17
 
 limit A called package's `.git` in the workspace.
   quote has no cover while the steps of the calling package run
