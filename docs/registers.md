@@ -71,8 +71,8 @@ every report, and takes every item that is open or was not judged into its next 
 `examples/audit/testing` is an audit of the tests of a Maven project: it measures with mutation testing (PIT) which
 changes of the code no test notices, has a model rate each method's gap, and feeds the register `audit.testing`. It
 reads what the register knew from the register folder of the run (`{{ register_dir }}`, see "The register folder of
-a run"). `examples/audit/testing-again` measures the same and rates a changed method from its earlier verdict; it
-feeds the register `audit.testing-again`.
+a run"). `examples/audit/testing-again` measures the same, reads the register folder the same way, and rates a changed
+method from its earlier verdict; it feeds the register `audit.testing-again`.
 
 ### catalog.json
 
