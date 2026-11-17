@@ -53,8 +53,11 @@ traceworks findings mutation-testing
 - **Run time:** PIT runs the tests once per change. A whole project takes hours; the operator's `container_limits` in
   `traceworks.json` say how many CPUs the step gets.
 - **The project is not changed.** PIT needs its JUnit 5 plugin in the pom; `scripts/pit.sh` adds it to the copy.
-- **Measured once per state of the sources:** the result is kept in the cache folder under a digest of the poms, the
-  `src` folders and `classes`, and a run on the same sources takes it from there (the step says so).
+- **Measured once per state of the sources:** the result is kept in the cache folder under a digest of every
+  `pom.xml`, every file below a `src` folder and the `.mvn` folder, at any depth, of `scripts/pit.sh` (PIT's version
+  and settings), of `images/maven/Dockerfile` (Maven and the JDK) and of `classes`, and a run with the same digest
+  takes it from there (the step says so). A file outside these that the tests read, such as test data next to a
+  module's `src` folder, is not in the digest: after changing one, empty the folder `pit` of the step's cache folder.
 - **Left out:** a test that is red in the image without any change (it needs a program the image lacks) does not
   count: add the program to `images/maven/Dockerfile`. PIT runs only the tests of the module it changes.
 - The Maven repository in the cache folder (`<home>/cache/tools/maven`) is written by the step with network and read
