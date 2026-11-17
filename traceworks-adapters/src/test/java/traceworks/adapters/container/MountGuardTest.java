@@ -329,6 +329,10 @@ class MountGuardTest {
                         + MountGuard.real(home.resolve("documents")) + "\"]"));
         assertThat(MountGuard.writableMountRefusal("a-volume", home, listing(out)))
                 .as("no host path: the step refuses it for that").isEmpty();
+        assertThat(MountGuard.writableMountRefusal("~/not-made-yet", home, listing(out)))
+                .as("a folder that does not exist yet is the folder to list, not the one that holds it")
+                .hasValueSatisfying(reason -> assertThat(reason).contains("\"" + MountGuard.real(home)
+                        .resolve("not-made-yet") + "\"]"));
     }
 
     // --- forbidden paths ---

@@ -738,7 +738,9 @@ public final class MountGuard {
         Path file = layout.home().resolve("traceworks.json");
         String why = "a package may mount a host path writable only in or below a folder that writable_mounts in "
                 + file + " lists, and " + real + " lies in none";
-        Path folder = Files.isDirectory(real) || real.getParent() == null ? real : real.getParent();
+        // The folder of a file; a path that does not exist yet is taken for the folder it is meant to become
+        boolean aFile = Files.exists(real, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(real);
+        Path folder = aFile && real.getParent() != null ? real.getParent() : real;
         if (folder.getNameCount() == 0 || realHome.startsWith(folder)) {
             return Optional.of(why + "; its folder " + folder + " is your home directory or holds it, which"
                     + " writable_mounts cannot list: move it into a folder of its own, or mount it :ro");

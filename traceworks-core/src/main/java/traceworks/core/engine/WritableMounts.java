@@ -53,7 +53,7 @@ public final class WritableMounts {
                 }
                 String where = prefix + "Block " + (i + 1) + named(block.getName());
                 collect(where, block.getType(), block.getConfig(), false, containerRun, found);
-                NestedBlocks.visit(block.getConfig(), nested -> collect(where + " › " + nested.path()
+                NestedBlocks.visit(block.getConfig(), nested -> collect(where + " \u203a " + nested.path()
                         + named(nested.name()), nested.type(), nested.config(), true, containerRun, found));
             }
         }
