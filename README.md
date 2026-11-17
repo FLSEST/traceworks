@@ -163,8 +163,8 @@ Bash does not parse what a variable holds. What the command does with the variab
 
 ## What a model's verdict is
 
-A deterministic step gives the same result for the same input. A model does not. Three full runs of the testing
-audit on the same code gave 8, 14 and 11 findings rated `HIGH`. So a model's verdict is a testimony, not a
+A deterministic step gives the same result for the same input. A model does not. Three full runs of the mutation
+testing audit on the same code gave 8, 14 and 11 findings rated `HIGH`. So a model's verdict is a testimony, not a
 measurement, and Traceworks asks of it what one asks of a witness:
 
 - **It is on record.** The prompt and the answer are in the run record, and a change of either shows.
@@ -189,13 +189,13 @@ Two example audits are built on these rules. Both measure the same: [PIT](https:
 code of a Maven project in one place at a time, and a change no test notices is a gap. A model rates each method
 with a gap, and the gate counts the findings no person has decided on. They differ in how a rating is given again:
 
-- [examples/audit/testing](examples/audit/testing/README.md) rates from zero. Its unit is the Java package: a
+- [examples/mutation-testing](examples/mutation-testing/README.md) rates from zero. Its unit is the Java package: a
   package whose gaps and decisions are what they were at its last rating is not rated, and a changed package is
   rated anew.
-- [examples/audit/testing-again](examples/audit/testing-again/README.md) rates again from the earlier verdict. Its
-  unit is the method: an unchanged method is not asked about, and the rating of a changed method moves only when
-  the answer names a ground, a test or a line of code, that a script finds in the workspace. That shows that the
-  place exists, not that the rating is right.
+- [examples/mutation-testing-grounded](examples/mutation-testing-grounded/README.md) rates again from the earlier
+  verdict. Its unit is the method: an unchanged method is not asked about, and the rating of a changed method moves
+  only when the answer names a ground, a test or a line of code, that a script finds in the workspace. That shows
+  that the place exists, not that the rating is right.
 
 Each has a register of its own.
 
@@ -210,7 +210,9 @@ in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `reso
 
 - [examples/audit-hello](examples/audit-hello/README.md) is the smallest audit with a register: three shell
   steps, no AI.
-- [examples/audit](examples/audit) holds the two testing audits above.
+- [examples/mutation-testing](examples/mutation-testing/README.md) and
+  [examples/mutation-testing-grounded](examples/mutation-testing-grounded/README.md) are the two testing audits
+  above.
 - [examples/self-audit](examples/self-audit/README.md) holds the packages Traceworks checks itself with:
   `security`, `architecture` and `build`. They share one shape: a script measures and chooses, a model judges one
   item per call, and a script checks every quote, counts and sets the gate; `build` asks no model at all. The two
@@ -221,7 +223,7 @@ in the register folder of the run, `{{ register_dir }}`: `findings.jsonl`, `reso
   the code that changed since a commit and the code one call away. It never says GREEN, since it did not look at
   the rest: its best gate is YELLOW.
 - [examples/hooks](examples/hooks/README.md): an operator's hook gets the diff of a register that changed.
-  `todo-service.sh` creates one TODO per new or reopened finding in a TODO service over HTTP.
+  `github-issues.sh` opens one GitHub issue per new or reopened finding.
 
 ## Status
 
