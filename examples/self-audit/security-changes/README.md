@@ -1,8 +1,15 @@
 # Security check of the changes
 
-**What this check is for.** It finds mistakes early, in the time between two full audits: after a day's work or
-before a merge it looks at what changed since a commit and at what is one call away, a handful of calls where the
-[security self-audit](../security/README.md) makes about 110.
+**What this check is for.** It finds mistakes early, in the time between two full audits: it looks at what changed
+since a commit and at what is one call away, where the [security self-audit](../security/README.md) looks at
+every area.
+
+**What it costs, measured.** On the last ten merges of this repository's `main` (November 2026, about 140 areas in
+the project) it picked 5, 0, 51, 27, 0, 57, 26, 44, 0 and 0 areas. A merge that touches main code costs about 35
+calls, roughly a quarter of a full audit, and the neighbours outnumber the changed areas. So it is short per
+merge, not per day: run it per merge. It was GREEN in at most 2 of the 10, on a clean `--source` checkout; the
+others were YELLOW for files passed unjudged (workflow files, scripts, package READMEs, `AGENTS.md`). Expect
+YELLOW with a short list of files to look at yourself as its usual good result.
 
 **What it does not claim.** It selects what to look at by text and by one call. That catches the ordinary mistake
 in the code somebody just wrote. It does not protect against someone who hides a change on purpose: a selection
@@ -101,8 +108,8 @@ later run can judge:
 
 What this check can never judge does not hold the base, or it would hold it for ever: a changed script, workflow
 or build file, Java code outside the compiled roots, a removed Java file, and commits skipped with `skip=yes`. Such
-a run is not GREEN, the report names the files and says **passed unjudged**, and no later run of this check comes
-back to them. A run that holds the base judges again only what the register does not call judged as it is.
+a run is not GREEN, the report names the files and says **passed unjudged**, and a later run without `since` does not come
+back to them (a run with the same `since` again names them again). A run that holds the base judges again only what the register does not call judged as it is.
 
 **Changes that are in no commit count as changed.** A file is compared as it lies in the workspace, and a `.java`
 file the base does not have is new, whether git tracks it, ignores it or neither. The report says whether the
@@ -132,11 +139,17 @@ What the workspace sets for git has no say in this: an attribute (`*.java -diff`
 | of the base, with another blob id in the workspace, or another mode (made executable, replaced by a link) | changed |
 | of the base, and not in the workspace | removed |
 | of the workspace commit and not of the base, whatever its kind | new |
-| a `.java` file in neither tree, anywhere below the workspace except below a `.git` directory, tracked, ignored or neither | new |
+| a `.java` file in neither tree, tracked, ignored or neither, anywhere below the workspace except below a `.git` directory and except what a build leaves (next paragraph) | new |
 | of a tree, and no file any more (a directory), or a path that leaves the workspace | not compared |
 | a file whose name is no UTF-8, in a tree or on disk | not compared: no text leads back to such a file, so it is a doubt by its name |
 
-Every path of either tree and every `.java` file on disk has one of these or is unchanged, and none is dropped: a
+**What a build leaves is no file of the workspace.** Outside the source roots, a `.java` file in no commit that
+lies below a hidden directory, `target`, `build` or `node_modules` is not looked at: the finder skips those
+directories when it searches for source roots and never compiles what is there (a copy of a source in
+`target/classes`, the worktrees of a tool), so it neither makes the workspace differ nor counts as a file. Inside
+a source root every directory counts, whatever its name, and a file a commit holds is compared wherever it lies.
+
+Every path of either tree and every `.java` file on disk that is looked at has one of these or is unchanged, and none is dropped: a
 test puts every status against every kind of file and holds that each ends in changed lines or in a list the report
 shows (`ChangesTest`, "noStatusOfNoKindOfFile_isDroppedSilently").
 
@@ -176,7 +189,9 @@ next run speaks about what changed after it.
 
 **A finding is not named as gone while Java code changed where the finder does not read.** When a member with an
 open finding is no area any more, the tool otherwise names the finding as gone. In a run with a changed or new
-Java file outside the compiled roots, a test included, it does not: the member may have moved there. The finding stays open, the
+Java file outside the compiled roots it does not: the member may have moved there. A changed test does not count
+for this: tests change with nearly every commit, and a method that was removed must be able to take its finding
+with it. The finding stays open, the
 report lists it under "Open findings that no item carries", and a person decides.
 
 ## What is looked at
@@ -188,6 +203,8 @@ limits), and then keeps:
 |---|---|
 | a changed line lies in it | `changed` |
 | it shows a part of a long member, and the member changed in another part | `changed: <member> outside the lines of this area` |
+| a line of its file changed that lies in no member (an import, the head of a class) | `changed: the head of its file (outside every member)` |
+| a field, a constant or an initializer of its file changed | `changed: a field of its file` |
 | a member in it calls a member that changed, or is called by one | `neighbour of <member>`, once per changed member |
 | the register holds an open finding of it, or calls it open | `an open finding of an earlier run` |
 | an earlier run listed it and got no verdict (a failed call, the cap) | `not judged by an earlier run` |
@@ -333,8 +350,9 @@ path or an option is refused. Not tried: other versions of git, and the steps in
 ## What it does not see
 
 - **A change two calls away.** When `a` calls `b` and `b` calls the changed `c`, the area of `a` is not looked at.
-- **What is no call.** A changed constant or field that another member reads, in another file: the areas of the
-  file that changed are picked, the readers elsewhere are not. And a call the compiler could not resolve: on a library type, or through
+- **What is no call.** A changed field, constant or initializer picks every area of its own file (reason
+  `changed: a field of its file`): the members of a class read it without a call. A reader in another file is not
+  picked. And a call the compiler could not resolve: on a library type, or through
   reflection.
 - **A base that was never audited.** The check judges the changes; it takes the base as it is. Run the long audit
   once, or accept that the code before the base is unjudged. A `since` later than the last run's commit is
