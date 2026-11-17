@@ -68,6 +68,12 @@ registers and the triage of their findings make a loop. `examples/self-audit/sec
 runs each judge a part of the project (what changed since a commit): it lists every item its register knows in
 every report, and takes every item that is open or was not judged into its next run.
 
+`examples/audit/testing` is an audit of the tests of a Maven project: it measures with mutation testing (PIT) which
+changes of the code no test notices, has a model rate each method's gap, and feeds the register `audit.testing`. It
+reads what the register knew from the register folder of the run (`{{ register_dir }}`, see "The register folder of
+a run"). `examples/audit/testing-again` measures the same and rates a changed method from its earlier verdict; it
+feeds the register `audit.testing-again`.
+
 ### catalog.json
 
 A package may carry a `catalog.json` beside `workflow.json`:
