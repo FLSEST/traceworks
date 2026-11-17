@@ -631,7 +631,7 @@ With `hooks.register_changed` in `traceworks.json`, a program of the operator ru
 run whose report changed the register (something new, resolved, reopened or due for review) or was rejected:
 
 ```json
-{"hooks": {"register_changed": ["/path/to/register-todos.sh"], "timeout_seconds": 60}}
+{"hooks": {"register_changed": ["/opt/traceworks-hooks/register-todos.sh"], "timeout_seconds": 60}}
 ```
 
 It is started without a shell, with the operator's own environment, in the register's folder, after the register's
