@@ -109,7 +109,7 @@ limit Pi as root.
 limit Pi with a Claude subscription token
   quote presents itself to Anthropic as Claude Code
   says  Pi given a Claude subscription token (ANTHROPIC_OAUTH_TOKEN, or an sk-ant-oat value in ANTHROPIC_API_KEY) presents itself to Anthropic as Claude Code; that is Pi's own behaviour, and Traceworks hands it the credential as stored.
-  digest 55d43e52c4edaa61
+  digest c4f03ebaef0594ca
 
 limit Pi and a writable workspace.
   quote but it renames a `.pi/commands/` folder there to `.pi/prompts/` when it starts
