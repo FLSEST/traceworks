@@ -2784,4 +2784,6 @@ uncommitted changes (`git_commit`, `git_dirty`). A package may come from somewhe
 run programs that a repository's own configuration names. Traceworks therefore asks git with `core.fsmonitor`
 and the hooks switched off, without writing the index (`--no-optional-locks`), with every filter driver
 (`filter.<name>.clean`, `smudge` and `process`) emptied and not required, and with submodules ignored. A package
-that uses filter drivers, for example git-lfs, may therefore read as dirty.
+that uses filter drivers, for example git-lfs, may therefore read as dirty. A driver whose name cannot be handed
+back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied: git is then not asked for
+the state at all, and the run records neither `git_commit` nor `git_dirty`.
