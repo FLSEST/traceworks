@@ -642,7 +642,11 @@ What a seal does not protect:
 - **A called package is loaded again when its block runs.** The seal digest and the seals of the called packages
   are checked when the run starts and when it resumes. The engine loads a called package from disk again at the
   moment its `sub-workflow` or `foreach` block runs, and does not compare it with what the start saw. A called
-  package changed in between runs changed. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
+  package changed in between runs changed. A step of the run itself can be the one that changes it: with
+  `workspace_writable: true` a container sees only the run's own package read-only inside the workspace, so a
+  called package that lies in the workspace can be rewritten by a step, or by a model with write tools, before its
+  block runs, and its steps then get the secrets the run took at its start. Keep called packages outside every
+  workspace a run writes. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
   an unsealed package is not known at the start at all, so a sealed package reached that way is not checked.
 - **Whoever writes the home is the operator.** `traceworks.json`, `allowed_signers` and the seal log are files of
   the home. Someone who can write them can allow a key of their own, switch `require_seal` off or undo
@@ -800,5 +804,11 @@ this setting is the usual one for Docker hosts and has not been verified here.
   run's checkout is not refused, so the clone's git on the host would read the checkout's `.git`, which a step with a
   writable workspace may have written. Planting such a file needs a write outside the checkout, on the host or
   through a writable mount a step declares; do not use a directory that steps could write as a `--source`.
+- **A source path is checked, then cloned.** Whether a local `--source` lies in a folder that steps write is
+  judged on the path as it resolves at the check, and git resolves the path again when it clones. A path through
+  such a folder with a part that does not exist yet (`<run folder>/scratch/missing/../../../../repo`) is judged
+  as if the part were a plain folder; a step of a run going on at that moment that creates it as a link changes
+  where git ends up. The path is yours: name a source by a path that exists and passes through no folder a run
+  writes.
 - **Paths in a package.** A `sub-workflow` or `foreach` block may name its workflow by any path on the machine. Run
   only packages you trust.
