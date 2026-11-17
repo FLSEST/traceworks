@@ -124,23 +124,30 @@ public final class RunReport {
 
     /** What every line of a question begins with. */
     private static final String QUESTION_LINE = "  | ";
-    /** The most characters of a question on one line, so a marked line fits a terminal of 80 columns. */
+    /** The most columns of a question on one line, so a marked line fits a terminal of 80 columns. */
     static final int QUESTION_WIDTH = 76;
 
     /**
-     * A line of a question in parts of at most {@value #QUESTION_WIDTH} characters: broken at the last blank within
+     * A line of a question in parts of at most {@value #QUESTION_WIDTH} columns: broken at the last blank within
      * the width, else at the width; the blanks at a break are dropped. A short line is one part, as it is.
+     *
+     * <p>The width is counted in the columns a terminal gives a character, not in characters: a part that is wider
+     * than the terminal is broken there by the terminal, and what follows shows without the mark of a question
+     * line. A tab becomes a blank first: it takes up to eight columns, and at the right margin a terminal keeps
+     * the cursor in the last column, so text after a row of tabs would wrap.
      */
     static List<String> broken(String line) {
         List<String> parts = new ArrayList<>();
-        String rest = line.stripTrailing();
-        while (rest.length() > QUESTION_WIDTH) {
-            int cut = rest.lastIndexOf(' ', QUESTION_WIDTH);
+        String rest = line.replace('\t', ' ').stripTrailing();
+        while (true) {
+            int fits = fitting(rest);
+            if (fits == rest.length()) {
+                break;
+            }
+            int cut = rest.lastIndexOf(' ', fits);
             // A blank that only leads the line is no place to break: the part before it would be empty
             if (rest.substring(0, Math.max(cut, 0)).isBlank()) {
-                cut = QUESTION_WIDTH;
-                // Not between the two halves of one character
-                if (Character.isHighSurrogate(rest.charAt(cut - 1))) cut--;
+                cut = fits;
             }
             parts.add(rest.substring(0, cut).stripTrailing());
             rest = rest.substring(cut).stripLeading();
@@ -149,6 +156,26 @@ public final class RunReport {
             parts.add(rest);
         }
         return parts;
+    }
+
+    /**
+     * How many chars from the start of {@code text} fit into {@value #QUESTION_WIDTH} columns, never between the
+     * two halves of one character and at least one character, so a break always moves on. A character from U+1100
+     * on counts as two columns: every wide character (Hangul, CJK, the ideographic space, the fullwidth forms,
+     * emoji) lies there, and a narrow one counted as two only breaks its line earlier.
+     */
+    private static int fitting(String text) {
+        int columns = 0;
+        int i = 0;
+        while (i < text.length()) {
+            int c = text.codePointAt(i);
+            columns += c >= 0x1100 ? 2 : 1;
+            if (columns > QUESTION_WIDTH && i > 0) {
+                return i;
+            }
+            i += Character.charCount(c);
+        }
+        return i;
     }
 
     /**
