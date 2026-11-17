@@ -46,8 +46,14 @@ import java.util.Set;
  * @param sealFiles the files the seal settings name ({@code signing_key}, {@code allowed_signers}), where the
  *                  operator put them, in or outside the home: the mount guard keeps every step from them. Empty
  *                  without the settings; the allowed signers of the home are a file of the home then
+ * @param writableMounts the folders in or below which a package may mount a host path writable
+ *                  ({@code writable_mounts}), which the mount guard reads: each absolute, a leading {@code ~/}
+ *                  already replaced by the operator's home directory. Empty without the setting: no package
+ *                  mounts a host path of the operator's writable then. They are no places of the home; they lie
+ *                  here because the layout is what the mount guard gets of {@code traceworks.json}
  */
-public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List<SealFile> sealFiles) {
+public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List<SealFile> sealFiles,
+                         List<Path> writableMounts) {
 
     static final String SIGNING_KEY = "signing_key";
     static final String ALLOWED_SIGNERS = "allowed_signers";
@@ -61,9 +67,9 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
     public record SealFile(String setting, Path file) {
     }
 
-    /** A layout without files of seal settings. */
+    /** A layout without files of seal settings and without a folder for writable mounts. */
     public HomeLayout(Path home, Path runs, Path ledger, Path registers) {
-        this(home, runs, ledger, registers, List.of());
+        this(home, runs, ledger, registers, List.of(), List.of());
     }
 
     /**
@@ -76,8 +82,21 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
         List<SealFile> files = new ArrayList<>();
         if (signingKey != null) files.add(new SealFile(SIGNING_KEY, signingKey));
         if (allowedSigners != null) files.add(new SealFile(ALLOWED_SIGNERS, allowedSigners));
-        return new HomeLayout(home, runs, ledger, registers, files);
+        return new HomeLayout(home, runs, ledger, registers, files, writableMounts);
     }
+
+    /**
+     * The same places, with the folders a package may mount writable ({@code writable_mounts}).
+     *
+     * @param roots absolute folders. The setting's own check ({@link #read}) is not repeated here; the mount guard
+     *              counts no folder that is the operator's home directory or holds it
+     */
+    public HomeLayout withWritableMounts(List<Path> roots) {
+        return new HomeLayout(home, runs, ledger, registers, sealFiles, roots);
+    }
+
+    /** The key of {@code traceworks.json} that lists the folders a package may mount writable. */
+    public static final String WRITABLE_MOUNTS = "writable_mounts";
 
     static final String RUNS_KEY = "runs_dir";
     static final String LEDGER_KEY = "ledger_dir";
@@ -96,6 +115,7 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
         Objects.requireNonNull(ledger, "ledger");
         Objects.requireNonNull(registers, "registers");
         sealFiles = sealFiles == null ? List.of() : List.copyOf(sealFiles);
+        writableMounts = writableMounts == null ? List.of() : List.copyOf(writableMounts);
     }
 
     /** The layout without a setting: every place is its fixed folder of {@code home}. */
@@ -109,13 +129,32 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
      * @throws IllegalArgumentException for a file that cannot be parsed, an unknown key, or a place that is refused
      */
     public static HomeLayout read(Path home) {
+        return read(home, operatorHome());
+    }
+
+    /**
+     * {@link #read(Path)} for an operator whose home directory is {@code userHome}.
+     *
+     * @param userHome where a leading {@code ~/} of a {@code writable_mounts} entry points, and what no entry may be
+     */
+    static HomeLayout read(Path home, Path userHome) {
         Path file = home.resolve(OperatorConfigFile.FILE);
         JsonNode root = OperatorConfigFile.root(file);
-        return root == null ? of(home) : from(home, file, root);
+        return root == null ? of(home) : from(home, file, root, userHome);
+    }
+
+    /** The home directory of the user this process runs as: where {@code ~} points. */
+    private static Path operatorHome() {
+        return Path.of(System.getProperty("user.home"));
     }
 
     /** The layout that the object {@code root} of {@code file} sets for {@code home}. */
     static HomeLayout from(Path home, Path file, JsonNode root) {
+        return from(home, file, root, operatorHome());
+    }
+
+    /** {@link #from(Path, Path, JsonNode)} for an operator whose home directory is {@code userHome}. */
+    static HomeLayout from(Path home, Path file, JsonNode root, Path userHome) {
         Map<String, Path> places = new LinkedHashMap<>();
         Set<String> configured = new LinkedHashSet<>();
         for (String key : KEYS) {
@@ -136,7 +175,75 @@ public record HomeLayout(Path home, Path runs, Path ledger, Path registers, List
         }
         return new HomeLayout(home, places.get(RUNS_KEY), places.get(LEDGER_KEY), places.get(REGISTERS_KEY))
                 .withSealFiles(OperatorConfigFile.path(home, file, root, SIGNING_KEY),
-                        OperatorConfigFile.path(home, file, root, ALLOWED_SIGNERS));
+                        OperatorConfigFile.path(home, file, root, ALLOWED_SIGNERS))
+                .withWritableMounts(writableMounts(file, root.get(WRITABLE_MOUNTS), userHome));
+    }
+
+    /**
+     * The folders of {@code writable_mounts}: a list of strings, each an absolute path or one that starts with
+     * {@code ~/}, which is the operator's home directory as on the host side of a mount. Missing, {@code null} or
+     * an empty list is none. A folder need not exist. Refused, naming the entry: one that is no string, begins or
+     * ends with white space, or is not absolute; {@code /}, which would list every folder; and the operator's home
+     * directory or a folder that holds it, as written or behind a link, which would list the files the operator's
+     * shell and session run.
+     */
+    private static List<Path> writableMounts(Path file, JsonNode value, Path userHome) {
+        if (value == null || value.isNull()) {
+            return List.of();
+        }
+        String expected = "a list of directories, each an absolute path or one that starts with ~/";
+        if (!value.isArray()) {
+            throw new IllegalArgumentException("'" + WRITABLE_MOUNTS + "' in " + file + " must be " + expected);
+        }
+        List<Path> roots = new ArrayList<>();
+        for (JsonNode entry : value) {
+            if (!entry.isTextual()) {
+                throw new IllegalArgumentException("'" + WRITABLE_MOUNTS + "' in " + file + " must be " + expected
+                        + "; it holds a value that is no string");
+            }
+            String text = entry.textValue();
+            String holds = "'" + WRITABLE_MOUNTS + "' in " + file + " holds \"" + text + "\", which ";
+            if (!text.equals(text.strip())) {
+                throw new IllegalArgumentException(holds + "begins or ends with white space");
+            }
+            Path root;
+            try {
+                if (text.equals("~") || text.startsWith("~/")) {
+                    root = userHome.resolve(text.substring(1).replaceFirst("^/+", "")).normalize();
+                } else if (text.startsWith("/")) {
+                    root = Path.of(text).normalize();
+                } else {
+                    throw new IllegalArgumentException(holds + "is not an absolute path: write the whole path of"
+                            + " the folder, or one that starts with ~/ for a folder below your home directory");
+                }
+            } catch (InvalidPathException e) {
+                throw new IllegalArgumentException(holds + "is not a valid path: " + e.getMessage(), e);
+            }
+            if (root.getNameCount() == 0) {
+                throw new IllegalArgumentException(holds + "is the root of the file system: every package could"
+                        + " mount every folder writable; name the folders that packages may write");
+            }
+            if (isOrHolds(root, userHome)) {
+                throw new IllegalArgumentException(holds + "is your home directory " + userHome + " or a folder"
+                        + " that holds it: a package could write the files your shell and your session run"
+                        + " (~/.bashrc, ~/.local/bin); name a folder below it that packages may write");
+            }
+            roots.add(root);
+        }
+        return roots;
+    }
+
+    /** Whether {@code folder} is {@code inside} or holds it, as written or as the file system resolves the two. */
+    private static boolean isOrHolds(Path folder, Path inside) {
+        if (absolute(inside).startsWith(folder)) {
+            return true;
+        }
+        try {
+            return inside.toRealPath().startsWith(folder.toRealPath());
+        } catch (java.io.IOException e) {
+            // A folder that does not exist holds nothing yet; the mount guard compares the real paths again
+            return false;
+        }
     }
 
     private static Path configuredPlace(Path home, Path file, String key, JsonNode value) {

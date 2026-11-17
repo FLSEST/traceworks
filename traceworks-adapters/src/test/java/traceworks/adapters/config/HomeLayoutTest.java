@@ -178,6 +178,70 @@ class HomeLayoutTest {
         refused("{\"ledger_dir\": \"~\"}", "'ledger_dir'", "~");
     }
 
+    // --- writable_mounts: the folders a package may mount writable ---
+
+    private Path userHome() throws IOException {
+        return Files.createDirectories(temp.resolve("user"));
+    }
+
+    private void rootRefused(String entry, String... parts) throws IOException {
+        config("{\"writable_mounts\": [" + entry + "]}");
+        Path home = home();
+        Path userHome = userHome();
+        assertThatThrownBy(() -> HomeLayout.read(home, userHome)).as(entry)
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("'writable_mounts'")
+                .hasMessageContainingAll(parts).hasMessageContaining(home.resolve("traceworks.json").toString());
+    }
+
+    @Test
+    void withoutWritableMounts_noFolderIsListed() throws IOException {
+        assertThat(HomeLayout.of(home()).writableMounts()).isEmpty();
+        config("{\"writable_mounts\": null}");
+        assertThat(HomeLayout.read(home(), userHome()).writableMounts()).isEmpty();
+        config("{\"writable_mounts\": []}");
+        assertThat(HomeLayout.read(home(), userHome()).writableMounts()).isEmpty();
+    }
+
+    @Test
+    void writableMounts_areAbsolute_orStartAtTheOperatorsHome() throws IOException {
+        Path data = temp.resolve("disk/data");
+        config("{\"writable_mounts\": [\"" + data + "\", \"~/out\", \"" + temp.resolve("a/../b") + "\"]}");
+
+        HomeLayout layout = HomeLayout.read(home(), userHome());
+
+        assertThat(layout.writableMounts()).containsExactly(data, userHome().resolve("out"), temp.resolve("b"));
+        assertThat(Files.exists(data)).as("reading the layout creates nothing").isFalse();
+        assertThat(layout.withSealFiles(temp.resolve("key"), null).writableMounts()).as("kept with the seal files")
+                .isEqualTo(layout.writableMounts());
+    }
+
+    @Test
+    void aWritableMountsRoot_thatIsTheRootOfTheFileSystem_theHomeOrAFolderHoldingIt_isRefused() throws IOException {
+        Path userHome = userHome();
+        rootRefused("\"/\"", "\"/\"", "every");
+        rootRefused("\"/usr/..\"", "every");
+        rootRefused("\"~\"", "home directory");
+        rootRefused("\"~/\"", "home directory");
+        rootRefused("\"~/docs/..\"", "home directory");
+        rootRefused("\"" + userHome + "\"", "home directory");
+        rootRefused("\"" + userHome.getParent() + "\"", "home directory");
+        Path link = Files.createSymbolicLink(temp.resolve("link-to-user"), userHome);
+        rootRefused("\"" + link + "\"", "home directory");
+    }
+
+    @Test
+    void aWritableMountsRoot_thatIsNotAbsolute_orNoString_isRefused() throws IOException {
+        rootRefused("\"data/out\"", "data/out", "absolute", "~/");
+        rootRefused("\"~other/out\"", "~other/out", "absolute");
+        rootRefused("\"\"", "absolute");
+        rootRefused("\" /data\"", "white space");
+        rootRefused("7", "a list of directories");
+        config("{\"writable_mounts\": \"/data\"}");
+        Path home = home();
+        assertThatThrownBy(() -> HomeLayout.read(home, userHome())).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'writable_mounts'").hasMessageContaining("a list of directories");
+    }
+
     @Test
     void twoPlacesInOneFolder_orOneInsideTheOther_areRefused() throws IOException {
         Path disk = temp.resolve("disk");

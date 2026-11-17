@@ -109,6 +109,17 @@ class OperatorConfigFileTest {
         }
     }
 
+    /** The setting is the layout's, as the places are: every reader of the file refuses a wrong one. */
+    @Test
+    void writableMounts_isAKey_andAWrongRootIsRefusedByEveryReader() throws IOException {
+        config("{\"writable_mounts\": [\"/srv/traceworks-out\"]}");
+        assertThat(OperatorConfigFile.read(home)).isEqualTo(OperatorSettings.defaults());
+
+        config("{\"writable_mounts\": [\"/\"]}");
+        assertThatThrownBy(() -> OperatorConfigFile.read(home)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'writable_mounts'");
+    }
+
     @Test
     void unknownKey_isRefused_andNamed() throws IOException {
         config("{\"allow_host_exec\": true}");
