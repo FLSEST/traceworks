@@ -301,6 +301,28 @@ class ContainerProcessTest {
         assertThat(removed).as("container removed").exists();
     }
 
+    /** A cancel whose client left a writer out of reach of the stop: exit code 130, and the cut is marked. */
+    @Test
+    void execute_cancelled_withAWriterOutOfReach_marksTheCut(@TempDir Path dir) throws Exception {
+        Path started = dir.resolve("started");
+        Path fake = Files.writeString(dir.resolve("fake-docker.sh"),
+                "(sh -c \"trap '' PIPE; while echo tick && echo tock >&2; do sleep 0.05; done\" &)\n"
+                        + "touch '" + started + "'\nexec sleep 30\n");
+        ExecutionContext context = ExecutionContext.builder().workflowRunId("run-1").build();
+        AtomicReference<CommandResult> result = new AtomicReference<>();
+
+        Thread worker = Thread.ofVirtual().start(() -> result.set(ProcessTracking.bind(context.processTracker(),
+                () -> execute(fake, null, 60, List.of("true")))));
+        awaitFile(started);
+        context.cancel();
+        worker.join(TimeUnit.SECONDS.toMillis(30));
+
+        assertThat(worker.isAlive()).as("container client still running after the cancel").isFalse();
+        assertThat(result.get().exitCode()).isEqualTo(130);
+        assertThat(result.get().outputCut()).isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                List.of(CommandResult.STDOUT, CommandResult.STDERR), ContainerProcess.AFTER_END_MILLIS));
+    }
+
     /**
      * A tracker tells stop handles apart by identity: the client reports its end with the very handle it reported its
      * start with, once each, for a container and for a client call alike, so a client that ended leaves nothing behind
@@ -396,6 +418,9 @@ class ContainerProcessTest {
         assertThat(worker.isAlive()).isFalse();
         assertThat(result.get().exitCode()).isEqualTo(130);
         assertThat(result.get().stderr()).contains("Command interrupted");
+        assertThat(result.get().outputCut()).as("the streams were not read to their end, and the result says so")
+                .isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                        List.of(CommandResult.STDOUT, CommandResult.STDERR), 0));
         assertThat(interruptedAfterReturn).as("interrupt flag still set for the caller").isTrue();
         assertThat(removedBeforeReturn).as("container removal awaited before returning").isTrue();
         assertThat(traceworks.core.testing.BackgroundChild.endsWithin(
@@ -527,6 +552,41 @@ class ContainerProcessTest {
         assertThat(stdout.stdout()).isEqualTo("early\nlate\n");
         assertThat(stderr.exitCode()).isZero();
         assertThat(stderr.stderr()).isEqualTo("early\nlate\n");
+        assertThat(stdout.outputCut()).as("read to its end: no cut").isNull();
+        assertThat(stderr.outputCut()).isNull();
+    }
+
+    /**
+     * A client that leaves a writer behind on one stream: the reading of that stream ends at the bound, and the
+     * result names the stream and the bound. The other stream ended, and is not named.
+     */
+    @Test
+    void execute_ofAClientThatLeavesAWriterBehind_namesTheStreamWhoseReadingEndedAtTheBound(@TempDir Path dir)
+            throws IOException {
+        Path fake = Files.writeString(dir.resolve("writer-on-stderr.sh"),
+                "(exec >&-; trap '' PIPE; while echo tick >&2; do sleep 0.05; done) &\n"
+                        + "echo early\nsleep 0.3\n");
+
+        CommandResult result = execute(fake, null, 30, List.of("true"));
+
+        assertThat(result.exitCode()).as("a mark, not a failure").isZero();
+        assertThat(result.stdout()).isEqualTo("early\n");
+        assertThat(result.stderr()).startsWith("tick\n");
+        assertThat(result.outputCut()).isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                List.of(CommandResult.STDERR), ContainerProcess.AFTER_END_MILLIS));
+    }
+
+    /** A writer that holds both streams: both are named, and the bound is one for the two, not one after the other. */
+    @Test
+    void execute_ofAClientWhoseWriterHoldsBothStreams_namesBoth_afterOneBound(@TempDir Path dir) throws IOException {
+        Path fake = Files.writeString(dir.resolve("writer-on-both.sh"),
+                "(trap '' PIPE; while echo tick && echo tock >&2; do sleep 0.05; done) &\n"
+                        + "echo early\nsleep 0.3\n");
+
+        CommandResult result = execute(fake, null, 30, List.of("true"));
+
+        assertThat(result.outputCut()).isEqualTo(new traceworks.core.port.CommandRunner.OutputCut(
+                List.of(CommandResult.STDOUT, CommandResult.STDERR), ContainerProcess.AFTER_END_MILLIS));
     }
 
     @Test

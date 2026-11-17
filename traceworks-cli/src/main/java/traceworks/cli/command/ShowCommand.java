@@ -103,7 +103,7 @@ public final class ShowCommand implements Command {
             // What the run of an audit knew of earlier runs: the head of the register's log it started from
             out.println("Register  " + TerminalFormat.safe(view.register().summary()));
         }
-        egress(out, view);
+        egress(out, view, args.has("children"));
         if (view.error() != null) {
             out.println("Error     " + TerminalFormat.oneLine(text.apply(view.error().sha256())));
         }
@@ -123,7 +123,7 @@ public final class ShowCommand implements Command {
      * Where the run's AI containers could connect, and what they asked the egress proxy for in the whole run, with
      * the denied connections counted: an observation that fails nothing, but must not be overlooked.
      */
-    private static void egress(PrintStream out, RunView view) {
+    private static void egress(PrintStream out, RunView view, boolean everyChild) {
         if (view.aiNetwork() != null) {
             StringBuilder line = new StringBuilder(TerminalFormat.safe(view.aiNetwork()));
             if (view.aiNetwork().equals("open")) {
@@ -140,6 +140,56 @@ public final class ShowCommand implements Command {
                     + " asked of the egress proxy by " + egress.commands()
                     + (egress.commands() == 1 ? " command, " : " commands, ")
                     + (egress.denied() == 0 ? "none denied" : egress.denied() + " DENIED"));
+        }
+        int cuts = view.outputCuts();
+        if (cuts > 0) {
+            // The steps below, those of the child runs that are listed too, mark the commands of their latest
+            // attempt; the line says how many more it counts
+            int elsewhere = cuts - markedCuts(view, everyChild, new HashSet<>());
+            out.println("Output    " + cuts + (cuts == 1 ? " command" : " commands")
+                    + " whose output was CUT before the end of its stream: it may be incomplete"
+                    + (elsewhere == 0 ? "" : " (" + elsewhere + " of them in earlier attempts of a step or in child"
+                    + " runs that are not listed, which are not marked below)"));
+        }
+    }
+
+    /**
+     * How many commands with a cut output the steps section marks: those of the latest attempt of each step of
+     * {@code run} and of each child run that is listed under its step ({@link #listed}), at every level.
+     */
+    private static int markedCuts(RunView run, boolean everyChild, Set<String> drawn) {
+        int marked = run.outputCutsOfLatestAttempts();
+        for (StepView step : run.steps()) {
+            for (String id : listed(run, step, everyChild)) {
+                RunView child = run.children().get(id);
+                if (child != null && drawn.add(id)) {
+                    marked += markedCuts(child, everyChild, drawn);
+                }
+            }
+        }
+        return marked;
+    }
+
+    /**
+     * The child runs of {@code step} that are listed with their steps: all of them, or of more than
+     * {@value #CHILD_RUNS_SHOWN} those that did not complete, at most that many.
+     */
+    private static List<String> listed(RunView run, StepView step, boolean everyChild) {
+        List<String> ids = step.childRunIds();
+        return everyChild || ids.size() <= CHILD_RUNS_SHOWN ? ids
+                : ids.stream().filter(id -> !completed(run.children().get(id))).limit(CHILD_RUNS_SHOWN).toList();
+    }
+
+    /**
+     * The commands of the step whose output was not read to its end: something the command left behind still held it
+     * at the bound. A mark, like a denied connection; the step's status is as it was.
+     */
+    private static void outputCuts(PrintStream out, List<CommandView> commands) {
+        for (CommandView command : commands) {
+            if (command.outputCut() != null) {
+                out.println("      output CUT     " + TerminalFormat.safe(command.outputCut().summary())
+                        + "   <== may be incomplete");
+            }
         }
     }
 
@@ -249,6 +299,7 @@ public final class ShowCommand implements Command {
                             + (step.attempts() > 1 ? "  (" + step.attempts() + " attempts)" : "")));
             aiCalls(out, step.aiCalls(), text);
             egress(out, step.commands());
+            outputCuts(out, step.commands());
             values(out, step.commands(), text, shown.outputs(), shown.full());
             files(out, step.files());
             BlobRef output = step.output();
@@ -304,8 +355,7 @@ public final class ShowCommand implements Command {
         if (ids.isEmpty()) {
             return;
         }
-        List<String> listed = shown.children() || ids.size() <= CHILD_RUNS_SHOWN ? ids
-                : ids.stream().filter(id -> !completed(run.children().get(id))).limit(CHILD_RUNS_SHOWN).toList();
+        List<String> listed = listed(run, step, shown.children());
         Map<String, ItemView> items = new HashMap<>();
         step.items().forEach(item -> {
             if (item.subRun() != null) {

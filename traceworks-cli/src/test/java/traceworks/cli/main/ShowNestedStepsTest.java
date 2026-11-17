@@ -387,4 +387,34 @@ class ShowNestedStepsTest {
             Steps
               0   build                    [shell]          COMPLETED         12 ms
             """;
+
+    /**
+     * A command of a child's step whose output was cut is marked under that step, as far in as the step, and the
+     * line {@code Output} counts it without saying that it is marked nowhere: it is.
+     */
+    @Test
+    void aCutOutputOfAChildsStep_isMarkedUnderItsStep_andTheOutputLineAgrees() throws IOException {
+        String child = "c0000000-0000-0000-0000-000000000001";
+
+        String shown = fixedRun("00000000-0000-0000-0000-0000000000b5", recorder -> {
+            recorder.emit(new RunEvent.StepStarted(0, "outer", "sub-workflow", 2, false));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.StepStarted(0, "work", "shell", 0, false)));
+            recorder.recording(request -> new CommandResult(0, "", "", 1, false)
+                            .withOutputCut(new traceworks.core.port.CommandRunner.OutputCut(List.of("stdout"), 5000)))
+                    .run(new CommandRequest("make", "/ws", 60, null, null, null, false));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.StepFinished(0, "work", "shell",
+                    StepStatus.COMPLETED, "make", 5, Map.of())));
+            recorder.emit(new ChildRunEvent(child, new RunEvent.RunFinished(RunStatus.COMPLETED, Map.of(), null)));
+            recorder.emit(new RunEvent.StepFinished(0, "outer", "sub-workflow", StepStatus.COMPLETED, "", 9, Map.of()));
+        });
+
+        assertThat(shown).contains("Output    1 command whose output was CUT before the end of its stream: it may"
+                + " be incomplete\n");
+        assertThat(String.join("\n", steps(shown))).as(shown).isEqualTo("""
+                  0   outer                    [sub-workflow]   COMPLETED         9 ms
+                      child run c0000000 COMPLETED
+                        0   work                     [shell]          COMPLETED         5 ms
+                            output CUT     stdout after 5000 ms   <== may be incomplete"""
+                .indent(2).stripTrailing());
+    }
 }

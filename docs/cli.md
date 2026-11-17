@@ -429,7 +429,13 @@ says `not compared` with the reason. The findings never change the exit code.
 
 - the **package digest** and the **inputs** (the inputs digest);
 - every **deterministic step**: its status and its output, and each `foreach` item of it. A step that only one run
-  has counts too. This is strict on purpose: a deterministic step counts also when it comes after an AI answer that
+  has counts too, and so does a step of which other commands had their output cut (`output_cut`, "Host execution"):
+  `step build: the output was cut in run B (command 1: stdout after 5000 ms), not in run A`. A command is matched
+  by its `foreach` item and its order among the commands of that item, in the latest attempt of the step, so a cut
+  in item 2 against a cut in item 7 differs. This holds only between two records that can name a cut (`records` in
+  `run.started` and in every `run.resumed`). A record of an earlier version does not say whether an output was cut:
+  then the cuts are not compared, and when either run names one, a note says so (`note: run 5cf3... is of a version
+  that does not record whether an output was cut: the cuts of the two runs are not compared`); This is strict on purpose: a deterministic step counts also when it comes after an AI answer that
   differed and only carries that answer on; the reason then ends with `(after an AI output that differed)`;
 - the **setup of every AI call**: provider, model asked for, effort, tool policy, web mode and hosts, system prompt
   and prompt, and the model that answered when both calls report one. A different model or another prompt is another
@@ -439,8 +445,8 @@ says `not compared` with the reason. The findings never change the exit code.
   follows an AI output that differed)`. A prompt that differs with no differing AI output before it does count:
   something outside the record changed it, such as a file of the workspace.
 
-What does not count, and is reported: the answer of an AI call, the output and status of an AI step, an AI step or
-call that only one run has, and the other header fields (Traceworks version, execution, images, the operator's AI
+What does not count, and is reported: the answer of an AI call, the output and status of an AI step, an output cut
+of an AI step that differs (a note), an AI step or call that only one run has, and the other header fields (Traceworks version, execution, images, the operator's AI
 settings, models, status, gate). So `0` means "the deterministic part ran the same, and the AI part was asked the
 same way", not "the two runs printed the same".
 
@@ -460,7 +466,11 @@ its first line` when the register did not exist yet); `run.html` has the row `re
 (docs/registers.md, "The register folder of a run"). It names where the run's AI containers could
 connect (`AI net`), and under each AI step the hosts its container could reach and every connection it asked the
 egress proxy for; a denied one is marked `DENIED`, and the line `Egress` counts them for the whole run ("The network
-of an AI step").
+of an AI step"). A command whose output was not read to its end is marked `output CUT` under its step, and the line
+`Output` counts them ("Host execution", "A process the command leaves behind"). The line counts the whole run. The
+steps of a child run that is listed carry the mark like any step, as far in as their step; the commands of an
+earlier attempt of a step, and of the child runs a step with more than 10 of them does not list, are under no step,
+so the line says how many of its count are those.
 `--outputs` adds each step's output, cut at 2000 characters. `--full` adds it whole. A step's status is `COMPLETED`,
 `FAILED`, `SKIPPED`, `CANCELLED` (the run's cancel ended it), `RUNNING` or `WAITING_APPROVAL`.
 
@@ -2471,7 +2481,9 @@ run is refused (exit 6). `run.started` records the limit a run starts with as
 budget bounds what a run holds in all (see "Output budget").
 
 A stream that goes beyond the limit stops the command at once, as a timeout does: the command and what it started get
-SIGTERM, what is left 2 seconds later SIGKILL, and its container is removed. The command has failed, whatever its own
+SIGTERM (each process before its children, so a shell does not go on to its next command because the one in flight
+ended; one whose own TERM trap does not exit does go on), what is left 2 seconds later SIGKILL in the same order,
+and its container is removed. The command has failed, whatever its own
 exit code would have been, and what ran it never reads the cut text as if it were whole:
 
 - a `shell` step, also the inner shell step of `conditional`, `retry`, `switch`, `while` and `foreach`, fails with
@@ -2632,18 +2644,29 @@ stay out.
 **A process the command leaves behind.** A command on the host can end while something it started still writes to
 its output: a background job (`server &`), or a process substitution, which bash does not wait for
 (`exec > >(tee log)`). The step's output holds what such a process writes until it closes the output, for a bounded
-time: up to 5 seconds after a command that ended by itself, up to 2 seconds after one that Traceworks stopped (a
-timeout, an output beyond the limit). The step takes that much longer. A process that still holds the output then
+time: up to 5 seconds after a command that ended by itself, up to 2 seconds after one that was stopped (a
+timeout, an output beyond the limit, a cancel). The step takes that much longer. A process that still holds the output then
 is not ended: the output is closed, so its next write fails (it gets SIGPIPE), and what it would have written is not
-in the record; the record does not say that it was cut. Let the command wait for what it starts (`wait`) when its
-output matters, and send the output of a server it leaves running to a file.
+in the record. The record marks that: the command's `step.command.finished` has `output_cut` with the stream and
+the bound (`{"streams":["stdout"],"after_ms":5000}`, docs/events.md), and only then; a command whose output ended
+has no such field. The step's status and the gate are as they would be. `traceworks show` prints
+`output CUT     stdout after 5000 ms   <== may be incomplete` under the step and counts such commands in a line
+`Output`, `run.html` marks the step and the command, and `traceworks diff` takes a cut in one run and none in the
+other as a difference ("diff"). A process that holds the output and never writes is marked the same way, at the
+bound; the record holds what came before. A wait that was interrupted (exit code 130) ends the reading at once and is
+marked with `"after_ms":0`. A record of an earlier version has no mark for any of this, and its silence says
+nothing: only a record whose `run.started` names `output_cut` in `records` can say (docs/events.md). Let the command wait for what it starts (`wait`) when its output matters, and send
+the output of a server it leaves running to a file.
 
 Reading past the command's end rests on how the JDK handles the output of a process on Linux and macOS (tested with
 a JDK 21). On a JDK or a platform that handles it differently, the output ends with the command: what a process it
 left behind writes afterwards is lost. A test of Traceworks fails when that changes.
 
 In a container there is no such process: the container ends with its command, and everything the command started
-ends with it.
+ends with it. What Traceworks reads there is the output of the client (`docker run`, `podman run`), which alone
+holds those pipes; the processes in the container write to the runtime's. So a container step is not cut this way.
+The client's output is still read with a bound, 2 seconds after the client's end, and a client that left something
+behind which holds its output would be marked the same way.
 
 ## Isolated workspace
 

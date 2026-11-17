@@ -1,6 +1,7 @@
 package traceworks.core.record;
 
 import traceworks.core.port.BlobRef;
+import traceworks.core.port.CommandRunner.OutputCut;
 
 import java.util.List;
 
@@ -34,13 +35,27 @@ public record CommandView(int seq, Integer item, BlobRef command, BlobRef values
     public record Mount(String host, String container, boolean readOnly) {}
 
     /**
-     * @param egress what the container asked the egress proxy for, by target and verdict; empty for a command that
-     *               asked for nothing or had no proxy
+     * @param egress    what the container asked the egress proxy for, by target and verdict; empty for a command
+     *                  that asked for nothing or had no proxy
+     * @param outputCut the streams whose reading ended at its bound after the command's end, and the bound: the
+     *                  output may be incomplete; {@code null} when the record names no cut, as every record of an
+     *                  earlier version
      */
-    public record Result(Integer exitCode, long durationMs, boolean timedOut, List<Connection> egress) {
+    public record Result(Integer exitCode, long durationMs, boolean timedOut, List<Connection> egress,
+                         OutputCut outputCut) {
         public Result {
             egress = List.copyOf(egress);
         }
+
+        /** A result whose record names no cut of the output. */
+        public Result(Integer exitCode, long durationMs, boolean timedOut, List<Connection> egress) {
+            this(exitCode, durationMs, timedOut, egress, null);
+        }
+    }
+
+    /** The cut of the command's output its end names; {@code null} for none, and for a command without an end. */
+    public OutputCut outputCut() {
+        return result == null ? null : result.outputCut();
     }
 
     /**

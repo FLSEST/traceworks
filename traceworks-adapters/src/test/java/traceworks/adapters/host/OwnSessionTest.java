@@ -102,14 +102,15 @@ class OwnSessionTest {
     void start_thatFailedWhileCtrlCCame_isTriedAgain() throws IOException {
         assumeTrue(OwnSession.available(), "needs setsid");
         java.util.concurrent.atomic.AtomicInteger starts = new java.util.concurrent.atomic.AtomicInteger();
+        // The Ctrl-C comes while the start is under way, as it does when it kills the helper
         OwnSession.Starter failsOnce = () -> {
             if (starts.incrementAndGet() == 1) {
+                OwnSession.terminalInterrupt();
                 throw new IOException("Failed to exec spawn helper: pid: 1, signal: 2");
             }
             return new ProcessBuilder("/bin/sh", "-c", "exit 0").start();
         };
 
-        OwnSession.terminalInterrupt();
         Process process = OwnSession.start(failsOnce);
 
         assertThat(process).isNotNull();
@@ -132,15 +133,31 @@ class OwnSessionTest {
 
     /** The host command the Ctrl-C killed while it started runs again, once; one that ends with 130 by itself does not. */
     @Test
-    void aHostCommandKilledAtItsStart_runsAgain(@TempDir Path dir) throws IOException {
+    void aHostCommandKilledAtItsStart_runsAgain(@TempDir Path dir) throws Exception {
         assumeTrue(OwnSession.available(), "needs setsid");
         Path calls = dir.resolve("calls");
-        // The first call ends as a process a SIGINT killed; the second one works
-        String command = "echo call >> '" + calls + "'; [ \"$(wc -l < '" + calls + "')\" -ge 2 ] || exit 130; echo done";
+        Path interrupted = dir.resolve("interrupted");
+        // The first call ends as a process a SIGINT killed, once the Ctrl-C has come; the second one works
+        String command = "echo call >> '" + calls + "'; if [ \"$(wc -l < '" + calls + "')\" -lt 2 ]; then "
+                + "while [ ! -e '" + interrupted + "' ]; do sleep 0.01; done; exit 130; fi; echo done";
+        // The Ctrl-C comes while the first call is under way: no duration places it near the start
+        Thread ctrlC = new Thread(() -> {
+            try {
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (!Files.exists(calls) && System.nanoTime() < deadline) {
+                    Thread.sleep(5);
+                }
+                OwnSession.terminalInterrupt();
+                Files.createFile(interrupted);
+            } catch (IOException | InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        ctrlC.start();
 
-        OwnSession.terminalInterrupt();
         CommandResult result = new HostCommandRunner().run(new CommandRequest(command, null, 30, null, null, null,
                 false));
+        ctrlC.join();
 
         assertThat(result.exitCode()).as(result.stdout()).isZero();
         assertThat(result.stdout()).contains("done");

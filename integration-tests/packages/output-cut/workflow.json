@@ -1,0 +1,19 @@
+{
+  "format": "traceworks-workflow",
+  "format_version": 1,
+  "id": "481a0f46-9b0e-45b4-b31a-21d1db327591",
+  "name": "IT output cut",
+  "description": "A command that ends while a job it started still writes to its output. In a container that job ends with the command, so the output ends and nothing is cut.",
+  "blocks": [
+    {
+      "type": "shell",
+      "name": "serve",
+      "config": {"command": "(trap '' PIPE; while echo tick; do sleep 0.05; done 2>/dev/null) & echo early"}
+    },
+    {
+      "type": "shell",
+      "name": "plain",
+      "config": {"command": "echo fine"}
+    }
+  ]
+}

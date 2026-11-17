@@ -263,7 +263,8 @@ public final class CliAiProvider implements AiProvider {
 
     /**
      * {@code result} as the CLI's parser reads it: of a stdout that did not end by itself only the lines that ended.
-     * That is the stdout of a CLI that went beyond the output limit, timed out, or exited with any other code than 0,
+     * That is the stdout of a CLI that went beyond the output limit, timed out, whose reading ended before the
+     * stream's end ({@link CommandResult#outputCut()}), or that exited with any other code than 0,
      * such as a cancel (143) or a kill (137). Its last line broke off where the CLI was stopped, maybe inside a
      * credential, and what a parser repairs from it (a tool call's result, say) would hold the credential's first
      * characters, which the record cannot redact. A line holds no line feed of a value: the CLIs write one JSON object
@@ -272,12 +273,14 @@ public final class CliAiProvider implements AiProvider {
      */
     private static CommandResult endedLines(CommandResult result) {
         String stdout = result.stdout();
-        if (stdout == null || result.exitCode() == 0 && !result.timedOut() && !result.truncated()) {
+        // A stdout whose reading ended at its bound broke off wherever the reader was, whatever the exit code
+        boolean cut = result.outputCut() != null && result.outputCut().streams().contains(CommandResult.STDOUT);
+        if (stdout == null || result.exitCode() == 0 && !result.timedOut() && !result.truncated() && !cut) {
             return result;
         }
         return new CommandResult(result.exitCode(), stdout.substring(0, stdout.lastIndexOf('\n') + 1),
                 result.stderr(), result.durationMs(), result.timedOut(), result.truncatedStreams(),
-                result.outputLimitBytes());
+                result.outputLimitBytes()).withOutputCut(result.outputCut());
     }
 
     private static int timeout(Integer requested) {

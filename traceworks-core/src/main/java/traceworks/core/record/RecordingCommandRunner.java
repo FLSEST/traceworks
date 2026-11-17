@@ -10,7 +10,8 @@ import java.util.function.Supplier;
  * A {@link CommandRunner} that records what it runs, attributed by the recorder to the innermost running step:
  * {@code step.command} with the facts the delegate planned (image, image ID, effective mounts, network, environment
  * names, host) before the command runs, and {@code step.command.finished} after it, with the streams that went beyond
- * the output limit ({@code truncated}, empty when the output was whole). The network is {@code none}, {@code open} or
+ * the output limit ({@code truncated}, empty when the output was whole) and, only when the reading of the output
+ * ended at its bound because something the command left behind still held it, {@code output_cut}. The network is {@code none}, {@code open} or
  * {@code hosts}; with {@code hosts} the command names them ({@code network_hosts}) and its end names every connection
  * its container asked the egress proxy for ({@code egress}, by target and verdict). A planned refusal (a missing
  * image) is recorded the same way, with its exit code. An exception of the delegate propagates: a plan that cannot be
@@ -81,6 +82,13 @@ final class RecordingCommandRunner implements CommandRunner {
         finished.put("timed_out", result.timedOut());
         ArrayNode truncated = finished.putArray("truncated");
         result.truncatedStreams().forEach(truncated::add);
+        if (result.outputCut() != null) {
+            // Only then: a record without the field says that the output was read to its end
+            ObjectNode cut = finished.putObject("output_cut");
+            ArrayNode streams = cut.putArray("streams");
+            result.outputCut().streams().forEach(streams::add);
+            cut.put("after_ms", result.outputCut().afterMs());
+        }
         if (facts.network().restricted() || !result.connections().isEmpty()) {
             ArrayNode egress = finished.putArray("egress");
             for (Connection connection : result.connections()) {

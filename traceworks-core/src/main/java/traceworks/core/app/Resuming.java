@@ -213,6 +213,7 @@ final class Resuming {
                 resumed.put("execution", target.recorded());
                 resumed.put("container_runtime", runtimeOf(runtime));
                 resumed.put("output_limit_mib", outputLimitMib);
+                resumed.put("records", traceworks.core.record.RunRecorder.RECORDS);
                 resumed.put("run_output_budget_mib", runOutputBudgetMib);
                 resumed.put("ai_images", new TreeMap<>(aiImages));
                 resumed.put("ai_network", aiNetwork.mode());

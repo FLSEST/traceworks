@@ -247,6 +247,25 @@ class CliAiProviderTest {
     }
 
     /**
+     * A stdout whose reading ended at its bound broke off as well, wherever the reader was, also when the CLI exited
+     * with 0: its parser gets only the lines that ended. A cut of stderr alone leaves stdout as it came.
+     */
+    @Test
+    void anOutputCutAtTheBound_theParserGetsOnlyTheLinesThatEnded_alsoAfterExitCode0() throws IOException {
+        String ended = "{\"type\":\"assistant\"}\n";
+        String broken = ended + "{\"type\":\"user\",\"content\":\"" + KEY.substring(0, 10);
+        next = new CommandResult(0, broken, "", 900, false)
+                .withOutputCut(new CommandRunner.OutputCut(List.of("stdout", "stderr"), 2000));
+        provider.executeAction(new ActionRequest("env", null, null, null));
+        next = new CommandResult(0, broken, "", 900, false)
+                .withOutputCut(new CommandRunner.OutputCut(List.of("stderr"), 2000));
+        provider.executeAction(new ActionRequest("env", null, null, null));
+
+        assertThat(cli.results()).extracting(CommandResult::stdout).containsExactly(ended, broken);
+        assertThat(cli.results().getFirst().outputCut()).as("the cut stays with the result").isNotNull();
+    }
+
+    /**
      * A CLI stopped for time, by a cancel or by a kill broke off where it was stopped, as one cut at the limit does:
      * its parser gets only the lines that ended, so no tool call is repaired from a last line that may end inside a
      * credential. A CLI that exited 0 ended its stream itself, and its parser gets it as it came.

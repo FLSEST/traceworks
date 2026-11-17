@@ -54,6 +54,17 @@ class InterruptsTest {
         return errBytes.toString(StandardCharsets.UTF_8);
     }
 
+    /**
+     * Waits until {@code text} is printed. The JVM hands a signal to a thread of its own, which prints after it has
+     * asked the runs to pause: whoever only waits for the pause can be ahead of the message.
+     */
+    private void awaitPrinted(String text) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (!printed().contains(text) && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+    }
+
     @Test
     void theFirstCtrlC_pauses_andSaysHowToCancel() {
         FakeRuns runs = new FakeRuns();
@@ -116,6 +127,7 @@ class InterruptsTest {
         // A JVM started with SIGINT ignored (a background job) never sees the signal: nothing to test there
         assumeTrue(reached, "this JVM ignores SIGINT");
         assertThat(runs.calls).containsExactly("pause");
+        awaitPrinted("pausing after the step in flight");
         assertThat(printed()).contains("pausing after the step in flight");
     }
 
