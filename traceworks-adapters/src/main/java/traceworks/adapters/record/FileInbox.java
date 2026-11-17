@@ -33,6 +33,12 @@ final class FileInbox implements Inbox {
 
     private final Path dir;
 
+    /**
+     * How large a request file may be. A request is read into memory whole, and the inbox of a run folder opened
+     * by its path may hold anything: a larger file is not read to its end, and none is posted.
+     */
+    static final int MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
     FileInbox(Path dir) {
         this.dir = dir;
     }
@@ -55,12 +61,16 @@ final class FileInbox implements Inbox {
         json.put("actor", request.actor());
         json.put("at", request.at().toString());
         try {
+            byte[] bytes = MAPPER.writeValueAsString(json).getBytes(StandardCharsets.UTF_8);
+            if (bytes.length > MAX_REQUEST_BYTES) {
+                throw new IllegalArgumentException("The request is too large for the inbox of a run: "
+                        + bytes.length + " bytes, and at most " + MAX_REQUEST_BYTES + " are taken");
+            }
             if (Files.isSymbolicLink(dir)) {
                 throw new IOException(dir + " is a link, not the run's inbox");
             }
             Files.createDirectories(dir);
-            AtomicFiles.write(dir.resolve(request.at().toEpochMilli() + "-" + request.id() + ".json"),
-                    MAPPER.writeValueAsString(json).getBytes(StandardCharsets.UTF_8));
+            AtomicFiles.write(dir.resolve(request.at().toEpochMilli() + "-" + request.id() + ".json"), bytes);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot post to " + dir + ": " + e.getMessage(), e);
         }
@@ -94,7 +104,9 @@ final class FileInbox implements Inbox {
                 InboxRequest parsed = null;
                 try {
                     try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
-                        parsed = parse(in.readAllBytes());
+                        byte[] bytes = in.readNBytes(MAX_REQUEST_BYTES + 1);
+                        // A file beyond the limit is no request: it is not read further and not parsed
+                        parsed = bytes.length > MAX_REQUEST_BYTES ? null : parse(bytes);
                     }
                 } catch (IOException | RuntimeException e) {
                     // moved aside below

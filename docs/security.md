@@ -95,15 +95,19 @@ workspace holds the package, the container sees the package read-only at its pla
 writable workspace inside the package is refused, so no step changes the package. A block's own `mounts`
 must state `:ro` or `:rw`, and each host path is checked on its real path, with `..` and symbolic links resolved: the
 home directory, logins below it (`~/.ssh`, the AI CLIs' logins, ...), the runtimes' sockets and storage, your
-session's sockets, socket files and folders that directly hold one, the Traceworks home (but for the tool caches of
-the tool mode, the run's own scratch directory and its own checkout) with its `runs/`, `ledger/`, `registers/`,
+session's sockets, socket files, device nodes, named pipes and folders that directly hold one of these, `/dev` (the
+terminals of your session, shared memory, device nodes), the Traceworks home (but for the run's own scratch
+directory and its own checkout; of the tool caches a tool step gets the one folder of its image through `cache_dir`,
+and a `mounts` entry names none of them) with its `runs/`, `ledger/`, `registers/`,
 `seals/` and `cache/` also where a link or a setting (`runs_dir`, `ledger_dir`, `registers_dir` in `traceworks.json`) puts them
 elsewhere, and a path that does not exist or cannot be resolved are refused. The forbidden
 paths are compared with the path as written and with the real path, so `link/..` counts as the folder the kernel
 mounts. A block's own mount is resolved once too: the real path the check judged is the path the runtime is given,
 and the path as the block wrote it is not read again. Where the package has a top-level `.git/`, a mount of that directory, of something in it, of the package
 again or of a folder holding the package is refused too: it would show what the cover hides.
-The workspace and the package are checked against the same paths before the run is created, with two differences:
+The workspace and the package are checked against the same paths before the run is created, with three differences:
+a folder in `/dev/shm` may be one (a memory disk is a common place for a build), while `/dev/shm` itself and the
+rest of `/dev` are refused, and a block's own mount from there is refused as any mount from `/dev`;
 inside the Traceworks home only its `runs/`, `ledger/`, `registers/`, `seals/` and `cache/` are refused (a package or
 a run's checkout may lie elsewhere in it), a folder that holds one of the places the settings name is refused wherever
 it is, and a folder with a credential store of its own (`.ssh`, `.aws`, ...) is not refused. Each of
@@ -471,7 +475,10 @@ content, and no blob is written through one.
     workflow the values are handed to, for the output of a child (or a child of a child) that asked a model, and
     after a resume. What a step recorded before the first call is inserted as before, and a run that asks no model
     and carries no untrusted input runs as it always did. A trusted write takes the mark off a variable again: the
-    static `items` of a `foreach`, a person's answer.
+    static `items` of a `foreach`, a person's answer. A default that a person takes at the console with an empty
+    line is such an answer, so the console takes it only when its prompt showed the whole default: one that is
+    longer than the 200 characters shown, or has a line break or a character a terminal does not show, must be
+    typed. What the prompt shows, the person has seen and answers for.
   - **Which bash.** A step with `values` needs bash 3.1 or later, on the host and in the step's image: `printf -v`,
     which sets the variables, came with 3.1. The first line checks the version in syntax every bash reads and ends
     an older one as a failed delivery. The lines after it use nothing a bash from 3.1 on reads differently, so a
@@ -634,11 +641,19 @@ What a seal does not protect:
   `allowed_signers` gives it (`key` and `principals` in `run.started`). Read those to know who sealed.
 - **What the digest does not see.** An empty directory; a file that is not a regular file (a named pipe, a socket);
   permission bits other than the owner's execute bit; the top-level `.git/`. A change there breaks no seal. A
-  container does not see the package's `.git/`, and a workflow under it cannot be sealed.
+  container does not see the package's `.git/`, and a workflow under it cannot be sealed. That holds for
+  these other spellings a file system may take for the directory: another case (`.GIT` on macOS or Windows), the
+  characters HFS+ ignores, dots and blanks at the end (`.git.`), the short name `GIT~<n>`, and an NTFS stream
+  suffix (`.git::$INDEX_ALLOCATION`). It does not hold for the hashed short name NTFS gives `.git` when `GIT~1` to
+  `GIT~4` are taken; seal on a file system that knows one spelling.
 - **A called package is loaded again when its block runs.** The seal digest and the seals of the called packages
   are checked when the run starts and when it resumes. The engine loads a called package from disk again at the
   moment its `sub-workflow` or `foreach` block runs, and does not compare it with what the start saw. A called
-  package changed in between runs changed. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
+  package changed in between runs changed. A step of the run itself can be the one that changes it: with
+  `workspace_writable: true` a container sees only the run's own package read-only inside the workspace, so a
+  called package that lies in the workspace can be rewritten by a step, or by a model with write tools, before its
+  block runs, and its steps then get the secrets the run took at its start. Keep called packages outside every
+  workspace a run writes. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
   an unsealed package is not known at the start at all, so a sealed package reached that way is not checked.
 - **Whoever writes the home is the operator.** `traceworks.json`, `allowed_signers` and the seal log are files of
   the home. Someone who can write them can allow a key of their own, switch `require_seal` off or undo
@@ -734,8 +749,19 @@ What a seal does not protect:
   was checked, so a link that replaces a part of the path as written changes nothing. What is left is the runtime
   itself, which opens that real path a moment later: a process that can write one of its parent directories could
   still swap a part of it in between. Do not declare mounts below directories that others can write.
-- **Sockets deeper down.** A socket file and a folder that directly holds one are refused (all of `/tmp` is, since it
-  holds the X11 socket directory), but a folder with a socket two or more levels down is not. Mount the narrowest
+- **A writable mount below the home.** The mount check refuses the home as a whole, the logins below it and the
+  places listed above; it does not refuse a writable mount (`:rw`) of any other file or folder of yours. A workflow
+  that declares `~/.bashrc:/x:rw`, `~/.local/bin:/x:rw`, `~/.config/systemd/user:/x:rw` or the `.git/hooks` of one of your
+  repositories gets it, and its step, which runs as you, can leave commands there that your shell, your session or
+  git runs later outside every container. `traceworks describe <package>` shows every mount of every block before
+  anything runs: read it for a package you did not write, and run no package whose writable mounts you would not
+  hand to its author.
+- **The tool caches are shared between runs.** A tool step's cache folder (`cache_dir`) belongs to an image name,
+  and every package that names that image, or gives its own package and image the same names, shares it. What one
+  run's tool wrote there, a later run's tool reads.
+- **Sockets, pipes and devices deeper down.** A socket file, a named pipe, a device node and a folder that directly
+  holds one are refused (all of `/tmp` is, since it holds the X11 socket directory), but a folder with one of them
+  two or more levels down is not. Mount the narrowest
   directory a step needs.
 - **Runtime storage elsewhere.** The guard knows the runtimes' default storage (`/var/lib/docker`,
   `/var/lib/containers`, `~/.local/share/docker`, `~/.local/share/containers`). Storage moved elsewhere, such as
@@ -777,12 +803,24 @@ this setting is the usual one for Docker hosts and has not been verified here.
   busy until the Traceworks process ends (a thread inside the regex engine cannot be stopped). A pattern whose
   counts (`{n}`, `{n,}`, `{n,m}`) multiply to more than 1,000,000,000,000 is refused before any match, with a
   message that says so; a count written with white space or a comment in it, which `(?x)` allows, is read as the
-  engine reads it.
+  engine reads it, and so is quoting: the counts are read after `\Q...\E` is taken out the way the engine takes it
+  out, so an empty `\Q\E` between the digits of a count hides nothing. A brace that is escaped, in a character
+  class or in quoted text counts nothing, unless the pattern holds a control escape (`\c`) or a `#`: either can
+  make a class or an escape look like one where the engine reads none, so in such a pattern every brace counts.
+  What this guarantees: no count Java's engine takes is missed (checked against the engine for quoting, nested
+  classes, intersections and the braces of `\p{..}`, `\x{..}`, `\N{..}`); it refuses some patterns the engine would
+  match quickly, since it multiplies all counts, nested or not.
 - **A token in a `--source` URL** is an argument of `git clone`, so every process on the machine can read it in the
   process list while the clone runs. Use a credential helper instead.
 - **A gitfile that points into a checkout.** A local source whose `.git` is a file (`gitdir: ...`) that points into a
   run's checkout is not refused, so the clone's git on the host would read the checkout's `.git`, which a step with a
   writable workspace may have written. Planting such a file needs a write outside the checkout, on the host or
   through a writable mount a step declares; do not use a directory that steps could write as a `--source`.
+- **A source path is checked, then cloned.** Whether a local `--source` lies in a folder that steps write is
+  judged on the path as it resolves at the check, and git resolves the path again when it clones. A path through
+  such a folder with a part that does not exist yet (`<run folder>/scratch/missing/../../../../repo`) is judged
+  as if the part were a plain folder; a step of a run going on at that moment that creates it as a link changes
+  where git ends up. The path is yours: name a source by a path that exists and passes through no folder a run
+  writes.
 - **Paths in a package.** A `sub-workflow` or `foreach` block may name its workflow by any path on the machine. Run
   only packages you trust.

@@ -51,6 +51,34 @@ class FileInboxTest {
         }
     }
 
+    /**
+     * A run folder opened by its path may come from anyone, and every request file is read into memory: a file
+     * beyond the limit is not read to its end and not parsed. It is moved aside as invalid, well-formed or not.
+     */
+    @Test
+    void take_aRequestBeyondTheSizeLimit_isMovedAsInvalid_andNotParsed() throws IOException {
+        FileInbox inbox = new FileInbox(dir.resolve("inbox"));
+        inbox.post(request("a", 2_000));
+        String wellFormed = "{\"id\":\"big\",\"kind\":\"approval\",\"at\":\"" + Instant.ofEpochMilli(1_000)
+                + "\",\"answer\":\"" + "a".repeat(FileInbox.MAX_REQUEST_BYTES) + "\"}";
+        Files.writeString(dir.resolve("inbox").resolve("1-big.json"), wellFormed);
+
+        assertThat(inbox.take()).containsExactly(request("a", 2_000));
+        assertThat(dir.resolve("inbox").resolve("done").resolve("1-big.json.invalid")).exists();
+    }
+
+    /** What could not be taken is not posted: the sender hears of it, instead of a request that is set aside. */
+    @Test
+    void post_aRequestBeyondTheSizeLimit_isRefused() {
+        FileInbox inbox = new FileInbox(dir.resolve("inbox"));
+        InboxRequest big = new InboxRequest("big", "approval", "run", 2, 17, "a".repeat(FileInbox.MAX_REQUEST_BYTES),
+                Map.of(), null, "flo", Instant.ofEpochMilli(1_000));
+
+        assertThatThrownBy(() -> inbox.post(big)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("too large");
+        assertThat(inbox.take()).isEmpty();
+    }
+
     @Test
     void take_anUnparsableFile_isMovedAsInvalidAndSkipped() throws IOException {
         FileInbox inbox = new FileInbox(dir.resolve("inbox"));

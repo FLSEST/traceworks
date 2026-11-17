@@ -131,4 +131,51 @@ class GitInfoTest {
         assertNull(info.commit());
         assertNull(info.dirty());
     }
+
+    /**
+     * A driver name is bytes to git, and it reaches {@code -c} as text: a name that is no valid UTF-8 (here the one
+     * byte 0xFF) would come back as U+FFFD, so the {@code -c} would empty a driver of another name and
+     * {@code git status} would run the package's own. Such a name leaves the drivers unknown: no status runs.
+     */
+    @Test
+    void aFilterDriverWhoseNameIsNotValidText_isNeverRun_andTheGitStateIsUnknown() throws Exception {
+        Path marker = temp.resolve("filter-ran");
+        Path pkg = packageWithFilters("", "text");
+        byte[] name = {(byte) 0xFF};
+        java.io.ByteArrayOutputStream config = new java.io.ByteArrayOutputStream();
+        config.write(Files.readAllBytes(pkg.resolve(".git/config")));
+        config.write("[filter \"".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        config.write(name);
+        config.write(("\"]\n\tclean = touch '" + marker + "'; cat\n\tsmudge = cat\n")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Files.write(pkg.resolve(".git/config"), config.toByteArray());
+        java.io.ByteArrayOutputStream attributes = new java.io.ByteArrayOutputStream();
+        attributes.write("*.json filter=".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        attributes.write(name);
+        attributes.write('\n');
+        Files.write(pkg.resolve(".gitattributes"), attributes.toByteArray());
+
+        GitInfo info = GitInfo.of(pkg, "git", 10_000L, Map.of());
+
+        assertEquals(false, Files.exists(marker), "the package's filter driver ran");
+        assertNull(info.commit());
+        assertNull(info.dirty());
+    }
+
+    /**
+     * A name outside ASCII that is valid UTF-8 is refused as well: how the JVM encodes an argument depends on its
+     * locale, so the name git gets back need not be the name it listed.
+     */
+    @Test
+    void aFilterDriverWithAnAccentedName_leavesTheGitStateUnknown() throws Exception {
+        Path marker = temp.resolve("filter-ran");
+        Path pkg = packageWithFilters("[filter \"café\"]\n\tclean = touch '" + marker + "'; cat\n\tsmudge = cat\n",
+                "filter=café");
+
+        GitInfo info = GitInfo.of(pkg, "git", 10_000L, Map.of());
+
+        assertEquals(false, Files.exists(marker), "the package's filter driver ran");
+        assertNull(info.commit());
+        assertNull(info.dirty());
+    }
 }

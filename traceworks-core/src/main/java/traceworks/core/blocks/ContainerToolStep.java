@@ -139,7 +139,7 @@ class ContainerToolStep {
         } catch (IOException e) {
             throw new WorkflowExecutionException("Cannot create tool cache " + dir + ": " + e.getMessage(), e);
         }
-        return new Mount(dir.toString(), spec.cacheDir(), false);
+        return new Mount(dir.toString(), spec.cacheDir(), false, true);
     }
 
     /** A name the slug cannot confuse with another: only letters, digits, "." and "-" between its slashes. */
