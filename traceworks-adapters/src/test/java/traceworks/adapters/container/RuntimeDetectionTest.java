@@ -40,7 +40,7 @@ class RuntimeDetectionTest {
         assertThat(runtime.version()).isEqualTo("29.1.3");
     }
 
-    /** Docker first: it is the runtime this release is tested with (Flo, 2026-11-11). */
+    /** Docker first: it is the runtime this release is tested with. */
     @Test
     void autoDetection_triesDockerBeforePodman() {
         assertThat(RuntimeDetection.RUNTIMES).containsExactly("docker", "podman");
