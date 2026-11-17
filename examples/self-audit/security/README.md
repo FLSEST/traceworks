@@ -151,22 +151,38 @@ guarantees and not the limits, so it reported what the documents already say, an
 that out.
 
 **The stated limits** are in `rules/security.limits`, and the instructions carry them as a numbered list of one
-line each, under the document and the heading they come from (`L1` to `L57`, about 10 KB). The judge is told how to use them:
+line each, under the document and the heading they come from (`L1` to `L60`). The judge is told how to use them:
 
 - A behaviour that a limit states is not a finding. An open finding of an earlier run that describes only such a
-  behaviour is answered `gone`, with the number of the limit in the reason.
+  behaviour is answered `gone` with `"limit": "L<number>"`.
 - It is a finding when the code does more than the limit says. The issue then names the limit by its number and
   says what goes beyond it.
 - In doubt it is a finding, with the limit quoted in the issue: a person decides.
 - A limit takes nothing from a guarantee beyond what it says.
+
+**A model never closes a medium or high finding by citing a limit.** The `report` step reads the limit a `gone`
+answer cites (its `limit` field, an `L<number>` in its reason, or the words "stated limit") and checks it against
+the list `find --limits` read from the file:
+
+| The answer cites | Medium or high finding | Low finding |
+|---|---|---|
+| one limit of the list | stays `OPEN`: the envelope states it again, its description "The judge holds that limit Lx covers this: <the limit's line> A person decides ...", and the area is open | closed: named `gone`, and counted under "Closed by a stated limit (low)" |
+| a number that is not on the list, more than one, or none | no answer: the item is not judged, the gate at least YELLOW (RED for a high one) | the same |
+
+The report lists both kinds under "Covered by a stated limit, for a person", each with the limit's line, and the
+output counts them (`FACT report_known_covered_by_limit`, `FACT report_known_gone_by_limit`). A person settles one
+with one command: `traceworks findings security accept <id> --note "L12"` when the limit covers it, `dismiss` when
+the finding never held, or a fix.
 
 ```
 source docs/security.md
 section Seals
 limit A called package is loaded again when its block runs.
   quote A called package changed in between runs changed.
-  says  A called package is checked when the run starts and resumes, and is loaded from disk again when ...
+  says  A called package is checked when the run starts and resumes and loaded again when its block runs, ...
+  digest 3f0c9a1b2c3d4e5f
 aside The private key is yours to keep.
+  digest 9ab1c2d3e4f50617
 ```
 
 | Line | Meaning |
@@ -175,27 +191,38 @@ aside The private key is yours to keep.
 | `section <heading>` | a heading of that document |
 | `limit <lead>` | a bullet of the section, by its bold lead: a limit the judge gets |
 | `quote <text>` | a sentence of that bullet, word for word; one or more per limit |
-| `says <text>` | the limit in one line, as the judge gets it |
-| `aside <lead>` | a bullet that says nothing about what the code does (advice to the operator, a provider's behaviour): named, so that the list is whole, and not sent |
+| `says <text>` | the limit in one line, as the judge gets it. It may narrow the bullet, never widen it: it keeps every bound the bullet sets ("Traceworks guarantees that the value is in the variable and nowhere in the code") |
+| `digest <hex>` | the first 16 hex digits of the SHA-256 of the bullet's whole text, as the test reads it |
+| `aside <lead>` | a bullet that says nothing about what the code does: named, so that the list is whole, and not sent. The file's head says why each is one |
 
 **The file cannot drift from the documents unnoticed.** `LimitsTest` fails when "What they do not protect" of
 `docs/security.md` gets a heading or a bullet the file does not name, when a bullet the file names is gone or
-moved, when a quote is no longer in its bullet, and when the list in the instructions of this package or of
-`security-changes` is not the one the file gives. It writes the list as it goes into `workflow.json` to
-`target/security-limits.json-text`. A limit stated elsewhere is named by the bold lead of its passage and pinned
-by its quotes only, and nothing finds a new one there: the five that stand among the guarantees ("What the defaults
-protect": a workspace with a credential store of its own, a hook's environment and output, lines after a
-register's last anchor, the register folder in a host run, what the ledger does not find) and the one of
-`docs/events.md`. A guarantee is not copied as a limit.
+moved, when the text of any bullet changes (its digest; a limit or an aside, inside the quotes or not), when a quote
+is no longer in its bullet, and when the list in the instructions of this package or of `security-changes` is not
+the one the file gives. Its failure shows each `says` line next to the whole bullet, so whoever brings them in step
+sees both. It writes the list as it goes into `workflow.json` to `target/security-limits.json-text`, and the
+digests as the documents have them to `target/security-limits-digests.txt`. A limit stated among the guarantees
+("What the defaults protect": a workspace with a credential store of its own, a hook's environment and output,
+lines after a register's last anchor, the register folder in a host run, what the ledger does not find) is named by
+the bold lead of its passage, and the digest covers the whole passage; so does the one of `docs/events.md`. A new
+limit written into such a passage changes its digest; a new passage is not found. A guarantee is not copied as a
+limit.
 
 **Why a file of the package, and not the documents at run time.** The workspace is untrusted input, and this text
 tells the judge what not to report: read from the workspace, a line added to its `docs/security.md` would switch
 a finding off. The file belongs to the package, and a seal covers it and the instructions.
 
-**No step reads the file.** It is the source of the list and of the pin. Who changes a limit changes the file, puts
-the list into both `workflow.json` anew, and raises `--verdict-version` (below): the question changed. That was
-done on 2026-11-17, from 1 to 2, so the next run of this audit judges every area again: 141 calls on the sources
-of that day, where a run without the change would have asked about the open and the changed areas only.
+**Who changes a limit** changes the file, puts the list into both `workflow.json` anew, and raises
+`--verdict-version` (below): the question changed. That was done on 2026-11-17, from 1 to 2. The `areas` step reads
+the file too (`--limits`), only to hand the report the line of each limit by its number.
+
+**What the instructions cost.** They are about 19 KB (`security-changes`: 19.6 KB), of which the limits are 14.5 KB:
+about 4 800 input tokens per call, 3 600 of them the limits. Every call sends them, so after the version raise the
+next full run (every area judged again: 141 calls on the sources of November 2026) sends about 680 000 instruction
+tokens, 510 000 of them the limits; the instructions are the same in every call, so a provider that caches a prompt
+prefix reads most of them from its cache. That is more than the code of an area in most calls, and less than what a
+model with `tools: read` reads of the workspace in many. A later run asks only about the open, changed and
+unjudged areas, at the same cost per call.
 
 ## The register
 
@@ -259,38 +286,48 @@ between frame lines, and wants an answer per open finding in `"known"`:
 |---|---|---|
 | `{"id":"K1","status":"holds", severity, line, quote, issue, fix}` | checks the line and the quote like a new finding's, and states the finding again under its rule | seen, stays `OPEN` |
 | `{"id":"K1","status":"gone","reason":"..."}` | names the finding in the envelope's `gone`; the reason goes to the report | `RESOLVED` |
+| `{"id":"K1","status":"gone","limit":"L12","reason":"..."}` | checks the limit against the list ("What the judge is told"): a medium or high finding is stated again with the limit as its note, a low one is named in `gone`; a limit not on the list is no answer | `OPEN` for a person, or `RESOLVED` (low) |
 | none, an unknown status, or `holds` with a quote that is not in the line | lists it under "Open findings without an answer"; the gate is at least YELLOW | stays `OPEN`, counted as not mentioned |
 
 Only `OPEN` and `AWAITING_VERIFICATION` findings are asked about.
 
-**How a finding leaves the register.** There are four ways, and the report counts the first three under "Earlier
-findings that are gone", each finding with its old subject (`FACT report_known_gone_file`, `..._member`,
-`..._answered` in the output of the `report` step):
+**How a finding leaves the register.** The report counts every way but a person's under "Earlier findings that are
+gone", each finding with its old subject (`FACT report_known_gone_file`, `..._subject`, `..._restated`,
+`..._answered` and `..._by_limit` in the output of the `report` step):
 
 | Why | Who says so | When |
 |---|---|---|
 | the file is gone | `find`, by measurement | no source file the audit reads has the path of the finding's subject: the file was removed, renamed or moved, as after the rename of a package |
-| the member is gone | `find`, by measurement | the file is still read, and none of its areas has the members of the subject: a member was removed or renamed, or lost what a rule points at |
-| the judge answered that it is gone | the model, not checked | the answer for its area said `gone`, with a reason: fixed, never held, or what a stated limit says |
-| a person decided | `traceworks findings security dismiss` or `accept` | any time |
+| no area has this subject any more | `find`, by measurement | the file is still read, and none of its areas has any of the subject's members: a member was removed, or renamed alone |
+| stated under the subject of its area now | the judge's `holds`, checked like a new finding | an area of the same file has one of the subject's members (it regrouped, or a member beside it was renamed): the finding was asked about there, and holds; it is stated under the area's subject, and the old subject is named gone |
+| the judge answered that it is gone | the model, not checked | the answer for its area said `gone`, with a reason of its own: fixed, or never held |
+| closed by a stated limit (low) | the model, with a limit checked against the list | a low finding the answer called covered by one limit of the list ("What the judge is told") |
+| a person decided | `traceworks findings security dismiss` or `accept` | any time; a medium or high finding a limit covers in the judge's view waits for this |
 
 A finding's subject is `<file>#<members>`, and it is compared with the subjects of the areas the sources have now.
-No model is asked about a finding whose code is not there: it cannot hold as it was stated.
+No model is asked about a finding whose code is not there: it cannot hold as it was stated. **A finding whose
+members an area of its file still has is not named gone:** it is handed to every such area as a known finding, so
+the judge must answer for it there, and no answer keeps it open. Only when no area of the file has any of its
+members is it named gone without a model.
 
 **A finding whose rule left the catalog** (a rule renamed or removed in the rule file and `catalog.json`) is shown
-to no run: the files of the register folder list the findings of the catalog's rules. It does not stay open
-unseen. A rule the catalog does not hold is no judged rule, so the register takes its finding as a measurement, and
-the next applied report, a full snapshot that cannot state it (a report that names a rule outside the catalog is
-rejected whole), resolves it; a decided one is resolved the same way
-([docs/registers.md](../../../docs/registers.md), "catalog.json" and "Reconciliation"). A defect that is still there
-comes back under the new rule, whose area the same run judges. `EngineRoundTripTest` runs that through the
-register.
+to no run: the files of the register folder list the findings of the catalog's rules, resolved ones too. It does not
+stay open unseen. A rule the catalog does not hold is no judged rule, so the register takes its finding as a
+measurement, and the next applied report, a full snapshot that cannot state it (a report that names a rule outside
+the catalog is rejected whole), resolves it; a decided one is resolved the same way
+([docs/registers.md](../../../docs/registers.md), "catalog.json" and "Reconciliation"). The report of that run says
+so under "Rules that left the catalog": it compares the rules the previous report printed (`FACT report_rules`)
+with the rule file (`find --previous-report`), and names each rule that left. It cannot name the findings: nothing
+the register hands a run lists them. `traceworks findings security list --all` shows them as `RESOLVED`. A defect
+that is still there comes back under the new rule, whose area the same run judges. `EngineRoundTripTest` runs that
+through the register.
 
-**A renamed or moved member is not lost with its finding.** Its code is still in the sources, in an area whose
-name or digest the register does not know, so the same run judges that area: a defect that is still there is
-reported again, as a new finding under the new subject. What does not travel is a person's decision on the old
-subject, as with every rename. Where the cap (`--max-areas`) leaves that area without a place, the report lists it
-as cut, its item is not judged, and the gate is YELLOW until a run judges it.
+**A renamed or moved member is not lost with its finding.** Beside a member that stayed, its finding is asked
+about in the area, as above. Renamed alone, or moved to another file, its code is in an area whose name or digest
+the register does not know, so the same run judges that area: a defect that is still there is reported again, as a
+new finding under the new subject, from the judge's reading alone. What does not travel is a person's decision on
+the old subject, as with every rename. Where the cap (`--max-areas`) leaves that area without a place, the report
+lists it as cut, its item is not judged, and the gate is YELLOW until a run judges it.
 
 **Why a finding could stay open after its code was gone.** `find` named a finding gone only when it could compare
 its subject, and until 2026-11-17 it read the findings from `{{ audit_findings }}`, which shows 300 characters of
@@ -298,8 +335,6 @@ a subject. A subject with a long path and the members of a whole class is longer
 equals no area's, and so the finding was neither asked about nor named gone, run after run (the report listed it
 under "Open findings that no item carries"). The run of November 2026 held three findings with paths from before a
 package was renamed. The step now reads `findings.jsonl` of the register folder, which holds every finding whole.
-An area whose members change, also by a neighbour that joins it, has another subject: its earlier finding is
-named gone ("the member is gone"), and the area is judged in the same run, since its digest changed.
 
 ```bash
 traceworks findings security list

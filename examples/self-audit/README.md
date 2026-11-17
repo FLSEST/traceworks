@@ -115,11 +115,11 @@ Two things keep a person from findings that cost time for nothing, both in `secu
 ([security/README.md](security/README.md), "What the judge is told" and "How a finding leaves the register"):
 
 - **The judge knows the stated limits.** A behaviour the documents state as not protected is no finding; code that
-  does more than the limit says is one, and in doubt it is a finding with the limit quoted. The limits are a file
+  does more than the limit says is one, and in doubt it is a finding with the limit quoted. A model that calls a known finding covered by a limit closes only a low one; a medium or high one stays open, with the limit as its note, for a person. The limits are a file
   of the package, pinned to `docs/security.md` by a test.
 - **A finding whose code is gone is named gone by measurement.** When no source file has the path of its subject
-  any more, or the file has no area with its members, the fact step names it gone without asking a model, and the
-  report counts it with its reason. A member that only moved or was renamed is an area of the same run, so a
+  any more, or no area of its file has any of its members, the fact step names it gone without asking a model, and the
+  report counts it with its reason. A finding whose members an area of its file still has is asked about there; a member renamed alone is an area of the same run, so a
   defect that is still there is reported under its new name.
 
 | Status in the register | Asked about in the next run? | Leaves that status when |
