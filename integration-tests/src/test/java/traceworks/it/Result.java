@@ -9,8 +9,10 @@ import java.util.regex.Pattern;
  *
  * @param args the arguments after {@code java -jar traceworks.jar}
  * @param code the exit code
- * @param out  standard output
- * @param err  standard error
+ * @param out  standard output, with every line that Traceworks broke for an 80 column terminal put together
+ *             again: what follows a {@code "|+"} at the start of a line follows the end of the line above, so a
+ *             test of what a command says does not depend on the length of a temporary folder's name
+ * @param err  standard error, put together the same way
  */
 record Result(List<String> args, int code, String out, String err) {
 
@@ -20,6 +22,13 @@ record Result(List<String> args, int code, String out, String err) {
 
     Result {
         args = List.copyOf(args);
+        out = unbroken(out);
+        err = unbroken(err);
+    }
+
+    /** {@code printed} with the lines joined that go on behind {@code "|+"}; every other line stays as it is. */
+    static String unbroken(String printed) {
+        return printed == null ? null : printed.replaceAll("\\R *\\|\\+", "");
     }
 
     /** The run id of the summary line; fails when the command printed none. */

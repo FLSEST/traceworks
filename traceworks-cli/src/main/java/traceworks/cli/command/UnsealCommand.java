@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Seals;
 
@@ -33,8 +33,8 @@ public final class UnsealCommand implements Command {
             throw new UsageException("no such package: " + pkg);
         }
         Seals.Unsealed unsealed = context.seals().unseal(pkg, args.option("note"));
-        context.out().println("unsealed " + TerminalFormat.safe(unsealed.workflowId()) + " ("
-                + TerminalFormat.safe(unsealed.directory()) + ")"
+        TerminalText.println(context.out(), "unsealed ", TerminalText.safe(unsealed.workflowId()), " (",
+                TerminalText.whole(unsealed.directory()), ")"
                 + (unsealed.fileRemoved() ? "" : "; the package carried no seal file"));
         return ExitCodes.OK;
     }

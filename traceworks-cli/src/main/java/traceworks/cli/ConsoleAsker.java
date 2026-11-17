@@ -91,7 +91,7 @@ public final class ConsoleAsker implements QuestionAsker {
             return Optional.empty();
         }
         try {
-            String text = TerminalFormat.printable(text(question.question(), "(deleted)"));
+            String text = text(question.question(), "(deleted)");
             return "human-input".equals(question.kind()) ? human(question, text) : approval(question, text);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -103,8 +103,7 @@ public final class ConsoleAsker implements QuestionAsker {
 
     private Optional<String> approval(QuestionView question, String text) throws InterruptedException {
         List<String> options = question.options();
-        out.println();
-        out.println("? " + text);
+        question(text);
         if (!options.isEmpty()) {
             options("answer with one of:", options);
         }
@@ -129,9 +128,25 @@ public final class ConsoleAsker implements QuestionAsker {
         }
     }
 
-    private Optional<String> human(QuestionView question, String text) throws InterruptedException {
+    /**
+     * The question behind {@code ?}. It is the workflow's text: on that line only where it is one line that fits
+     * the terminal and holds no run of blanks, else every line of it on marked lines below, so that no part of it
+     * starts a terminal line that reads as one of Traceworks.
+     */
+    private void question(String text) {
         out.println();
-        out.println("? " + text);
+        String shown = text.strip();
+        List<String> inline = TerminalText.lines("? ", TerminalText.safe(shown));
+        if (shown.lines().count() <= 1 && inline.size() == 1) {
+            out.println(inline.getFirst());
+            return;
+        }
+        out.println("?");
+        TerminalText.block(LEAD, shown).forEach(out::println);
+    }
+
+    private Optional<String> human(QuestionView question, String text) throws InterruptedException {
+        question(text);
         if (question.fields() == null || question.fields().isEmpty()) {
             String value = value(text(question.defaultValue(), ""), question.required(), pattern(question.pattern()),
                     question.options());
@@ -142,7 +157,7 @@ public final class ConsoleAsker implements QuestionAsker {
             Object name = field.get("variable_name");
             Object label = field.getOrDefault("label", name);
             // A label is the workflow's text, as an option is
-            AnswerCommands.shown(LEAD, "", "", "", "", List.of(String.valueOf(label)))
+            TerminalText.shown(LEAD, "", "", "", "", List.of(String.valueOf(label)))
                     .forEach(shown -> out.println(LEAD + shown));
             String value = value(string(field.get("default_value")), !Boolean.FALSE.equals(field.get("required")),
                     pattern(field.get("validation_pattern")), strings(field.get("options")));
@@ -166,18 +181,20 @@ public final class ConsoleAsker implements QuestionAsker {
         }
         // What comes back from here is the person's own answer, and the step stores it without the protection the
         // default had (a default may be made of a step's or a model's output). An empty line therefore takes the
-        // default only when the hint shows all of it, not one cut at the limit or changed to fit a line
-        String hint = TerminalFormat.oneLine(defaultValue);
-        boolean shownWhole = hint.equals(defaultValue);
+        // default only when the hint shows all of it, not one cut at the limit, changed to fit a line or broken
+        // over several (a break drops the blanks it is made at). The hint is the workflow's text, or a step's
+        List<String> hint = defaultValue.isEmpty() ? List.of("")
+                : TerminalText.lines(" [", TerminalText.oneLine(defaultValue), "]");
+        boolean shownWhole = TerminalFormat.oneLine(defaultValue).equals(defaultValue) && hint.size() == 1;
         while (true) {
-            String line = prompt(defaultValue.isEmpty() ? "" : " [" + hint + "]");
+            String line = prompt(hint);
             if (line == null) {
                 return null;
             }
             if (line.isEmpty() && !shownWhole) {
                 out.println("  the default is not shown whole here (" + defaultValue.length() + " characters, or with"
-                        + " line breaks or characters a terminal does not show), so an empty line does not take it:"
-                        + " type the value");
+                        + " line breaks, a run of blanks or characters a terminal does not show), so an empty line"
+                        + " does not take it: type the value");
                 continue;
             }
             String value = line.isEmpty() ? defaultValue : line;
@@ -190,11 +207,11 @@ public final class ConsoleAsker implements QuestionAsker {
                 if (matches == null) {
                     // The pattern is the workflow's own; asking again would never end, and the step checks the
                     // answer once more
-                    out.println("  could not be checked against the pattern in time, so it is taken as it is: "
-                            + TerminalFormat.safe(pattern));
+                    TerminalText.println(out, "  could not be checked against the pattern in time, so it is taken as"
+                            + " it is: ", TerminalText.safe(pattern));
                     return value;
                 } else if (!matches) {
-                    out.println("  does not match " + TerminalFormat.safe(pattern));
+                    TerminalText.println(out, "  does not match ", TerminalText.safe(pattern));
                 } else {
                     return value;
                 }
@@ -212,7 +229,7 @@ public final class ConsoleAsker implements QuestionAsker {
      * of a padded option never starts a terminal line that reads as one of Traceworks.
      */
     private void options(String caption, List<String> options) {
-        AnswerCommands.shown(LEAD, caption, " ", "", "", options).forEach(line -> out.println(LEAD + line));
+        TerminalText.shown(LEAD, caption, " ", "", "", options).forEach(line -> out.println(LEAD + line));
     }
 
     /**
@@ -231,12 +248,17 @@ public final class ConsoleAsker implements QuestionAsker {
     }
 
     private String prompt() throws InterruptedException {
-        return prompt("");
+        return prompt(List.of(""));
     }
 
-    /** Shows the prompt and waits for a line; {@code null} at the end of the input. */
-    private String prompt(String hint) throws InterruptedException {
-        out.print(hint + "> ");
+    /**
+     * Shows the prompt and waits for a line; {@code null} at the end of the input.
+     *
+     * @param hint the lines of the hint before the prompt, as {@link TerminalText#lines} gives them
+     */
+    private String prompt(List<String> hint) throws InterruptedException {
+        hint.subList(0, hint.size() - 1).forEach(out::println);
+        out.print(hint.getLast() + "> ");
         out.flush();
         String line = lines.take();
         if (line == EOF) {

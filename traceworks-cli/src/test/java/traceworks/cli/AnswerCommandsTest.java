@@ -59,10 +59,10 @@ class AnswerCommandsTest {
                     List.of());
 
             assertThat(lines.getFirst()).as(filler).isEqualTo("traceworks approve '" + RUN + "' --answer '<option>'");
-            assertThat(lines).filteredOn(line -> !line.startsWith("| ") && !line.startsWith("|   "))
+            assertThat(lines).filteredOn(line -> !line.startsWith("| ") && !line.startsWith("|+"))
                     .as("the command and one line that says what the list is").hasSize(2);
             assertThat(lines).contains("| Yes");
-            assertThat(lines).allSatisfy(line -> assertThat(RunReport.columns("  " + line)).as(line)
+            assertThat(lines).allSatisfy(line -> assertThat(TerminalText.columns("  " + line)).as(line)
                     .isLessThanOrEqualTo(80));
             assertThat(String.join("\n", lines)).contains("curl").doesNotContain("--answer 'No");
             assertNoRowStartsInTheWorkflowsText("  ", lines);
@@ -77,7 +77,7 @@ class AnswerCommandsTest {
         assertThat(lines.getFirst()).isEqualTo("traceworks answer '" + RUN + "' --field '<name>=<value>'");
         assertThat(lines).contains("| who").hasSize(5);
         assertThat(lines).filteredOn(line -> line.startsWith("|"))
-                .allSatisfy(line -> assertThat(RunReport.columns("  " + line)).isLessThanOrEqualTo(80));
+                .allSatisfy(line -> assertThat(TerminalText.columns("  " + line)).isLessThanOrEqualTo(80));
         assertNoRowStartsInTheWorkflowsText("  ", lines);
     }
 

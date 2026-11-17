@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.TraceworksVersion;
 import traceworks.core.describe.DescriptionText;
@@ -55,7 +55,9 @@ public final class DescribeCommand implements Command {
         }
         WorkflowDescription described = context.services().describe(pkg);
         if (!html) {
-            DescriptionText.lines(described).forEach(line -> context.out().println(TerminalFormat.safe(line)));
+            // Each line is laid out by the core, with the package's names and texts in it
+            DescriptionText.lines(described)
+                    .forEach(line -> TerminalText.println(context.out(), TerminalText.composed(line)));
             return ExitCodes.OK;
         }
         Path packageDir = Path.of(described.packageDir());
@@ -86,10 +88,11 @@ public final class DescribeCommand implements Command {
                     + (e.getMessage() == null ? "" : " (" + e.getMessage() + ")"));
         }
         if (inside) {
-            context.err().println("traceworks: note: " + TerminalFormat.safe(page.toString()) + " is inside the"
-                    + " package, so the package's digest is no longer the one the page shows");
+            TerminalText.println(context.err(), "traceworks: note: ", TerminalText.whole(page.toString()),
+                    " is inside the package, so the package's digest is no longer the one the page shows");
         }
-        context.out().println(TerminalFormat.safe(page.toString()));
+        // The page is where the operator asked for it
+        TerminalText.println(context.out(), TerminalText.whole(page.toString()));
         return ExitCodes.OK;
     }
 }

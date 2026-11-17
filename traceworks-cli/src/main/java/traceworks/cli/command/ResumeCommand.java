@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.core.app.ResumeRequest;
 import traceworks.core.app.RunResult;
 import traceworks.core.app.RunServices;
@@ -36,7 +36,7 @@ public final class ResumeCommand implements Command {
                 (listener, asker) -> services.resume(new ResumeRequest(args.positional(),
                         args.has("allow-host-execution"), args.has("allow-changed-package"),
                         context.attended(args.has("allow-unsealed"))), listener, asker,
-                        warning -> context.err().println("traceworks: warning: " + TerminalFormat.printable(warning))));
+                        warning -> TerminalText.message(context.err(), "traceworks: warning: ", warning)));
         return ExitCodes.of(result);
     }
 }

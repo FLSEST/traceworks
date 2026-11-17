@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Images;
 
@@ -50,19 +50,24 @@ public final class ImagesCommand implements Command {
         if (built.lines().isEmpty() && built.failures().isEmpty()) {
             context.out().println("nothing to build");
         }
-        built.lines().forEach(line -> context.out().println(TerminalFormat.oneLine(line)));
+        // A line names the image as the package wrote it
+        built.lines().forEach(line -> TerminalText.println(context.out(), TerminalText.oneLine(line)));
         built.failures().forEach(failure -> failure(context.err(), failure));
         return built.failures().isEmpty() ? ExitCodes.OK : ExitCodes.REFUSED;
     }
 
     /**
      * Prints one failure. It names the image as the package wrote it and carries the runtime's output, so it may
-     * have several lines: each after the first is marked, and none of them can pass for a line of Traceworks.
+     * have several lines: each after the first is marked, also where it is broken for the terminal's width, and
+     * none of them can pass for a line of Traceworks.
      */
     private static void failure(PrintStream err, String failure) {
-        List<String> lines = TerminalFormat.printable(failure).strip().lines().toList();
-        for (int i = 0; i < lines.size(); i++) {
-            err.println((i == 0 ? "traceworks: " : "traceworks:   | ") + lines.get(i));
+        List<String> lines = failure.strip().lines().toList();
+        if (lines.isEmpty()) {
+            return;
         }
+        TerminalText.println(err, "traceworks: ", TerminalText.safe(lines.getFirst()));
+        TerminalText.block("traceworks:   ", String.join("\n", lines.subList(1, lines.size())))
+                .forEach(err::println);
     }
 }

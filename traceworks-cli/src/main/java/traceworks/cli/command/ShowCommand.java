@@ -7,6 +7,7 @@ import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.RunReport;
 import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.core.app.RunServices;
 import traceworks.core.container.ImageFacts;
 import traceworks.core.model.RunStatus;
@@ -22,13 +23,12 @@ import traceworks.core.record.StepFiles;
 import traceworks.core.record.StepView;
 import traceworks.core.record.SwitchCase;
 import traceworks.core.record.WorkflowOutline;
-import traceworks.core.register.DecisionAgent;
 
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -74,35 +74,36 @@ public final class ShowCommand implements Command {
         String ref = RunningRun.ref(context, args.positional(), "show");
         String folder = context.runFolder(ref);
         RunView view = services.view(ref);
-        PrintStream out = context.out();
+        // What a record holds is a text from outside, whoever's run it is: a folder can be another's, or edited
+        TerminalText.Printer out = new TerminalText.Printer(context.out(), "");
         Function<String, String> text = sha -> services.content(ref, sha)
                 .map(bytes -> new String(bytes, StandardCharsets.UTF_8)).orElse("(deleted)");
 
-        out.println("Run       " + TerminalFormat.safe(view.runId()));
-        out.println("Workflow  " + TerminalFormat.safe(view.workflowName())
-                + (view.workflowId() == null ? "" : " (" + TerminalFormat.safe(view.workflowId()) + ")"));
+        out.println("Run       ", TerminalText.safe(view.runId()));
+        out.println("Workflow  ", TerminalText.safe(view.workflowName()),
+                view.workflowId() == null ? "" : TerminalText.seq(" (", TerminalText.safe(view.workflowId()), ")"));
         out.println("Status    " + view.status());
-        out.println("Actor     " + TerminalFormat.safe(view.actor()));
+        out.println("Actor     ", TerminalText.safe(view.actor()));
         out.println("Started   " + time(view.startedAt()));
         if (view.finishedAt() != null) {
             out.println("Finished  " + time(view.finishedAt()));
         }
-        out.println("Package   " + TerminalFormat.safe(view.packageDir()));
+        out.println("Package   ", TerminalText.safe(view.packageDir()));
         if (view.packageCommit() != null) {
-            out.println("Commit    " + TerminalFormat.safe(view.packageCommit())
-                    + (Boolean.TRUE.equals(view.packageDirty()) ? " (with uncommitted changes)" : ""));
+            out.println("Commit    ", TerminalText.safe(view.packageCommit()),
+                    Boolean.TRUE.equals(view.packageDirty()) ? " (with uncommitted changes)" : "");
         }
-        out.println("Seal      " + (view.seal() == null ? "unsealed" : TerminalFormat.safe(view.seal().summary())));
+        out.println("Seal      ", view.seal() == null ? "unsealed" : TerminalText.safe(view.seal().summary()));
         // The option the run picked of each model choice its workflow opens: what its steps ran with
-        view.modelChoices().forEach(pick -> out.println("Model     " + TerminalFormat.safe(pick.summary())));
-        out.println("Ledger    " + view.ledgerStartLine());
+        view.modelChoices().forEach(pick -> out.println("Model     ", TerminalText.safe(pick.summary())));
+        out.println("Ledger    ", TerminalText.safe(view.ledgerStartLine()));
         if (view.register() != null) {
             // What the run of an audit knew of earlier runs: the head of the register's log it started from
-            out.println("Register  " + TerminalFormat.safe(view.register().summary()));
+            out.println("Register  ", TerminalText.safe(view.register().summary()));
         }
         egress(out, view, args.has("children"));
         if (view.error() != null) {
-            out.println("Error     " + TerminalFormat.oneLine(text.apply(view.error().sha256())));
+            out.println("Error     ", TerminalText.oneLine(text.apply(view.error().sha256())));
         }
         workflow(out, view, services, ref);
         byte[] definition = view.definition() == null ? null
@@ -111,7 +112,7 @@ public final class ShowCommand implements Command {
                 args.has("children")), definition);
         interventions(out, view);
         gate(out, view.gate(), text);
-        RunReport.waiting(out, folder != null ? folder : view.runId(), view, view.pendingQuestion(), text,
+        RunReport.waiting(context.out(), folder != null ? folder : view.runId(), view, view.pendingQuestion(), text,
                 services.resumeNeedsHostFlag(view));
         return view.status() == RunStatus.INTERRUPTED ? ExitCodes.INTERRUPTED : ExitCodes.OK;
     }
@@ -120,16 +121,16 @@ public final class ShowCommand implements Command {
      * Where the run's AI containers could connect, and what they asked the egress proxy for in the whole run, with
      * the denied connections counted: an observation that fails nothing, but must not be overlooked.
      */
-    private static void egress(PrintStream out, RunView view, boolean everyChild) {
+    private static void egress(TerminalText.Printer out, RunView view, boolean everyChild) {
         if (view.aiNetwork() != null) {
-            StringBuilder line = new StringBuilder(TerminalFormat.safe(view.aiNetwork()));
+            List<Object> line = new ArrayList<>(List.of("AI net    ", TerminalText.safe(view.aiNetwork())));
             if (view.aiNetwork().equals("open")) {
-                line.append(view.webHostsNotEnforced() ? " (every AI container can connect anywhere; the web_hosts of"
+                line.add(view.webHostsNotEnforced() ? " (every AI container can connect anywhere; the web_hosts of"
                         + " a step are recorded, but not enforced)" : " (every AI container can connect anywhere)");
             }
-            view.aiHosts().forEach((cli, hosts) -> line.append("; more hosts for ").append(TerminalFormat.safe(cli))
-                    .append(": ").append(TerminalFormat.safe(String.join(", ", hosts))));
-            out.println("AI net    " + line);
+            view.aiHosts().forEach((cli, hosts) -> line.addAll(List.of("; more hosts for ", TerminalText.safe(cli),
+                    ": ", TerminalText.safe(String.join(", ", hosts)))));
+            out.println(line);
         }
         RunView.Egress egress = view.egress();
         if (egress.commands() > 0 || egress.connections() > 0) {
@@ -181,11 +182,11 @@ public final class ShowCommand implements Command {
      * The commands of the step whose output was not read to its end: something the command left behind still held it
      * at the bound. A mark, like a denied connection; the step's status is as it was.
      */
-    private static void outputCuts(PrintStream out, List<CommandView> commands) {
+    private static void outputCuts(TerminalText.Printer out, List<CommandView> commands) {
         for (CommandView command : commands) {
             if (command.outputCut() != null) {
-                out.println("      output CUT     " + TerminalFormat.safe(command.outputCut().summary())
-                        + "   <== may be incomplete");
+                out.println("      output CUT     ", TerminalText.safe(command.outputCut().summary()),
+                        "   <== may be incomplete");
             }
         }
     }
@@ -194,25 +195,26 @@ public final class ShowCommand implements Command {
      * The network of each command of the step that could connect to listed hosts only: the hosts, then one line per
      * target and verdict its container asked the egress proxy for. A target comes from inside the container.
      */
-    private static void egress(PrintStream out, List<CommandView> commands) {
+    private static void egress(TerminalText.Printer out, List<CommandView> commands) {
         for (CommandView command : commands) {
             if (!command.throughProxy()) {
                 continue;
             }
-            out.println("      network hosts " + TerminalFormat.safe(String.join(", ", command.networkHosts())));
+            out.println("      network hosts ", TerminalText.safe(String.join(", ", command.networkHosts())));
             if (command.result() == null) {
                 continue;
             }
             for (CommandView.Connection connection : command.result().egress()) {
-                out.println(String.format("      egress %-7s %s  x%d%s", connection.denied() ? "DENIED"
-                                : TerminalFormat.safe(connection.verdict()), TerminalFormat.safe(connection.target()),
-                        connection.count(), connection.denied() ? "   <== not allowed" : ""));
+                out.println("      egress ", connection.denied() ? "DENIED "
+                                : TerminalText.safe(connection.verdict()).padded(7), " ",
+                        TerminalText.safe(connection.target()), "  x" + connection.count(),
+                        connection.denied() ? "   <== not allowed" : "");
             }
         }
     }
 
     /** The blocks of the recorded definition, one line each, with the step each became. */
-    private static void workflow(PrintStream out, RunView view, RunServices services, String ref) {
+    private static void workflow(TerminalText.Printer out, RunView view, RunServices services, String ref) {
         if (view.definition() == null) {
             return;
         }
@@ -224,7 +226,7 @@ public final class ShowCommand implements Command {
         out.println();
         out.println("Workflow");
         if (outline.description() != null) {
-            out.println("  " + TerminalFormat.oneLine(outline.description()));
+            out.println("  ", TerminalText.oneLine(outline.description()));
         }
         Map<Integer, StepView> steps = new HashMap<>();
         view.steps().forEach(step -> steps.putIfAbsent(step.position(), step));
@@ -232,27 +234,31 @@ public final class ShowCommand implements Command {
             StepView step = steps.get(block.position());
             String became = step == null ? "did not run" : "step " + step.stepIndex() + " " + step.shownStatus();
             String type = block.shownType();
-            out.println(String.format("  %-3d %-24s %-34s %s", block.position(),
-                    TerminalFormat.oneLine(block.name() == null ? "(unnamed)" : block.name()),
-                    TerminalFormat.safe(type), became));
+            out.println(String.format("  %-3d ", block.position()),
+                    TerminalText.oneLine(block.name() == null ? "(unnamed)" : block.name()).padded(24), " ",
+                    TerminalText.safe(type).padded(34), " ", became);
             if (block.what() != null) {
-                out.println("      " + TerminalFormat.oneLine(block.what()));
+                out.println("      ", TerminalText.oneLine(block.what()));
             }
         }
         images(out, view);
     }
 
     /** What each image the run may use holds, as the record says. */
-    private static void images(PrintStream out, RunView view) {
+    private static void images(TerminalText.Printer out, RunView view) {
         if (view.images().isEmpty()) {
             return;
         }
         out.println();
         out.println("Images");
         for (ImageFacts image : view.images()) {
-            out.println(String.format("  %-24s %-30s %s", TerminalFormat.safe(image.reference()),
-                    image.base() == null ? "(a registry image)" : TerminalFormat.safe(image.base()),
-                    image.description() == null ? "" : TerminalFormat.oneLine(image.description())).stripTrailing());
+            TerminalText base = TerminalText.safe(image.base() == null ? "(a registry image)" : image.base());
+            if (image.description() == null) {
+                out.println("  ", TerminalText.safe(image.reference()).padded(24), " ", base);
+            } else {
+                out.println("  ", TerminalText.safe(image.reference()).padded(24), " ", base.padded(30), " ",
+                        TerminalText.oneLine(image.description()));
+            }
         }
     }
 
@@ -265,7 +271,7 @@ public final class ShowCommand implements Command {
      */
     private record Shown(boolean outputs, boolean full, boolean children) {}
 
-    private static void steps(PrintStream out, RunView view, Function<String, String> text, Shown shown,
+    private static void steps(TerminalText.Printer out, RunView view, Function<String, String> text, Shown shown,
                               byte[] definition) {
         if (view.steps().isEmpty()) {
             return;
@@ -284,12 +290,14 @@ public final class ShowCommand implements Command {
      *                   definition the record does not hold
      * @param drawn      the child runs listed so far: a child run is listed once
      */
-    private static void stepLines(PrintStream out, RunView run, Function<String, String> text, Shown shown,
+    private static void stepLines(TerminalText.Printer out, RunView run, Function<String, String> text, Shown shown,
                                   byte[] definition, Set<String> drawn) {
         for (StepView step : run.steps()) {
-            String badge = "[" + TerminalFormat.safe(step.blockType()) + (step.ai() ? ", ai" : "") + "]";
-            out.println(String.format("  %-3d %-24s %-16s %-17s %s", step.stepIndex(),
-                    TerminalFormat.oneLine(step.label()), badge, step.shownStatus(), duration(step)
+            TerminalText type = TerminalText.safe(step.blockType());
+            String badgeEnd = (step.ai() ? ", ai" : "") + "]";
+            out.println(String.format("  %-3d ", step.stepIndex()), TerminalText.oneLine(step.label()).padded(24),
+                    " [", type, badgeEnd + " ".repeat(Math.max(0, 15 - type.width() - badgeEnd.length())),
+                    String.format(" %-17s %s", step.shownStatus(), duration(step)
                             + (step.interrupted() ? "  (interrupted)" : "")
                             // The loop a pause stopped between two items: nothing runs now
                             + (run.paused() && step.status() == StepStatus.RUNNING ? "  (paused)" : "")
@@ -309,7 +317,8 @@ public final class ShowCommand implements Command {
     }
 
     /** Under a {@code switch} that finished: the case it ran and the blocks of that case, as the definition has them. */
-    private static void switchCase(PrintStream out, StepView step, Function<String, String> text, byte[] definition) {
+    private static void switchCase(TerminalText.Printer out, StepView step, Function<String, String> text,
+                                   byte[] definition) {
         if (!"switch".equals(step.blockType()) || step.metadata() == null) {
             return;
         }
@@ -325,10 +334,13 @@ public final class ShowCommand implements Command {
         String matched = ran.matched();
         List<WorkflowOutline.Block> blocks = definition == null ? List.of()
                 : WorkflowOutline.caseBlocks(definition, step.position(), matched);
-        out.println(UNDER + "case " + TerminalFormat.oneLine(matched) + (blocks.isEmpty() ? "" : ": " + blocks.stream()
-                .map(block -> TerminalFormat.oneLine(block.name() == null ? StepView.UNNAMED : block.name()) + " ["
-                        + TerminalFormat.safe(block.shownType()) + "]")
-                .collect(Collectors.joining(", "))));
+        List<Object> line = new ArrayList<>(List.of(UNDER + "case ", TerminalText.oneLine(matched)));
+        for (WorkflowOutline.Block block : blocks) {
+            line.addAll(List.of(block == blocks.getFirst() ? ": " : ", ",
+                    TerminalText.oneLine(block.name() == null ? StepView.UNNAMED : block.name()), " [",
+                    TerminalText.safe(block.shownType()), "]"));
+        }
+        out.println(line);
     }
 
     /**
@@ -336,7 +348,7 @@ public final class ShowCommand implements Command {
      * gate, then its steps. Of more than {@value #CHILD_RUNS_SHOWN} child runs only those that did not complete are
      * listed, at most that many, and the others are counted, unless every one is asked for.
      */
-    private static void childRuns(PrintStream out, RunView run, StepView step, Function<String, String> text,
+    private static void childRuns(TerminalText.Printer out, RunView run, StepView step, Function<String, String> text,
                                   Shown shown, Set<String> drawn) {
         List<String> ids = step.childRunIds();
         if (ids.isEmpty()) {
@@ -349,22 +361,23 @@ public final class ShowCommand implements Command {
                 items.putIfAbsent(item.subRun(), item);
             }
         });
-        PrintStream inner = indented(out, UNDER);
+        // The indent is part of each line of a child run, so its texts are broken where the indented line ends
+        TerminalText.Printer inner = out.indented(UNDER);
         for (String id : listed) {
             ItemView item = items.get(id);
-            String label = UNDER + (item == null ? "" : "item " + (item.index() + 1) + "/" + item.total() + "  ")
-                    + "child run " + TerminalFormat.safe(TerminalFormat.shortId(id));
+            Object label = TerminalText.seq(UNDER + (item == null ? "" : "item " + (item.index() + 1) + "/"
+                    + item.total() + "  ") + "child run ", TerminalText.safe(TerminalFormat.shortId(id)));
             RunView child = run.children().get(id);
             if (child == null) {
-                out.println(label + " (not in the record)");
+                out.println(label, " (not in the record)");
             } else if (!drawn.add(id)) {
                 // Only a record nobody's run wrote names a child twice
-                out.println(label + " (listed above, under the step that names it first)");
+                out.println(label, " (listed above, under the step that names it first)");
             } else {
                 GateView gate = child.gate();
-                out.println(label + " " + child.status() + (gate == null ? "" : "  gate "
-                        + TerminalFormat.safe(gate.status())
-                        + (gate.category() == null ? "" : " (" + TerminalFormat.safe(gate.category()) + ")")));
+                out.println(label, " " + child.status(), gate == null ? "" : TerminalText.seq("  gate ",
+                        TerminalText.safe(gate.status()), gate.category() == null ? ""
+                                : TerminalText.seq(" (", TerminalText.safe(gate.category()), ")")));
                 stepLines(inner, child, text, shown, null, drawn);
             }
         }
@@ -386,101 +399,73 @@ public final class ShowCommand implements Command {
         return child != null && child.status() == RunStatus.COMPLETED;
     }
 
-    /** A stream that writes each line to {@code out} after {@code indent}. */
-    static PrintStream indented(PrintStream target, String indent) {
-        // In the target's own encoding, as every other line of the command: bytes of another encoding would pass
-        // the target unchanged, and on a terminal that is not UTF-8 a byte of a UTF-8 letter is a control character
-        java.nio.charset.Charset charset = target.charset();
-        byte[] prefix = indent.getBytes(charset);
-        // On the bytes, so that it holds for whatever is printed and however: a line starts after each line feed,
-        // and gets the indent before its first byte; an empty line gets none
-        return new PrintStream(new OutputStream() {
-            private boolean atLineStart = true;
-
-            @Override
-            public void write(int b) {
-                if (atLineStart && b != '\n' && b != '\r') {
-                    target.write(prefix, 0, prefix.length);
-                    atLineStart = false;
-                }
-                target.write(b);
-                if (b == '\n') {
-                    atLineStart = true;
-                }
-            }
-        }, true, charset);
-    }
-
     /**
      * One line per AI call of the step: provider, model, tools and how it ended; for a call that failed, the first
      * line of the CLI's error, so that nobody has to open a blob to learn why; then one line per tool call it made, in
      * order.
      */
-    private static void aiCalls(PrintStream out, List<AiCallView> calls, Function<String, String> text) {
+    private static void aiCalls(TerminalText.Printer out, List<AiCallView> calls, Function<String, String> text) {
         for (AiCallView call : calls) {
-            StringBuilder line = new StringBuilder("      ai ").append(TerminalFormat.safe(call.provider()));
+            List<Object> line = new ArrayList<>(List.of("      ai ", TerminalText.safe(call.provider())));
             if (call.item() != null) {
-                line.append("  item ").append(call.item());
+                line.add("  item " + call.item());
             }
             if (call.model() != null) {
-                line.append("  model ").append(TerminalFormat.safe(call.model()));
+                line.addAll(List.of("  model ", TerminalText.safe(call.model())));
             }
             if (call.local() != null) {
                 // A call that went to a model server of the operator's, not to a provider
-                line.append("  ").append(TerminalFormat.safe(call.localSummary()));
+                line.addAll(List.of("  ", TerminalText.safe(call.localSummary())));
             }
-            line.append("  tools ").append(TerminalFormat.safe(call.tools()));
+            line.addAll(List.of("  tools ", TerminalText.safe(call.tools())));
             if (call.hasWeb()) {
-                line.append("  web ").append(TerminalFormat.safe(call.web()));
+                line.addAll(List.of("  web ", TerminalText.safe(call.web())));
                 if (!call.webHosts().isEmpty()) {
-                    line.append(" (").append(TerminalFormat.safe(String.join(", ", call.webHosts()))).append(")");
+                    line.addAll(List.of(" (", TerminalText.safe(String.join(", ", call.webHosts())), ")"));
                 }
             }
             AiCallView.Response response = call.response();
             if (response == null) {
-                line.append("  (no response)");
+                line.add("  (no response)");
             } else {
-                line.append("  exit ").append(response.exitCode() == null ? "none" : response.exitCode());
+                line.add("  exit " + (response.exitCode() == null ? "none" : response.exitCode()));
                 if (response.inputTokens() != null || response.outputTokens() != null) {
-                    line.append("  ").append(response.inputTokens()).append(" in / ").append(response.outputTokens())
-                            .append(" out tokens");
+                    line.add("  " + response.inputTokens() + " in / " + response.outputTokens() + " out tokens");
                 }
             }
-            line.append("  ").append(call.toolCalls().size())
-                    .append(call.toolCalls().size() == 1 ? " tool call" : " tool calls");
+            line.add("  " + call.toolCalls().size() + (call.toolCalls().size() == 1 ? " tool call" : " tool calls"));
             out.println(line);
             if (response != null && response.error() != null) {
                 String why = AiCallView.firstErrorLine(text.apply(response.error().sha256()));
                 if (why != null) {
-                    out.println("        error " + TerminalFormat.oneLine(why));
+                    out.println("        error ", TerminalText.oneLine(why));
                 }
             }
             for (AiCallView.ToolCallView tool : call.toolCalls()) {
-                out.println("        tool " + TerminalFormat.safe(tool.tool()) + (tool.error() ? "  (error)" : ""));
+                out.println("        tool ", TerminalText.safe(tool.tool()), tool.error() ? "  (error)" : "");
             }
         }
     }
 
     /** One line per file the step left in the scratch directory, and per link and removed path. */
-    private static void files(PrintStream out, StepFiles files) {
+    private static void files(TerminalText.Printer out, StepFiles files) {
         if (files == null) {
             return;
         }
         for (FileView file : files.files()) {
-            out.println("      file " + TerminalFormat.safe(file.path()) + "  " + file.size() + " bytes"
-                    + (file.blob() == null ? "  (not stored: " + TerminalFormat.safe(file.reason()) + ")"
-                            : "  blob " + TerminalFormat.safe(file.blob().sha256())));
+            out.println("      file ", TerminalText.safe(file.path()), "  " + file.size() + " bytes",
+                    file.blob() == null ? TerminalText.seq("  (not stored: ", TerminalText.safe(file.reason()), ")")
+                            : TerminalText.seq("  blob ", TerminalText.safe(file.blob().sha256())));
         }
         for (StepFiles.Link link : files.links()) {
-            out.println("      link " + TerminalFormat.safe(link.path()) + " -> "
-                    + TerminalFormat.safe(link.target()));
+            out.println("      link ", TerminalText.safe(link.path()), " -> ", TerminalText.safe(link.target()));
         }
         for (StepFiles.Unreadable entry : files.unreadable()) {
-            out.println("      unreadable " + TerminalFormat.safe(entry.path()) + " ("
-                    + TerminalFormat.safe(entry.reason()) + ")");
+            out.println("      unreadable ", TerminalText.safe(entry.path()), " (",
+                    TerminalText.safe(entry.reason()), ")");
         }
         for (String path : files.removed()) {
-            out.println("      removed " + TerminalFormat.safe(path));
+            out.println("      removed ", TerminalText.safe(path));
         }
         if (files.truncated()) {
             out.println("      (listing cut)");
@@ -488,17 +473,16 @@ public final class ShowCommand implements Command {
     }
 
     /** What people and processes did to the run from outside its steps: resumes, cancels, answers, refusals. */
-    private static void interventions(PrintStream out, RunView view) {
+    private static void interventions(TerminalText.Printer out, RunView view) {
         if (view.interventions().isEmpty()) {
             return;
         }
         out.println();
         out.println("Interventions");
         for (RunView.Intervention intervention : view.interventions()) {
-            out.println("  " + time(intervention.at()) + "  "
-                    + TerminalFormat.safe(intervention.actor() == null ? "-" : intervention.actor()) + "  "
-                    + TerminalFormat.oneLine(intervention.description()
-                    + DecisionAgent.through(intervention.agent())));
+            out.println("  " + time(intervention.at()) + "  ",
+                    TerminalText.safe(intervention.actor() == null ? "-" : intervention.actor()), "  ",
+                    TerminalText.oneLine(intervention.description()), TerminalFormat.through(intervention.agent()));
         }
     }
 
@@ -506,7 +490,7 @@ public final class ShowCommand implements Command {
      * The shell variables each command of the step found set (the block's {@code values}): their names, and with
      * the outputs shown their values too, cut as an output is. Commands with the same values are named once.
      */
-    private static void values(PrintStream out, List<CommandView> commands, Function<String, String> text,
+    private static void values(TerminalText.Printer out, List<CommandView> commands, Function<String, String> text,
                                boolean contents, boolean full) {
         java.util.Set<String> seen = new java.util.HashSet<>();
         for (CommandView command : commands) {
@@ -514,34 +498,37 @@ public final class ShowCommand implements Command {
                 continue;
             }
             Map<String, String> values = CommandView.values(text.apply(command.values().sha256()));
-            out.println("      values " + TerminalFormat.safe(String.join(", ", values.keySet())));
+            out.println("      values ", TerminalText.safe(String.join(", ", values.keySet())));
             if (contents) {
                 values.forEach((name, value) -> {
-                    out.println("      value " + TerminalFormat.safe(name) + ":");
+                    out.println("      value ", TerminalText.safe(name), ":");
                     shown(out, value, full);
                 });
             }
         }
     }
 
-    private static void shown(PrintStream out, String content, boolean full) {
+    /**
+     * An output behind the mark, line by line. A line wider than the terminal is broken and each part marked: the
+     * terminal would break it without the mark, and its end would read as a line of Traceworks.
+     */
+    private static void shown(TerminalText.Printer out, String content, boolean full) {
         boolean cut = !full && content.length() > OUTPUT_LIMIT;
-        String body = TerminalFormat.printable(cut ? content.substring(0, OUTPUT_LIMIT) : content);
-        body.stripTrailing().lines().forEach(line -> out.println("      | " + line));
+        out.block("      ", (cut ? content.substring(0, OUTPUT_LIMIT) : content).stripTrailing());
         if (cut) {
             out.println("      | ... (cut at " + OUTPUT_LIMIT + " characters; --full shows it whole)");
         }
     }
 
-    private static void gate(PrintStream out, GateView gate, Function<String, String> text) {
+    private static void gate(TerminalText.Printer out, GateView gate, Function<String, String> text) {
         if (gate == null) {
             return;
         }
         out.println();
-        out.println("Gate      " + TerminalFormat.safe(gate.status())
-                + (gate.category() == null ? "" : " (" + TerminalFormat.safe(gate.category()) + ")"));
+        out.println("Gate      ", TerminalText.safe(gate.status()),
+                gate.category() == null ? "" : TerminalText.seq(" (", TerminalText.safe(gate.category()), ")"));
         if (gate.description() != null) {
-            out.println("          " + TerminalFormat.oneLine(text.apply(gate.description().sha256())));
+            out.println("          ", TerminalText.oneLine(text.apply(gate.description().sha256())));
         }
     }
 

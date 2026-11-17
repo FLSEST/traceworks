@@ -1,5 +1,6 @@
 package traceworks.cli.command;
 
+import traceworks.cli.TerminalFormat;
 import traceworks.cli.AnswerCommands;
 import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
@@ -7,7 +8,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.RunReport;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.core.app.RunResult;
 import traceworks.core.app.RunServices;
 import traceworks.core.model.RunStatus;
@@ -38,8 +39,9 @@ public final class PauseCommand implements Command {
             return result.status() == RunStatus.PARKED ? ExitCodes.OK : ExitCodes.of(result);
         }
         String named = context.runFolder(ref) != null ? context.runFolder(ref) : result.runId();
-        context.out().println("pause requested: run " + TerminalFormat.safe(TerminalFormat.shortId(result.runId()))
-                + " finishes the step or the loop item in flight, then parks (exit 5 in its terminal).");
+        TerminalText.println(context.out(), "pause requested: run ",
+                TerminalText.safe(TerminalFormat.shortId(result.runId())),
+                " finishes the step or the loop item in flight, then parks (exit 5 in its terminal).");
         context.out().println("go on later with:");
         context.out().println("  " + AnswerCommands.resume(named,
                 services.resumeNeedsHostFlag(services.view(result.location()))));

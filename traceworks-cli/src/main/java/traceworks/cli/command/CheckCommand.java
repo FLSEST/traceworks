@@ -35,7 +35,7 @@ public final class CheckCommand implements Command {
         if (findings.isEmpty()) {
             context.out().println("no findings");
         }
-        findings.forEach(finding -> context.out().println(FindingLines.line(finding)));
+        findings.forEach(finding -> FindingLines.print(context.out(), finding));
         return findings.stream().anyMatch(f -> f.severity() == Severity.ERROR) ? ExitCodes.REFUSED : ExitCodes.OK;
     }
 }

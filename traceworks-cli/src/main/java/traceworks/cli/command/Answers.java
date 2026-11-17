@@ -5,7 +5,7 @@ import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.AnswerRequest;
 import traceworks.core.app.AnswerResult;
@@ -55,11 +55,11 @@ final class Answers {
         if (!result.accepted()) {
             // A refusal names the options, a field's name or its pattern: text of the workflow. On one line only
             // where it stays there; else on marked lines, as wherever options are shown
-            AnswerCommands.shown("  ", "traceworks: ", "", "", "the answer is refused:", List.of(result.message()))
+            TerminalText.shown("  ", "traceworks: ", "", "", "the answer is refused:", List.of(result.message()))
                     .forEach(line -> context.err().println(line.startsWith("|") ? "  " + line : line));
             return ExitCodes.REFUSED;
         }
-        context.out().println(TerminalFormat.safe(result.message()));
+        TerminalText.println(context.out(), TerminalText.safe(result.message()));
         if (result.runParked()) {
             RunServices services = context.services();
             RunView view = services.view(runRef);

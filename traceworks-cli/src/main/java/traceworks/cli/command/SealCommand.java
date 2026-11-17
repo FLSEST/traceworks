@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Seals;
 
@@ -45,16 +45,19 @@ public final class SealCommand implements Command {
         }
         Seals.Sealed sealed = context.seals().seal(pkg, key == null ? null : context.resolve(key).toString());
         PrintStream out = context.out();
-        out.println("sealed " + TerminalFormat.safe(sealed.workflowName()) + " ("
-                + TerminalFormat.safe(sealed.seal().workflowId()) + ")");
-        out.println("  package  " + TerminalFormat.safe(sealed.directory()));
+        // The names are the package's text; its folder is the one the operator named
+        TerminalText.println(out, "sealed ", TerminalText.safe(sealed.workflowName()), " (",
+                TerminalText.safe(sealed.seal().workflowId()), ")");
+        TerminalText.println(out, "  package  ", TerminalText.whole(sealed.directory()));
         out.println("  digest   " + sealed.seal().digest());
         if (!sealed.children().isEmpty()) {
-            out.println("  covers   the packages it calls: " + TerminalFormat.safe(String.join(", ", sealed.children())));
+            TerminalText.println(out, "  covers   the packages it calls: ",
+                    TerminalText.safe(String.join(", ", sealed.children())));
         }
-        out.println("  signer   " + TerminalFormat.safe(String.join(", ", sealed.principals())) + " (key "
-                + TerminalFormat.safe(sealed.key()) + ")");
-        out.println("  seal     " + TerminalFormat.safe(Path.of(sealed.directory()).resolve("traceworks.seal").toString()));
+        TerminalText.println(out, "  signer   ", TerminalText.safe(String.join(", ", sealed.principals())), " (key ",
+                TerminalText.safe(sealed.key()), ")");
+        TerminalText.println(out, "  seal     ",
+                TerminalText.whole(Path.of(sealed.directory()).resolve("traceworks.seal").toString()));
         return ExitCodes.OK;
     }
 }

@@ -6,7 +6,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.SealStatus;
 import traceworks.core.app.Seals;
@@ -16,6 +16,7 @@ import traceworks.core.seal.SealLogCheck;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -72,18 +73,20 @@ public final class SealsCommand implements Command {
         Seals seals = context.seals();
         SealLogCheck log = seals.log();
         PrintStream out = context.out();
-        out.println("seal log  " + TerminalFormat.safe(seals.logLocation()) + ": "
+        // The log is a file of the home: its place is the operator's. What its lines hold of a package is not
+        TerminalText.println(out, "seal log  ", TerminalText.whole(seals.logLocation()), ": "
                 + (log.intact() ? "ok (" + log.events().size() + " lines)" : "BROKEN"));
-        log.problems().forEach(problem -> out.println("  " + TerminalFormat.safe(problem)));
+        log.problems().forEach(problem -> TerminalText.println(out, "  ", TerminalText.safe(problem)));
         if (everyLine) {
-            log.events().forEach(event -> out.println(line(event)));
+            log.events().forEach(event -> TerminalText.println(out, line(event)));
         } else if (log.intact()) {
             if (log.sealed().isEmpty()) {
                 out.println("no package is sealed in this home");
             }
-            log.sealed().values().forEach(sealed -> out.println(TerminalFormat.safe(sealed.workflowId()) + "  "
-                    + TerminalFormat.safe(start(sealed.digest())) + "  " + TerminalFormat.safe(sealed.signer()) + "  "
-                    + sealed.at() + "  " + TerminalFormat.safe(sealed.packageDir())));
+            log.sealed().values().forEach(sealed -> TerminalText.println(out,
+                    TerminalText.safe(sealed.workflowId()), "  ", TerminalText.safe(start(sealed.digest())), "  ",
+                    TerminalText.safe(sealed.signer()), "  " + sealed.at() + "  ",
+                    TerminalText.safe(sealed.packageDir())));
         }
         if (!log.intact()) {
             out.println("the seal log does not hold: no seal of this home can be trusted, and every run is refused");
@@ -93,19 +96,19 @@ public final class SealsCommand implements Command {
     }
 
     /** One line of the log: its number, time and type, then its fields as {@code name=value}. */
-    private static String line(SealEvent event) {
-        StringBuilder text = new StringBuilder().append(event.seq()).append("  ").append(event.at()).append("  ")
-                .append(TerminalFormat.safe(event.type()));
+    private static List<Object> line(SealEvent event) {
+        List<Object> text = new ArrayList<>(List.of(event.seq() + "  " + event.at() + "  ",
+                TerminalText.safe(event.type())));
         for (Iterator<Map.Entry<String, JsonNode>> it = event.fields().fields(); it.hasNext(); ) {
             Map.Entry<String, JsonNode> field = it.next();
             if (field.getValue().isNull()) {
                 continue;
             }
             String value = field.getValue().isTextual() ? field.getValue().textValue() : field.getValue().toString();
-            text.append("  ").append(TerminalFormat.safe(field.getKey())).append('=')
-                    .append(TerminalFormat.safe(field.getKey().endsWith("digest") ? start(value) : value));
+            text.addAll(List.of("  ", TerminalText.safe(field.getKey()), "=",
+                    TerminalText.safe(field.getKey().endsWith("digest") ? start(value) : value)));
         }
-        return text.toString();
+        return text;
     }
 
     private static String start(String digest) {
@@ -119,17 +122,19 @@ public final class SealsCommand implements Command {
         SealStatus status = context.seals().verify(pkg);
         PrintStream out = context.out();
         switch (status.state()) {
-            case UNSEALED -> out.println("unsealed  " + TerminalFormat.safe(pkg.toString()));
+            // The package is the folder the operator named; the seal file in it is the package's text
+            case UNSEALED -> TerminalText.println(out, "unsealed  ", TerminalText.whole(pkg.toString()));
             case SEALED -> {
-                out.println("sealed    " + TerminalFormat.safe(pkg.toString()));
-                out.println("  digest  " + status.seal().digest());
-                out.println("  signer  " + TerminalFormat.safe(String.join(", ", status.principals())) + " (key "
-                        + TerminalFormat.safe(status.key()) + "), sealed by "
-                        + TerminalFormat.safe(status.seal().signer()) + " at " + status.seal().sealedAt());
+                TerminalText.println(out, "sealed    ", TerminalText.whole(pkg.toString()));
+                TerminalText.println(out, "  digest  ", TerminalText.safe(status.seal().digest()));
+                TerminalText.println(out, "  signer  ", TerminalText.safe(String.join(", ", status.principals())),
+                        " (key ", TerminalText.safe(status.key()), "), sealed by ",
+                        TerminalText.safe(status.seal().signer()), " at ",
+                        TerminalText.safe(String.valueOf(status.seal().sealedAt())));
             }
             case REFUSED -> {
-                out.println("the seal does NOT hold  " + TerminalFormat.safe(pkg.toString()));
-                out.println("  " + TerminalFormat.safe(status.detail()));
+                TerminalText.println(out, "the seal does NOT hold  ", TerminalText.whole(pkg.toString()));
+                TerminalText.println(out, "  ", TerminalText.safe(status.detail()));
             }
         }
         return status.state() == SealStatus.State.REFUSED ? ExitCodes.VERIFY_FAILED : ExitCodes.OK;

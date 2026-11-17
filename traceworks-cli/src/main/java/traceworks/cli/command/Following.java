@@ -6,7 +6,7 @@ import traceworks.cli.Context;
 import traceworks.cli.Interrupts;
 import traceworks.cli.RunFollower;
 import traceworks.cli.RunReport;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.core.app.QuestionAsker;
 import traceworks.core.register.DecisionAgent;
 import traceworks.core.app.RunResult;
@@ -58,7 +58,7 @@ final class Following {
         // run starts. A run that asks nobody (--no-input, no terminal) does not look at the variable
         String agent = interactive ? agentAtThePrompt(context) : null;
         services.aiImageNotes().forEach(note ->
-                context.err().println("traceworks: note: " + TerminalFormat.printable(note)));
+                TerminalText.message(context.err(), "traceworks: note: ", note));
         try (RunFollower follower = new RunFollower(services, context.out(), quiet, interactive, folder)) {
             QuestionAsker asker = interactive
                     ? new ConsoleAsker(context.console(), context.out(),

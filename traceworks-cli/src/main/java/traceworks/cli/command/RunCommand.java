@@ -6,7 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.FindingLines;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.RunCheck;
 import traceworks.core.app.RunResult;
@@ -113,9 +113,9 @@ public final class RunCommand implements Command {
      * @return whether the run may start: the check found no error
      */
     private static boolean checked(Context context, RunCheck check) {
-        check.errorsAndWarnings().forEach(finding -> context.err().println(FindingLines.line(finding)));
+        check.errorsAndWarnings().forEach(finding -> FindingLines.print(context.err(), finding));
         check.inputWarnings().forEach(warning ->
-                context.err().println("traceworks: warning: " + TerminalFormat.safe(warning)));
+                TerminalText.println(context.err(), "traceworks: warning: ", TerminalText.safe(warning)));
         int errors = check.errors().size();
         if (errors > 0) {
             context.err().println("traceworks: the run is refused: check reports " + errors

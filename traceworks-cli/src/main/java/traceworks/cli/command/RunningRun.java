@@ -1,7 +1,7 @@
 package traceworks.cli.command;
 
-import traceworks.cli.Context;
 import traceworks.cli.TerminalFormat;
+import traceworks.cli.Context;
 import traceworks.cli.UsageException;
 import traceworks.core.model.RunStatus;
 import traceworks.core.record.RunView;
@@ -46,7 +46,8 @@ final class RunningRun {
     }
 
     private static String named(RunView run) {
-        String name = run.workflowName() == null ? "" : " (" + TerminalFormat.oneLine(run.workflowName()) + ")";
-        return TerminalFormat.safe(TerminalFormat.shortId(run.runId())) + name;
+        // As it is: the message of the refusal is made safe as a whole where it is printed
+        String name = run.workflowName() == null ? "" : " (" + run.workflowName().strip() + ")";
+        return TerminalFormat.shortId(run.runId()) + name;
     }
 }

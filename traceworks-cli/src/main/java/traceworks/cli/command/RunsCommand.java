@@ -1,10 +1,11 @@
 package traceworks.cli.command;
 
+import traceworks.cli.TerminalFormat;
 import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.RunListing;
 import traceworks.core.model.RunStatus;
@@ -46,14 +47,14 @@ public final class RunsCommand implements Command {
         if (args.has("long")) {
             longLines(context.services().listing(read).stream()
                     .filter(run -> matches(run.view(), status, workflow)).limit(limit).toList())
-                    .forEach(context.out()::println);
+                    .forEach(line -> TerminalText.println(context.out(), line));
             return 0;
         }
         List<RunView> runs = context.services().runs(read);
         runs.stream()
                 .filter(run -> matches(run, status, workflow))
                 .limit(limit)
-                .forEach(run -> context.out().println(line(run)));
+                .forEach(run -> TerminalText.println(context.out(), line(run)));
         return 0;
     }
 
@@ -67,8 +68,8 @@ public final class RunsCommand implements Command {
      * digest (8 characters each) and its models. A digest gets a star when the run of the same workflow listed below
      * has another: the workflow's version, or the inputs, changed between the two.
      */
-    private static List<String> longLines(List<RunListing> runs) {
-        List<String> lines = new ArrayList<>();
+    private static List<List<Object>> longLines(List<RunListing> runs) {
+        List<List<Object>> lines = new ArrayList<>();
         for (int i = 0; i < runs.size(); i++) {
             RunView run = runs.get(i).view();
             RunView earlier = null;
@@ -79,11 +80,11 @@ public final class RunsCommand implements Command {
             }
             String inputs = inputsDigest(run);
             List<String> models = runs.get(i).models();
-            lines.add(line(run) + "  gate " + (run.gate() == null ? "-" : TerminalFormat.safe(run.gate().status()))
-                    + "  " + duration(run)
-                    + "  pkg " + digest(run.packageDigest(), earlier == null ? null : earlier.packageDigest(), earlier)
-                    + "  inputs " + digest(inputs, earlier == null ? null : inputsDigest(earlier), earlier)
-                    + "  models " + (models.isEmpty() ? "-" : TerminalFormat.safe(String.join(",", models))));
+            lines.add(List.of(line(run), "  gate ", TerminalText.safe(run.gate() == null ? "-" : run.gate().status()),
+                    "  " + duration(run) + "  pkg ",
+                    digest(run.packageDigest(), earlier == null ? null : earlier.packageDigest(), earlier),
+                    "  inputs ", digest(inputs, earlier == null ? null : inputsDigest(earlier), earlier),
+                    "  models ", TerminalText.safe(models.isEmpty() ? "-" : String.join(",", models))));
         }
         return lines;
     }
@@ -93,9 +94,9 @@ public final class RunsCommand implements Command {
     }
 
     /** The first 8 characters of a digest, with a star when the run it is compared with has another. */
-    private static String digest(String digest, String earlierDigest, RunView earlier) {
-        String shown = digest == null ? "-" : TerminalFormat.safe(digest.substring(0, Math.min(8, digest.length())));
-        return earlier != null && !Objects.equals(digest, earlierDigest) ? shown + "*" : shown;
+    private static Object digest(String digest, String earlierDigest, RunView earlier) {
+        TerminalText shown = TerminalText.safe(digest == null ? "-" : digest.substring(0, Math.min(8, digest.length())));
+        return earlier != null && !Objects.equals(digest, earlierDigest) ? TerminalText.seq(shown, "*") : shown;
     }
 
     /** From start to end; {@code -} for a run that has not ended. */
@@ -115,10 +116,12 @@ public final class RunsCommand implements Command {
                 : String.format(Locale.ROOT, "%dh%02dm", seconds / 3_600, seconds % 3_600 / 60);
     }
 
-    private static String line(RunView run) {
-        String name = run.workflowName() == null ? "-" : TerminalFormat.oneLine(run.workflowName());
+    /** The plain line of a run, as parts: its name is the workflow's text, and a long one goes on on marked lines. */
+    private static Object line(RunView run) {
         String started = run.startedAt() == null ? "-" : run.startedAt().truncatedTo(ChronoUnit.SECONDS).toString();
-        return String.format("%-8s  %-21s  %s  %s", TerminalFormat.safe(TerminalFormat.shortId(run.runId())), run.status(), name, started);
+        return TerminalText.seq(TerminalText.safe(TerminalFormat.shortId(run.runId())).padded(8),
+                String.format("  %-21s  ", run.status()),
+                TerminalText.oneLine(run.workflowName() == null ? "-" : run.workflowName()), "  " + started);
     }
 
     private static RunStatus status(String value) {

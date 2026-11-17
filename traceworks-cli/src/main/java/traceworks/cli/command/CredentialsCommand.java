@@ -5,7 +5,7 @@ import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
-import traceworks.cli.TerminalFormat;
+import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.Credentials;
 
@@ -51,7 +51,7 @@ public final class CredentialsCommand implements Command {
             };
         } catch (IllegalArgumentException | UncheckedIOException e) {
             // No such message shows a value: the store names paths and positions, the use case names and rules
-            context.err().println("traceworks: " + TerminalFormat.safe(e.getMessage()));
+            TerminalText.println(context.err(), "traceworks: ", TerminalText.safe(e.getMessage()));
             return ExitCodes.REFUSED;
         }
     }
@@ -75,9 +75,10 @@ public final class CredentialsCommand implements Command {
         Credentials credentials = context.credentials();
         List<String> names = credentials.names();
         if (names.isEmpty()) {
-            context.out().println("no credentials in " + TerminalFormat.safe(credentials.location()));
+            TerminalText.println(context.out(), "no credentials in ", TerminalText.whole(credentials.location()));
         }
-        names.forEach(context.out()::println);
+        // A name is checked where it is stored; a file written by hand can hold any
+        names.forEach(name -> TerminalText.println(context.out(), TerminalText.safe(name)));
         return ExitCodes.OK;
     }
 
@@ -90,21 +91,26 @@ public final class CredentialsCommand implements Command {
         credentials.names();   // a file that cannot be trusted refuses before the person types a value
         String value = context.secrets().read("Value of " + name + " (not shown): ");
         if (value == null) {
-            context.err().println("traceworks: no value given for " + name + "; nothing was stored");
+            TerminalText.println(context.err(), "traceworks: no value given for ", TerminalText.whole(name),
+                    "; nothing was stored");
             return ExitCodes.REFUSED;
         }
         boolean replaced = credentials.set(name, value);
-        context.out().println((replaced ? "replaced " : "stored ") + name + " in " + TerminalFormat.safe(credentials.location()));
+        // The name is the operator's own argument, and the file is one of their home
+        TerminalText.println(context.out(), (replaced ? "replaced " : "stored "), TerminalText.whole(name), " in ",
+                TerminalText.whole(credentials.location()));
         return ExitCodes.OK;
     }
 
     private static int remove(Context context, String name) {
         Credentials credentials = context.credentials();
         if (!credentials.remove(name)) {
-            context.err().println("traceworks: no " + name + " in " + TerminalFormat.safe(credentials.location()));
+            TerminalText.println(context.err(), "traceworks: no ", TerminalText.whole(name), " in ",
+                    TerminalText.whole(credentials.location()));
             return ExitCodes.REFUSED;
         }
-        context.out().println("removed " + name + " from " + TerminalFormat.safe(credentials.location()));
+        TerminalText.println(context.out(), "removed ", TerminalText.whole(name), " from ",
+                TerminalText.whole(credentials.location()));
         return ExitCodes.OK;
     }
 }
