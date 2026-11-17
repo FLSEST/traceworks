@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -78,8 +79,15 @@ class RetryBlockExecutorTest {
         });
         Thread.ofVirtual().start(() -> {
             try {
-                attempted.await();
+                // Without the wait there is no stop: the retries run on and the test fails on what it expects
+                if (!attempted.await(30, TimeUnit.SECONDS)) {
+                    return;
+                }
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
                 while (executing.getState() != Thread.State.TIMED_WAITING) {
+                    if (System.nanoTime() >= deadline) {
+                        return;
+                    }
                     Thread.sleep(5);
                 }
             } catch (InterruptedException e) {
