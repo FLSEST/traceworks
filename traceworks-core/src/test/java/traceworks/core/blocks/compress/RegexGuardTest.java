@@ -129,6 +129,19 @@ class RegexGuardTest {
                 .isInstanceOf(CompressionException.class).hasMessageContaining("invalid regular expression");
     }
 
+    /** A stage's pattern is checked on the caller's thread, in validate() and in `check`: its length is bounded. */
+    @Test
+    void compile_refusesAPatternTooLongToCheck_atOnce_andDoesNotPrintItWhole() {
+        String regex = "{#".repeat(100 * 1024) + "\n" + " ".repeat(100 * 1024);
+
+        org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(java.time.Duration.ofSeconds(2), () ->
+                assertThatThrownBy(() -> RegexGuard.compile(regex, 0, "Stage test"))
+                        .isInstanceOf(CompressionException.class)
+                        .hasMessageContaining("longer than 4,096 characters")
+                        .hasMessageContaining("shorten the pattern")
+                        .satisfies(e -> assertThat(e.getMessage().length()).isLessThan(400)));
+    }
+
     @Test
     void safeCut_movesBeforeSurrogatePair() {
         assertThat(RegexGuard.safeCut("x😀", 2)).isEqualTo(1);
@@ -219,7 +232,8 @@ class RegexGuardTest {
 
     /**
      * The engine reads groups by recursion, and a pattern nested deeply enough overflows the stack while it is
-     * compiled. The JDK (21) turns that into a syntax error itself, so the stage fails as for any invalid pattern.
+     * compiled. A pattern that long is refused for its length before the engine sees it; the deepest one the bound
+     * lets through compiles, or is a syntax error of the JDK (21), and never an error that ends the run.
      */
     @Test
     void aPatternNestedTooDeeplyToCompile_isAnInvalidPattern_notAnError() {
@@ -227,6 +241,14 @@ class RegexGuardTest {
 
         assertThatThrownBy(() -> RegexGuard.compile(nested, 0, "Stage test"))
                 .isInstanceOf(CompressionException.class).hasMessageContaining("invalid regular expression")
-                .hasMessageContaining("Stack overflow");
+                .hasMessageContaining("longer than 4,096 characters");
+
+        int depth = (traceworks.core.util.TimedRegex.MAX_PATTERN_LENGTH - 1) / 2;
+        String deepest = "(".repeat(depth) + "a" + ")".repeat(depth);
+        try {
+            assertThat(RegexGuard.compile(deepest, 0, "Stage test").matcher("a").matches()).isTrue();
+        } catch (CompressionException e) {
+            assertThat(e).hasMessageContaining("invalid regular expression");
+        }
     }
 }

@@ -885,7 +885,9 @@ this setting is the usual one for Docker hosts and has not been verified here.
   answer is refused or the `compress` step fails, the pattern is not tried again, and the thread is left behind,
   busy until the Traceworks process ends (a thread inside the regex engine cannot be stopped). A pattern whose
   counts (`{n}`, `{n,}`, `{n,m}`) multiply to more than 1,000,000,000,000 is refused before any match, with a
-  message that says so; a count written with white space or a comment in it, which `(?x)` allows, is read as the
+  message that says so, and so is a pattern longer than 4,096 characters, which is not read at all (the check of
+  the counts runs before any time limit, and its time grows with the square of the pattern's length: shorten the
+  pattern); a count written with white space or a comment in it, which `(?x)` allows, is read as the
   engine reads it, and so is quoting: the counts are read after `\Q...\E` is taken out the way the engine takes it
   out, so an empty `\Q\E` between the digits of a count hides nothing. A brace that is escaped, in a character
   class or in quoted text counts nothing, unless the pattern holds a control escape (`\c`) or a `#`: either can

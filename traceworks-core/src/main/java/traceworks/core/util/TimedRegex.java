@@ -20,6 +20,13 @@ public final class TimedRegex {
     /** The most that the counted repetitions of one pattern may multiply to. */
     public static final long MAX_REPETITIONS = 1_000_000_000_000L;
 
+    /**
+     * The longest pattern that is read at all, in chars. {@link #repetitionProblem} runs on the caller's thread,
+     * before any time limit, and the count of one brace can read on to the end of the pattern: its time grows with
+     * the square of the length, minutes for a pattern of some MiB. Far above what a pattern written by hand needs.
+     */
+    public static final int MAX_PATTERN_LENGTH = 4096;
+
     private TimedRegex() {
     }
 
@@ -40,7 +47,8 @@ public final class TimedRegex {
      * What is wrong with the counted repetitions ({@code {n}}, {@code {n,}}, {@code {n,m}}) of {@code regex}, or
      * {@code null}. The clock is read where the engine reads a character, and a counted repetition of something
      * that reads none, like {@code (?:^{1000000}){1000000}}, repeats without ever reading one. So a pattern whose
-     * counts multiply to more than {@link #MAX_REPETITIONS} is refused before the engine sees it.
+     * counts multiply to more than {@link #MAX_REPETITIONS} is refused before the engine sees it, and so is a
+     * pattern longer than {@link #MAX_PATTERN_LENGTH}, which is not read at all.
      *
      * <p>The product of every count in the pattern is taken, nested or not: that refuses more than it must, and it
      * needs no reading of groups. The quoting ({@code \Q...\E}) is taken out first, as the engine takes it
@@ -58,6 +66,11 @@ public final class TimedRegex {
      * in the text, so that reading misses none.
      */
     public static String repetitionProblem(String pattern) {
+        if (pattern.length() > MAX_PATTERN_LENGTH) {
+            // Before anything reads it: the reading below is not linear in the length of the pattern
+            return String.format(java.util.Locale.ROOT, "it is longer than %,d characters (%,d): shorten the pattern",
+                    MAX_PATTERN_LENGTH, pattern.length());
+        }
         // Quoting first, as the engine does: from here on no quote is left, and a quoted brace is an escaped one
         String regex = withoutQuotes(pattern);
         boolean everyBrace = regex.contains("\\c") || regex.indexOf('#') >= 0;

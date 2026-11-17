@@ -346,7 +346,7 @@ limit Patterns and reports are read under a time limit.
   quote the thread is left behind, busy until the Traceworks process ends
   quote it refuses some patterns the engine would match quickly
   says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends, and the check of a pattern's counts multiplies them all, so it refuses some patterns the engine would match quickly.
-  digest 573d07610ab60212
+  digest 97c7421834e500f3
 
 limit A token in a `--source` URL
   quote every process on the machine can read it in the process list while the clone runs
