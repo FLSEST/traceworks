@@ -7,7 +7,7 @@ The smallest audit: three shell steps, no AI, and a register that keeps the find
 |---|---|---|
 | `known` | `shell` | prints `{{ audit_findings }}`, what the register knows before this run: `(no known findings)` the first time |
 | `measure` | `shell` | runs `scripts/measure.sh`: counts the files, finds the long ones, and prints a fact sheet (`## FACT SHEET`, `FACT files:`, `FACT long_files:`, one `HIT long_file:` per long file) |
-| `report` | `shell` | runs `scripts/report.sh`: a short markdown, the gate (`YELLOW` with a long file, else `GREEN`), and the audit result envelope with one finding per long file |
+| `report` | `shell` | runs `scripts/report.sh`: a short markdown, the gate (`YELLOW` with a long file, else `GREEN`), and the audit result envelope with one finding per long file, written with `jq` |
 
 `workflow.json` declares the audit:
 
@@ -20,8 +20,8 @@ names the fact `long_file` of the measure step, so the register marks none as un
 
 ## Try it
 
-From the root of the repository, after `mvn -q package` and `bin/traceworks images build`, in a directory with a
-few files:
+From the root of the repository, after `mvn -q package` and `bin/traceworks images build examples/audit-hello`
+(the shell image), in a directory with a few files:
 
 ```bash
 bin/traceworks run examples/audit-hello --workspace /some/dir
@@ -48,4 +48,5 @@ chain.
   that is new, resolved or reopened, and the decisions you took. See "The register log" in
   [docs/events.md](../../docs/events.md).
 - The envelope at the end of the `report` step's output, in the run's record and in `run.html`.
-- `RegistersIT` in `integration-tests` runs this sequence against the jar.
+- `RegistersIT` in `integration-tests` runs this sequence against the jar, and `AuditHelloReportTest` in
+  `traceworks-cli` holds the report to the same bytes for a fixed list of files, with `jq` alone on the `PATH`.

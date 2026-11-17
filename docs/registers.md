@@ -61,7 +61,7 @@ reported, not the first (docs/workflow-format.md). A report without an envelope 
 rule `todo_item` whose subject is its title; a reworded title is a new finding. A line has the limits of a finding
 of an envelope: a title over 2000 or a description over 20 000 characters rejects the report. That is the simple form for a workflow whose findings are tasks (GitHub issues, Jira), not measurements.
 
-`examples/audit-hello` is the smallest audit: two shell steps and no AI. `examples/self-audit/architecture` feeds
+`examples/audit-hello` is the smallest audit: three shell steps and no AI. `examples/self-audit/architecture` feeds
 the register `architecture` with its measured findings and its verified verdicts. `examples/self-audit/security`,
 `functionality` and `testing` feed registers of their own; `examples/self-audit/README.md` shows how the audits, the
 registers and the triage of their findings make a loop. `examples/self-audit/security-changes` is an audit whose
