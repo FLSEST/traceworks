@@ -928,15 +928,57 @@ public final class MountGuard {
      * One of the run's own directories as the runtime mounts it: its real path, read exactly as it is named. Unlike
      * a step's own mount ({@link #realHostPath}) nothing is cut off and no {@code ~} is expanded: the run hands the
      * directory on as the real path its start check judged, and what was judged must be what is mounted.
+     *
+     * <p>Only a path that resolves has a real path here. {@link #real} answers for a path that does not resolve with
+     * its parent's real path plus its name, which for a link whose target cannot be reached (no permission on the
+     * way, nothing there, a loop) is the link's own path: it would "resolve to itself", and a runtime that runs as
+     * root would follow the link. The start check resolved the directory ({@link #checkRunDirectory}), so one that
+     * does not resolve now was replaced or removed since.
+     *
+     * @throws RunDirectoryUnresolved if the directory cannot be resolved; its message says why
      */
     static String realRunDirectory(String directory) {
         if (!directory.startsWith("/")) {
             return directory;
         }
         try {
-            return real(Path.of(directory)).toString();
+            return Path.of(directory).toRealPath().toString();
         } catch (InvalidPathException e) {
+            throw new RunDirectoryUnresolved("it is not a valid path (" + e.getReason() + ")");
+        } catch (NoSuchFileException e) {
+            throw new RunDirectoryUnresolved("it or a folder on the way to it is gone, or it is a link to nothing ("
+                    + e.getFile() + ")");
+        } catch (AccessDeniedException e) {
+            throw new RunDirectoryUnresolved("permission denied on the way to " + e.getFile());
+        } catch (IOException e) {
+            // A loop of links among others; the reason is the system's own text
+            throw new RunDirectoryUnresolved("the system does not resolve it ("
+                    + (e instanceof java.nio.file.FileSystemException fs && fs.getReason() != null
+                    ? fs.getReason() : e.toString()) + ")");
+        }
+    }
+
+    /**
+     * The source the command line names for one of the run's own directories: its real path, and the directory as
+     * it is named when it does not resolve. The command line is not the guard: before it is built, every container
+     * start refuses a run directory that does not resolve to itself ({@link #realRunDirectory}), so the second case
+     * is left only where something replaced the directory in between, and there the name the check saw is mounted.
+     */
+    static String runDirectoryAsMounted(String directory) {
+        try {
+            return realRunDirectory(directory);
+        } catch (RunDirectoryUnresolved e) {
             return directory;
+        }
+    }
+
+    /** A run directory that resolved at the run's start check and does not resolve now. */
+    static final class RunDirectoryUnresolved extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        RunDirectoryUnresolved(String why) {
+            super(why);
         }
     }
 

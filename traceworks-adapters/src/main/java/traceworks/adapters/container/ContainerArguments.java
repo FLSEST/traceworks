@@ -138,7 +138,7 @@ final class ContainerArguments {
      *
      * @param user     {@code <uid>:<gid>}, the owner of the Traceworks home
      * @param declaredRealPath the host side of a mount the step declared as the runtime mounts it (its real path);
-     *                         the run's own directories are resolved by {@link MountGuard#realRunDirectory}
+     *                         the run's own directories are resolved by {@link MountGuard#runDirectoryAsMounted}
      * @throws IllegalArgumentException for what the command line must not carry (see the class documentation)
      */
     static Invocation of(Client client, ContainerRun run, String user, UnaryOperator<String> declaredRealPath) {
@@ -200,7 +200,8 @@ final class ContainerArguments {
         int own = run.mounts().size() - run.declaredMounts().size();
         for (int i = 0; i < run.mounts().size(); i++) {
             Mount mount = run.mounts().get(i);
-            String source = i < own ? MountGuard.realRunDirectory(mount.hostPath()) : declaredRealPaths.get(i - own);
+            String source = i < own ? MountGuard.runDirectoryAsMounted(mount.hostPath())
+                    : declaredRealPaths.get(i - own);
             arguments.addAll(List.of("--mount", bind(mount, source)));
             if (i < own && !workspaceGitWritable && isWritableWorkspace(mount, run)) {
                 // After the workspace's own mount: its .git once more at its place, read-only as a whole
@@ -384,7 +385,7 @@ final class ContainerArguments {
             return null;
         }
         Path holder = Path.of(source);
-        Path real = Path.of(MountGuard.realRunDirectory(pkg));
+        Path real = Path.of(MountGuard.runDirectoryAsMounted(pkg));
         if (real.equals(holder) || !real.startsWith(holder)
                 || !Files.isDirectory(real.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) {
             return null;

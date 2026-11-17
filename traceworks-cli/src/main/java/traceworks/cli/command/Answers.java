@@ -13,6 +13,8 @@ import traceworks.core.app.RunServices;
 import traceworks.core.record.RunView;
 import traceworks.core.register.DecisionAgent;
 
+import java.util.List;
+
 /** Gives an answer and says what became of it. */
 final class Answers {
 
@@ -51,7 +53,10 @@ final class Answers {
     static int give(Context context, String runRef, AnswerRequest request) {
         AnswerResult result = context.services().answer(runRef, request);
         if (!result.accepted()) {
-            context.err().println("traceworks: " + TerminalFormat.safe(result.message()));
+            // A refusal names the options, a field's name or its pattern: text of the workflow. On one line only
+            // where it stays there; else on marked lines, as wherever options are shown
+            AnswerCommands.shown("  ", "traceworks: ", "", "", "the answer is refused:", List.of(result.message()))
+                    .forEach(line -> context.err().println(line.startsWith("|") ? "  " + line : line));
             return ExitCodes.REFUSED;
         }
         context.out().println(TerminalFormat.safe(result.message()));

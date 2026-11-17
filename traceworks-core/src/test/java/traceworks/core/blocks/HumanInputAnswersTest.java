@@ -168,13 +168,17 @@ class HumanInputAnswersTest {
 
     /**
      * The engine reads groups by recursion, and a pattern nested deeply enough overflows the stack while it is
-     * compiled. The JDK (21) turns that into a syntax error itself, so the answer is refused and the run goes on.
+     * compiled. A pattern that long is refused for its length before the engine sees it, so the answer is refused
+     * and the run goes on, and the message does not repeat the pattern.
      */
     @Test
     void aPatternNestedTooDeeplyToCompile_refusesTheAnswer_insteadOfEndingTheRun() {
         var pattern = single("text", Map.of("validation_pattern", "(".repeat(200_000) + "a" + ")".repeat(200_000)));
 
-        assertThat(HumanInputAnswers.validate("a", pattern).error())
-                .contains("validation_pattern", "not a valid regular expression", "Stack overflow");
+        String error = HumanInputAnswers.validate("a", pattern).error();
+
+        assertThat(error).contains("validation_pattern cannot be used", "longer than 4,096 characters",
+                "shorten the pattern");
+        assertThat(error.length()).isLessThan(400);
     }
 }

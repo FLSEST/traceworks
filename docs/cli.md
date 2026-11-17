@@ -1569,6 +1569,18 @@ Without a terminal (CI, a pipe), or with `--no-input`, nobody can answer inside 
    traceworks approve '56e7c2a8-...' --answer 'Yes'
    traceworks resume '56e7c2a8-...'
    ```
+
+   An option of an approval and the name of a form's field are text of the workflow, as the question is. A command
+   is written out with one only where it stays on one line of a terminal of 80 columns and holds no two blanks in a
+   row: an option padded to the terminal's width would otherwise end on a line of its own and read as a hint of
+   Traceworks. With the run's id that is an option of up to 9 characters. For anything longer the command is
+   printed once with a placeholder (`--answer '<option>'`, `--field '<name>=<value>'`) and the options or names
+   follow on lines marked with `|`, as the lines of the question are; type the one you choose, quoted for your
+   shell, or copy the command from `run.html`. The hint of a question that does not park the run
+   (`waiting for an answer: ...`) follows the same rule, and so does every other place that shows options or a
+   field's label on the terminal: the question asked at the console (`answer with one of:`, `one of:`,
+   `is not one of:`) and the live line of a question (`question: ... [Yes / No]`, or `[options:]` with the
+   options on marked lines below it).
 4. `traceworks approve` records the answer. `traceworks resume` (a host run with `--allow-host-execution`, or the
    setting) continues from the last checkpoint. The step asks again and receives the recorded answer at once. For a
    host run, the commands that `run`, `approve`, `answer` and `show` print to go on carry `--allow-host-execution`

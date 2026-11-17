@@ -40,7 +40,8 @@ import java.util.TreeSet;
  * @param children   the workflow ids of the other packages the digest covers, sorted
  * @param violations why the package cannot be sealed, one text each; empty when it can
  * @param childPackages every package in another directory than the package's own that the walk reached, each once,
- *                      those inside the package directory too: the packages whose own seals a run must respect
+ *                      those inside the package directory too, also under its {@code .git/}: the packages whose own
+ *                      seals a run must respect
  */
 record SealClosure(String digest, List<String> children, List<String> violations,
                    List<LoadedPackage> childPackages) {
@@ -155,7 +156,9 @@ record SealClosure(String digest, List<String> children, List<String> violations
                 violations.add(label + " names the workflow " + ref.strip() + " under the package's .git directory,"
                         + " which the package digest leaves out, so a seal cannot cover it: move the workflow out"
                         + " of .git");
-                return;
+                // No return: the violation is the caller's, and it counts only when the caller carries a seal. The
+                // child is a called package all the same, so it and what it calls are walked and their own seals
+                // judged; an unsealed caller would otherwise run a changed copy of a sealed workflow from there
             }
             if (!owner.directory().equals(root.directory())) {
                 packages.putIfAbsent(owner.directory(), owner);
