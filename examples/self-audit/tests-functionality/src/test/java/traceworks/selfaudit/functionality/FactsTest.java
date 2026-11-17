@@ -116,6 +116,51 @@ class FactsTest {
     }
 
     @Test
+    void anOptionOfAnotherProgram_namedWithAWord_isNoFindingOnlyInALineThatHoldsTheWordBeforeIt() {
+        fixture.replace("docs/cli.md", "follows it.", """
+                follows it. A Dockerfile may use `COPY --from=` or
+                `RUN --mount=...,from=`, and a step hands a file to its tool:
+
+                ```json
+                {"container_args": ["scan", "--from", "answer.txt"]}
+                ```
+                """);
+        fixture.rule("foreign_option from COPY");
+        fixture.rule("foreign_option from container_args");
+        fixture.rule("foreign_option mount RUN");
+
+        fixture.facts();
+
+        assertThat(fixture.findings()).isEmpty();
+    }
+
+    @Test
+    void anOptionOfAnotherProgram_namedWithAWord_isStillUnknownAnywhereElse() {
+        // The word after the option or in the line before does not count, and "run" is not RUN
+        fixture.replace("docs/cli.md", "follows it.", """
+                follows it. `tool watch --from 3` starts later, unlike COPY
+                with `--from=` in the next line, `tool run --mount x` mounts, and `--mount` RUN too.
+                """);
+        fixture.rule("foreign_option from COPY");
+        fixture.rule("foreign_option mount RUN");
+
+        fixture.facts();
+
+        assertThat(fixture.findings()).containsExactly("unknown-option-in-docs show/watch --from",
+                "unknown-option-in-docs show/watch --mount");
+    }
+
+    @Test
+    void aForeignOptionWithMoreThanOneWord_isRefused() {
+        fixture.rule("foreign_option from COPY and more");
+
+        Fixture.Ran ran = fixture.facts();
+
+        assertThat(ran.code()).isNotZero();
+        assertThat(ran.err()).contains("'foreign_option' takes an option's name, or the name and one word");
+    }
+
+    @Test
     void anExitCodeOnOneSideOnly_isAMismatch_bothWays() {
         fixture.replace(Fixture.SOURCES + "ExitCodes.java", "USAGE = 2;", "USAGE = 2;\n    public static final int"
                 + " FAILED = 3;\n    static final String NAME = \"7\";\n    // public static final int GONE = 9;");
