@@ -148,7 +148,7 @@ class WorkflowEngineResumeTest {
                 .containsEntry("form", SetVariables.FORM);
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(second.commands.commands()).containsExactly(first.commands.commands().getLast())
-                .containsExactly("echo a note\nof two lines {name=Alex, tags=[x]}");
+                .containsExactly("echo a note\nof two lines {name=Operator, tags=[x]}");
     }
 
     /**
@@ -476,7 +476,7 @@ class WorkflowEngineResumeTest {
 
         private static Map<String, Object> form() {
             Map<String, Object> form = new LinkedHashMap<>();
-            form.put("name", "Alex");
+            form.put("name", "Operator");
             form.put("tags", List.of("x"));
             return form;
         }

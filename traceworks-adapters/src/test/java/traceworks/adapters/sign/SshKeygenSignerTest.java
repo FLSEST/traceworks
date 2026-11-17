@@ -59,8 +59,8 @@ class SshKeygenSignerTest {
         assertThat(signature.problem(MESSAGE, "traceworks")).isNull();
         assertThat(signature.problem("other".getBytes(StandardCharsets.UTF_8), "traceworks")).isNotNull();
         assertThat(publicKey).startsWith(signature.publicKey());
-        assertThat(AllowedSigners.parse(("alex@example.org " + publicKey + "\n").getBytes(StandardCharsets.UTF_8))
-                .principals(signature.publicKey(), "traceworks")).containsExactly("alex@example.org");
+        assertThat(AllowedSigners.parse(("operator@example.org " + publicKey + "\n").getBytes(StandardCharsets.UTF_8))
+                .principals(signature.publicKey(), "traceworks")).containsExactly("operator@example.org");
     }
 
     @Test

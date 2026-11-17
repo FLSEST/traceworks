@@ -34,7 +34,7 @@ class HomeLayoutTest {
     @Test
     void withoutTheSettings_everyPlaceIsTheFixedFolderOfTheHome() throws IOException {
         Path home = home();
-        for (String json : new String[] {null, "{}", "{\"actor\": \"alex\"}",
+        for (String json : new String[] {null, "{}", "{\"actor\": \"operator\"}",
                 "{\"runs_dir\": null, \"ledger_dir\": null, \"registers_dir\": null}"}) {
             if (json != null) config(json);
 
@@ -344,8 +344,8 @@ class HomeLayoutTest {
 
     @Test
     void theOperatorConfiguration_knowsTheKeys_andRefusesWhatTheLayoutRefuses() throws IOException {
-        config("{\"runs_dir\": \"data/runs\", \"actor\": \"alex\"}");
-        assertThat(OperatorConfigFile.read(home()).actor()).isEqualTo("alex");
+        config("{\"runs_dir\": \"data/runs\", \"actor\": \"operator\"}");
+        assertThat(OperatorConfigFile.read(home()).actor()).isEqualTo("operator");
 
         config("{\"runs_dir\": 5}");
         Path home = home();

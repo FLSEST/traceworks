@@ -20,7 +20,7 @@ class RegisterFilesTest {
 
     private static Finding finding(int n, FindingStatus status, Severity severity, String rule, String evidence) {
         Finding.DispositionRecord decision = status == FindingStatus.ACCEPTED_RISK || status == FindingStatus.DISMISSED
-                ? new Finding.DispositionRecord(status, "a note", "alex", T, status == FindingStatus.ACCEPTED_RISK
+                ? new Finding.DispositionRecord(status, "a note", "operator", T, status == FindingStatus.ACCEPTED_RISK
                 ? T.plusSeconds(86_400) : null, "old evidence", Severity.LOW) : null;
         return new Finding(String.format("%064d", n), rule, "Subject" + n + ".java", severity, "Title " + n,
                 "What is wrong with " + n, evidence, List.of("tag"), status, new Finding.Seen("run-first", T),

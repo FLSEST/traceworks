@@ -245,7 +245,7 @@ class HumanInputBlockExecutorTest {
         var block = BlockDefinition.builder().type("human-input")
                 .config(new HashMap<>(Map.of("prompt", "Enter value", "variable_name", "val"))).build();
         var context = buildContext();
-        context.presetAnswer(0, "human-input", "Who deploys?", "Alex");
+        context.presetAnswer(0, "human-input", "Who deploys?", "Operator");
 
         var result = executor.execute(block, context);
 
@@ -261,12 +261,12 @@ class HumanInputBlockExecutorTest {
         var block = BlockDefinition.builder().type("human-input")
                 .config(new HashMap<>(Map.of("prompt", "Enter value", "variable_name", "val"))).build();
         var context = buildContext();
-        context.presetAnswer(0, "human-input", "Enter value", "Alex");
+        context.presetAnswer(0, "human-input", "Enter value", "Operator");
 
         var result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(context.getVariable("val")).isEqualTo("Alex");
+        assertThat(context.getVariable("val")).isEqualTo("Operator");
         assertThat(events.getFirst()).isInstanceOfSatisfying(ApprovalRequested.class,
                 requested -> assertThat(requested.preset()).isTrue());
     }
@@ -321,11 +321,11 @@ class HumanInputBlockExecutorTest {
         ));
 
         var block = BlockDefinition.builder().type("human-input").config(config).build();
-        var context = buildContextWithPrecompletedApproval("{\"name\":\"Alex\"}");
+        var context = buildContextWithPrecompletedApproval("{\"name\":\"Operator\"}");
 
         executor.execute(block, context);
 
-        assertThat(context.getVariable("name")).isEqualTo("Alex");
+        assertThat(context.getVariable("name")).isEqualTo("Operator");
         assertThat(context.getVariable("age")).isEqualTo("");
     }
 
@@ -367,13 +367,13 @@ class HumanInputBlockExecutorTest {
         config.put("variable_name", "name");
 
         var block = BlockDefinition.builder().type("human-input").config(config).build();
-        var context = buildContextWithPrecompletedApproval("Alex");
+        var context = buildContextWithPrecompletedApproval("Operator");
 
         var result = executor.execute(block, context);
 
         assertThat(result.getStatus()).isEqualTo(StepStatus.COMPLETED);
-        assertThat(context.getVariable("name")).isEqualTo("Alex");
-        assertThat(result.getOutput()).isEqualTo("Alex");
+        assertThat(context.getVariable("name")).isEqualTo("Operator");
+        assertThat(result.getOutput()).isEqualTo("Operator");
     }
 
     @Test
@@ -417,7 +417,7 @@ class HumanInputBlockExecutorTest {
         ExecutionContext waiting = ExecutionContext.builder().workflowRunId("run-1").build();
         waiting.onApprovalWait(isWaiting -> {
             if (isWaiting) {
-                waiting.resolveApproval(waiting.getCurrentApprovalRequest(), "Alex");
+                waiting.resolveApproval(waiting.getCurrentApprovalRequest(), "Operator");
             } else {
                 throw new EventLogException(new IOException("disk full"));
             }

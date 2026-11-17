@@ -22,7 +22,7 @@ class FileInboxTest {
     Path dir;
 
     private static InboxRequest request(String id, long millis) {
-        return new InboxRequest(id, "approval", "run-" + id, 2, 17, "yes", Map.of("k", "v"), "ok", "alex",
+        return new InboxRequest(id, "approval", "run-" + id, 2, 17, "yes", Map.of("k", "v"), "ok", "operator",
                 Instant.ofEpochMilli(millis));
     }
 
@@ -31,7 +31,7 @@ class FileInboxTest {
         FileInbox inbox = new FileInbox(dir.resolve("inbox"));
         inbox.post(request("b", 2_000));
         inbox.post(request("a", 1_000));
-        InboxRequest cancel = new InboxRequest("c", "cancel", null, null, null, null, null, null, "alex",
+        InboxRequest cancel = new InboxRequest("c", "cancel", null, null, null, null, null, null, "operator",
                 Instant.ofEpochMilli(3_000));
         inbox.post(cancel);
         assertThat(inbox.take()).containsExactly(request("a", 1_000), request("b", 2_000), cancel);
@@ -42,7 +42,7 @@ class FileInboxTest {
     @Test
     void anAnswersAgent_isPostedAndTaken_andARequestWithoutOneHasNoSuchField() throws IOException {
         FileInbox inbox = new FileInbox(dir.resolve("inbox"));
-        InboxRequest byAgent = new InboxRequest("z", "approval", "run-z", 2, 17, "yes", Map.of(), null, "alex",
+        InboxRequest byAgent = new InboxRequest("z", "approval", "run-z", 2, 17, "yes", Map.of(), null, "operator",
                 Instant.ofEpochMilli(2_000), "claude-code");
         inbox.post(request("a", 1_000));
         inbox.post(byAgent);
@@ -93,7 +93,7 @@ class FileInboxTest {
     void post_aRequestBeyondTheSizeLimit_isRefused() {
         FileInbox inbox = new FileInbox(dir.resolve("inbox"));
         InboxRequest big = new InboxRequest("big", "approval", "run", 2, 17, "a".repeat(FileInbox.MAX_REQUEST_BYTES),
-                Map.of(), null, "alex", Instant.ofEpochMilli(1_000));
+                Map.of(), null, "operator", Instant.ofEpochMilli(1_000));
 
         assertThatThrownBy(() -> inbox.post(big)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("too large");

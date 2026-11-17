@@ -66,7 +66,7 @@ class RunHtmlTest {
     private RunHtmlTest started(String execution) {
         recorder.runStarted(new RunStart("wf", "Wf <b>", "/pkg", "digest-1", null, null,
                 "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of("ticket", "T-1"), TriggerSource.MANUAL,
-                "alex@box", "0.1.0", execution, null, "/ws"));
+                "operator@box", "0.1.0", execution, null, "/ws"));
         return this;
     }
 
@@ -203,7 +203,7 @@ class RunHtmlTest {
         RunRecorder own = RunRecorder.start(log, blobs, clock, RUN, new WorkflowDefinition("wf", "Wf", null,
                 List.of(unnamed, second, third), null, null, null, null, null, null, null, null, null));
         own.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex@box",
+                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "operator@box",
                 "0.1.0", "host", null, "/ws"));
         own.emit(new StepStarted(0, null, "shell", 0, false));
         own.emit(new StepFinished(0, null, "shell", StepStatus.COMPLETED, "true", 1, Map.of()));
@@ -230,7 +230,7 @@ class RunHtmlTest {
                 log.readAll().stream().map(RecordedEvent::parse).toList());
         next.attributeNextAnswer("anna@box", "cli", "req-1", "looks <good>");
         next.emit(new ApprovalAnswered(0, "approval", "yes"));
-        next.record("run.resumed", Map.of("actor", "alex@box", "package_changed", false));
+        next.record("run.resumed", Map.of("actor", "operator@box", "package_changed", false));
         next.attributeNextAnswer("anna@box", "resume", null, null);
         for (RunEvent event : List.of(new StepStarted(0, "fetch", "approval", 0, false),
                 new ApprovalRequested(0, "b1", "approval", "Ship?", List.of("yes", "no"), List.of(), null, null,
@@ -264,7 +264,7 @@ class RunHtmlTest {
                 log.readAll().stream().map(RecordedEvent::parse).toList());
         next.attributeNextAnswer("anna@box", "cli", "req-1", null, "claude<code>");
         next.emit(new ApprovalAnswered(0, "approval", "yes"));
-        next.record("run.resumed", Map.of("actor", "alex@box", "package_changed", false));
+        next.record("run.resumed", Map.of("actor", "operator@box", "package_changed", false));
         next.attributeNextAnswer("anna@box", "resume", null, null, "claude<code>");
         for (RunEvent event : List.of(new StepStarted(0, "fetch", "approval", 0, false),
                 new ApprovalRequested(0, "b1", "approval", "Ship?", List.of("yes", "no"), List.of(), null, null,
@@ -396,7 +396,7 @@ class RunHtmlTest {
 
         assertThat(render()).contains("<tr><th>run</th><td>" + RUN + "</td></tr>",
                 "<tr><th>status</th><td>COMPLETED</td></tr>",
-                "<tr><th>actor</th><td>alex@box</td></tr>",
+                "<tr><th>actor</th><td>operator@box</td></tr>",
                 "<tr><th>trigger</th><td>MANUAL</td></tr>",
                 "<tr><th>started</th><td>" + view.startedAt() + "</td></tr>",
                 "<tr><th>finished</th><td>" + view.finishedAt() + "</td></tr>",
@@ -410,7 +410,7 @@ class RunHtmlTest {
     void anIntervention_showsWhatItKept() {
         started();
         recorder.record("run.recovered", Map.of("discarded", "{\"seq\":9".getBytes(StandardCharsets.UTF_8)));
-        recorder.record("run.resumed", Map.of("actor", "alex@box"));
+        recorder.record("run.resumed", Map.of("actor", "operator@box"));
 
         assertThat(render()).contains("a writer found a torn last line, set it aside and went on: <code>{&quot;seq&quot;:9"
                 + "</code> <small>seq", "<td>resumed the run <small>seq");
@@ -717,7 +717,7 @@ class RunHtmlTest {
                   {"type":"simple","name":"summarise","config":{"provider":"claude","model":"m1","prompt":"Sum up"}},
                   {"type":"shell","config":{"command":"echo never"}}]}""";
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", "abc123", true,
-                definition.getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex@box", "0.1.0",
+                definition.getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "operator@box", "0.1.0",
                 "host", null, "/ws"));
         finishedFetch("hi");
         emit(new StepStarted(1, "summarise", "simple", 1, true),
@@ -743,13 +743,13 @@ class RunHtmlTest {
     void workflowSection_namesTheSealOfASealedPackage() {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 "{\"id\":\"wf\",\"blocks\":[]}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL,
-                "alex@box", "0.1.0", "host", null, 16, Map.of(), "/ws", null, null, 128, null, List.of(), null,
-                new traceworks.core.record.SealView("wf", "seal-digest-1", "alex <b>@box",
+                "operator@box", "0.1.0", "host", null, 16, Map.of(), "/ws", null, null, 128, null, List.of(), null,
+                new traceworks.core.record.SealView("wf", "seal-digest-1", "operator <b>@box",
                         "2026-11-13T12:00:00Z", "SHA256:abc", List.of("release@example.org"), "sig")));
 
         String html = render();
 
-        assertThat(html).contains("<th>seal</th><td>sealed by alex &lt;b&gt;@box at 2026-11-13T12:00:00Z, signed as"
+        assertThat(html).contains("<th>seal</th><td>sealed by operator &lt;b&gt;@box at 2026-11-13T12:00:00Z, signed as"
                 + " release@example.org with the key SHA256:abc; seal digest seal-digest-1</td>");
         assertThat(new RunHtmlTest().started().render()).contains("<th>seal</th><td>unsealed</td>");
     }
@@ -762,7 +762,7 @@ class RunHtmlTest {
     void workflowSection_namesThePickedOptionOfAModelChoice() {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 "{\"id\":\"wf\",\"blocks\":[]}".getBytes(StandardCharsets.UTF_8), Map.of("judge", "astra"),
-                TriggerSource.MANUAL, "alex@box", "0.1.0", "host", null, 16, Map.of(), "/ws", null, null, 128, null,
+                TriggerSource.MANUAL, "operator@box", "0.1.0", "host", null, 16, Map.of(), "/ws", null, null, 128, null,
                 List.of(), null, null, List.of(new traceworks.core.model.ModelPick("judge", "astra",
                 "PI", "openai/gpt-6-<astra>", false))));
 
@@ -789,7 +789,7 @@ class RunHtmlTest {
                         "eclipse-temurin:21-jdk-noble", "the area finder on JDK 21"),
                 new traceworks.core.container.ImageFacts("alpine:3.20", null, null));
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex@box", "0.1.0",
+                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "operator@box", "0.1.0",
                 "container", new RunStart.Runtime("docker", "29.1.3"), 16, Map.of(), "/ws", null, null, 128, null, images));
         emit(new StepStarted(0, "fetch", "shell", 0, false));
         traceworks.core.port.CommandRunner.CommandFacts facts =
@@ -835,7 +835,7 @@ class RunHtmlTest {
     @Test
     void workflowSection_withoutAReadableDefinition_saysSo() {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                "nonsense".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex@box", "0.1.0",
+                "nonsense".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "operator@box", "0.1.0",
                 "host", null, "/ws"));
 
         assertThat(render()).contains("<h2>Workflow</h2>", "<th>package</th><td>/pkg</td>",
@@ -1057,7 +1057,7 @@ class RunHtmlTest {
     @Test
     void theAiNetworkOfTheRun_isInTheHeader() {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "alex@box", "0.1.0",
+                "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL, "operator@box", "0.1.0",
                 "container", null, 16, Map.of(), "/ws", null, null, 128, null, List.of(),
                 new AiNetwork(true, Map.of("claude", List.of("gateway.example:8443"), "pi", List.of("a.example:1",
                         "b.example:2")))));
@@ -1076,7 +1076,7 @@ class RunHtmlTest {
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 ("{\"id\":\"wf\",\"blocks\":[{\"type\":\"simple\",\"name\":\"look\",\"config\":{\"command\":\"Look\","
                         + "\"web\":\"fetch\",\"web_hosts\":[\"*\"]}}]}").getBytes(StandardCharsets.UTF_8), Map.of(),
-                TriggerSource.MANUAL, "alex@box", "0.1.0", "container", null, 16, Map.of(), "/ws", null, null, 128, null,
+                TriggerSource.MANUAL, "operator@box", "0.1.0", "container", null, 16, Map.of(), "/ws", null, null, 128, null,
                 List.of(), new AiNetwork(true, Map.of())));
         emit(new StepStarted(0, "look", "simple", 0, true));
         FakeAiCli cli = FakeAiCli.claude();
@@ -1128,7 +1128,7 @@ class RunHtmlTest {
                 List.of(fetch, use), null, null, null, null, null, null, null, null, null));
         own.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
                 "{\"id\":\"wf\"}".getBytes(StandardCharsets.UTF_8), Map.of(), TriggerSource.MANUAL,
-                "alex@box", "0.1.0", "host", null, "/ws"));
+                "operator@box", "0.1.0", "host", null, "/ws"));
         own.emit(new StepStarted(0, "fetch", "shell", 0, false));
         own.emit(new StepFinished(0, "fetch", "shell", StepStatus.COMPLETED, "i", 5, Map.of()));
         own.emit(new StepStarted(1, "summarise", "simple", 1, true));

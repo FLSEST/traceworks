@@ -531,7 +531,7 @@ TRACEWORKS_AGENT=claude-code traceworks findings security accept 4a4dd633 --note
 
   ```json
   {"seq":41,"at":"2026-11-17T10:02:11.418Z","type":"finding.dismissed","register":"security","prev":"...",
-   "actor":"alex@host","agent":"claude-code","evidence":"...","id":"9d3692a8...","note":"...","severity":"LOW",
+   "actor":"operator@host","agent":"claude-code","evidence":"...","id":"9d3692a8...","note":"...","severity":"LOW",
    "signature":null,"state_blob":"..."}
   ```
 
@@ -541,10 +541,10 @@ TRACEWORKS_AGENT=claude-code traceworks findings security accept 4a4dd633 --note
 | Where | What it says |
 |---|---|
 | `findings <key> accept`, `dismiss`, `reopen` | the name as it was recorded: `dismissed 9d3692a8 through the agent claude-code` |
-| `findings <key> show <id>` | `Decision  DISMISSED by alex@host through the agent claude-code at 2026-11-17T10:02:11.418Z, ...` |
+| `findings <key> show <id>` | `Decision  DISMISSED by operator@host through the agent claude-code at 2026-11-17T10:02:11.418Z, ...` |
 | `findings <key> list` | the row ends with `(through the agent claude-code)`; inside the note of a row that has one: `(decided on LOW through the agent claude-code)`, `(dismissed on LOW through the agent claude-code before, not in force)` |
 | `state.json`, `findings <key> list --json` | `disposition.agent` |
-| `report.html` | `dismissed by alex@host through the agent claude-code at ...`, and in the history `actor alex@host · agent claude-code` |
+| `report.html` | `dismissed by operator@host through the agent claude-code at ...`, and in the history `actor operator@host · agent claude-code` |
 | the register folder of a run (`findings.jsonl`, `resolved.jsonl`) | `disposition.agent`, next to `disposition.actor` |
 
 `{{ audit_findings }}` carries the note of a decision and neither its actor nor its agent, and the diff a hook gets

@@ -17,7 +17,7 @@ class AcceptancePolicyTest {
     private static Finding accepted(String frozenEvidence, Instant until) {
         return new Finding("a".repeat(64), "r", "s", Severity.HIGH, "t", null, frozenEvidence, List.of(),
                 FindingStatus.ACCEPTED_RISK, new Finding.Seen("run-1", ACCEPTED), new Finding.Seen("run-1", ACCEPTED),
-                1, 0, false, null, new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "note", "alex", ACCEPTED,
+                1, 0, false, null, new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "note", "operator", ACCEPTED,
                 until, frozenEvidence));
     }
 

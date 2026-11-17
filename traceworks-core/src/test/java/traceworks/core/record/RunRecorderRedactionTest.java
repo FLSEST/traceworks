@@ -93,13 +93,13 @@ class RunRecorderRedactionTest {
         nested.put("list", List.of("one " + SECRET, 2));
         nested.put(SECRET, "as a key");
         Map<String, Object> values = new LinkedHashMap<>();
-        values.put("actor", "alex " + SECRET);
+        values.put("actor", "operator " + SECRET);
         values.put("nested", nested);
         recorder.record("run.resumed", values);
 
         List<JsonNode> lines = lines();
         assertThat(lines.get(0).get("name").asText()).isEqualTo("deploy " + REDACTED);
-        assertThat(lines.get(1).get("actor").asText()).isEqualTo("alex " + REDACTED);
+        assertThat(lines.get(1).get("actor").asText()).isEqualTo("operator " + REDACTED);
         assertThat(lines.get(1).get("nested").get("list").get(0).asText()).isEqualTo("one " + REDACTED);
         assertThat(lines.get(1).get("nested").has(REDACTED)).isTrue();
         assertNoSecretInTheRecord();
@@ -110,7 +110,7 @@ class RunRecorderRedactionTest {
         Map<String, Object> inputs = new LinkedHashMap<>();
         inputs.put("note", "with " + SECRET);
         recorder.runStarted(new RunStart("wf", "Wf", "/pkg", "digest-1", null, null,
-                bytes("{\"id\":\"wf\",\"comment\":\"" + SECRET + "\"}"), inputs, TriggerSource.MANUAL, "alex@box",
+                bytes("{\"id\":\"wf\",\"comment\":\"" + SECRET + "\"}"), inputs, TriggerSource.MANUAL, "operator@box",
                 "0.1.0", "host", null, "/ws"));
         recorder.emit(new StepStarted(0, "deploy", "shell", 0, false));
         recorder.emit(new OutputRecorded(0, "deploy", "the token is " + SECRET + "\n"));

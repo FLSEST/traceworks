@@ -17,7 +17,7 @@ class FindingsTextTest {
     private static Finding finding(String id, FindingStatus status, Severity severity, String rule, String subject,
                                    String title, String evidence, String note) {
         Finding.DispositionRecord d = status == FindingStatus.ACCEPTED_RISK || status == FindingStatus.DISMISSED
-                ? new Finding.DispositionRecord(status, note, "alex", T, null, evidence) : null;
+                ? new Finding.DispositionRecord(status, note, "operator", T, null, evidence) : null;
         return new Finding(id.repeat(64), rule, subject, severity, title, null, evidence, List.of(), status,
                 new Finding.Seen("r", T), new Finding.Seen("r", T), 1, 0, false, null, d);
     }
@@ -106,7 +106,7 @@ class FindingsTextTest {
         }
         all.add(new Finding("f".repeat(64), "r", "kept", Severity.LOW, "t", null, null, List.of(),
                 FindingStatus.ACCEPTED_RISK, new Finding.Seen("r", T), new Finding.Seen("r", T), 1, 0, false, null,
-                new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "n", "alex", T, null, null)));
+                new Finding.DispositionRecord(FindingStatus.ACCEPTED_RISK, "n", "operator", T, null, null)));
 
         String text = FindingsText.render(new RegisterState(1, "k", "wf", "c", null, all, 1), null);
 

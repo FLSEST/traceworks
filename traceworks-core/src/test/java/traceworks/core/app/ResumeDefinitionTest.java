@@ -316,7 +316,7 @@ class ResumeDefinitionTest {
     @Test
     void aRefusedSource_isNotRepeated_itMayHoldALogin() {
         assertThatThrownBy(() -> fx.services().start(AppFixture.sourced(AppFixture.BUILD,
-                "https://alex:hunter2hunter2@elsewhere.example/[redacted:PROJECT]/repo?token=abcdefgh12", null), null,
+                "https://operator:hunter2hunter2@elsewhere.example/[redacted:PROJECT]/repo?token=abcdefgh12", null), null,
                 null)).isInstanceOf(RunRefusedException.class).hasMessageContaining("its source contains '[redacted:'")
                 .message().doesNotContain("hunter2hunter2").doesNotContain("abcdefgh12").doesNotContain("elsewhere");
     }

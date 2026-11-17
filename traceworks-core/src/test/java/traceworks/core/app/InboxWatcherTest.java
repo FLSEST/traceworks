@@ -48,7 +48,7 @@ class InboxWatcherTest {
     }
 
     private static InboxRequest request(String id) {
-        return new InboxRequest(id, "approval", "run-1", 0, 3, "Yes", Map.of(), null, "alex@box",
+        return new InboxRequest(id, "approval", "run-1", 0, 3, "Yes", Map.of(), null, "operator@box",
                 Instant.parse("2026-11-03T12:00:00Z"));
     }
 }

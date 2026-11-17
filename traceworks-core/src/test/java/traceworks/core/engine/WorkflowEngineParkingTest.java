@@ -186,21 +186,21 @@ class WorkflowEngineParkingTest {
         Session second = new Session();
         second.commands.on("echo ", "said");
         RunOutcome outcome = second.resume(workflow, first.lastCheckpoint(),
-                new PresetAnswer(1, "human-input", asked.question(), "Alex"));
+                new PresetAnswer(1, "human-input", asked.question(), "Operator"));
 
         assertThat(parked.status()).isEqualTo(RunStatus.PARKED);
         assertThat(first.events.last()).isEqualTo(new RunParked(1, "human-input"));
         assertThat(asked.question()).isEqualTo("Who deploys?");
         assertThat(outcome.status()).isEqualTo(RunStatus.COMPLETED);
-        assertThat(second.commands.commands()).as("the answer reaches the later step").containsExactly("echo Alex");
+        assertThat(second.commands.commands()).as("the answer reaches the later step").containsExactly("echo Operator");
         assertThat(second.events.of(ApprovalRequested.class)).as("the resumed step asks again")
                 .extracting(ApprovalRequested::stepIndex, ApprovalRequested::question)
                 .containsExactly(tuple(1, "Who deploys?"));
         assertThat(second.events.of(ApprovalAnswered.class))
-                .containsExactly(new ApprovalAnswered(1, "human-input", "Alex"));
+                .containsExactly(new ApprovalAnswered(1, "human-input", "Operator"));
         assertThat(second.events.of(StepWaiting.class)).as("the preset answers at once").isEmpty();
         assertThat(outcome.steps()).extracting(StepResult::getStepIndex, StepResult::getStatus, StepResult::getOutput)
-                .containsExactly(tuple(0, StepStatus.COMPLETED, "a done"), tuple(1, StepStatus.COMPLETED, "Alex"),
+                .containsExactly(tuple(0, StepStatus.COMPLETED, "a done"), tuple(1, StepStatus.COMPLETED, "Operator"),
                         tuple(2, StepStatus.COMPLETED, "said"));
     }
 
@@ -213,7 +213,7 @@ class WorkflowEngineParkingTest {
 
         Session second = new Session();
         RunOutcome outcome = second.resume(workflow, first.lastCheckpoint(),
-                new PresetAnswer(1, "human-input", "other", "Alex"));
+                new PresetAnswer(1, "human-input", "other", "Operator"));
 
         StepResult asking = outcome.steps().get(1);
         assertThat(asking.getStatus()).isEqualTo(StepStatus.FAILED);
