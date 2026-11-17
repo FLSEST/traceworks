@@ -2,8 +2,8 @@
   "format": "traceworks-workflow",
   "format_version": 1,
   "id": "73419f4c-b02a-4966-bab3-0f6c9eb591ab",
-  "name": "Testing audit, rating again",
-  "description": "Asks whether the tests of the Maven project in the workspace notice when the code changes, by mutation testing with PIT (pitest.org) in a Maven container, as the testing audit does (examples/audit/testing), and rates each method with a change no test detected from its earlier verdict. A method whose gaps and decision are what they were keeps its severity and reason and is not put to a model. A changed method is put to a model with its earlier severity and reason and with what changed; the model may keep the rating, and a change is taken only on a ground a script finds in the workspace: a test that exists, or a line of a file. A method that was never rated is rated fresh. A method rated low is counted and is no finding. The gate counts the findings no person has decided on. The findings feed the register \"audit.testing-again\".",
+  "name": "Mutation testing, grounded",
+  "description": "Asks whether the tests of the Maven project in the workspace notice when the code changes, by mutation testing with PIT (pitest.org) in a Maven container, as the package mutation-testing does (examples/mutation-testing), and rates each method with a change no test detected from its earlier verdict. A method whose gaps and decision are what they were keeps its severity and reason and is not put to a model. A changed method is put to a model with its earlier severity and reason and with what changed; the model may keep the rating, and a change is taken only on a ground a script finds in the workspace: a test that exists, or a line of a file. A method that was never rated is rated fresh. A method rated low is counted and is no finding. The gate counts the findings no person has decided on. The findings feed the register \"mutation-testing-grounded\".",
   "requires": [
     "container.network",
     "ai.tools",
@@ -15,7 +15,7 @@
     },
     "audit": {
       "enabled": true,
-      "key": "audit.testing-again",
+      "key": "mutation-testing-grounded",
       "category": "testing",
       "report_block": "report"
     }

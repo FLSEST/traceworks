@@ -1,22 +1,24 @@
-# Testing audit, rating again
+# Mutation testing, grounded
 
-The same question and the same measurement as the [testing audit](../testing/README.md): would the tests notice
-when the code changes, answered by mutation testing with [PIT](https://pitest.org). What differs is the rating. The
-testing audit rates a Java package from zero whenever it changed, and a model that rates the same gap twice does not
-always say the same: three full runs on the same code gave 8, 14 and 11 `HIGH`. This audit rates again **from the
-earlier verdict**: a method that did not change is not rated again, and the rating of a changed method moves only
-when the answer names a place in the workspace that a script finds.
+This is the variant of [`mutation-testing`](../mutation-testing/README.md) in which a rating moves only on a ground:
+a test or a line of code, named in the model's answer, that a script finds in the workspace. Hence the name. The
+question and the measurement are the same: would the tests notice when the code changes, answered by mutation testing
+with [PIT](https://pitest.org). What differs is the rating. `mutation-testing` rates a Java package from zero whenever
+it changed, and a model that rates the same gap twice does not always say the same: three full runs on the same code
+gave 8, 14 and 11 `HIGH`. This audit rates again **from the earlier verdict**: a method that did not change is not
+rated again, and the rating of a changed method moves only when the answer names a place in the workspace that a
+script finds.
 
 ```
-traceworks images build examples/audit/testing-again
-traceworks run examples/audit/testing-again
-traceworks findings audit.testing-again
+traceworks images build examples/mutation-testing-grounded
+traceworks run examples/mutation-testing-grounded
+traceworks findings mutation-testing-grounded
 ```
 
 | Step | Image | Network | What it does |
 |---|---|---|---|
-| `fetch` | `./images/maven` | yes | as in the testing audit: fills a Maven repository in the tool's cache folder |
-| `measure` | `./images/maven` | no | as in the testing audit: runs PIT offline on a copy of the sources |
+| `fetch` | `./images/maven` | yes | as in `mutation-testing`: fills a Maven repository in the tool's cache folder |
+| `measure` | `./images/maven` | no | as in `mutation-testing`: runs PIT offline on a copy of the sources |
 | `findings` | built-in `shell` | no | maps PIT's CSV to one entry per method, and adds from the register folder of the run (`{{ register_dir }}`) the earlier verdict of each method: its severity, its reason, the kinds of its gaps then, and what a person decided |
 | `rate` | `claude` | provider only | AI calls of at most twenty methods, only for methods that changed or were never rated. A changed method comes with its earlier severity and reason and with what changed |
 | `report` | built-in `shell` | no | takes the answers, looks each ground up in the workspace, and writes the gate, the findings and the list of methods |
@@ -45,7 +47,7 @@ traceworks findings audit.testing-again
 - **A raise that is not taken is asked about again** in the next run, and so is a method without an answer. The
   method keeps its severity for now and the report lists it. A method that stays `LOW` is no finding, so nobody
   would look at it; a mistyped path must not end the question.
-- **Never rated: rated fresh,** as in the testing audit. Without an answer the method is `MEDIUM` from ten unnoticed
+- **Never rated: rated fresh,** as in `mutation-testing`. Without an answer the method is `MEDIUM` from ten unnoticed
   changes on, else `LOW`, and is asked about again.
 - **Rated low and changed later.** A method rated `low` is no finding, so the register keeps no reason for it. Its
   earlier rating is `LOW`. When it was a finding before, the register folder still has that rating and reason
@@ -55,7 +57,7 @@ traceworks findings audit.testing-again
   with the note. After that it is asked about when its gaps change, like every method.
 
 The report says how many methods kept their rating without being asked, how many were asked, how many changes were
-taken and how many were not. The findings, the gate and the inputs are those of the testing audit; read its README
+taken and how many were not. The findings, the gate and the inputs are those of `mutation-testing`; read its README
 for them.
 
 ## What a ground is worth
@@ -67,18 +69,18 @@ because a model worded a close call differently, and every change that was taken
 Whether the place holds is the person's to judge, in the triage of the finding. A test method that is not `void`,
 a caller in the method's own class and a caller in Kotlin or Groovy are grounds the script does not take.
 
-## What is shared with the testing audit, and what is a copy
+## What is shared with `mutation-testing`, and what is a copy
 
-Three files are copies of the testing audit's, byte for byte: `images/maven/Dockerfile`, `scripts/pit.sh` and
+Three files are copies of those of `mutation-testing`, byte for byte: `images/maven/Dockerfile`, `scripts/pit.sh` and
 `scripts/methods.sh` (the mapping of PIT's CSV). Change them there and copy them here. They are copies because a run
 resolves `./images/` against the package it was started with: a child workflow of another package may not name a
 package image (docs/workflow-format.md), and it runs with the paths of the run, so `/package` is not its own
 package. The cache folder belongs to the image of one package too, so this audit measures the sources again even
-when the testing audit measured them.
+when `mutation-testing` measured them.
 
 `scripts/findings.sh` and `scripts/report.sh` are this audit's own. The register is its own as well
-(`audit.testing-again`): a register belongs to one workflow, and the two audits rate differently, so each keeps its
-own findings and decisions.
+(`mutation-testing-grounded`): a register belongs to one workflow, and the two audits rate differently, so each
+keeps its own findings and decisions.
 
 ## Limits
 

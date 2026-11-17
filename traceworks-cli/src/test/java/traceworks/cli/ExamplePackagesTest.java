@@ -37,8 +37,9 @@ class ExamplePackagesTest {
         }
 
         assertThat(packages).extracting(p -> EXAMPLES.relativize(p).toString().replace('\\', '/'))
-                .contains("hello", "ai-hello", "audit-hello", "self-audit/security", "self-audit/architecture", "self-audit/build",
-                        "self-audit/functionality", "self-audit/testing", "audit/testing", "audit/testing-again");
+                .contains("hello", "ai-hello", "audit-hello", "mutation-testing", "mutation-testing-grounded",
+                        "self-audit/security", "self-audit/security-changes", "self-audit/architecture", "self-audit/build",
+                        "self-audit/functionality", "self-audit/testing");
         return packages;
     }
 
@@ -83,14 +84,14 @@ class ExamplePackagesTest {
     }
 
     /**
-     * {@code audit/testing-again} measures as {@code audit/testing} does. A child workflow of another package cannot
-     * run a package image, so the image and the two measuring scripts are copies: they stay the same bytes.
+     * {@code mutation-testing-grounded} measures as {@code mutation-testing} does. A child workflow of another package
+     * cannot run a package image, so the image and the two measuring scripts are copies: they stay the same bytes.
      */
     @Test
-    void theSecondTestingAudit_holdsTheMeasuringOfTheFirst_byteForByte() throws IOException {
+    void theGroundedMutationTesting_holdsTheMeasuringOfMutationTesting_byteForByte() throws IOException {
         for (String file : List.of("images/maven/Dockerfile", "scripts/pit.sh", "scripts/methods.sh")) {
-            assertThat(EXAMPLES.resolve("audit/testing-again").resolve(file)).as(file)
-                    .hasBinaryContent(Files.readAllBytes(EXAMPLES.resolve("audit/testing").resolve(file)));
+            assertThat(EXAMPLES.resolve("mutation-testing-grounded").resolve(file)).as(file)
+                    .hasBinaryContent(Files.readAllBytes(EXAMPLES.resolve("mutation-testing").resolve(file)));
         }
     }
 }

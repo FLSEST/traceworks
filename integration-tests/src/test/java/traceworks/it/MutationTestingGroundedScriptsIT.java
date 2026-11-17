@@ -13,14 +13,14 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The scripts of the testing audit that rates again from the earlier verdict
- * ({@code examples/audit/testing-again/scripts}) as they ship, in the built-in shell image: {@code findings.sh} on
- * fixed results of PIT that change between the runs and {@code report.sh} on fixed answers of the rating, in a
+ * The scripts of the mutation testing audit that rates again from the earlier verdict, and moves a rating only on a
+ * ground ({@code examples/mutation-testing-grounded/scripts}), as they ship, in the built-in shell image:
+ * {@code findings.sh} on fixed results of PIT that change between the runs and {@code report.sh} on fixed answers of the rating, in a
  * package that leaves out the steps that measure and rate. The register is real, and the workspace holds the files
  * the grounds of the answers point to. The scripts learn what the register knew from the register folder of the run
  * ({@code {{ register_dir }}}).
  */
-class TestingAgainScriptsIT extends IntegrationTest {
+class MutationTestingGroundedScriptsIT extends IntegrationTest {
 
     private static final String MUTATORS = "org.pitest.mutationtest.engine.gregor.mutators.";
     private static final String MAIN = "core/src/main/java/demo/";
@@ -148,10 +148,10 @@ class TestingAgainScriptsIT extends IntegrationTest {
               "format": "traceworks-workflow",
               "format_version": 1,
               "id": "8c2f4e7a-1b3d-4a5c-9e6f-7d8a9b0c1d2e",
-              "name": "IT testing audit that rates again, scripts",
+              "name": "IT mutation testing grounded, scripts",
               "metadata": {
                 "gate": {"expected": true},
-                "audit": {"enabled": true, "key": "it.testing-again", "category": "testing", "report_block": "report"}
+                "audit": {"enabled": true, "key": "it.grounded", "category": "testing", "report_block": "report"}
               },
               "default_context": {"result": "first", "answers": "first"},
               "blocks": [
@@ -187,7 +187,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
         Result first = run(dir);
 
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("RED (testing)").contains("register it.testing-again: 4 new, 0 resolved, "
+        assertThat(first.out()).contains("RED (testing)").contains("register it.grounded: 4 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 1 of 5 settled, 5 judged in this run");
         assertThat(traceworks.folder(first).output("findings")).contains("FACT mutants: 6\n")
                 .contains("FACT survived: 4\n").contains("FACT not_covered: 1\n")
@@ -213,7 +213,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
         Result second = run(dir, "--input", "answers=other");
 
         assertThat(second.code()).as(second.describe()).isZero();
-        assertThat(second.out()).contains("RED (testing)").contains("register it.testing-again: 0 new, 0 resolved, "
+        assertThat(second.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 1 of 5 settled, 0 judged in this run");
         assertThat(traceworks.folder(second).output("findings")).contains("FACT methods_to_rate: 0 of 5\n");
         assertThat(traceworks.folder(second).output("report"))
@@ -253,7 +253,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                         + "on with a flow that should have ended\n");
         // The lowered method left the findings and the register resolved it; the new method is a finding. Its reason
         // holds the end and the start of an HTML comment: the register applied the report all the same
-        assertThat(third.out()).contains("RED (testing)").contains("register it.testing-again: 1 new, 1 resolved, "
+        assertThat(third.out()).contains("RED (testing)").contains("register it.grounded: 1 new, 1 resolved, "
                 + "0 reopened, 4 open now; items 2 of 6 settled, 5 judged in this run");
         assertThat(list()).contains("HIGH      undetected-mutants  demo.Flow#stop")
                 .contains("MEDIUM    undetected-mutants  demo.Guard#allow")
@@ -297,7 +297,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                         + "not call or reference stop\n")
                 .contains("5 methods are rated above low. A person decided on 0 of them; 5 are left to decide, 1 of "
                         + "them high:");
-        assertThat(fourth.out()).contains("RED (testing)").contains("register it.testing-again: 0 new, 0 resolved, "
+        assertThat(fourth.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
                 + "1 reopened, 5 open now; items 1 of 6 settled, 3 judged in this run");
         assertThat(list()).contains("MEDIUM    undetected-mutants  demo.Flow#step")
                 .contains("MEDIUM    undetected-mutants  demo.Guard#check");
@@ -318,7 +318,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                         + "before, 1 kept their rating, 0 changes were taken")
                 .contains("5 methods are rated above low. A person decided on 1 of them; 4 are left to decide, 1 of "
                         + "them high:");
-        assertThat(fifth.out()).contains("register it.testing-again: 0 new, 0 resolved, 0 reopened, 4 open now; "
+        assertThat(fifth.out()).contains("register it.grounded: 0 new, 0 resolved, 0 reopened, 4 open now; "
                 + "items 2 of 6 settled, 1 judged in this run");
 
         // Nothing changed: nothing is asked, and the decision still covers the method
@@ -330,7 +330,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                 .contains("6 methods kept their rating without being asked")
                 .contains("A person decided on 1 of them; 4 are left to decide, 1 of them high:\n\n"
                         + "- `demo.Flow#stop`: the caller goes on with a flow that should have ended\n");
-        assertThat(sixth.out()).contains("RED (testing)").contains("register it.testing-again: 0 new, 0 resolved, "
+        assertThat(sixth.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 2 of 6 settled, 0 judged in this run");
 
         // The dismissed method changed and is lowered on a test: it leaves the findings of the report
@@ -358,7 +358,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                 .contains("4 methods are rated above low. A person decided on 0 of them; 4 are left to decide, 1 of "
                         + "them high:")
                 .doesNotContain("\"subject\":\"demo.Guard#allow\"");
-        assertThat(traceworks.exec("findings", "it.testing-again", "verify").code()).isZero();
+        assertThat(traceworks.exec("findings", "it.grounded", "verify").code()).isZero();
     }
 
     /**
@@ -371,7 +371,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
         Path dir = audit();
         Result first = run(dir, "--input", "result=calc-first", "--input", "answers=calc-first");
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("register it.testing-again: 20 new, 0 resolved, 0 reopened, 20 open now; "
+        assertThat(first.out()).contains("register it.grounded: 20 new, 0 resolved, 0 reopened, 20 open now; "
                 + "items 0 of 20 settled, 20 judged in this run");
 
         Result second = run(dir, "--input", "result=calc-second", "--input", "answers=calc-second");
@@ -426,7 +426,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                         + "<path>:<line> of the place that breaks, not on a test\n")
                 .contains("17 methods are rated above low. A person decided on 0 of them; 17 are left to decide, 1 of "
                         + "them high:\n\n- `demo.Calc#up`: w\n");
-        assertThat(second.out()).contains("register it.testing-again: 0 new, 3 resolved, 0 reopened, 17 open now; "
+        assertThat(second.out()).contains("register it.grounded: 0 new, 3 resolved, 0 reopened, 17 open now; "
                 + "items 3 of 20 settled, 16 judged in this run");
 
         // The three raises that were not taken and the method without an answer are asked about again, with what
@@ -443,7 +443,7 @@ class TestingAgainScriptsIT extends IntegrationTest {
                 .contains("16 methods kept their rating without being asked")
                 .contains("A model was asked about 4: 0 that were never rated, and 4 rated before.")
                 .contains("4 methods got no answer.");
-        assertThat(third.out()).contains("register it.testing-again: 0 new, 0 resolved, 0 reopened, 17 open now; "
+        assertThat(third.out()).contains("register it.grounded: 0 new, 0 resolved, 0 reopened, 17 open now; "
                 + "items 3 of 20 settled, 0 judged in this run");
     }
 
@@ -474,8 +474,8 @@ class TestingAgainScriptsIT extends IntegrationTest {
      * workspace the callers and the tests the grounds name.
      */
     private Path audit() throws IOException {
-        Path dir = Files.createDirectories(sandbox.resolve("testing-again"));
-        Path scripts = traceworks.examplePackage("audit/testing-again").resolve("scripts");
+        Path dir = Files.createDirectories(sandbox.resolve("mutation-testing-grounded"));
+        Path scripts = traceworks.examplePackage("mutation-testing-grounded").resolve("scripts");
         Files.createDirectories(dir.resolve("scripts"));
         try (Stream<Path> files = Files.list(scripts)) {
             for (Path script : files.toList()) {
@@ -627,14 +627,14 @@ class TestingAgainScriptsIT extends IntegrationTest {
     }
 
     private String list() {
-        Result list = traceworks.exec("findings", "it.testing-again", "list");
+        Result list = traceworks.exec("findings", "it.grounded", "list");
         assertThat(list.code()).as(list.describe()).isZero();
         return list.out();
     }
 
     private void decide(String decision, String subject) {
         String id = list().lines().filter(line -> line.contains(subject)).findFirst().orElseThrow().substring(0, 8);
-        Result decided = traceworks.exec("findings", "it.testing-again", decision, id, "--note", "looked at it");
+        Result decided = traceworks.exec("findings", "it.grounded", decision, id, "--note", "looked at it");
         assertThat(decided.code()).as(decided.describe()).isZero();
     }
 }

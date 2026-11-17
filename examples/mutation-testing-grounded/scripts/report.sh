@@ -166,7 +166,7 @@ jq -r --slurpfile rated "$scratch/rated.json" --rawfile grounds "$scratch/ground
   | ($reported | map(select(.undecided))) as $open
   | ($open | map(select((.severity | rank) >= ("HIGH" | rank)))) as $high
   | (($reported | length) - ($open | length)) as $decided
-  | "# Testing audit, rating again",
+  | "# Mutation testing, grounded",
     "",
     "PIT changed the code in \($mutants) places. \($unnoticed) changes went unnoticed by the tests, in \($methods | length) methods.",
     "",
