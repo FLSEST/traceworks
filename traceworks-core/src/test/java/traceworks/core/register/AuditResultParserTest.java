@@ -1,5 +1,6 @@
 package traceworks.core.register;
 
+import traceworks.core.compat.EarlierNames;
 import traceworks.core.register.AuditResultParser.ParseResult;
 import org.junit.jupiter.api.Test;
 
@@ -48,7 +49,7 @@ class AuditResultParserTest {
      */
     @Test
     void theEarlierMarker_isStillRead() {
-        String earlier = "<!-- mysuricates:audit-result:v1\n{\"snapshotComplete\":true,\"findings\":[{\"ruleKey\":"
+        String earlier = "<!-- " + EarlierNames.AUDIT_ENVELOPE_WORD + ":audit-result:v1\n{\"snapshotComplete\":true,\"findings\":[{\"ruleKey\":"
                 + "\"size.class\",\"subject\":\"Old.java\",\"severity\":\"LOW\",\"title\":\"t\"}]}\n-->";
 
         ParseResult alone = parse("# Report\n\n" + earlier);
