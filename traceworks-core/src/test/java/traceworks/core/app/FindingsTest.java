@@ -93,6 +93,56 @@ class FindingsTest {
         assertThat(findings.verify("hello").problems()).isEmpty();
     }
 
+    /** The actor stays who ran the command; the agent that decided under that actor stands beside it. */
+    @Test
+    void aDecisionOfAnAgent_isRecordedWithTheActorAndTheAgent_andOneWithoutNamesNone() {
+        AppFixture fixture = fixtureOf(audit);
+        fixture.services().start(request(RegistersTest.AUDIT), null, null);
+        Findings findings = fixture.services().findings();
+        List<Finding> open = findings.state("hello").findings();
+        String a = open.get(0).id();
+        String b = open.get(1).id();
+
+        Finding dismissed = findings.dismiss("hello", a, "not ours", "claude-code");
+        Finding accepted = findings.accept("hello", b, "bounded", null, null);
+
+        assertThat(dismissed.disposition().actor()).isEqualTo(AppFixture.ACTOR);
+        assertThat(dismissed.disposition().agent()).isEqualTo("claude-code");
+        assertThat(accepted.disposition().agent()).isNull();
+        List<RegisterEvent> events = findings.events("hello");
+        assertThat(events).extracting(RegisterEvent::type).endsWith(RegisterEvents.REQUIRES,
+                RegisterEvents.FINDING_DISMISSED, RegisterEvents.FINDING_ACCEPTED);
+        assertThat(events.get(events.size() - 2).text("actor")).isEqualTo(AppFixture.ACTOR);
+        assertThat(events.get(events.size() - 2).text("agent")).isEqualTo("claude-code");
+        assertThat(events.getLast().fields().has("agent")).isFalse();
+        assertThat(findings.state("hello").finding(a).disposition().agent()).isEqualTo("claude-code");
+
+        findings.reopen("hello", a, "look again", "claude-code");
+
+        assertThat(findings.events("hello").getLast().text("agent")).isEqualTo("claude-code");
+        assertThat(new String(fixture.registers.viewFile("hello"), StandardCharsets.UTF_8))
+                .contains("actor " + AppFixture.ACTOR + " \u00b7 agent claude-code \u00b7 note look again");
+        assertThat(findings.verify("hello").problems()).isEmpty();
+    }
+
+    /** Whoever calls the use case: a name beyond the bounds reaches no line of the log. */
+    @Test
+    void aBadNameOfAnAgent_isRefused_andRecordsNothing() {
+        AppFixture fixture = fixtureOf(audit);
+        fixture.services().start(request(RegistersTest.AUDIT), null, null);
+        Findings findings = fixture.services().findings();
+        String a = findings.state("hello").findings().getFirst().id();
+        int lines = findings.events("hello").size();
+
+        assertThatThrownBy(() -> findings.dismiss("hello", a, "not ours", " "))
+                .isInstanceOf(RunRefusedException.class).hasMessageContaining("The agent of a decision is blank");
+        assertThatThrownBy(() -> findings.accept("hello", a, "bounded", null, "claude\ncode"))
+                .isInstanceOf(RunRefusedException.class).hasMessageContaining("U+000A");
+        assertThatThrownBy(() -> findings.reopen("hello", a, null, "x".repeat(65)))
+                .isInstanceOf(RunRefusedException.class).hasMessageContaining("at most 64 characters");
+        assertThat(findings.events("hello")).hasSize(lines);
+    }
+
     @Test
     void aWrongTransition_orAnUnknownFinding_isRefused_andRecordsNothing() {
         AppFixture fixture = fixtureOf(audit);

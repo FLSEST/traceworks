@@ -167,6 +167,45 @@ class RegisterHtmlTest {
         assertThat(render()).doesNotContain("<th>items</th>").doesNotContain("Items (");
     }
 
+    /** Who decided: the actor, then that it was through an agent. A decision without one reads as it always did. */
+    @Test
+    void aDecisionOfAnAgent_namesItAfterTheActor_inTheFindingAndInTheHistory() {
+        Finding.DispositionRecord byAgent = new Finding.DispositionRecord(FindingStatus.DISMISSED, "not ours",
+                "flo@box", T, null, null, Severity.HIGH, "claude-code");
+        Finding.DispositionRecord byPerson = new Finding.DispositionRecord(FindingStatus.DISMISSED, "checked",
+                "flo@box", T, null, null, Severity.HIGH);
+        RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
+                finding("a", "A.java", FindingStatus.DISMISSED, byAgent),
+                finding("b", "B.java", FindingStatus.DISMISSED, byPerson)), 2);
+        List<RegisterEvent> history = List.of(event(0, "finding.dismissed", "\"id\":\"" + "a".repeat(64)
+                + "\",\"actor\":\"flo@box\",\"agent\":\"claude-code\",\"note\":\"not ours\""));
+
+        String page = RegisterHtml.render(state, history, blobs, new ChainReport(true, 1, "h".repeat(64), List.of(),
+                List.of()), "1.2.3");
+
+        assertThat(page).contains(
+                "dismissed by flo@box through the agent claude-code at 2026-11-11T10:00:00Z, made on severity HIGH:"
+                        + " not ours",
+                "dismissed by flo@box at 2026-11-11T10:00:00Z, made on severity HIGH: checked",
+                "<td>finding.dismissed</td><td>id aaaaaaaa · actor flo@box · agent claude-code · note"
+                        + " not ours</td>");
+    }
+
+    /** The name is checked where it is given; a state that was edited can hold any, and the page shows it as text. */
+    @Test
+    void theNameOfAnAgentFromAnEditedState_isEscaped_andItsDirectionMarkIsShownByItsCodePoint() {
+        Finding.DispositionRecord hostile = new Finding.DispositionRecord(FindingStatus.DISMISSED, "n", "flo@box", T,
+                null, null, Severity.HIGH, "<script>x</script>‮");
+        RegisterState state = new RegisterState(1, "arch", "wf-1", "architecture", null, List.of(
+                finding("a", "A.java", FindingStatus.DISMISSED, hostile)), 1);
+
+        String page = RegisterHtml.render(state, List.of(), blobs, new ChainReport(true, 0, "h".repeat(64), List.of(),
+                List.of()), "1.2.3");
+
+        assertThat(page).contains("through the agent &lt;script&gt;x&lt;/script&gt;[U+202E] at ")
+                .doesNotContain("<script>x").doesNotContain("‮");
+    }
+
     /** A decision covers the severity it was made on; where the finding has another one, the page says so. */
     @Test
     void aDecisionMadeOnAnotherSeverity_saysSo_andOneMadeOnTheSameNamesIt() {
