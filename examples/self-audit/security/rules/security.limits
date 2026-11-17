@@ -32,14 +32,15 @@ limit Hooks
 limit Registers
   quote Lines appended after the last anchor are accepted.
   quote But they can **add** to both
-  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed.
-  digest 40eaf5ab88ded69a
+  quote **Who decided is a label, not a proof.**
+  says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed. The agent named beside a decision's actor is self-declared and unsigned: it can be left out, or be any name within its bounds.
+  digest 2c95d3cc38f1fa0b
 
 limit The register folder of a run
   quote In a host run nothing keeps a command from writing the folder
   quote An audit package you run is trusted with the names of the people who decided on its findings.
   says  In a host run nothing keeps a command from writing the run's register folder: it is compared with the recorded digests before each command that gets it, not while it reads; in a container run it is a read-only mount. Every shell and tool step of an audit can read it, who decided included; an AI step's container does not get it.
-  digest 2f557af3549e9794
+  digest 39cffd31f3da8967
 
 limit What nothing in this version finds:
   quote the ledger is not signed
