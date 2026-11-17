@@ -1,7 +1,5 @@
 package traceworks.cli.command;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import traceworks.cli.Args.Parsed;
 import traceworks.cli.Args.Spec;
 import traceworks.cli.Command;
@@ -22,9 +20,9 @@ import traceworks.core.record.ItemView;
 import traceworks.core.record.RunView;
 import traceworks.core.record.StepFiles;
 import traceworks.core.record.StepView;
+import traceworks.core.record.SwitchCase;
 import traceworks.core.record.WorkflowOutline;
 
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -52,8 +50,6 @@ public final class ShowCommand implements Command {
 
     /** What the lines under a step start with; the steps of a child run stand that much further in. */
     private static final String UNDER = "      ";
-
-    private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final Spec SPEC = Spec.of("show", "Shows a run: status, steps, gate and the question it waits for.",
                     "[<run>]")
@@ -316,26 +312,16 @@ public final class ShowCommand implements Command {
         if (!"switch".equals(step.blockType()) || step.metadata() == null) {
             return;
         }
-        String matched;
-        JsonNode ran;
-        try {
-            JsonNode metadata = JSON.readTree(text.apply(step.metadata().sha256()));
-            matched = metadata.path("matchedCase").isTextual() ? metadata.path("matchedCase").asText() : null;
-            ran = metadata.path("caseMatched");
-        } catch (IOException e) {
-            return;   // a deleted or damaged metadata blob: nothing to name
-        }
-        if (matched == null) {
+        // A deleted or damaged metadata blob, or one without a case: nothing to name
+        SwitchCase ran = SwitchCase.of(step, text.apply(step.metadata().sha256())).orElse(null);
+        if (ran == null) {
             return;
         }
-        // "none" is what the step says when no case ran, and may be the value of a case that did. The step says
-        // which (caseMatched); a record of an earlier version does not, and there only a case ran a command or a call
-        boolean noCase = ran.isBoolean() ? !ran.asBoolean()
-                : matched.equals("none") && step.commands().isEmpty() && step.aiCalls().isEmpty();
-        if (noCase) {
+        if (!ran.ran()) {
             out.println(UNDER + "no case matched");
             return;
         }
+        String matched = ran.matched();
         List<WorkflowOutline.Block> blocks = definition == null ? List.of()
                 : WorkflowOutline.caseBlocks(definition, step.position(), matched);
         out.println(UNDER + "case " + TerminalFormat.oneLine(matched) + (blocks.isEmpty() ? "" : ": " + blocks.stream()
