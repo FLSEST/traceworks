@@ -58,6 +58,35 @@ class InputsFromTest {
         assertThat(fixture.services().events(first.runId()).getFirst().fields().has("inputs_from")).isFalse();
     }
 
+    /**
+     * The new run names the earlier one as the origin of its inputs, so the inputs must be what that run's record
+     * names: a blob with other content than its name says refuses the run, as a resume refuses it.
+     */
+    @Test
+    void aChangedInputsBlob_isRefused_beforeTheRunExists() {
+        RunResult first = fixture.services().start(new StartRequest(PKG, Map.of("version", "1"), AppFixture.WORKSPACE,
+                false, false), null, null);
+        RecordedEvent started = fixture.services().events(first.runId()).getFirst();
+        try (var run = fixture.store.open(first.runId())) {
+            ((traceworks.core.testing.InMemoryBlobStore) run.blobs()).putRaw(started.blob("inputs").sha256(),
+                    "{\"version\":\"9; rm -rf .\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        int commands = fixture.commands.requests().size();
+
+        assertThatThrownBy(() -> fixture.services().start(from(first.runId(), Map.of()), null, null))
+                .isInstanceOf(RecordDamagedException.class).hasMessageContaining("inputs")
+                .hasMessageContaining("other content");
+        assertThat(fixture.store.runIds()).hasSize(1);
+        assertThat(fixture.commands.requests()).hasSize(commands);
+    }
+
+    /** Inputs that are no JSON object are a damaged record, not a failure deeper down. */
+    @Test
+    void recordedInputsThatAreNoObject_areADamagedRecord() {
+        assertThatThrownBy(() -> RunRecords.inputs("r1", "null".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                .isInstanceOf(RecordDamagedException.class).hasMessageContaining("r1");
+    }
+
     @Test
     void anUnknownRun_orADeletedInputsBlob_isRefused_beforeTheRunExists() {
         assertThatThrownBy(() -> fixture.services().start(from("deadbeef", Map.of()), null, null))

@@ -20,6 +20,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class ChainVerifierTest {
 
+    /** What follows "has other content": the SHA-256 of what the blob holds now. */
+    private static final String NOW_HOLDS = " \\(SHA-256 [0-9a-f]{64}\\)";
+
+
     private final RecordFixture fx = new RecordFixture().started();
 
     private List<byte[]> intactRecord() {
@@ -93,8 +97,8 @@ class ChainVerifierTest {
         ChainReport report = verify(lines);
 
         assertThat(report.intact()).isFalse();
-        assertThat(report.problems()).containsExactly(
-                "seq 2: blob " + output.sha256() + " of output has other content");
+        assertThat(report.problems()).singleElement().asString().matches(java.util.regex.Pattern.quote(
+                "seq 2: blob " + output.sha256() + " of output has other content") + NOW_HOLDS);
     }
 
     /** A step.files line lists the scratch files in an array, each with its blob reference nested inside. */
@@ -116,8 +120,8 @@ class ChainVerifierTest {
         ChainReport report = verify(lines);
 
         assertThat(report.intact()).isFalse();
-        assertThat(report.problems()).containsExactly(
-                "seq " + files.seq() + ": blob " + a + " of files[0].blob has other content");
+        assertThat(report.problems()).singleElement().asString().matches(java.util.regex.Pattern.quote(
+                "seq " + files.seq() + ": blob " + a + " of files[0].blob has other content") + NOW_HOLDS);
         assertThat(report.deletedBlobs()).containsExactly(b);
     }
 
@@ -169,8 +173,9 @@ class ChainVerifierTest {
         ChainReport report = verify(lines);
 
         assertThat(report.intact()).isFalse();
-        assertThat(report.problems()).containsExactly("seq " + checkpoint.seq() + ": blob " + previous
-                + " of state.context.previous_output has other content");
+        assertThat(report.problems()).singleElement().asString().matches(java.util.regex.Pattern.quote(
+                "seq " + checkpoint.seq() + ": blob " + previous
+                + " of state.context.previous_output has other content") + NOW_HOLDS);
         assertThat(report.deletedBlobs()).as("the output, once for the line and the state").containsExactly(output);
     }
 

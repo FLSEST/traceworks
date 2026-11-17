@@ -322,6 +322,28 @@ class LedgerStartCommandTest {
         assertThat(exec("verify", idOf(again)).code()).isZero();
     }
 
+    /**
+     * verify --json goes to a terminal too. JSON escapes only what is below U+0020, so everything from DEL on is
+     * escaped as well: no control or format character of a text in the report arrives raw, and a reader of the JSON
+     * gets the same text.
+     */
+    @Test
+    void verifyJson_isAsciiOnly_soNoControlCharacterReachesTheTerminal() throws Exception {
+        String lost = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        delete(folderOf(lost));
+        String note = "the disk was full \u009b31m\u007f‮ é";
+        Result ack = exec("verify", "--acknowledge", lost, "--note", note);
+        assertThat(ack.code()).as(ack.out() + ack.err()).isZero();
+
+        Result home = exec("verify", "--json");
+
+        assertThat(home.code()).as(home.out() + home.err()).isZero();
+        assertThat(home.out().chars().allMatch(c -> c == '\n' || c == '\r' || c >= 0x20 && c < 0x7f))
+                .as(home.out()).isTrue();
+        assertThat(new com.fasterxml.jackson.databind.ObjectMapper().readTree(home.out()).path("acknowledged").get(0)
+                .path("note").asText()).isEqualTo(note);
+    }
+
     /** verify --json: the classes and the counts for a script, with the same exit codes. */
     @Test
     void verifyJson_givesTheClassesAndCounts_andTheSameExitCodes() throws Exception {

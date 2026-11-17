@@ -110,6 +110,27 @@ class ResumeDefinitionTest {
     }
 
     /**
+     * The start check of a resume judges the real paths, and its refusal goes to the terminal: it names the
+     * workspace and the package as the record does, with no value of a secret in it.
+     */
+    @Test
+    void aResume_whoseWorkspaceOrPackageIsRefused_namesThemAsTheRecordDoes() {
+        RunServices services = fx.services();
+        String id = services.start(start(IN_PROJECT, PROJECT_WORKSPACE), null, null).runId();
+        services.answer(id, new AnswerRequest("approval", 0, "Yes", null, null));
+        fx.refusedDirectories.put(PROJECT_WORKSPACE, "it does not exist (" + PROJECT_WORKSPACE + ")");
+        fx.refusedDirectories.put(IN_PROJECT, "it directly holds the socket " + IN_PROJECT + "/s");
+
+        assertThatThrownBy(() -> services.resume(resumeOf(id), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("the workspace /work/[redacted:PROJECT] cannot be mounted")
+                .hasMessageContaining("it does not exist (/work/[redacted:PROJECT])")
+                .hasMessageContaining("the package /pkg/[redacted:PROJECT] cannot be mounted")
+                .message().doesNotContain(PROJECT);
+        assertThat(fx.types(id)).doesNotContain(RecordTypes.RUN_RESUMED);
+    }
+
+    /**
      * With --allow-changed-package a resume runs the definition recorded at the start. One whose recorded copy had a
      * secret's value replaced is not that definition, so the resume is refused rather than run the replacement.
      */

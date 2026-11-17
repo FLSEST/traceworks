@@ -281,7 +281,9 @@ final class Starting {
             throw new RunRefusedException("Run " + earlier.runId() + " has no run.started, so its inputs are not known");
         }
         BlobRef ref = events.getFirst().blob("inputs");
-        byte[] bytes = ref == null ? null : earlier.blobs().get(ref.sha256()).orElse(null);
+        // Checked against the name and the size the record gives: the new run names this run as the origin of its
+        // inputs, so they must be what its record says, as for a resume
+        byte[] bytes = ref == null ? null : RunRecords.checkedContent(earlier, ref, "inputs").orElse(null);
         if (bytes == null) {
             throw new RunRefusedException("The inputs of run " + earlier.runId() + " are deleted from its record, so"
                     + " --inputs-from cannot take them");

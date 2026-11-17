@@ -386,8 +386,11 @@ public final class ShowCommand implements Command {
     }
 
     /** A stream that writes each line to {@code out} after {@code indent}. */
-    private static PrintStream indented(PrintStream target, String indent) {
-        byte[] prefix = indent.getBytes(StandardCharsets.UTF_8);
+    static PrintStream indented(PrintStream target, String indent) {
+        // In the target's own encoding, as every other line of the command: bytes of another encoding would pass
+        // the target unchanged, and on a terminal that is not UTF-8 a byte of a UTF-8 letter is a control character
+        java.nio.charset.Charset charset = target.charset();
+        byte[] prefix = indent.getBytes(charset);
         // On the bytes, so that it holds for whatever is printed and however: a line starts after each line feed,
         // and gets the indent before its first byte; an empty line gets none
         return new PrintStream(new OutputStream() {
@@ -404,7 +407,7 @@ public final class ShowCommand implements Command {
                     atLineStart = true;
                 }
             }
-        }, true, StandardCharsets.UTF_8);
+        }, true, charset);
     }
 
     /**

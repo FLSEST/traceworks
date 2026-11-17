@@ -48,7 +48,7 @@ is refused before it is read.
 | Flag | Meaning |
 |---|---|
 | `--input K=V` | an input of the run; repeatable; split at the first `=`. The input named like a model choice of the workflow picks one of its options ("Model choices") |
-| `--inputs-from RUN` | take the inputs an earlier run was started with (its id or a prefix); an `--input` overrides one of them. Refused when that run's inputs are deleted from its record; `run.started` records `inputs_from` |
+| `--inputs-from RUN` | take the inputs an earlier run was started with (its id or a prefix); an `--input` overrides one of them. Refused when that run's inputs are deleted from its record, or are not the bytes its record names (a changed blob); `run.started` records `inputs_from` |
 | `--workspace DIR` | the directory the steps work in (default: the working directory) |
 | `--source PATH\|URL` | work in a new checkout of this git repository instead of a workspace (see "Isolated workspace"); excludes `--workspace` |
 | `--ref REF` | the branch, tag or commit of `--source` to check out (default: its `HEAD`); only with `--source` |
@@ -641,7 +641,7 @@ verification FAILED: 2 problems; acknowledge one that has an honest cause with t
 | `the end entry ...`, `the start entry ...` | an entry that is no manifest of this run, has another status than its commit says, or does not name the `run.started` line of the start entry |
 
 - A problem of the anchors of a register is listed under `registers.<key>` and acknowledged under that name.
-- **`--json`** prints the same as one JSON object: `verified`, `records_verified`, the counts `started`, `ended`
+- **`--json`** prints the same as one JSON object, in ASCII (every character from U+007F on is written as `\uXXXX`, so no text of a record or a note steers the terminal): `verified`, `records_verified`, the counts `started`, `ended`
   and `before_ledger`, and the arrays `open`, `ended_folder_gone`, `before_ledger_not_ended`, `in_flight`,
   `acknowledged` and `problems` (each problem with `run`, `code` and `text`; the codes are `lost`, `unreadable`,
   `other-record`, `no-start-entry`, `no-end-entry`, `entry-invalid`, `entry-changed`, `manifest-differs`,
@@ -2820,5 +2820,5 @@ run programs that a repository's own configuration names. Traceworks therefore a
 and the hooks switched off, without writing the index (`--no-optional-locks`), with every filter driver
 (`filter.<name>.clean`, `smudge` and `process`) emptied and not required, and with submodules ignored. A package
 that uses filter drivers, for example git-lfs, may therefore read as dirty. A driver whose name cannot be handed
-back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied: git is then not asked for
+back to git exactly (one with `=`, or with anything but printable ASCII) is not emptied, and a listing of the configuration beyond 16 MiB is not read to its end: git is then not asked for
 the state at all, and the run records neither `git_commit` nor `git_dirty`.

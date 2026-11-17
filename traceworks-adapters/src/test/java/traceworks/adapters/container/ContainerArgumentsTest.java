@@ -445,6 +445,45 @@ class ContainerArgumentsTest {
         assertThat(arguments.stream().filter("--tmpfs"::equals)).hasSize(2);   // /tmp and the package's .git only
     }
 
+    /**
+     * A workspace that holds the package shows the package a second time, at its place in the workspace. With a
+     * read-only workspace no second package mount lies there, so the package's .git must be covered at that place
+     * too; with a writable one the package's own mount there brings its cover, and the place is covered once.
+     */
+    @Test
+    void arguments_coverTheGitDirectoryOfThePackage_alsoAtItsPlaceInAWorkspaceThatHoldsIt(@TempDir Path home)
+            throws IOException {
+        Path workspace = Files.createDirectories(home.resolve("ws"));
+        Path pkg = Files.createDirectories(workspace.resolve("tools/pkg"));
+        Files.createDirectories(pkg.resolve(".git"));
+        String cover = "/workspace/tools/pkg/.git:ro,size=4k,mode=555";
+        ContainerRun readOnly = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, "/bin/bash",
+                List.of("-c", "true"), "/workspace", List.of(new Mount(workspace.toString(), "/workspace", true),
+                        new Mount(pkg.toString(), "/package", true)),
+                new RunDirectories(workspace.toString(), pkg.toString(), null), false, Map.of(), null, 60,
+                ContainerLimits.DEFAULTS);
+
+        List<String> arguments = ContainerArguments.of(Client.DOCKER, readOnly, USER, UnaryOperator.identity())
+                .arguments();
+
+        assertThat(arguments).containsSubsequence("--tmpfs", cover);
+        assertThat(arguments).containsSubsequence("--tmpfs", "/package/.git:ro,size=4k,mode=555");
+        assertThat(arguments.stream().filter("--tmpfs"::equals)).hasSize(3);
+
+        ContainerRun writable = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, "/bin/bash",
+                List.of("-c", "true"), "/workspace", List.of(new Mount(workspace.toString(), "/workspace", false),
+                        new Mount(pkg.toString(), "/package", true),
+                        new Mount(pkg.toString(), "/workspace/tools/pkg", true)),
+                new RunDirectories(workspace.toString(), pkg.toString(), null), false, Map.of(), null, 60,
+                ContainerLimits.DEFAULTS);
+
+        List<String> again = ContainerArguments.of(Client.DOCKER, writable, USER, UnaryOperator.identity())
+                .arguments();
+
+        assertThat(again.stream().filter(cover::equals)).as("covered once").hasSize(1);
+        assertThat(again.stream().filter("--tmpfs"::equals)).hasSize(3);
+    }
+
     @Test
     void arguments_coverNothing_whenThePackageHasNoGitDirectory(@TempDir Path home) throws IOException {
         Path pkg = Files.createDirectories(home.resolve("pkg"));

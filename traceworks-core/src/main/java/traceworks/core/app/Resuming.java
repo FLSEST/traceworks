@@ -172,8 +172,15 @@ final class Resuming {
         view.modelChoices().forEach(pick -> recordedPicks.put(pick.choice(), pick.option()));
         Map<String, Object> pickInputs = new LinkedHashMap<>(snapshot.inputContext());
         pickInputs.putAll(recordedPicks);
-        RunPreparation.Prepared prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
-                "Run " + runId + " cannot resume");
+        RunPreparation.Prepared prepared;
+        try {
+            prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
+                    "Run " + runId + " cannot resume");
+        } catch (RunRefusedException e) {
+            // The check judged the real paths and names them: a refusal names a path as the record does
+            throw preparation.asRecorded(e, redacted, view.packageDir(),
+                    RunRecords.started(events).fields().path("workspace").asText(null));
+        }
         // The register folder is the one the run started with, whatever the register holds now: a file that is no
         // longer the one run.started recorded stops the resume, before anything is recorded
         RegisterFolder folder = view.register() == null ? null : new RegisterFolder(run, view.register());
