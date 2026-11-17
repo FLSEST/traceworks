@@ -122,6 +122,8 @@ public final class RunReport {
         }
     }
 
+    /** What a command of a hint begins with. */
+    private static final String HINT_LEAD = "  ";
     /** What every line of a question begins with. */
     private static final String QUESTION_LINE = "  | ";
     /** The most columns of a question on one line, so a marked line fits a terminal of 80 columns. */
@@ -137,10 +139,15 @@ public final class RunReport {
      * the cursor in the last column, so text after a row of tabs would wrap.
      */
     static List<String> broken(String line) {
+        return broken(line, QUESTION_WIDTH);
+    }
+
+    /** As {@link #broken(String)}, in parts of at most {@code width} columns (at least one character each). */
+    static List<String> broken(String line, int width) {
         List<String> parts = new ArrayList<>();
         String rest = line.replace('\t', ' ').stripTrailing();
         while (true) {
-            int fits = fitting(rest);
+            int fits = fitting(rest, width);
             if (fits == rest.length()) {
                 break;
             }
@@ -159,23 +166,28 @@ public final class RunReport {
     }
 
     /**
-     * How many chars from the start of {@code text} fit into {@value #QUESTION_WIDTH} columns, never between the
+     * How many chars from the start of {@code text} fit into {@code width} columns, never between the
      * two halves of one character and at least one character, so a break always moves on. A character from U+1100
      * on counts as two columns: every wide character (Hangul, CJK, the ideographic space, the fullwidth forms,
      * emoji) lies there, and a narrow one counted as two only breaks its line earlier.
      */
-    private static int fitting(String text) {
+    private static int fitting(String text, int width) {
         int columns = 0;
         int i = 0;
         while (i < text.length()) {
             int c = text.codePointAt(i);
             columns += c >= 0x1100 ? 2 : 1;
-            if (columns > QUESTION_WIDTH && i > 0) {
+            if (columns > width && i > 0) {
                 return i;
             }
             i += Character.charCount(c);
         }
         return i;
+    }
+
+    /** The columns a terminal gives {@code text}, counted as {@link #fitting} counts them. */
+    static int columns(String text) {
+        return text.codePoints().map(c -> c >= 0x1100 ? 2 : 1).sum();
     }
 
     /**
@@ -209,8 +221,10 @@ public final class RunReport {
             if (question.fields() != null) {
                 question.fields().forEach(field -> names.add(String.valueOf(field.get("variable_name"))));
             }
-            AnswerCommands.of(run, question.kind(), question.options(), names)
-                    .forEach(command -> out.println("  " + command));
+            // The options and the names are text of the workflow too: a command is written out only where none of
+            // it would cross to the next line of the terminal, and else they are listed on marked lines
+            AnswerCommands.of(HINT_LEAD, run, question.kind(), question.options(), names)
+                    .forEach(line -> out.println(HINT_LEAD + line));
         } else {
             out.println("it is answered.");
         }
