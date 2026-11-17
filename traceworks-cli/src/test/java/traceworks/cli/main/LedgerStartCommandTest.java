@@ -391,6 +391,8 @@ class LedgerStartCommandTest {
         String eventLines = Files.readString(oldEvents);
         assertThat(eventLines).contains("\"ledger_start\":true");
         Files.writeString(oldEvents, eventLines.replaceFirst("\"ledger_start\":true", "\"ledger_start\":false"));
+        // the ledger's first commit has a time in whole seconds: the new ledger must begin after the old run started
+        Thread.sleep(1100);
 
         String finished = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
         String lostOne = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
