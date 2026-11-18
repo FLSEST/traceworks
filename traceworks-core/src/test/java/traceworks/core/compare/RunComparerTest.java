@@ -696,6 +696,21 @@ class RunComparerTest {
         assertThat(comparison.differences()).containsExactly("step sub > inner: only in run A");
     }
 
+    /** The same for a child run only run B started. */
+    @Test
+    void theStepsOfAChildRunOfRunBOnly_areListedUnderTheirParentStep() {
+        Run a = new Run("run-a").step("sub", "sub-workflow", false, StepStatus.COMPLETED, "done", List.of(),
+                List.of(), List.of());
+        Run b = new Run("run-b");
+        b.children.put("child-b", Run.view("child-b", new Run("x").shell("inner", "1").steps, Map.of()));
+        b.step("sub", "sub-workflow", false, StepStatus.COMPLETED, "done", List.of(), List.of(), List.of("child-b"));
+
+        RunComparison comparison = compare(a, b);
+
+        assertThat(comparison.steps()).extracting(Step::label).containsExactly("sub", "sub > inner");
+        assertThat(comparison.differences()).containsExactly("step sub > inner: only in run B");
+    }
+
     /** The child runs of a foreach are matched by their item, also when they started in another order. */
     @Test
     void theChildRunsOfForeachItems_areMatchedByItem_notByTheOrderTheyStarted() {

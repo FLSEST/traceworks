@@ -164,6 +164,56 @@ class FileRunStoreTest {
         run.close();
     }
 
+    /** A run folder without run.lock has no writer, and a look at it makes no lock file. */
+    @Test
+    void writerAlive_isFalse_forARunFolderWithoutItsLockFile() throws Exception {
+        FileRunStore store = new FileRunStore(home.resolve("runs"));
+        store.create("abcd-1", Instant.now()).close();
+        try (StoredRun run = store.open("abcd-1")) {
+            Path lock = Path.of(run.location()).resolve("run.lock");
+            Files.delete(lock);
+
+            assertThat(run.writerAlive()).isFalse();
+            assertThat(lock).doesNotExist();
+        }
+    }
+
+    /**
+     * A lock another process holds: every try opens the lock file and closes it again. Where the channel stayed
+     * open, the process would hold a descriptor of run.lock for each try.
+     */
+    @Test
+    void tryLockWriter_whileAnotherProcessHoldsTheLock_leavesNoChannelOpen() throws Exception {
+        Path descriptors = Path.of("/proc/self/fd");
+        org.junit.jupiter.api.Assumptions.assumeTrue(Files.isDirectory(descriptors), "no /proc/self/fd here");
+        FileRunStore store = new FileRunStore(home.resolve("runs"));
+        store.create("abcd-1", Instant.now()).close();
+        try (StoredRun run = store.open("abcd-1")) {
+            Path lock = Path.of(run.location()).resolve("run.lock").toRealPath();
+            try (OtherProcessLock holder = OtherProcessLock.hold(lock)) {
+                for (int i = 0; i < 20; i++) {
+                    assertThat(run.tryLockWriter()).isFalse();
+                }
+
+                assertThat(openDescriptorsOf(descriptors, lock)).as("descriptors of %s", lock).isZero();
+            }
+        }
+    }
+
+    /** How many descriptors of this process name {@code file}. */
+    private static long openDescriptorsOf(Path descriptors, Path file) throws Exception {
+        try (var entries = Files.list(descriptors)) {
+            return entries.filter(entry -> {
+                try {
+                    return Files.readSymbolicLink(entry).equals(file);
+                } catch (Exception gone) {
+                    // The descriptor of the listing itself, or one closed meanwhile
+                    return false;
+                }
+            }).count();
+        }
+    }
+
     @Test
     void manifestAndView_roundTrip() throws Exception {
         try (StoredRun run = new FileRunStore(home.resolve("runs")).create("abcd-1", Instant.parse("2026-11-03T10:00:00Z"))) {

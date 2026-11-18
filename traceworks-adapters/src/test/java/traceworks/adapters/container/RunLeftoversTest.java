@@ -104,6 +104,44 @@ class RunLeftoversTest {
         assertThat(networks.removeLeftovers("r1")).isFalse();
     }
 
+    /**
+     * A container whose first removal failed and whose second, from {@link RunLeftovers#mayStillRun}, succeeded is
+     * confirmed gone: the next question asks the client nothing.
+     */
+    @Test
+    void aContainerRemovedOnceMore_isConfirmed_andTheNextQuestionAsksNothing() {
+        List<String> removal = List.of("rm", "-f", "traceworks-r1-1");
+        RunLeftovers leftovers = leftovers(
+                call -> call.equals(PS) && java.util.Collections.frequency(calls, removal) < 2 ? "traceworks-r1-1\n" : "",
+                call -> call.equals(removal) && !calls.contains(removal));
+
+        assertThat(leftovers.removeLeftovers("r1")).isFalse();
+        assertThat(leftovers.mayStillRun("r1")).isFalse();
+        assertThat(calls).as("removed once more").containsSubsequence(removal, PS, NETWORKS, removal);
+
+        int asked = calls.size();
+        assertThat(leftovers.mayStillRun("r1")).isFalse();
+        assertThat(calls.subList(asked, calls.size())).as("nothing is left to ask about").isEmpty();
+    }
+
+    /** The same for a network. */
+    @Test
+    void aNetworkRemovedOnceMore_isConfirmed_andTheNextQuestionAsksNothing() {
+        List<String> removal = List.of("network", "rm", "traceworks-r1-net");
+        RunLeftovers leftovers = leftovers(
+                call -> call.equals(NETWORKS) && java.util.Collections.frequency(calls, removal) < 2
+                        ? "traceworks-r1-net\n" : "",
+                call -> call.equals(removal) && !calls.contains(removal));
+
+        assertThat(leftovers.removeLeftovers("r1")).isFalse();
+        assertThat(leftovers.mayStillRun("r1")).isFalse();
+        assertThat(calls).as("removed once more").containsSubsequence(removal, PS, NETWORKS, removal);
+
+        int asked = calls.size();
+        assertThat(leftovers.mayStillRun("r1")).isFalse();
+        assertThat(calls.subList(asked, calls.size())).as("nothing is left to ask about").isEmpty();
+    }
+
     /** A ledger whose client succeeds with what {@code printed} gives for a call, and notes every call. */
     private RunLeftovers leftovers(Function<List<String>, String> printed) {
         return leftovers(printed, call -> false);

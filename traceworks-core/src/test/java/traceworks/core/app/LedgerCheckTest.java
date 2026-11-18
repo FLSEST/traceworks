@@ -412,6 +412,78 @@ class LedgerCheckTest {
     }
 
     /**
+     * Two blobs broken and acknowledged: the second blob changed once more leaves the first problem, the count and
+     * the head as they were. Only the digest of every problem tells the record from the one acknowledged.
+     */
+    @Test
+    void anAcknowledgedRecordWithTwoBrokenBlobs_isOpenAgain_whenTheSecondChangesOnceMore() {
+        String id = finished();
+        List<traceworks.core.port.BlobRef> blobs = fx.events(id).stream()
+                .flatMap(event -> java.util.stream.Stream.of("command", "output", "inputs").map(event::blob))
+                .filter(java.util.Objects::nonNull).distinct().toList();
+        assertThat(blobs).hasSizeGreaterThan(1);
+        traceworks.core.testing.InMemoryBlobStore store =
+                (traceworks.core.testing.InMemoryBlobStore) fx.run(id).blobs();
+        store.putRaw(blobs.getFirst().sha256(), "first changed".getBytes(StandardCharsets.UTF_8));
+        store.putRaw(blobs.getLast().sha256(), "last changed".getBytes(StandardCharsets.UTF_8));
+        String acknowledged = said(id, "record-broken");
+        assertThat(acknowledged).contains(blobs.getFirst().sha256()).doesNotContain(blobs.getLast().sha256());
+        assertThat(services.acknowledge(id, "two blobs lost to a disk error").ok()).isTrue();
+        assertThat(services.ledgerReport().ok()).as("nothing changed since").isTrue();
+
+        store.putRaw(blobs.getLast().sha256(), "last changed twice".getBytes(StandardCharsets.UTF_8));
+
+        assertThat(codes(services.ledgerReport())).as("the second blob once more")
+                .containsExactly(tuple(id, "record-broken"));
+        String now = said(id, "record-broken");
+        assertThat(now).isNotEqualTo(acknowledged);
+        assertThat(withoutDigest(now)).as("the first problem, the count and the head are as they were")
+                .isEqualTo(withoutDigest(acknowledged));
+    }
+
+    /** The sentence of a broken record without the digest of its lines and problems. */
+    private static String withoutDigest(String sentence) {
+        return sentence.replaceFirst("its lines and problems have the SHA-256 [0-9a-f]{64}", "");
+    }
+
+    /**
+     * A changed line in the middle of the record is a problem of the line after it, whose words do not say what the
+     * line holds: a line changed once more is the same problem in the same words, with the same head. Only the
+     * digest of every line tells the record from the one acknowledged.
+     */
+    @Test
+    void anAcknowledgedRecordWithAChangedLine_isOpenAgain_whenTheLineChangesOnceMore() {
+        String id = finished();
+        int middle = fx.events(id).size() / 2;
+        String line = new String(fx.events(id).get(middle).raw(), StandardCharsets.UTF_8);
+        assertThat(middle).isPositive().isLessThan(fx.events(id).size() - 1);
+        assertThat(line).contains("\"at\":\"2026-");
+        replaceLine(id, middle, line.replace("\"at\":\"2026-", "\"at\":\"2027-"));
+        String acknowledged = said(id, "record-broken");
+        assertThat(acknowledged).contains("prev does not match");
+        assertThat(services.acknowledge(id, "a line edited by hand").ok()).isTrue();
+        assertThat(services.ledgerReport().ok()).as("nothing changed since").isTrue();
+
+        replaceLine(id, middle, line.replace("\"at\":\"2026-", "\"at\":\"2028-"));
+
+        assertThat(codes(services.ledgerReport())).as("the same line once more")
+                .containsExactly(tuple(id, "record-broken"));
+        String now = said(id, "record-broken");
+        assertThat(now).isNotEqualTo(acknowledged);
+        assertThat(withoutDigest(now)).as("the problems, their count and the head are as they were")
+                .isEqualTo(withoutDigest(acknowledged));
+    }
+
+    /** The record of {@code id} with its line {@code index} replaced, every other line, blob and manifest left alone. */
+    private void replaceLine(String id, int index, String line) {
+        traceworks.core.testing.InMemoryEventLog log = fx.run(id).log();
+        List<byte[]> lines = log.readAll();
+        log.dropLast(lines.size() - index);
+        log.append(line.getBytes(StandardCharsets.UTF_8));
+        lines.subList(index + 1, lines.size()).forEach(log::append);
+    }
+
+    /**
      * A new ledger beside runs of a version that noted no start: the ledger never knew them. The check of the home
      * counts them as from before the ledger, which is no failure, and the check of such a run says that its ledger
      * part is not checked. A run of this version without its entries fails as ever.

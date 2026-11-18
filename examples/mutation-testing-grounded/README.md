@@ -120,11 +120,31 @@ What they also show:
   result counts every file below a `src` folder in the workspace, and this workspace held other checkouts of the
   repository (git worktrees in a folder git ignores), one of which changed between the runs. See the limits of
   `mutation-testing`.
-- **Nobody has checked the findings yet.** The 187 findings are what a model rated above low. How many of them a
-  person would call a gap is not known.
+- **Of the 19 findings rated high, 3 held as rated.** After the runs each of the 19 was read against the code and
+  against every test of the project. 3 held as rated, 6 were real and smaller than rated, 4 were noticed by an
+  integration test in another module only, and 6 were no gap. Two faults of the measurement explain 7 of the 19;
+  they are the first two limits below. The 168 findings rated medium were not checked: how many of them a person
+  would call a gap is not known.
+
+Two runs that agree show that the audit repeats itself, not that it is right. A finding of this audit is a place
+to look at, and a person or an agent has to look.
 
 ## Limits
 
+- **A change that changes nothing can count as unnoticed.** PIT leaves out a `return true` it would replace with
+  `return true`, but not inside a `synchronized` block, where the compiler puts the release of the lock between
+  the value and the return. Such a change survives every test, and a method that returns under a lock looks worse
+  than it is.
+- **The model is told the line and the kind of a change, not which change it was.** Where a line holds two changes
+  of one kind, such as two comparisons, and the tests notice one of them, the model cannot tell which one
+  survived, and in the two real runs it rated the one the tests notice more than once. PIT's CSV names the test
+  that noticed a change; this audit does not hand that over yet.
+- **Only the tests of the module count.** PIT runs the tests of the module it changes. What a test in another
+  module notices, such as an integration test, counts as unnoticed.
+- **Built on Traceworks, not for any project.** The inputs are `modules`, `classes` and `threads`. What else
+  depends on the project is fixed in the package or left to PIT's defaults: which tests count, the time a test may
+  take before a change counts as timed out, what makes a consequence severe, and which code to leave out, such as
+  generated code. Expect to change the package before its findings fit another project.
 - **At most 1000 methods with an unnoticed change.** A register takes at most 1000 items in a report and rejects a
   larger one as a whole, so nothing would be kept. The `findings` step fails before any call of a model and says
   so: narrow `classes` or `modules`, and keep them the same from run to run.
