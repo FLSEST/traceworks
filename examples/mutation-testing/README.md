@@ -82,6 +82,8 @@ traceworks run examples/mutation-testing \
   and settings), of `images/maven/Dockerfile` (Maven and the JDK) and of `classes`, and a run with the same digest
   takes it from there (the step says so). A file outside these that the tests read, such as test data next to a
   module's `src` folder, is not in the digest: after changing one, empty the folder `pit` of the step's cache folder.
+  The digest and the copy take the whole workspace, not the Maven project alone: another checkout inside it, such as
+  a git worktree, is copied, and a change below one of its `src` folders makes the next run measure again.
 - **Left out:** a test that is red in the image without any change (it needs a program the image lacks) does not
   count: add the program to `images/maven/Dockerfile`. PIT runs only the tests of the module it changes.
 - The Maven repository in the cache folder (`<home>/cache/tools/maven`) is written by the step with network and read
