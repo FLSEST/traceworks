@@ -6,13 +6,12 @@ LABEL org.opencontainers.image.description="the Pi coding agent 1.5.2 with ripgr
 
 # Pi's grep and find tools run rg and fd. Traceworks starts Pi offline, so Pi cannot download them itself.
 # rg is Debian's. fd is a release of fd's own, since Debian's fd 8.6.0 does not know --no-require-git, which Pi's
-# find passes (fd added it in 8.7.0). It is 10.5.0, released 2026-08-26: the newest release that was at least 14 days
-# old when it was pinned, so it has had time to be found bad. The asset is the build for this glibc base,
-# fd-v<version>-<arch>-unknown-linux-gnu.tar.gz, for amd64 and arm64 only (Pi 1.5.2 itself would download the musl
-# build).
+# find passes (fd added it in 8.7.0). It is 10.5.2, released 2026-11-07: the newest release when it was pinned. The
+# asset is the build for this glibc base, fd-v<version>-<arch>-unknown-linux-gnu.tar.gz, for amd64 and arm64 only
+# (Pi 1.5.2 itself would download the musl build).
 # The release publishes no checksum file. Each sha256 below is the digest GitHub publishes for the asset
-# (https://api.github.com/repos/sharkdp/fd/releases/tags/v10.5.0, field "digest"), and matched the sha256sum of the
-# downloaded archive on 2026-11-05.
+# (https://api.github.com/repos/sharkdp/fd/releases/tags/v10.5.2, field "digest"), and matched the sha256sum of the
+# downloaded archive on 2026-11-18.
 # ripgrep is pinned to one build of Debian's package (13.0.0-4+b2) and comes from the live archive, which keeps only
 # the current build of a package. When Debian replaces that build (a rebuild, a point release), apt-get no longer
 # finds this version and 'traceworks images build pi' fails with "Version '13.0.0-4+b2' for 'ripgrep' was not found",
@@ -25,11 +24,11 @@ LABEL org.opencontainers.image.description="the Pi coding agent 1.5.2 with ripgr
 # removed in the same layer and never reach the image, and the sha256 checks the bytes they fetch, so their versions
 # are not pinned.
 RUN set -eu; \
-    version=10.5.0; \
+    version=10.5.2; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-      amd64) target=x86_64-unknown-linux-gnu; sum=a1259cd129636efbc3fef123525c1b49e88fe5088c012630983c310e52fdfa95 ;; \
-      arm64) target=aarch64-unknown-linux-gnu; sum=c0ee43802e3313a317c5af2f4eabd6ba13eeedd595af9775f05e18a13ac4f52c ;; \
+      amd64) target=x86_64-unknown-linux-gnu; sum=985e24041e9ef6e9a38e9e088743405dde23d7220aa96740f091862167d9ff28 ;; \
+      arm64) target=aarch64-unknown-linux-gnu; sum=4b144f38bd7352cd4c95020b58e8e575476e60edcdf1dc5e0733e3d01efba6dd ;; \
       *) echo "The pi image has fd for amd64 and arm64 only, not for $arch" >&2; exit 1 ;; \
     esac; \
     asset="fd-v$version-$target.tar.gz"; \

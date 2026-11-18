@@ -53,7 +53,7 @@ class SystemPromptLaunchContainerTest {
 
     /**
      * The command behind the launch script, as the image's CLI adapter starts it, and the version lines it prints, as
-     * patterns: the CLI's, and for Pi those of {@code rg} (Debian's) and {@code fd} (release 10.5.0, which the image's
+     * patterns: the CLI's, and for Pi those of {@code rg} (Debian's) and {@code fd} (release 10.5.2, which the image's
      * Dockerfile pins; Pi itself would download the latest release when it may). Pi prints its version on stderr when
      * stdin is no terminal. The file ends without a line break, which the stream filter adds, so both commands add
      * one.
@@ -66,7 +66,7 @@ class SystemPromptLaunchContainerTest {
         return Stream.of(
                 Arguments.of("claude", List.of("sh", "-c", claude), List.of("\\S+ \\(Claude Code\\)")),
                 Arguments.of("pi", List.of("sh", "-c", PiCli.STREAM_FILTER, "sh", "sh", "-c", pi),
-                        List.of("1\\.5\\.2", "ripgrep 13\\.0\\.0\\b.*", "fd 10\\.5\\.0")));
+                        List.of("1\\.5\\.2", "ripgrep 13\\.0\\.0\\b.*", "fd 10\\.5\\.2")));
     }
 
     @AfterEach
