@@ -149,6 +149,12 @@ class RuleFileTest {
         assertThat(rules.isDockerfile(Path.of("examples/self-audit/build/images/facts/Dockerfile"))).isTrue();
         assertThat(rules.isDockerfile(Path.of("integration-tests/fake-ai/claude/Dockerfile"))).isFalse();
         assertThat(rules.imageRegistries()).extracting(RuleFile.ImageRegistry::host).containsExactly("docker.io");
+        for (String maven : List.of("examples/mutation-testing/images/maven/Dockerfile",
+                "examples/mutation-testing-grounded/images/maven/Dockerfile")) {
+            assertThat(rules.isDockerfile(Path.of(maven))).as(maven).isTrue();
+            assertThat(rules.accepts()).as(maven).filteredOn(a -> a.file().equals(maven)).singleElement()
+                    .satisfies(a -> assertThat(a.check()).isEqualTo("package_unpinned"));
+        }
     }
 
     private static void assertRefused(String text, String message) {
