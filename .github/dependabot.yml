@@ -3,17 +3,12 @@
 # It reads the POMs, the actions of .github/workflows and the FROM lines of the Dockerfiles. It does not read a
 # version inside a RUN line (the AI CLIs that the images claude and pi install with npm) or inside a script (PIT in
 # examples/mutation-testing/scripts/pit.sh): the build audit in examples/self-audit/build looks those up.
-#
-# cooldown: a release is proposed once it is two weeks old, so a release that is withdrawn in its first days never
-# reaches a pull request. Security updates are not held back by it.
 version: 2
 updates:
   - package-ecosystem: maven
     directory: /
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 14
     groups:
       maven:
         patterns: ["*"]
@@ -22,8 +17,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 14
     groups:
       actions:
         patterns: ["*"]
@@ -36,8 +29,6 @@ updates:
       - /integration-tests/packages/*/images/*
     schedule:
       interval: weekly
-    cooldown:
-      default-days: 14
     groups:
       images:
         patterns: ["*"]
