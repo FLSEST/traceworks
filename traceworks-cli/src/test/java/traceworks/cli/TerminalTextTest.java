@@ -68,6 +68,43 @@ class TerminalTextTest {
                 .containsExactly("L".repeat(100) + " short");
     }
 
+    /**
+     * A text from outside that begins its line, behind an indent or none, is broken into pieces that leave every
+     * line within the terminal: a piece wider than that would be broken by the terminal onto a line without a mark.
+     */
+    @Test
+    void aTextThatBeginsItsLine_isBrokenWithinTheTerminal_behindAnIndentToo() {
+        for (String lead : List.of("", "    ")) {
+            for (String text : List.of("a".repeat(200), "word ".repeat(40), Forged.WORD.repeat(12))) {
+                List<String> lines = TerminalText.lines(lead, TerminalText.safe(text));
+
+                assertThat(lines).as("%s behind %d blanks", text, lead.length()).hasSizeGreaterThan(2)
+                        .allSatisfy(line -> assertThat(TerminalText.columns(line)).as(line).isLessThanOrEqualTo(80))
+                        .allSatisfy(line -> assertThat(line.strip()).startsWith("|"));
+                assertThat(Unbroken.of(String.join("\n", lines))).as("nothing of the text is lost")
+                        .isEqualTo(lead.substring(Math.min(lead.length(), 2)) + "| " + text.strip());
+            }
+            Forged.assertNeverStartsATerminalLine(String.join("\n",
+                    TerminalText.lines(lead, TerminalText.safe(Forged.WORD.repeat(12)))));
+        }
+    }
+
+    /**
+     * A quoted value stands in a command only where it lies on one terminal line and not at the start of one, and
+     * holds no run of blanks.
+     */
+    @Test
+    void inline_refusesAValueAtTheStartOfATerminalLine_acrossOne_orWithARunOfBlanks() {
+        assertThat(TerminalText.inline("x".repeat(77), "a", "'a'")).as("to the last column").isTrue();
+        assertThat(TerminalText.inline("x".repeat(81), "a", "'a'")).as("on the next terminal line").isTrue();
+        assertThat(TerminalText.inline("x", "a b", "'a b'")).as("single blanks").isTrue();
+
+        assertThat(TerminalText.inline("x".repeat(80), "a", "'a'")).as("at the start of a terminal line").isFalse();
+        assertThat(TerminalText.inline("x".repeat(160), "a", "'a'")).as("at the start of the third").isFalse();
+        assertThat(TerminalText.inline("x".repeat(78), "a", "'a'")).as("across a terminal line").isFalse();
+        assertThat(TerminalText.inline("x", "a  b", "'a  b'")).as("a run of blanks").isFalse();
+    }
+
     @Test
     void wideCharacters_countTwoColumns() {
         List<String> lines = TerminalText.lines("t ", TerminalText.safe("\u4e2d".repeat(60)));
