@@ -922,7 +922,7 @@ container runtime:
 Workflow  Hello (b1445bda-e182-479a-bf85-f5b519d68ad2)
   A small workflow that greets, counts the files in the workspace, asks for approval and says it is done.
 Package   /srv/traceworks/examples/hello
-Digest    5620ebcc7d1821fd1dd0f448715c1c0c4a3438ade2034011ed9d82fed3ad6ee9
+Digest    aba21a51bbee3be4bb6521b42301bb5e95792aa4e5d9fd599a85149ae5eaefcc
 Commit    3684a05ff2909c495c6853ca8fb801555c574c9d
 
 Inputs
@@ -931,16 +931,16 @@ Requires  nothing
 
 Blocks
   0   greet                    shell
-      echo "Hello, {{ name }}"
+      set -euo pipefail; echo "Hello, {{ name }}"
       shell: network none, workspace read-only, image: the run's shell image
   1   count                    shell
-      bash "{{ package_dir }}/scripts/count-files.sh"
+      set -euo pipefail; bash "{{ package_dir }}/scripts/count-files.sh"
       shell: network none, workspace read-only, image: the run's shell image
   2   publish                  approval
       Publish the greeting "{{ block.greet.output }}"?
       person: a person is asked
   3   done                     shell
-      echo Published: {{ block.greet.output }}
+      set -euo pipefail; echo Published: {{ block.greet.output }}
       shell: network none, workspace read-only, image: the run's shell image
 
 4 blocks: 0 AI steps, 0 shell steps with network, 1 step that asks a person

@@ -10,12 +10,12 @@
     {
       "type": "shell",
       "name": "greet",
-      "config": {"command": "echo \"Hello, {{ name }}\""}
+      "config": {"command": "set -euo pipefail; echo \"Hello, {{ name }}\""}
     },
     {
       "type": "shell",
       "name": "count",
-      "config": {"command": "bash \"{{ package_dir }}/scripts/count-files.sh\""}
+      "config": {"command": "set -euo pipefail; bash \"{{ package_dir }}/scripts/count-files.sh\""}
     },
     {
       "type": "approval",
@@ -25,7 +25,7 @@
     {
       "type": "shell",
       "name": "done",
-      "config": {"command": "echo Published: {{ block.greet.output }}"}
+      "config": {"command": "set -euo pipefail; echo Published: {{ block.greet.output }}"}
     }
   ]
 }

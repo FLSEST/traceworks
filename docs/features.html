@@ -430,7 +430,7 @@ verified
     <div><dt>Where you see it</dt><dd><pre>$ traceworks describe examples/hello
 <span class="c"># ... the header and the inputs, then the blocks:</span>
   0   greet                    shell
-      echo "Hello, {{ name }}"
+      set -euo pipefail; echo "Hello, {{ name }}"
       shell: network none, workspace read-only, image: the run's shell image
   2   publish                  approval
       Publish the greeting "{{ block.greet.output }}"?
