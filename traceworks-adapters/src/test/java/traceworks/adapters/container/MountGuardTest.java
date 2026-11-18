@@ -800,6 +800,28 @@ class MountGuardTest {
     }
 
     /**
+     * A hard link of the {@code .git} file of a linked worktree, in a listed folder, is that {@code .git} under
+     * another name and path: only the comparison by the file each names finds it, and a writable mount of it is
+     * refused like one of the {@code .git} itself.
+     */
+    @Test
+    void writableMountOfAHardLinkToTheGitFileOfAWritableWorkspace_isRefused_inAListedFolder() throws IOException {
+        Path repository = Files.createDirectories(outside.resolve("repositories/project"));
+        Path git = Files.writeString(repository.resolve(".git"), "gitdir: /elsewhere/.git/worktrees/project\n");
+        Path listed = Files.createDirectories(outside.resolve("listed"));
+        Path link = Files.createLink(listed.resolve("gitfile"), git);
+        Path beside = Files.writeString(listed.resolve("other"), "x");
+        Context writable = new Context(home, listing(outside), scratch.toString(), repository.toString(), true,
+                packageDirectory.toString(), List.of(), null);
+
+        assertThat(MountGuard.check(new Mount(link.toString(), "/data", false), writable)).as("the hard link")
+                .hasValueSatisfying(r -> assertThat(r).contains(".git").contains("workspace_git_writable"));
+        assertThat(MountGuard.check(new Mount(beside.toString(), "/data", false), writable)).as("a file beside it")
+                .isEmpty();
+        assertThat(MountGuard.check(new Mount(link.toString(), "/data", true), writable)).as("read-only").isEmpty();
+    }
+
+    /**
      * Where the operator opened the {@code .git} of a writable workspace ({@code workspace_git_writable}), a step
      * writes it through the workspace, so a writable mount in it is a mount in the workspace like any other: no
      * refusal for the {@code .git}, and no listed folder asked. A folder that holds the workspace still needs one.

@@ -23,8 +23,9 @@ pass.
   the root `pom.xml`. The project is not changed.
 - A `<pluginManagement><plugins>` element in the root `pom.xml`, which is where the plugin goes. Without one the
   `fetch` step stops with exit code 2 and says so.
-- A module named as `mvn -pl` takes it, and in a form that is also a file name: the folder of a module directly below
-  the root (`core`), or `:<artifactId>`. For a project of one module, or a module deeper down, use `:<artifactId>`.
+- A module named as `mvn -pl` takes it: its folder (`core`, `services/billing`, or `.` for a project of one module) or
+  `:<artifactId>`. The files of a module are named after it with every other character than letters, digits, `.`, `_`
+  and `-` replaced by `_` (`.` is `root`); two modules that give the same name are refused, so name each once.
 
 **How Traceworks runs it on itself,** from the root of its repository:
 
@@ -81,6 +82,8 @@ traceworks run examples/mutation-testing \
   and settings), of `images/maven/Dockerfile` (Maven and the JDK) and of `classes`, and a run with the same digest
   takes it from there (the step says so). A file outside these that the tests read, such as test data next to a
   module's `src` folder, is not in the digest: after changing one, empty the folder `pit` of the step's cache folder.
+  The digest and the copy take the whole workspace, not the Maven project alone: another checkout inside it, such as
+  a git worktree, is copied, and a change below one of its `src` folders makes the next run measure again.
 - **Left out:** a test that is red in the image without any change (it needs a program the image lacks) does not
   count: add the program to `images/maven/Dockerfile`. PIT runs only the tests of the module it changes.
 - The Maven repository in the cache folder (`<home>/cache/tools/maven`) is written by the step with network and read

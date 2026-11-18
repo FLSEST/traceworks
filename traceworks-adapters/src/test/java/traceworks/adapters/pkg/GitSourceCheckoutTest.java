@@ -613,6 +613,34 @@ class GitSourceCheckoutTest {
     }
 
     /**
+     * git looks for {@code @[} in the whole of a local source, not only before its path, and reads on after the
+     * {@code ]}: {@code file:///x@[y]/home/workspaces/run-0} is that checkout for git ({@code git-upload-pack} ran
+     * there, seen with git 2.43), and {@code /x@[y]/home/workspaces/run-0} for a check of the path. So a local source
+     * with {@code @[} is refused, written out or encoded, as a URL and as a path; a bracket alone is a name.
+     */
+    @Test
+    void aLocalSourceWithAnAtAndABracket_whichGitReadsAsAHostInThePath_isRefusedBeforeGitRuns() throws Exception {
+        Path other = Files.createDirectories(workspaces.resolve("run-0"));
+        git(other, "init", "-q");
+        Path marker = temp.resolve("git-ran");
+        GitSourceCheckout fake = new GitSourceCheckout(workspaces, fakeGit(marker).toString(), TIMEOUT, Map.of());
+
+        for (String source : List.of("file:///x@[y]" + other, "file:///x%40%5By%5D" + other,
+                "file:///x@%5By]" + other, "file://localhost/x@[y]" + other,
+                "file://user:s3cr3t-T0KEN@localhost/x@[y]" + other, "/x@[y]" + other)) {
+            assertThatThrownBy(() -> fake.checkout(source, null, target()))
+                    .as(source).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("'@['")
+                    .message().doesNotContain("s3cr3t-T0KEN", "run-0");
+        }
+        assertThat(marker).doesNotExist();
+        assertThat(target()).doesNotExist();
+        assertThat(GitSourceCheckout.Source.parse("file:///srv/[a]/b@c/repo").localPath())
+                .isEqualTo("/srv/[a]/b@c/repo");
+        assertThat(GitSourceCheckout.Source.parse("/srv/[a]/b@c/repo").localPath()).isEqualTo("/srv/[a]/b@c/repo");
+    }
+
+    /**
      * The clone writes no reflog: its first line would be {@code clone: from <URL>} with the URL as git anonymises
      * it, which keeps a query and a fragment, in a folder the steps read.
      */

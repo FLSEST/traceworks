@@ -42,7 +42,8 @@ class OutputCutIT extends IntegrationTest {
         assertThat(ends).as("every output was read to its end").noneMatch(end -> end.has("output_cut"));
         assertThat(ends.getFirst().path("duration_ms").asLong()).as("the step did not wait for the bound of 2 s")
                 .isLessThan(30_000);
-        assertThat(folder.output("serve")).startsWith("early");
+        // The job left behind and the command write at the same time, so either line may come first
+        assertThat(folder.output("serve").lines()).contains("early");
         assertThat(folder.output("plain")).isEqualTo("fine");
         Result show = traceworks.exec("show", run.runId());
         assertThat(show.out()).doesNotContain("output CUT");
@@ -69,7 +70,7 @@ class OutputCutIT extends IntegrationTest {
         assertThat(ends.getFirst().path("exit_code").asInt()).as("a mark, not a failure").isZero();
         assertThat(ends.get(1).has("output_cut")).as("an output that ended").isFalse();
         assertThat(folder.stepStatus("serve")).isEqualTo("COMPLETED");
-        assertThat(folder.output("serve")).startsWith("early\ntick");
+        assertThat(folder.output("serve").lines()).contains("early", "tick");
         Result show = traceworks.exec("show", run.runId());
         assertThat(show.out()).contains("Output    1 command whose output was CUT",
                 "output CUT     stdout after 5000 ms   <== may be incomplete");

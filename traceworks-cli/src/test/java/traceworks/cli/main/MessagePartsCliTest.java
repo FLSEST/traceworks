@@ -187,4 +187,48 @@ class MessagePartsCliTest {
                 .startsWith("The answer to step 1 of run " + id.group(1) + " is recorded; continue the run with ")
                 .hasSizeGreaterThan(80);
     }
+
+    /**
+     * The id of a run named by its path is the name of its folder, which is anyone's text: in the line of an
+     * accepted answer, in its resume command and in the refusal of a diff it is a text from outside, never
+     * Traceworks' own words.
+     */
+    @Test
+    void theIdOfARunNamedByItsPath_isATextFromOutside_inAnAcceptedAnswerAndInARefusedDiff() throws IOException {
+        ObjectNode ask = JSON.createObjectNode().put("type", "approval").put("name", "ask");
+        ask.putObject("config").put("question", "Go?").putArray("options").add("Yes").add("No");
+        Path pkg = pkg("named", null, ask);
+        String parked = exec(null, "run", pkg.toString(), "--allow-host-execution", "--no-input");
+        Matcher id = RUN_ID.matcher(parked);
+        assertThat(id.find()).as(parked).isTrue();
+        Path folder;
+        try (var found = Files.find(home.resolve("runs"), 3, (path, a) -> path.getFileName().toString()
+                .equals(id.group(1)))) {
+            folder = found.findFirst().orElseThrow();
+        }
+        Path padded = copy(folder, temp.resolve("x" + " ".repeat(150) + Forged.HINT));
+        Path escaping = copy(folder, temp.resolve("x\u001b[2Jy"));
+
+        String refused = exec(null, "diff", padded.toString(), padded.toString());
+        assertThat(refused).contains("has not finished");
+        Forged.assertNeverStartsATerminalLine(refused);
+        String answered = exec(null, "approve", padded.toString(), "--answer", "Yes");
+        assertThat(answered).contains("is recorded; continue the run with");
+        // The line behind it names the folder as the operator typed it, which is shown whole
+        Forged.assertNeverStartsATerminalLine(answered.lines().filter(line -> !line.startsWith("go on with: "))
+                .collect(java.util.stream.Collectors.joining("\n")));
+        assertThat(exec(null, "diff", escaping.toString(), escaping.toString())).contains("has not finished")
+                .doesNotContain("\u001b");
+        assertThat(exec(null, "approve", escaping.toString(), "--answer", "Yes")).contains("is recorded")
+                .doesNotContain("\u001b");
+    }
+
+    private static Path copy(Path from, Path to) throws IOException {
+        try (var paths = Files.walk(from)) {
+            for (Path path : paths.toList()) {
+                Files.copy(path, to.resolve(from.relativize(path).toString()));
+            }
+        }
+        return to;
+    }
 }

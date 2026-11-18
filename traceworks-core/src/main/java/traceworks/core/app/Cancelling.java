@@ -92,7 +92,7 @@ final class Cancelling {
         removeLeftovers.accept(run.runId(), events);
         RunView view = RunRecords.view(run.runId(), events, false);
         if (RunRecords.isFinal(view.status())) {
-            throw new RunRefusedException(Message.of("Run " + run.runId() + " has finished (" + view.status()
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(run.runId()), " has finished (" + view.status()
                     + "); there is nothing to cancel"));
         }
         Map<String, Object> gate = checkpointGate(run, view);
@@ -189,7 +189,7 @@ final class Cancelling {
     private static void refuseIfRefused(StoredRun run, List<RecordedEvent> events, String requestId) {
         for (RecordedEvent event : events) {
             if (RecordTypes.REQUEST_REFUSED.equals(event.type()) && mine(event, requestId)) {
-                throw new RunRefusedException(Message.of("The cancel of run " + run.runId() + " was refused: ",
+                throw new RunRefusedException(Message.of("The cancel of run ", Message.quoted(run.runId()), " was refused: ",
                         Message.quoted(event.fields().path("reason").asText())));
             }
         }

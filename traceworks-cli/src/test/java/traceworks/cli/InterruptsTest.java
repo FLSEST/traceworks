@@ -8,10 +8,12 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -30,6 +32,7 @@ class InterruptsTest {
     private static final class FakeRuns implements Interrupts.Runs {
         final List<String> calls = new ArrayList<>();
         final CountDownLatch paused = new CountDownLatch(1);
+        final CountDownLatch cancelled = new CountDownLatch(1);
         int running = 1;
 
         @Override
@@ -42,6 +45,11 @@ class InterruptsTest {
         @Override
         public synchronized void cancel() {
             calls.add("cancel");
+            cancelled.countDown();
+        }
+
+        synchronized List<String> calls() {
+            return List.copyOf(calls);
         }
 
         @Override
@@ -177,6 +185,46 @@ class InterruptsTest {
             assertThat(handle.invoke(null, sigint, probe)).as("the handler from before is back").isSameAs(probe);
         } finally {
             handle.invoke(null, sigint, original);
+        }
+    }
+
+    /**
+     * Where Ctrl-C cancels, the end of the process cancels the runs too, and the hook waits until the guarded call
+     * has returned, so that the run can write its end before the JVM goes.
+     */
+    @Test
+    void theEndOfTheProcess_whereCtrlCCancels_cancelsTheRuns_andWaitsUntilTheCallReturned() throws Exception {
+        FakeRuns runs = new FakeRuns();
+        CountDownLatch returned = new CountDownLatch(1);
+        AtomicBoolean ending = new AtomicBoolean();
+        Thread hook = Thread.ofPlatform().daemon().start(
+                Interrupts.atTheEnd(Interrupts.Mode.CANCELS, runs, returned, ending));
+        try {
+            assertThat(runs.cancelled.await(5, TimeUnit.SECONDS)).as("the runs are cancelled").isTrue();
+            assertThat(hook.join(Duration.ofMillis(300))).as("the hook waits for the call").isFalse();
+            assertThat(ending).isTrue();
+
+            returned.countDown();
+
+            assertThat(hook.join(Duration.ofSeconds(5))).as("the hook returns once the call has").isTrue();
+            assertThat(runs.calls()).containsExactly("cancel");
+        } finally {
+            returned.countDown();
+        }
+    }
+
+    /** Anywhere else the end of the process cannot wait for a step: the runs are left interrupted, at once. */
+    @Test
+    void theEndOfTheProcess_whereCtrlCPausesOrIsIgnored_interruptsTheRuns_withoutWaiting() {
+        for (Interrupts.Mode mode : List.of(Interrupts.Mode.HANDLED, Interrupts.Mode.IGNORED)) {
+            FakeRuns runs = new FakeRuns();
+            AtomicBoolean ending = new AtomicBoolean();
+
+            // The call has not returned: a hook that waited for it would hold this test
+            Interrupts.atTheEnd(mode, runs, new CountDownLatch(1), ending).run();
+
+            assertThat(runs.calls()).as(mode.name()).containsExactly("interrupt");
+            assertThat(ending).as(mode.name()).isTrue();
         }
     }
 

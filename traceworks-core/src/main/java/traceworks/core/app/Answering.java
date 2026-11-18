@@ -58,10 +58,13 @@ final class Answering {
         this.redactors = redactors;
     }
 
-    /** The command that resumes the run, with {@code --allow-host-execution} where it needs the flag. */
-    private String resumeCommand(String id, RunView view) {
-        return "traceworks resume " + id
-                + (RunTarget.resumeNeedsHostFlag(view.execution(), hostConsent) ? " --allow-host-execution" : "");
+    /**
+     * The command that resumes the run, with {@code --allow-host-execution} where it needs the flag. The id is a
+     * part from outside: it is the name of the run's folder, which for a run named by its path is anyone's text.
+     */
+    private Message resumeCommand(String id, RunView view) {
+        return Message.of("traceworks resume ", Message.quoted(id),
+                RunTarget.resumeNeedsHostFlag(view.execution(), hostConsent) ? " --allow-host-execution" : "");
     }
 
     /**
@@ -157,8 +160,9 @@ final class Answering {
         recorder.record(RecordTypes.APPROVAL_ANSWERED, fields);
         List<byte[]> lines = run.events().readAll();
         RunOutputs.writeView(run, RunRecords.view(id, RunRecords.parse(id, lines), false), lines);
-        return new AnswerResult(true, true, Message.of("The answer to step " + question.step() + " of run " + id
-                + " is recorded", through(request.agent()), "; continue the run with " + resumeCommand(id, view)));
+        return new AnswerResult(true, true, Message.of("The answer to step " + question.step() + " of run ",
+                Message.quoted(id), " is recorded", through(request.agent()), "; continue the run with ",
+                resumeCommand(id, view)));
     }
 
     /**
@@ -229,7 +233,7 @@ final class Answering {
                     // The agent as the run's process recorded it. A process of an earlier version takes the
                     // answer and knows no agent: the sender learns that its name did not arrive
                     String recorded = event.fields().path("agent").asText(null);
-                    return new AnswerResult(true, false, Message.of("The answer reached run " + run.runId(),
+                    return new AnswerResult(true, false, Message.of("The answer reached run ", Message.quoted(run.runId()),
                             through(recorded), request.agent() == null || recorded != null ? ""
                             : Message.of("; the process that runs it recorded no agent (an earlier version of"
                             + " Traceworks): the answer stands as ", Message.quoted(actor), "'s alone")));

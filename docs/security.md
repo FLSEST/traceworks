@@ -290,7 +290,9 @@ Git on the host never runs in a run's checkout after a step ran in it, and a pac
 directories, is refused: a clone
 of a local source runs `git-upload-pack` in it, which reads its `.git/config`. A `file://` URL is judged on the path
 git reads: its part before the path is empty or `localhost`, with or without a user, and holds no `%` and no
-bracket, since git decodes the whole URL before it splits the host off and would read such a host as a path. When
+bracket, since git decodes the whole URL before it splits the host off and would read such a host as a path. A
+local source, path or URL, whose path holds `@[` is refused too: git reads a host in brackets after an `@` anywhere
+in it and takes only what follows the `]` as the path. When
 Traceworks reads the commit and the state of a package that has its own `.git`, git gets no transport at all: an
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 

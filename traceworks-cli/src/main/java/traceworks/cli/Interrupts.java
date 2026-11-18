@@ -143,20 +143,7 @@ public final class Interrupts {
         }
         CountDownLatch returned = new CountDownLatch(1);
         AtomicBoolean ending = new AtomicBoolean();
-        Thread hook = new Thread(() -> {
-            ending.set(true);
-            if (mode == Mode.CANCELS) {
-                runs.cancel();
-                try {
-                    returned.await(WAIT_SECONDS, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            } else {
-                // The process is told to end and cannot wait for a step: the run stays resumable
-                runs.interrupt();
-            }
-        }, "traceworks-interrupt");
+        Thread hook = new Thread(atTheEnd(mode, runs, returned, ending), "traceworks-interrupt");
         Runtime.getRuntime().addShutdownHook(hook);
         try {
             return call.get();
@@ -178,6 +165,30 @@ public final class Interrupts {
                 // The JVM is going down already: the hook finishes now that the call has returned
             }
         }
+    }
+
+    /**
+     * What the shutdown hook does at the end of the process: where Ctrl-C cancels, it cancels the runs and waits
+     * until the guarded call has returned ({@code returned}), at most {@value #WAIT_SECONDS} seconds; else it leaves
+     * them interrupted.
+     *
+     * @param ending set once the hook runs
+     */
+    static Runnable atTheEnd(Mode mode, Runs runs, CountDownLatch returned, AtomicBoolean ending) {
+        return () -> {
+            ending.set(true);
+            if (mode == Mode.CANCELS) {
+                runs.cancel();
+                try {
+                    returned.await(WAIT_SECONDS, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } else {
+                // The process is told to end and cannot wait for a step: the run stays resumable
+                runs.interrupt();
+            }
+        };
     }
 
     private static void waitForTheEnd() {

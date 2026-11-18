@@ -61,7 +61,7 @@ final class Comparing {
         List<RecordedEvent> events = RunRecords.events(run);
         RunView view = RunRecords.view(id, events, run.writerAlive());
         if (!RunRecords.isFinal(view.status())) {
-            throw new RunRefusedException(Message.of("Run " + id + " has not finished (" + view.status() + "), so it cannot be"
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(id), " has not finished (" + view.status() + "), so it cannot be"
                     + " compared: only a finished run has a manifest and a ledger entry to verify"));
         }
         VerifyReport report = Verification.verify(run, ledger);

@@ -720,6 +720,23 @@ class ExecutionContextTest {
                 .isInstanceOf(ShellLineRefusedException.class);
     }
 
+    /**
+     * A value built from a template of platform data is platform data by the template itself: no resolution has to
+     * report it first.
+     */
+    @Test
+    void setTemplateVariable_fromATemplateOfPlatformData_isPlatformData_withoutAResolution() {
+        context.setUntrustedPlatformVariable("previous_report", "x; id");
+
+        context.setTemplateVariable("x", "x; id", "{{ previous_report }}");
+
+        assertThat(context.platformVariableNames()).containsExactlyInAnyOrder("previous_report", "x");
+        assertThat(context.isUntrusted("x")).isTrue();
+        assertThat(context.hasUntrustedInput()).as("platform data taints the run only in a shell").isFalse();
+        assertThatThrownBy(() -> context.resolveShellTemplate("echo {{ x }}", false))
+                .isInstanceOf(ShellLineRefusedException.class);
+    }
+
     // ── Platform data taints the run once it really reaches a shell, as the value of a variable ──
 
     @Test

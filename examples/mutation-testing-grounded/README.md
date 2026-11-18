@@ -88,8 +88,63 @@ when `mutation-testing` measured them.
 (`mutation-testing-grounded`): a register belongs to one workflow, and the two audits rate differently, so each
 keeps its own findings and decisions.
 
+## Two real runs
+
+The audit ran twice on Traceworks itself on 2026-11-18, one run after the other on the same commit, with
+`modules=traceworks-cli,traceworks-adapters,traceworks-core`, `classes='traceworks.*'`, Docker 29.1.3, PIT 1.30.2
+and `claude-opus-5-5` as the model.
+
+| | First run | Second run |
+|---|---|---|
+| Changes PIT made | 16029 | 16029 |
+| Changes no test noticed | 1600, in 740 methods | 1600, in 741 methods |
+| Methods the model was asked about | 740 | 24 |
+| Methods that kept their rating without being asked | 0 | 717 |
+| Ratings that moved | no earlier rating | 0 |
+| Findings in the register (rated above low) | 175 | 187, 19 of them high |
+| Time for PIT | 4 h 34 min | 4 h 10 min |
+| Time for the model | 1 h 25 min | 2 min |
+
+What the two runs show: without a change of the code no rating moved, and the second run asked the model about
+24 methods instead of 740.
+
+What they also show:
+
+- **22 methods had no rating after the first run.** The model was asked about them and the report held no rating
+  for them (20 of one package, 2 of another). They were not judged, and the second run asked again. The 12
+  further findings of the second run are among these methods and the one method that was new.
+- **PIT does not measure the same twice.** 10 of the 16029 changes had another result in the second run, all of
+  them a time-out or a memory error on one side. For two methods that changed the gaps, so they were asked about
+  again: one kept its rating, one was new.
+- **The second run measured again,** although the sources of the project were the same. The digest of the kept
+  result counts every file below a `src` folder in the workspace, and this workspace held other checkouts of the
+  repository (git worktrees in a folder git ignores), one of which changed between the runs. See the limits of
+  `mutation-testing`.
+- **Of the 19 findings rated high, 3 held as rated.** After the runs each of the 19 was read against the code and
+  against every test of the project. 3 held as rated, 6 were real and smaller than rated, 4 were noticed by an
+  integration test in another module only, and 6 were no gap. Two faults of the measurement explain 7 of the 19;
+  they are the first two limits below. The 168 findings rated medium were not checked: how many of them a person
+  would call a gap is not known.
+
+Two runs that agree show that the audit repeats itself, not that it is right. A finding of this audit is a place
+to look at, and a person or an agent has to look.
+
 ## Limits
 
+- **A change that changes nothing can count as unnoticed.** PIT leaves out a `return true` it would replace with
+  `return true`, but not inside a `synchronized` block, where the compiler puts the release of the lock between
+  the value and the return. Such a change survives every test, and a method that returns under a lock looks worse
+  than it is.
+- **The model is told the line and the kind of a change, not which change it was.** Where a line holds two changes
+  of one kind, such as two comparisons, and the tests notice one of them, the model cannot tell which one
+  survived, and in the two real runs it rated the one the tests notice more than once. PIT's CSV names the test
+  that noticed a change; this audit does not hand that over yet.
+- **Only the tests of the module count.** PIT runs the tests of the module it changes. What a test in another
+  module notices, such as an integration test, counts as unnoticed.
+- **Built on Traceworks, not for any project.** The inputs are `modules`, `classes` and `threads`. What else
+  depends on the project is fixed in the package or left to PIT's defaults: which tests count, the time a test may
+  take before a change counts as timed out, what makes a consequence severe, and which code to leave out, such as
+  generated code. Expect to change the package before its findings fit another project.
 - **At most 1000 methods with an unnoticed change.** A register takes at most 1000 items in a report and rejects a
   larger one as a whole, so nothing would be kept. The `findings` step fails before any call of a model and says
   so: narrow `classes` or `modules`, and keep them the same from run to run.

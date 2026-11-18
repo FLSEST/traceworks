@@ -129,8 +129,8 @@ final class Resuming {
                              java.util.concurrent.atomic.AtomicReference<RecordedForm> form) {
         String runId = run.runId();
         if (!run.tryLockWriter()) {
-            throw new RunRefusedException(Message.of("Another process is writing run " + runId
-                    + "; resume it when that process has ended"));
+            throw new RunRefusedException(Message.of("Another process is writing run ", Message.quoted(runId),
+                    "; resume it when that process has ended"));
         }
         // Nobody runs the run now: a container its last process left behind can still write into its mounts
         ContainerRuntime runtime = findRuntime.get().orElse(null);
@@ -155,7 +155,7 @@ final class Resuming {
         PresetAnswer preset = given == null ? null : given.preset();
         RunView.Checkpoint checkpoint = view.lastCheckpoint();
         if (checkpoint == null) {
-            throw new RunRefusedException(Message.of("Run " + runId + " has no checkpoint to resume from"));
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(runId), " has no checkpoint to resume from"));
         }
         StoredRunPackage.Resolved resolved = storedPackage.resolve(run, view);
         LoadedPackage pkg = resolved.runs();
@@ -195,8 +195,8 @@ final class Resuming {
         RegisterFolder folder = view.register() == null ? null : new RegisterFolder(run, view.register());
         String folderProblem = folder == null ? null : folder.problem();
         if (folderProblem != null) {
-            throw new RunRefusedException(Message.of("Run " + runId + " cannot resume: ", Message.quoted(folderProblem),
-                    " ('traceworks verify " + runId + "' says the same)"));
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(runId), " cannot resume: ", Message.quoted(folderProblem),
+                    " ('traceworks verify ", Message.quoted(runId), "' says the same)"));
         }
         RunPaths paths = preparation.paths(run, prepared.workspace(), prepared,
                 folder == null ? null : run.registerDirectory());
@@ -364,7 +364,7 @@ final class Resuming {
     }
 
     private RunRefusedException beyondTheBudget(String runId, String holds) {
-        return new RunRefusedException(Message.of("Run " + runId + " cannot resume: its checkpoint holds " + holds
+        return new RunRefusedException(Message.of("Run ", Message.quoted(runId), " cannot resume: its checkpoint holds " + holds
                 + " MiB of output text in memory, more than its output budget of " + runOutputBudgetMib + " MiB;"
                 + " raise run_output_budget_mib in traceworks.json to resume it"));
     }
@@ -397,7 +397,7 @@ final class Resuming {
     private RunTarget target(String runId, RunView view, boolean allowedForThisResume) {
         RunTarget target = RunTarget.ofRecorded(view.execution());
         if (target == null) {
-            throw new RunRefusedException(Message.of("Run " + runId + " records the execution '", Message.quoted(view.execution()),
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(runId), " records the execution '", Message.quoted(view.execution()),
                     "', which is neither container nor host; it cannot be resumed"));
         }
         if (target == RunTarget.HOST) {
@@ -414,7 +414,7 @@ final class Resuming {
      */
     private void requireHostConsent(String runId, boolean allowedForThisResume) {
         if (!allowedForThisResume && !hostConsent) {
-            throw new RunRefusedException(Message.of("Host execution is not allowed: run " + runId + " is a host run, whose"
+            throw new RunRefusedException(Message.of("Host execution is not allowed: run ", Message.quoted(runId), " is a host run, whose"
                     + " shell steps without an image run on the host, and a resume needs the same consent as its"
                     + " start. Allow it for this resume with --allow-host-execution, or on this machine with"
                     + " \"allow_host_execution\": true in traceworks.json"));
@@ -436,7 +436,7 @@ final class Resuming {
         }
         List<String> completed = outputs.complete(run, catalogJson);
         if (completed.isEmpty()) {
-            throw new RunRefusedException(Message.of("Run " + run.runId() + " has finished (" + view.status()
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(run.runId()), " has finished (" + view.status()
                     + "); a finished run cannot be resumed"));
         }
         return new RunResult(run.runId(), run.location(), view.status(), RunRecords.gateOf(view), null, completed);
@@ -450,10 +450,10 @@ final class Resuming {
      */
     private static RunSnapshot snapshot(StoredRun run, RunView.Checkpoint checkpoint) {
         if (checkpoint.state() == null) {
-            throw new RunRefusedException(Message.of("Run " + run.runId() + " has no checkpoint state in its record"));
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(run.runId()), " has no checkpoint state in its record"));
         }
         return RunRecords.snapshot(run, checkpoint.state()).orElseThrow(() ->
-                new RunRefusedException(Message.of("The checkpoint state of run " + run.runId() + " is deleted (blob "
+                new RunRefusedException(Message.of("The checkpoint state of run ", Message.quoted(run.runId()), " is deleted (blob "
                         + checkpoint.state().sha256() + ")")));
     }
 
@@ -474,7 +474,7 @@ final class Resuming {
             return workspace == null ? null
                     : Path.of(preparation.realPath("The workspace of run " + runId, workspace, redacted));
         } catch (InvalidPathException e) {
-            throw new RunRefusedException(Message.of("The workspace of run " + runId + " (", Message.quoted(workspace), ") is not a path"));
+            throw new RunRefusedException(Message.of("The workspace of run ", Message.quoted(runId), " (", Message.quoted(workspace), ") is not a path"));
         }
     }
 
@@ -506,14 +506,13 @@ final class Resuming {
         QuestionView question = view.pendingQuestion();
         QuestionView.Answer answer = view.parkedAnswer();
         if (question == null) {
-            throw new RunRefusedException(Message.of("The parked question of run " + run.runId() + " is missing from its record"));
+            throw new RunRefusedException(Message.of("The parked question of run ", Message.quoted(run.runId()), " is missing from its record"));
         }
         if (answer == null) {
-            String how = "human-input".equals(question.kind())
-                    ? "traceworks answer " + run.runId() + " --value <text>"
-                    : "traceworks approve " + run.runId() + " --answer <option>";
-            throw new RunRefusedException(Message.of("Run " + run.runId() + " waits for an answer to step " + question.step()
-                    + "; give it with " + how + ", then resume"));
+            boolean input = "human-input".equals(question.kind());
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(run.runId()), " waits for an answer to step "
+                    + question.step() + "; give it with " + (input ? "traceworks answer " : "traceworks approve "),
+                    Message.quoted(run.runId()), (input ? " --value <text>" : " --answer <option>") + ", then resume"));
         }
         return new Given(new PresetAnswer(answer.step(), question.kind(),
                 RunRecords.text(run, question.question(), "parked question"),

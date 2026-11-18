@@ -185,4 +185,58 @@ class MutationTestingPitScriptTest {
         assertThat(newerPit).isNotEqualTo(before);
         assertThat(newerImage).isNotEqualTo(newerPit).isNotEqualTo(before);
     }
+
+    @Test
+    void aJavaPackageNamedTarget_isSource_andChangesTheKey() throws IOException {
+        Path project = project("package", "pom.xml", "src/main/java/demo/target/Aim.java",
+                "core/pom.xml", "core/src/main/java/demo/target/Hit.java");
+        String before = key(project, "demo.*");
+
+        write(project, "src/main/java/demo/target/Aim.java", "class Aim { }\n");
+        String root = key(project, "demo.*");
+        write(project, "core/src/main/java/demo/target/Hit.java", "class Hit { }\n");
+        String core = key(project, "demo.*");
+
+        assertThat(root).isNotEqualTo(before);
+        assertThat(core).isNotEqualTo(root);
+    }
+
+    @Test
+    void theBuildOutputOfAModule_nextToItsPom_isNotInTheKey() throws IOException {
+        Path project = project("output", "pom.xml", "core/pom.xml", "core/src/main/java/demo/A.java");
+        String before = key(project, "demo.*");
+
+        write(project, "target/generated-sources/src/G.java", "class G { }\n");
+        write(project, "core/target/generated-sources/src/H.java", "class H { }\n");
+
+        assertThat(key(project, "demo.*")).isEqualTo(before);
+    }
+
+    private Ran stems(String modules) throws IOException {
+        Path project = project("stems" + modules.hashCode(), "pom.xml");
+        return run(project, SCRIPT, "stems", modules, "demo.*", "2");
+    }
+
+    @Test
+    void aModuleGivenAsAPathOrAnArtifactId_getsOneSafeFileNameStem() throws IOException {
+        Ran ran = stems("core,services/billing,:my-app,.,.hidden,a:b/c*");
+
+        assertThat(ran.code()).as(ran.stderr()).isZero();
+        assertThat(ran.stdout().lines().toList()).containsExactly("core\tcore", "services/billing\tservices_billing",
+                ":my-app\t_my-app", ".\troot", ".hidden\t_hidden", "a:b/c*\ta_b_c_");
+    }
+
+    @Test
+    void twoModulesWithOneStem_areRefused_inEveryMode() throws IOException {
+        for (String modules : List.of("a/b,a_b", "core,core", ":x,_x", ".,root")) {
+            for (String mode : List.of("fetch", "measure", "stems")) {
+                Path project = project("clash" + mode + modules.hashCode(), "pom.xml");
+                Ran ran = run(project, SCRIPT, mode, modules, "demo.*", "2");
+
+                assertThat(ran.code()).as(mode + " " + modules).isEqualTo(2);
+                assertThat(ran.stderr()).contains("both give the file name");
+                assertThat(ran.stdout()).isEmpty();
+            }
+        }
+    }
 }
