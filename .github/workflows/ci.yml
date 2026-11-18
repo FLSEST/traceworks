@@ -1,4 +1,4 @@
-# Build and test Traceworks on every push and pull request.
+# Build and test Traceworks on every push to main and on every pull request.
 #
 # secrets:     gitleaks over the whole history with .gitleaks.toml, in the gitleaks image pinned by digest. The
 #              same scan runs on staged changes before a commit: scripts/hooks/pre-commit.
@@ -11,8 +11,11 @@
 #              So the built-in images are built first, with the jar. See integration-tests/README.md.
 name: CI
 
+# A push runs it on main only: a branch of this repository with a pull request, such as one of Dependabot, would
+# run twice otherwise, once for the push and once for the pull request.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -20,7 +23,8 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A new run of a pull request cancels the one before; on main every commit keeps its own result.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   secrets:

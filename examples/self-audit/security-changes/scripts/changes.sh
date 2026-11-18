@@ -112,7 +112,9 @@ else
         refuse "the base '$since' names no commit of this checkout"
     }
 fi
-base_date=$(g rev-list --no-walk --format='%cI' "$base" | sed -n 2p)
+# git writes a UTC offset as "+00:00" up to 2.4x and as "Z" in newer versions: one form, so that the report of the
+# same commits does not depend on the git that read them.
+base_date=$(g rev-list --no-walk --format='%cI' "$base" | sed -n '2{s/Z$/+00:00/;p;}')
 
 if ! g merge-base --is-ancestor "$base" "$head"; then
     if [ "$from" = register ]; then

@@ -210,7 +210,7 @@ when it needs an image of its own) and a class that extends `IntegrationTest`.
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push and pull request. The job `build` runs `mvn -B verify` with Temurin 21:
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull request. The job `build` runs `mvn -B verify` with Temurin 21:
 no container. The job `integration` runs after it: it builds the jar, builds the built-in images with it
 (`traceworks images build`, which the container tests of the other modules need), and runs `mvn -B -Pit verify`, once
 with `TRACEWORKS_IT_RUNTIME=docker` and once with `podman`. The variable picks the runtime of this suite; the
