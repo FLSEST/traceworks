@@ -60,11 +60,13 @@ class HelloExampleTest {
         Matcher m = RUN_ID.matcher(run.out());
         assertThat(m.find()).as(run.out()).isTrue();
         String id = m.group(1);
+        assertThat(run.out()).contains("Hello, world", "Files in the workspace: 2");
 
         Result approve = exec(home, work, "approve", id, "--answer", "Yes");
         assertThat(approve.code()).as(approve.out() + approve.err()).isZero();
         Result resume = exec(home, work, "resume", id, "--no-input", "--allow-host-execution");
         assertThat(resume.code()).as(resume.out() + resume.err()).isZero();
+        assertThat(resume.out()).contains("Published: Hello, world");
         Result verify = exec(home, work, "verify", id);
         assertThat(verify.code()).as(verify.out() + verify.err()).isZero();
 
@@ -90,5 +92,18 @@ class HelloExampleTest {
         Files.write(events, bytes);
         Result tampered = exec(home, work, "verify", id);
         assertThat(tampered.code()).as(tampered.out() + tampered.err()).isEqualTo(8);
+    }
+
+    /** The first example a reader runs has nothing for {@code check} to note: every shell block has strict mode. */
+    @Test
+    void check_findsNothing() throws IOException {
+        Path home = Files.createDirectories(temp.resolve("home"));
+        Path work = Files.createDirectories(temp.resolve("work"));
+
+        Result check = exec(home, work, "check", PACKAGE);
+
+        assertThat(check.code()).as(check.out() + check.err()).isZero();
+        assertThat(check.out()).isEqualTo("no findings" + System.lineSeparator());
+        assertThat(check.err()).isEmpty();
     }
 }

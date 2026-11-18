@@ -1,0 +1,39 @@
+# Merge some of Dependabot's pull requests without a reader.
+#
+# Which: a pull request of the groups build-plugins, actions and images of .github/dependabot.yml, which hold patch
+# and minor updates of the Maven build plugins, of the actions and of the base images. Not Jackson, not the test
+# libraries, no major update: those wait for a person.
+#
+# How: this job only turns on GitHub's auto-merge for the pull request. GitHub merges it when the required checks
+# of the branch have passed, and never before. So two settings of the repository are needed, and without them this
+# job does nothing or the wrong thing:
+#   - Settings, General: "Allow auto-merge" is on.
+#   - Settings, Branches: a rule for main requires the checks secrets, build and integration (docker). Without
+#     required checks GitHub merges at once.
+# A pull request this job cannot place (no group, a major update) is left alone.
+name: Dependabot auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: What the pull request updates
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Turn on auto-merge
+        if: >-
+          contains(fromJSON('["build-plugins", "actions", "images"]'), steps.meta.outputs.dependency-group)
+          && steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --merge "$PR_URL"

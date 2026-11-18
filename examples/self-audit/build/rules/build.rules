@@ -31,3 +31,7 @@ dockerfile       images/*/Dockerfile
 dockerfile       examples/**/images/*/Dockerfile
 
 accept           package_unpinned images/shell/Dockerfile The shell image installs Debian's current packages on purpose, and the record names the image ID each container started from (docs/security.md, "Images and containers").
+
+# The Maven image of the two mutation-testing packages, byte-identical copies, so one line for each.
+accept           package_unpinned examples/mutation-testing/images/maven/Dockerfile The Maven image installs Ubuntu's current openssh-client on purpose: Ubuntu removes a superseded version from its archive, so a pinned version would break the build at its next security update. The record names the image ID each container started from (docs/security.md, "Images and containers").
+accept           package_unpinned examples/mutation-testing-grounded/images/maven/Dockerfile The Maven image installs Ubuntu's current openssh-client on purpose: Ubuntu removes a superseded version from its archive, so a pinned version would break the build at its next security update. The record names the image ID each container started from (docs/security.md, "Images and containers").

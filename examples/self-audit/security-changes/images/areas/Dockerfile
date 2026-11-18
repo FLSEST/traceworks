@@ -2,7 +2,7 @@
 # It needs the JDK, not a runtime: it parses and attributes the audited sources with the JDK's compiler, against the
 # platform classes of every module they use. The base is pinned by digest, so the same Dockerfile always starts from
 # the same bytes.
-FROM eclipse-temurin:21-jdk-noble@sha256:b468c3fc688b14450571494f588bd939378e7fd542ed5a73f8efc13f17872a87
+FROM eclipse-temurin:21-jdk-noble@sha256:06c1f157dacf6b68198bd9a4186dd4c34ef24e65d7bbbe2a0cf8e62571ad38c9
 LABEL org.opencontainers.image.description="the security area finder and report tool compiled from src/ on JDK 21, which parses the audited sources with javac"
 
 COPY src /opt/areas/src
