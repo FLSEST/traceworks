@@ -44,3 +44,9 @@ updates:
       images:
         patterns: ["*"]
         update-types: [minor, patch]
+    # No pull request for a new major version of a base image: Java 21 to 26, Node 22 to 24 or a new Debian is a
+    # decision, made by hand. What stays is a new digest of the same tag, which is how a security fix arrives, and a
+    # minor or patch version.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
