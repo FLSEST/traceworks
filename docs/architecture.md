@@ -154,6 +154,7 @@ flowchart TB
         aicli["core.ai.cli"]
         compare["core.compare"]
         seal["core.seal"]
+        register["core.register"]
     end
     subgraph base["what the rest builds on"]
         port["core.port"]
@@ -382,6 +383,8 @@ flowchart TD
     run -- "a step fails and on_failure stops" --> failed["FAILED, exit 3"]
     run -- "pause or Ctrl-C once" --> paused["PARKED, exit 5<br>after the step or item in flight"]
     paused -. "traceworks resume" .-> step
+    run -- "SIGTERM, or the process ends" --> interrupted["INTERRUPTED<br>the record has no end; the run can be resumed"]
+    interrupted -. "traceworks resume" .-> step
     run -- "cancel or Ctrl-C twice" --> cancelled["CANCELLED, exit 4"]
     failed --> sealed["finished the same way:<br>manifest, ledger entry, run.html"]
     cancelled --> sealed
