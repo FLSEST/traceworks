@@ -269,8 +269,9 @@ security check beside them and the two testing audits.
 
 **Verified with:**
 
-- Docker 29.1.3. Podman is supported by the code and untested: CI runs the integration tests with it, and that leg
-  may fail without failing the workflow.
+- Docker 29.1.3, and rootless Podman 4.9.3 on one machine, where the whole suite passed on 2026-11-18. On the CI
+  runner the Podman leg has not passed yet and may fail without failing the workflow. `docs/security.md` still
+  states what it says about Podman as not verified.
 - Linux. CI runs on Linux only. Where the system has no `setsid` program (macOS), Ctrl-C cancels a run instead of
   pausing it.
 - Stand-in command line tools in place of the models, in every automatic test. No test calls a model or uses a
