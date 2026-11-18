@@ -31,15 +31,22 @@ The format of `workflow.json` is Traceworks' own, and it has one rule: a workflo
 refused. It never silently runs as something else ([docs/workflow-format.md](docs/workflow-format.md)).
 
 How the terms lie inside one another, package, workflow, block, step and container on one side, run, register and
-ledger on the other, is one drawing: [docs/architecture.md](docs/architecture.md#the-terms-and-how-they-nest).
+ledger on the other:
 
-Two pages explain it with drawings:
+![How the terms lie inside one another: on the left the package that is defined before a run, with its workflow, blocks, steps and containers; on the right the home the tool keeps, with runs, registers and the ledger; the workspace between them, mounted read-only.](docs/concepts.svg)
 
+[docs/architecture.md](docs/architecture.md#the-terms-and-how-they-nest) says what each term means.
+
+Three pages explain it with drawings:
+
+- [docs/how-it-works.html](docs/how-it-works.html): start here. One run in six stages, then six more scenes, as
+  moving drawings: a step in its container, the record as a chain, the ledger, an audit across runs, model text
+  and the shell, and what a record does not prove.
 - [docs/features.html](docs/features.html): the key features, each by the same four questions: what goes wrong
   without it, what Traceworks does, where you see it, and what it does not do.
 - [docs/audit-loop.html](docs/audit-loop.html): the register, round by round: an audit that knows when it is done.
 
-Both are self-contained pages that load nothing from the network. A repository host shows HTML as source, so open
+All three are self-contained pages that load nothing from the network. A repository host shows HTML as source, so open
 them in a browser from a checkout.
 
 ## Quick start
