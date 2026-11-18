@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>How Traceworks works</title>
+<style>
+/* Layout: a column of scenes. Each has a title, two or three sentences and a wide drawing that plays its loop.
+   The first scene is larger and has its stages as a list under the drawing. */
+:root {
+  --bg: #f3f6f6; --surface: #ffffff; --ink: #14232b; --ink2: #33454d; --muted: #8a989e; --soft: #5a6a72; --rule: #d3dcde;
+  --tint: #e6f1f0; --box: #14232b; --onbox: #e9f0f1; --onbox2: #c9d6d9;
+  --accent: #0b7a75; --on-accent: #ffffff; --warm: #c96f1e; --warm-strong: #a9570f; --on-warm: #ffffff;
+  --ok: #2e8b57; --on-ok: #ffffff; --warn: #d9a400; --bad: #c0392b;
+  --display: "Avenir Next", Avenir, "Segoe UI", system-ui, -apple-system, Ubuntu, Cantarell, "Noto Sans", sans-serif;
+  --body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e171b; --surface: #152126; --ink: #e6eef0; --ink2: #c3d0d4; --muted: #6f8087; --soft: #9fb0b6; --rule: #2a3a40;
+    --tint: #1b2d33; --box: #e6eef0; --onbox: #14232b; --onbox2: #3a4b52;
+    --accent: #45c9bd; --on-accent: #0e171b; --warm: #f2a655; --warm-strong: #f2a655; --on-warm: #14232b;
+    --ok: #4cc38a; --on-ok: #0e171b; --warn: #e8c547; --bad: #ef6b5b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e171b; --surface: #152126; --ink: #e6eef0; --ink2: #c3d0d4; --muted: #6f8087; --soft: #9fb0b6; --rule: #2a3a40;
+  --tint: #1b2d33; --box: #e6eef0; --onbox: #14232b; --onbox2: #3a4b52;
+  --accent: #45c9bd; --on-accent: #0e171b; --warm: #f2a655; --warm-strong: #f2a655; --on-warm: #14232b;
+  --ok: #4cc38a; --on-ok: #0e171b; --warn: #e8c547; --bad: #ef6b5b; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 34px; }
+header { display: flex; flex-direction: column; gap: 10px; }
+.kicker { margin: 0; font: 0.8rem/1.4 var(--mono); color: var(--soft); letter-spacing: 0.04em; text-transform: uppercase; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 5vw, 40px); line-height: 1.08; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header p { margin: 0; color: var(--soft); max-width: 62ch; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+code { font: 0.88em var(--mono); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 0.1em 0.35em; border-radius: 4px; overflow-wrap: anywhere; }
+.bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+button { font: 600 14px var(--body); color: var(--ink); background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scene { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.head { display: flex; flex-direction: column; gap: 4px; }
+h2 { font-family: var(--display); font-weight: 600; font-size: 22px; line-height: 1.25; margin: 0; text-wrap: balance; }
+.head p { margin: 0; color: var(--soft); max-width: 70ch; }
+.tile { background: var(--surface); border: 1px solid var(--rule); border-radius: 14px; padding: 8px; overflow-x: auto; min-width: 0; }
+.tile svg { display: block; width: 100%; min-width: 640px; height: auto; }
+.tile.big svg { min-width: 700px; }
+.hint { font-size: 13px; color: var(--soft); margin: 0; }
+.steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 12px; counter-reset: s; }
+.steps li { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 12px 14px; counter-increment: s; min-width: 0; }
+.steps b { display: block; font-family: var(--display); font-weight: 600; font-size: 16px; }
+.steps b::before { content: counter(s) " · "; color: var(--accent); }
+.steps li.ai b::before { color: var(--warm-strong); }
+.steps span { color: var(--soft); font-size: 14px; }
+footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
+
+/* The motion. One Pause for the page; a reader with reduced motion sees each drawing still at the time --still names. */
+.paused svg * { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) {
+  .tile svg * { animation-delay: var(--still) !important; animation-play-state: paused !important; }
+  .bar { display: none; }
+}
+
+/* The scenes after the first */
+.lbl { font: 500 14px var(--display); fill: var(--ink); } .dim { fill: var(--soft); } .onbox { fill: var(--onbox); font-weight: 600; }
+.phase { font: 700 16px var(--display); fill: var(--muted); } .warmtxt { fill: var(--warm-strong); font-weight: 600; }
+.mono { font: 500 16px var(--mono); } .mono15 { font: 500 15px var(--mono); fill: var(--ink); }
+.onbubble { fill: var(--on-warm); } .onshell { fill: var(--onbox); } .onvar { fill: var(--on-accent); font-weight: 600; } .onrun { fill: var(--onbox); font-weight: 600; }
+.s-tab { fill: var(--tint); stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.s-folder { fill: var(--tint); stroke: var(--ink); stroke-width: 2.5; }
+.s-paper { fill: var(--surface); stroke: var(--ink); stroke-width: 2; } .s-lines { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+.s-badge { fill: var(--box); } .s-badgeline { fill: none; stroke: var(--box); stroke-width: 3; } .s-onbadge { fill: var(--onbox); }
+.s-cloud { fill: var(--tint); stroke: var(--ink); stroke-width: 2.5; }
+.s-globe { fill: var(--surface); stroke: var(--muted); stroke-width: 2.5; } .s-globeline { fill: none; stroke: var(--muted); stroke-width: 1.8; }
+.s-shield { fill: var(--accent); } .s-onbadge2 { fill: none; stroke: var(--on-accent); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; }
+.s-glass { fill: none; stroke: var(--ink); stroke-width: 5; } .s-glasshandle { stroke: var(--ink); stroke-width: 7; stroke-linecap: round; }
+.f-ok, .f-okdot { fill: var(--ok); } .s-onok { fill: none; stroke: var(--on-ok); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.s-track { stroke: var(--rule); stroke-width: 4; stroke-linecap: round; }
+.f-box { fill: var(--box); }
+.s-step-ai { fill: var(--surface); stroke: var(--warm); stroke-width: 3.5; }
+.s-ai { fill: none; stroke: var(--warm); stroke-width: 3; stroke-dasharray: 2 7; stroke-linecap: round; }
+.f-token { fill: var(--accent); }
+.s-chain { stroke: var(--ink); stroke-width: 2.5; } .f-link { fill: var(--surface); stroke: var(--ink); stroke-width: 2.5; } .old { opacity: 0.55; }
+.f-row { fill: var(--surface); stroke: var(--ink); stroke-width: 2; }
+.s-arrow { fill: none; stroke: var(--ink); stroke-width: 2.5; } .s-arrowhead { fill: var(--ink); }
+.f-reg { fill: var(--tint); stroke: var(--ink); stroke-width: 2.5; }
+.s-wall { stroke: var(--bad); stroke-width: 7; stroke-linecap: round; } .s-dotted { fill: none; stroke: var(--muted); stroke-width: 3; stroke-dasharray: 2 7; stroke-linecap: round; }
+.f-packet { fill: var(--accent); } .f-bad { fill: var(--bad); } .f-ai { fill: var(--warm); }
+.s-x { stroke: var(--bad); stroke-width: 6; stroke-linecap: round; }
+.s-chainthick { stroke: var(--ink); stroke-width: 4; } .f-linkbig { fill: var(--surface); stroke: var(--ink); stroke-width: 3; }
+.s-hashmark { stroke: var(--muted); stroke-width: 3; stroke-linecap: round; }
+.s-dotted2 { fill: none; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 2 7; stroke-linecap: round; } .f-ledger { fill: var(--accent); }
+.f-stop, .f-warn { fill: var(--warm); } .s-onwarm { stroke: var(--on-warm); stroke-width: 4; stroke-linecap: round; } .f-onwarm { fill: var(--on-warm); }
+.s-gone { fill: none; stroke: var(--warm); stroke-width: 2.6; stroke-dasharray: 7 6; }
+.s-trash { fill: none; stroke: var(--warm); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.s-thread { fill: none; stroke: var(--accent); stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }
+.s-loose { fill: none; stroke: var(--warm); stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }
+.f-new { fill: var(--accent); }
+.f-run { fill: var(--box); } .s-slot { fill: none; stroke: var(--rule); stroke-width: 2.5; }
+.f-warmdot { fill: var(--warm); } .f-mutedot { fill: var(--muted); }
+.f-bubble { fill: var(--warm-strong); } .f-shell { fill: var(--box); } .f-var { fill: var(--accent); }
+
+/* The first scene: one run in six stages (18 s) */
+#run text { font-family: var(--body); }
+#run .mono12 { font-family: var(--mono); font-size: 12px; }
+#run .ink { fill: var(--ink); } #run .muted { fill: var(--soft); } #run .soft { fill: var(--ink2); }
+#run .card { fill: var(--surface); stroke: var(--ink); stroke-width: 1.8; } #run .tint { fill: var(--tint); stroke: var(--ink); stroke-width: 1.4; }
+#run .row { fill: var(--bg); stroke: var(--rule); }
+#run .hl { fill: none; stroke: var(--accent); stroke-width: 4.5; opacity: 0; } #run .hlw { fill: none; stroke: var(--warm); stroke-width: 4.5; opacity: 0; }
+#run .deep { fill: var(--box); } #run .ondeep { fill: var(--onbox); } #run .ondeep2 { fill: var(--onbox2); }
+#run .line { stroke: var(--ink); stroke-width: 2.4; fill: none; } #run .wline { stroke: var(--warm); stroke-width: 2.4; fill: none; stroke-dasharray: 1 6; stroke-linecap: round; }
+#run .teal { fill: var(--accent); } #run .warm { fill: var(--warm-strong); } #run .onwarm { fill: var(--on-warm); }
+#run .a { opacity: 0; }
+@keyframes r-st1 { 0% { opacity: 1 } 9.8% { opacity: 1 } 11% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-st2 { 0% { opacity: 0 } 9.8% { opacity: 0 } 11% { opacity: 1 } 20.8% { opacity: 1 } 22% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-st3 { 0% { opacity: 0 } 20.8% { opacity: 0 } 22% { opacity: 1 } 39.8% { opacity: 1 } 41% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-st4 { 0% { opacity: 0 } 39.8% { opacity: 0 } 41% { opacity: 1 } 59.8% { opacity: 1 } 61% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-st5 { 0% { opacity: 0 } 59.8% { opacity: 0 } 61% { opacity: 1 } 73.8% { opacity: 1 } 75% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-st6 { 0% { opacity: 0 } 73.8% { opacity: 0 } 75% { opacity: 1 } 94.8% { opacity: 1 } 96% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-box { 0% { opacity: 0 } 20.8% { opacity: 0 } 22% { opacity: 1 } 73.8% { opacity: 1 } 75% { opacity: 0 } 100% { opacity: 0 } }
+@keyframes r-ev1 { 0% { opacity: 0 } 9.8% { opacity: 0 } 11% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-led1 { 0% { opacity: 0 } 10.8% { opacity: 0 } 12% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-ev2 { 0% { opacity: 0 } 37.8% { opacity: 0 } 39% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-ev3 { 0% { opacity: 0 } 41.8% { opacity: 0 } 43% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-ev4 { 0% { opacity: 0 } 57.8% { opacity: 0 } 59% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-ev5 { 0% { opacity: 0 } 70.8% { opacity: 0 } 72% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-ev6 { 0% { opacity: 0 } 74.8% { opacity: 0 } 76% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-led2 { 0% { opacity: 0 } 76.8% { opacity: 0 } 78% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-reg { 0% { opacity: 0 } 79.8% { opacity: 0 } 81% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes r-led3 { 0% { opacity: 0 } 82.8% { opacity: 0 } 84% { opacity: 1 } 96% { opacity: 1 } 100% { opacity: 0 } }
+
+/* Inside one step (11 s) */
+@keyframes k22 { 0% { transform: translate(0px, 0px) } 4% { transform: translate(0px, 0px) } 18% { transform: translate(172px, 0px) } 100% { transform: translate(172px, 0px) } }
+@keyframes k24 { 0% { transform: translate(0px, 0px) } 22% { transform: translate(0px, 0px) } 34% { transform: translate(-150px, 0px) } 100% { transform: translate(-150px, 0px) } }
+@keyframes k25 { 0% { transform: translate(0px, 0px) } 40% { transform: translate(0px, 0px) } 50% { transform: translate(80px, 0px) } 100% { transform: translate(80px, 0px) } }
+@keyframes k26 { 0% { opacity:0 } 48.5% { opacity:0 } 50% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k27 { 0% { transform: translate(0px, 0px) } 66% { transform: translate(0px, 0px) } 74% { transform: translate(94px, -2px) } 78% { transform: translate(94px, -2px) } 88% { transform: translate(220px, -2px) } 100% { transform: translate(220px, -2px) } }
+@keyframes k28 { 0% { opacity:0 } 74.5% { opacity:0 } 76% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+
+/* The record is a chain (11 s) */
+@keyframes k29 { 0% { fill: var(--surface) } 28% { fill: var(--surface) } 30% { fill: var(--warm) } 92% { fill: var(--warm) } 96% { fill: var(--surface) } 100% { fill: var(--surface) } }
+@keyframes k30 { 0% { stroke: var(--ink) } 38% { stroke: var(--ink) } 40% { stroke: var(--warm) } 92% { stroke: var(--warm) } 96% { stroke: var(--ink) } 100% { stroke: var(--ink) } }
+@keyframes k34 { 0% { opacity:0 } 28.5% { opacity:0 } 30% { opacity:1 } 92% { opacity:1 } 93.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k35 { 0% { opacity:0 } 56.5% { opacity:0 } 58% { opacity:1 } 92% { opacity:1 } 93.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k36 { 0% { transform: translate(260px, 0px) } 58% { transform: translate(260px, 0px) } 66% { transform: translate(0px, 0px) } 100% { transform: translate(0px, 0px) } }
+@keyframes k37 { 0% { opacity:0 } 64.5% { opacity:0 } 66% { opacity:1 } 92% { opacity:1 } 93.5% { opacity:0 } 100% { opacity:0 } }
+
+/* A deleted run leaves a loose end (13 s) */
+@keyframes k38 { 0% { fill: var(--muted) } 0.5% { fill: var(--ink) } 24% { fill: var(--ink) } 25% { fill: var(--muted) } 100% { fill: var(--muted) } }
+@keyframes k39 { 0% { fill: var(--muted) } 24% { fill: var(--muted) } 25.5% { fill: var(--ink) } 49% { fill: var(--ink) } 50% { fill: var(--muted) } 100% { fill: var(--muted) } }
+@keyframes k40 { 0% { fill: var(--muted) } 49% { fill: var(--muted) } 50.5% { fill: var(--ink) } 74% { fill: var(--ink) } 75% { fill: var(--muted) } 100% { fill: var(--muted) } }
+@keyframes k41 { 0% { fill: var(--muted) } 74% { fill: var(--muted) } 75.5% { fill: var(--ink) } 99% { fill: var(--ink) } 100% { fill: var(--muted) } }
+@keyframes k42 { 0% { transform: translate(0px, 0px) } 23% { transform: translate(0px, 0px) } 25% { transform: translate(120px, 0px) } 48% { transform: translate(120px, 0px) } 50% { transform: translate(240px, 0px) } 73% { transform: translate(240px, 0px) } 75% { transform: translate(360px, 0px) } 100% { transform: translate(360px, 0px) } }
+@keyframes k43 { 0% { opacity:0 } 0.1% { opacity:0 } 0.5% { opacity:1 } 49% { opacity:1 } 50.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k44 { 0% { opacity:0 } 0.1% { opacity:0 } 0.5% { opacity:1 } 24% { opacity:1 } 25.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k45 { 0% { opacity:0 } 23.5% { opacity:0 } 25% { opacity:1 } 49% { opacity:1 } 50.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k46 { 0% { opacity:0 } 48.5% { opacity:0 } 50% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k47 { 0% { opacity:0 } 48.5% { opacity:0 } 50% { opacity:1 } 74% { opacity:1 } 75.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k48 { 0% { opacity:0 } 73.5% { opacity:0 } 75% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k49 { 0% { opacity:0 } 0.1% { opacity:0 } 0.5% { opacity:1 } 49% { opacity:1 } 50.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k50 { 0% { opacity:0 } 48.5% { opacity:0 } 50% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k51 { 0% { opacity:0 } 72.5% { opacity:0 } 74% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k52 { 0% { transform: translate(220px, 0px) } 74% { transform: translate(220px, 0px) } 80% { transform: translate(0px, 0px) } 100% { transform: translate(0px, 0px) } }
+
+/* An audit across runs (16 s) */
+@keyframes k53 { 0% { opacity:0 } 0.5% { opacity:0 } 2% { opacity:1 } 30% { opacity:1 } 31.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k54 { 0% { opacity:0 } 36.5% { opacity:0 } 38% { opacity:1 } 62% { opacity:1 } 63.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k55 { 0% { opacity:0 } 66.5% { opacity:0 } 68% { opacity:1 } 96% { opacity:1 } 97.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k56 { 0% { opacity:0 } 66.5% { opacity:0 } 68% { opacity:1 } 74% { opacity:1 } 75.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k57 { 0% { fill: transparent } 8% { fill: transparent } 10% { fill: var(--warm) } 33% { fill: var(--warm) } 35% { fill: var(--muted) } 97% { fill: var(--muted) } 100% { fill: transparent } }
+@keyframes k58 { 0% { opacity:0 } 30.5% { opacity:0 } 32% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k59 { 0% { fill: transparent } 10% { fill: transparent } 12% { fill: var(--warm) } 48% { fill: var(--warm) } 50% { fill: var(--ok) } 97% { fill: var(--ok) } 100% { fill: transparent } }
+@keyframes k60 { 0% { fill: transparent } 12% { fill: transparent } 14% { fill: var(--warm) } 78% { fill: var(--warm) } 80% { fill: var(--ok) } 97% { fill: var(--ok) } 100% { fill: transparent } }
+@keyframes k61 { 0% { fill: transparent } 46% { fill: transparent } 48% { fill: var(--warm) } 80% { fill: var(--warm) } 82% { fill: var(--ok) } 97% { fill: var(--ok) } 100% { fill: transparent } }
+@keyframes k62 { 0% { fill: transparent } 16% { fill: transparent } 18% { fill: var(--bad) } 30% { fill: var(--bad) } 36% { fill: transparent } 52% { fill: transparent } 54% { fill: var(--warn) } 62% { fill: var(--warn) } 66% { fill: transparent } 84% { fill: transparent } 86% { fill: var(--ok) } 96% { fill: var(--ok) } 100% { fill: transparent } }
+@keyframes k63 { 0% { opacity:0 } 84.5% { opacity:0 } 86% { opacity:1 } 96% { opacity:1 } 97.5% { opacity:0 } 100% { opacity:0 } }
+
+/* Model text never becomes shell code (11 s) */
+@keyframes k64 { 0% { opacity:0 } 8.5% { opacity:0 } 10% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k65 { 0% { transform: translate(0px, 0px) } 12% { transform: translate(0px, 0px) } 30% { transform: translate(300px, 30px) } 60% { transform: translate(300px, 30px) } 72% { transform: translate(563px, 56px) } 100% { transform: translate(563px, 56px) } }
+@keyframes k66 { 0% { opacity:0 } 70.5% { opacity:0 } 72% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k67 { 0% { opacity:0 } 28.5% { opacity:0 } 30% { opacity:1 } 60% { opacity:1 } 61.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k68 { 0% { opacity:0 } 70.5% { opacity:0 } 72% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k69 { 0% { opacity:0 } 74.5% { opacity:0 } 76% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes k70 { 0% { transform: translate(0px, 0px) } 76% { transform: translate(0px, 0px) } 86% { transform: translate(260px, 68px) } 100% { transform: translate(260px, 68px) } }
+@keyframes k71 { 0% { opacity:0 } 84.5% { opacity:0 } 86% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+
+/* Checkable, not right (12 s) */
+@keyframes c1 { 0% { opacity:0 } 6% { opacity:0 } 8% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes c2 { 0% { transform: translate(824px, 144px) } 8% { transform: translate(824px, 144px) } 18% { transform: translate(474px, 87px) } 22% { transform: translate(474px, 87px) } 30% { transform: translate(224px, 104px) } 34% { transform: translate(224px, 104px) } 40% { transform: translate(474px, 87px) } 44% { transform: translate(474px, 87px) } 50% { transform: translate(474px, 147px) } 54% { transform: translate(474px, 147px) } 62% { transform: translate(224px, 154px) } 66% { transform: translate(224px, 154px) } 72% { transform: translate(474px, 147px) } 76% { transform: translate(474px, 147px) } 86% { transform: translate(824px, 144px) } 100% { transform: translate(824px, 144px) } }
+@keyframes c3 { 0% { opacity:0 } 28.5% { opacity:0 } 30% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes c4 { 0% { opacity:0 } 40.5% { opacity:0 } 42% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes c5 { 0% { opacity:0 } 60.5% { opacity:0 } 62% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+@keyframes c6 { 0% { opacity:0 } 72.5% { opacity:0 } 74% { opacity:1 } 97% { opacity:1 } 98.5% { opacity:0 } 100% { opacity:0 } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="kicker">Traceworks · how it works</p>
+  <h1>How Traceworks works</h1>
+  <p>Moving drawings for a reader who knows containers and git and wants the idea without reading the code. Each
+  one loops; with reduced motion set in the system, each shows one still frame.</p>
+  <p>The key features, each explained the same way: <a href="features.html">features.html</a>. The register, round by
+  round: <a href="audit-loop.html">audit-loop.html</a>.</p>
+  <div class="bar"><button id="toggle" type="button">Pause</button></div>
+</header>
+
+<section class="scene">
+  <div class="head"><h2>One run, in six stages</h2><p>A small audit with three steps, followed from the package to
+  the register. The loop takes 18 seconds.</p></div>
+  <div class="tile big"><svg id="run" viewBox="0 0 960 492" role="img" aria-label="One run through Traceworks in six stages: the package on the left, a container in the middle, and on the right the home with the record of the run, the register and the ledger" aria-describedby="run-desc" style="--still:-16.9s">
+  <desc id="run-desc">Stage by stage: the package is checked; the run starts, the register's files are handed to the run, the record gets its first line and the ledger notes the start; the first step measures in a container without network; the second step asks a model through a proxy that reaches only the provider; the third step checks the answer and sets the gate; the record ends, the ledger notes the end, and only then the register takes the report and the ledger anchors its head.</desc>
+
+  <!-- the package -->
+  <rect class="card" x="16" y="16" width="250" height="354" rx="12"/>
+  <rect class="hl" x="16" y="16" width="250" height="354" rx="12" style="animation: r-st1 18s linear infinite"/>
+  <text class="ink" x="32" y="42" font-size="16" font-weight="700">Package</text>
+  <text class="muted" x="32" y="60" font-size="12">an audit, three blocks</text>
+  <rect class="row" x="32" y="78" width="218" height="64" rx="8"/><rect class="hl" x="32" y="78" width="218" height="64" rx="8" style="animation: r-st3 18s linear infinite"/>
+  <text class="ink" x="46" y="103" font-size="13" font-weight="700">1 · measure</text><text class="soft" x="46" y="124" font-size="12">shell: a tool counts</text>
+  <rect class="row" x="32" y="152" width="218" height="64" rx="8"/><rect class="hlw" x="32" y="152" width="218" height="64" rx="8" style="animation: r-st4 18s linear infinite"/>
+  <text class="ink" x="46" y="177" font-size="13" font-weight="700">2 · judge</text><text class="soft" x="46" y="198" font-size="12">AI: one question per item</text>
+  <rect class="row" x="32" y="226" width="218" height="64" rx="8"/><rect class="hl" x="32" y="226" width="218" height="64" rx="8" style="animation: r-st5 18s linear infinite"/>
+  <text class="ink" x="46" y="251" font-size="13" font-weight="700">3 · report</text><text class="soft" x="46" y="272" font-size="12">shell: checks, sets the gate</text>
+  <text class="muted" x="32" y="330" font-size="12">workflow.json, scripts, rules</text>
+  <text class="muted" x="32" y="348" font-size="12">and its container images</text>
+
+  <!-- the container of the running step -->
+  <g class="a" style="animation: r-box 18s linear infinite">
+    <rect class="deep" x="300" y="96" width="250" height="180" rx="12"/>
+    <text class="ondeep" x="316" y="122" font-size="15" font-weight="700">Container</text>
+    <text class="ondeep2" x="316" y="142" font-size="12">workspace read-only · limits</text>
+    <path class="line" d="M266 184H298"/>
+  </g>
+  <g class="a" style="animation: r-st3 18s linear infinite"><text class="ondeep" x="316" y="182" font-size="13" font-weight="700">step 1: measure</text><text class="ondeep2" x="316" y="202" font-size="12">no network</text><text class="ondeep2" x="316" y="220" font-size="12">/register read-only</text><text class="ondeep2" x="316" y="238" font-size="12">output: the facts</text></g>
+  <g class="a" style="animation: r-st4 18s linear infinite"><text class="ondeep" x="316" y="182" font-size="13" font-weight="700">step 2: judge</text><text class="ondeep2" x="316" y="202" font-size="12">one model call per item</text><text class="ondeep2" x="316" y="220" font-size="12">tools: read only</text><text class="ondeep2" x="316" y="238" font-size="12">no /register here</text>
+    <path class="wline" d="M425 96V58"/><rect x="352" y="22" width="150" height="36" rx="8" class="warm"/><text class="onwarm" x="427" y="45" font-size="12.5" font-weight="700" text-anchor="middle">proxy → provider</text><text class="muted" x="512" y="45" font-size="11.5">nothing else</text></g>
+  <g class="a" style="animation: r-st5 18s linear infinite"><text class="ondeep" x="316" y="182" font-size="13" font-weight="700">step 3: report</text><text class="ondeep2" x="316" y="202" font-size="12">no network</text><text class="ondeep2" x="316" y="220" font-size="12">checks each quote</text><text class="ondeep2" x="316" y="238" font-size="12">the answer as a variable</text></g>
+  <text class="muted" x="300" y="300" font-size="12">a new container for every step</text>
+
+  <!-- the home -->
+  <rect class="card" x="590" y="16" width="354" height="354" rx="12"/>
+  <text class="ink" x="606" y="42" font-size="16" font-weight="700">Home</text>
+  <text class="muted" x="606" y="60" font-size="12">what the tool keeps</text>
+  <rect class="tint" x="606" y="74" width="322" height="152" rx="9"/>
+  <text class="ink" x="620" y="96" font-size="13.5" font-weight="700">Record of this run</text>
+  <text class="muted" x="914" y="96" font-size="11" text-anchor="end">six of its lines</text>
+  <text class="soft a mono12" x="620" y="116" style="animation: r-ev1 18s linear infinite">run.started</text>
+  <text class="soft a mono12" x="620" y="133" style="animation: r-ev2 18s linear infinite">step.finished</text><text class="muted a" x="760" y="133" font-size="12" style="animation: r-ev2 18s linear infinite">measure</text>
+  <text class="soft a mono12" x="620" y="150" style="animation: r-ev3 18s linear infinite">ai.request</text><text class="muted a" x="760" y="150" font-size="12" style="animation: r-ev3 18s linear infinite">judge: the prompt</text>
+  <text class="soft a mono12" x="620" y="167" style="animation: r-ev4 18s linear infinite">ai.response</text><text class="muted a" x="760" y="167" font-size="12" style="animation: r-ev4 18s linear infinite">judge: the answer</text>
+  <text class="soft a mono12" x="620" y="184" style="animation: r-ev5 18s linear infinite">gate.reported</text><text class="muted a" x="760" y="184" font-size="12" style="animation: r-ev5 18s linear infinite">report</text>
+  <text class="soft a mono12" x="620" y="201" style="animation: r-ev6 18s linear infinite">run.finished</text>
+  <text class="muted" x="620" y="218" font-size="11">each line holds the hash of the line before</text>
+  <rect class="tint" x="606" y="236" width="322" height="58" rx="9"/><rect class="hl" x="606" y="236" width="322" height="58" rx="9" style="animation: r-st6 18s linear infinite"/><rect class="hl" x="606" y="236" width="322" height="58" rx="9" style="animation: r-st2 18s linear infinite"/>
+  <text class="ink" x="620" y="259" font-size="13.5" font-weight="700">Register</text>
+  <text class="soft" x="620" y="279" font-size="12">findings, items, decisions</text>
+  <text class="teal a" x="914" y="259" font-size="12.5" font-weight="700" text-anchor="end" style="animation: r-reg 18s linear infinite">written: 2 new · 1 resolved</text>
+  <text class="teal a" x="914" y="259" font-size="12.5" font-weight="700" text-anchor="end" style="animation: r-st2 18s linear infinite">handed to the run as files</text>
+  <rect class="deep" x="606" y="304" width="322" height="56" rx="9"/>
+  <text class="ondeep" x="620" y="326" font-size="13.5" font-weight="700">Ledger</text>
+  <text class="ondeep2" x="914" y="326" font-size="11.5" text-anchor="end">git, outside the run folders</text>
+  <text class="ondeep2 a" x="620" y="348" font-size="12" style="animation: r-led1 18s linear infinite">start noted</text>
+  <text class="ondeep2 a" x="700" y="348" font-size="12" style="animation: r-led2 18s linear infinite">· end noted</text>
+  <text class="ondeep2 a" x="782" y="348" font-size="12" style="animation: r-led3 18s linear infinite">· register anchored</text>
+  <path class="line" d="M552 184H588"/><path class="ink" d="M588 184L578 178.5V189.5z"/>
+
+  <!-- the caption of the stage -->
+  <rect x="16" y="382" width="928" height="96" rx="12" class="row"/>
+  <g class="a" style="animation: r-st1 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">1 OF 6 · CHECK</text>
+    <text class="ink" x="34" y="434" font-size="15">The package is read and checked, and nothing runs yet.</text>
+    <text class="ink" x="34" y="458" font-size="15">By default a package that <tspan class="mono15">traceworks check</tspan> reports with an error starts no run at all.</text></g>
+  <g class="a" style="animation: r-st2 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">2 OF 6 · START</text>
+    <text class="ink" x="34" y="434" font-size="15">What the register knows is written into the run folder as files, read-only in the containers.</text>
+    <text class="ink" x="34" y="458" font-size="15">The record gets its first line, <tspan class="mono15">run.started</tspan>, and the ledger notes the start before any step runs.</text></g>
+  <g class="a" style="animation: r-st3 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">3 OF 6 · A DETERMINISTIC STEP</text>
+    <text class="ink" x="34" y="434" font-size="15">Step 1 measures in a container without network. What it finds is the list that is judged.</text>
+    <text class="ink" x="34" y="458" font-size="15">It writes only to the run's scratch folder; the workspace and the package are read-only.</text></g>
+  <g class="a" style="animation: r-st4 18s linear infinite"><text class="warm" x="34" y="408" font-size="13" font-weight="700">4 OF 6 · A MODEL IS ASKED</text>
+    <text class="ink" x="34" y="434" font-size="15">Step 2 asks a model. Its container reaches only the provider, through the egress proxy.</text>
+    <text class="ink" x="34" y="458" font-size="15">The record keeps the prompt, the answer and every connection the container asked for.</text></g>
+  <g class="a" style="animation: r-st5 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">5 OF 6 · THE ANSWER IS CHECKED</text>
+    <text class="ink" x="34" y="434" font-size="15">Step 3 checks each quote of the answer against the facts, writes the report and sets the gate.</text>
+    <text class="ink" x="34" y="458" font-size="15">The answer reaches this shell step only as a named variable, never inside its command line.</text></g>
+  <g class="a" style="animation: r-st6 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">6 OF 6 · THE REGISTER</text>
+    <text class="ink" x="34" y="434" font-size="15">The record ends with <tspan class="mono15">run.finished</tspan>, and the ledger notes the end of the run.</text>
+    <text class="ink" x="34" y="458" font-size="15">Only then does the register take the report: new, seen, resolved. The ledger anchors its new head.</text></g>
+</svg></div>
+  <p class="hint">On a narrow screen the drawing scrolls sideways inside its frame. With reduced motion set in the system,
+  it shows the last stage.</p>
+  <ol class="steps">
+    <li><b>Check</b><span>The package is read and checked, and nothing runs yet. By default a package that
+    <code>traceworks check</code> reports with an error starts no run at all.</span></li>
+    <li><b>Start</b><span>What the register knows is written into the run folder as files (<code>register/</code>),
+    read-only in the containers. The record gets its first line, <code>run.started</code>, which names the digest of
+    each file, and the ledger notes the start before any step runs.</span></li>
+    <li><b>A deterministic step</b><span>Step 1 measures in a container without network. What it finds is the list
+    that is judged. It writes only to the run's scratch folder; the workspace and the package are read-only.</span></li>
+    <li class="ai"><b>A model is asked</b><span>Step 2 asks a model. By default its container reaches only the
+    provider, through the egress proxy, and it does not get the register's folder. The record keeps the prompt
+    (<code>ai.request</code>), the answer (<code>ai.response</code>) and every connection the container asked
+    for.</span></li>
+    <li><b>The answer is checked</b><span>Step 3 checks each quote of the answer against what step 1 measured, writes
+    the report and sets the gate (<code>gate.reported</code>). The answer reaches this shell step only as a named
+    variable, never inside its command line.</span></li>
+    <li><b>The register</b><span>The record ends with <code>run.finished</code>, and the ledger notes the end. Only
+    then does the register take the report: new, seen, resolved. During the run it was only read. The ledger anchors the
+    register's new head.</span></li>
+  </ol>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>Inside one step</h2><p>Each step runs in a container of its own. By default it reads the
+  workspace, writes only its scratch folder and has no network; more than that needs the step to say so and, for a
+  folder of the host, the operator to allow it. An AI step reaches only its provider, or a model server the operator
+  declared, through a proxy that records every connection the container asked for.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 300" role="img" aria-label="A step's container between two folders: it reads the workspace, which is locked, and writes the scratch folder. To the right a wall stops a packet to anything else, while an AI call passes a proxy to the provider or the operator's own model server, and the connection is recorded." style="--still:-9.9s"><rect class="f-box" x="360" y="70" width="240" height="150" rx="16"/><text class="lbl onbox" x="480" y="98" text-anchor="middle">one step, its own container</text><use href="#i-folder" x="70" y="40" width="110" height="84"/><use href="#i-lock" x="150" y="38" width="26" height="28"/><text class="lbl" x="125" y="146" text-anchor="middle">workspace, read-only</text><use href="#i-folder" x="70" y="176" width="110" height="84"/><use href="#i-pen" x="150" y="174" width="28" height="28"/><text class="lbl" x="125" y="282" text-anchor="middle">scratch, writable</text><path class="s-arrow" d="M190 90H352"/><path class="s-arrowhead" d="M352 84L362 90L352 96z"/><path class="s-arrow" d="M362 208H198"/><path class="s-arrowhead" d="M198 202L188 208L198 214z"/><path class="s-arrowhead" d="M352 202L362 208L352 214z"/><path class="s-wall" d="M700 168V264"/><use href="#i-globe" x="800" y="178" width="70" height="70"/><text class="lbl" x="835" y="270" text-anchor="middle">anything else</text><path class="s-dotted" d="M600 214H696"/><use href="#i-shield" x="684" y="54" width="40" height="46"/><text class="lbl" x="704" y="44" text-anchor="middle">proxy</text><path class="s-ai" d="M600 80H684M726 78H790"/><use href="#i-cloud" x="790" y="40" width="110" height="64"/><text class="lbl" x="845" y="124" text-anchor="middle">the provider</text><text class="lbl" x="845" y="142" text-anchor="middle" opacity="0.75">or your own model server</text><circle class="f-packet" cx="190" cy="90" r="7" style="animation: k22 11s linear infinite"/><circle class="f-packet" cx="350" cy="208" r="7" style="animation: k24 11s linear infinite"/><circle class="f-bad" cx="610" cy="214" r="7" style="animation: k25 11s linear infinite"/><g style="animation: k26 11s linear infinite"><path class="s-x" d="M688 200L712 224M712 200L688 224"/></g><circle class="f-ai" cx="610" cy="80" r="7" style="animation: k27 11s linear infinite"/><g style="animation: k28 11s linear infinite"><rect class="f-link" x="692" y="118" width="24" height="22" rx="5"/><text class="lbl dim" x="704" y="158" text-anchor="middle">recorded</text></g></svg></div>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>The record is a chain</h2><p>Each line of a run's record holds the hash of the line before.
+  Change one line, and the line after it no longer fits: <code>traceworks verify</code> finds the place. The manifest
+  names the last hash and the ledger keeps a copy of it, so a finished record that was cut short, or rewritten to its
+  end, is found too.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 280" role="img" aria-label="Seven linked boxes from run.started to run.finished. One box changes colour and the link after it breaks; a magnifying glass finds the place, and verify says the chain breaks after it. A dotted line from the last box leads down to the ledger, which keeps a copy of the manifest." style="--still:-9s"><rect class="f-linkbig" x="100" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M112 114H138M112 126H130"/><path class="s-chainthick" d="M130 120H210"/><rect class="f-linkbig" x="210" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M222 114H248M222 126H240"/><path class="s-chainthick" d="M240 120H320"/><rect class="f-linkbig" x="320" y="96" width="50" height="48" rx="10" style="animation: k29 11s linear infinite"/><path class="s-hashmark" d="M332 114H358M332 126H350"/><path class="s-chainthick" d="M350 120H430" style="animation: k30 11s linear infinite"/><rect class="f-linkbig" x="430" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M442 114H468M442 126H460"/><path class="s-chainthick" d="M460 120H540"/><rect class="f-linkbig" x="540" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M552 114H578M552 126H570"/><path class="s-chainthick" d="M570 120H650"/><rect class="f-linkbig" x="650" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M662 114H688M662 126H680"/><path class="s-chainthick" d="M680 120H760"/><rect class="f-linkbig" x="760" y="96" width="50" height="48" rx="10"/><path class="s-hashmark" d="M772 114H798M772 126H790"/><text class="lbl dim" x="100" y="80">run.started</text><text class="lbl dim" x="810" y="80" text-anchor="end">run.finished</text><g style="animation: k34 11s linear infinite"><text class="lbl warmtxt" x="245" y="178" text-anchor="middle">one line changed</text></g><g style="animation: k35 11s linear infinite"><g style="animation: k36 11s linear infinite"><use href="#i-glass" x="380" y="70" width="80" height="80"/></g></g><g style="animation: k37 11s linear infinite"><path class="s-x" d="M404 186L428 210M428 186L404 210"/><text class="lbl warmtxt" x="440" y="204">verify: the chain breaks after it</text></g><path class="s-dotted2" d="M785 144V232"/><circle class="f-ledger" cx="785" cy="246" r="14"/><text class="lbl" x="763" y="251" text-anchor="end">ledger: a copy of the manifest, with the last hash</text></svg></div>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>A deleted run leaves a loose end</h2><p>The ledger, a git repository outside the run folders,
+  notes a run when it starts and again when it ends. Kill a run and delete its folder: the start entry stays, and
+  <code>traceworks verify</code> lists a run that started, never ended and has no folder. The ledger is not signed:
+  whoever can write to it can add an entry, and a rewrite of its history shows only where it was pushed to a remote
+  that refuses rewrites.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 300" role="img" aria-label="Four phases: start, kill, delete and verify. A run folder appears, its run is stopped, the folder is deleted and a warning is left in its place. Below, the ledger keeps the start entry; its thread now leads nowhere, and a magnifying glass finds it." style="--still:-12s"><text class="phase" x="300" y="40" text-anchor="middle" style="animation: k38 13s linear infinite">start</text><text class="phase" x="420" y="40" text-anchor="middle" style="animation: k39 13s linear infinite">kill</text><text class="phase" x="540" y="40" text-anchor="middle" style="animation: k40 13s linear infinite">delete</text><text class="phase" x="660" y="40" text-anchor="middle" style="animation: k41 13s linear infinite">verify</text><path class="s-track" d="M240 54H720"/><circle class="f-token" cx="300" cy="54" r="7" style="animation: k42 13s linear infinite"/><g style="animation: k43 13s linear infinite"><use href="#i-folder" x="420" y="86" width="120" height="92"/></g><g style="animation: k44 13s linear infinite"><use href="#i-page" x="465" y="118" width="30" height="38"/></g><g style="animation: k45 13s linear infinite"><use href="#i-page" x="440" y="118" width="30" height="38"/><use href="#i-page" x="466" y="114" width="30" height="38"/><use href="#i-page" x="492" y="110" width="30" height="38"/><path class="f-stop" d="M535 80H553L566 93V111L553 124H535L522 111V93z"/><path class="s-onwarm" d="M534 102H554"/></g><g style="animation: k46 13s linear infinite"><path class="s-gone" d="M424 100V94Q424 90 428 90H460L468 100H532Q536 100 536 104V170Q536 174 532 174H428Q424 174 424 170z"/></g><g style="animation: k47 13s linear infinite"><path class="s-trash" d="M467 125H493M475 125V120H485V125M470 125L472 148H488L490 125"/></g><g style="animation: k48 13s linear infinite"><path class="f-warn" d="M480 104L506 150H454z"/><path class="s-onwarm" d="M480 118V136"/><circle class="f-onwarm" cx="480" cy="143" r="2.6"/></g><path class="s-thread" d="M480 178V232" style="animation: k49 13s linear infinite"/><path class="s-loose" d="M480 232V196" style="animation: k50 13s linear infinite"/><rect class="f-link old" x="344" y="240" width="26" height="26" rx="6"/><path class="s-chain" d="M370 253H384"/><rect class="f-link old" x="384" y="240" width="26" height="26" rx="6"/><path class="s-chain" d="M410 253H424"/><rect class="f-link old" x="424" y="240" width="26" height="26" rx="6"/><path class="s-chain" d="M450 253H464"/><rect class="f-new" x="464" y="236" width="34" height="34" rx="8"/><text class="lbl dim" x="481" y="292" text-anchor="middle">start entry</text><text class="lbl dim" x="260" y="140">run folder</text><text class="lbl dim" x="260" y="258">ledger</text><g style="animation: k51 13s linear infinite"><g style="animation: k52 13s linear infinite"><use href="#i-glass" x="474" y="222" width="64" height="64"/></g></g></svg></div>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>An audit across runs</h2><p>Each run reports to its register: new, seen, resolved. A person,
+  or an agent that names itself, decides on what stays, and the register records the actor and that name: labels,
+  not signatures. A finding a model judged is resolved only when a run names it as gone, never by silence. The next
+  run reads what is known, and a resolved finding stays on record.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 300" role="img" aria-label="Three runs in turn send a report to a register. Its findings turn open, then one is decided by a person and the others are resolved, and the gate beside it goes from red through yellow to green when all are settled." style="--still:-14.4s"><rect class="f-reg" x="350" y="70" width="260" height="170" rx="14"/><text class="lbl" x="480" y="60" text-anchor="middle">register</text><g style="animation: k53 16s linear infinite"><circle class="f-run" cx="160" cy="155" r="40"/><text class="lbl onrun" x="160" y="161" text-anchor="middle">run 1</text></g><g style="animation: k54 16s linear infinite"><circle class="f-run" cx="160" cy="155" r="40"/><text class="lbl onrun" x="160" y="161" text-anchor="middle">run 2</text></g><g style="animation: k55 16s linear infinite"><circle class="f-run" cx="160" cy="155" r="40"/><text class="lbl onrun" x="160" y="161" text-anchor="middle">run 3</text></g><path class="s-arrow" d="M204 140H342"/><path class="s-arrowhead" d="M342 134L352 140L342 146z"/><text class="lbl dim" x="270" y="128" text-anchor="middle">report</text><g style="animation: k56 16s linear infinite"><path class="s-ai" d="M350 176H210"/><text class="lbl" x="280" y="200" text-anchor="middle">reads what is known</text></g><circle cx="400" cy="120" r="14" style="animation: k57 16s linear infinite"/><g style="animation: k58 16s linear infinite"><use href="#i-person" x="412" y="96" width="22" height="22"/></g><circle cx="460" cy="120" r="14" style="animation: k59 16s linear infinite"/><circle cx="520" cy="120" r="14" style="animation: k60 16s linear infinite"/><circle cx="400" cy="180" r="14" style="animation: k61 16s linear infinite"/><circle class="s-slot" cx="400" cy="120" r="14"/><circle class="s-slot" cx="460" cy="120" r="14"/><circle class="s-slot" cx="520" cy="120" r="14"/><circle class="s-slot" cx="400" cy="180" r="14"/><circle class="s-slot" cx="460" cy="180" r="14"/><circle cx="760" cy="155" r="26" class="s-slot"/><circle cx="760" cy="155" r="22" style="animation: k62 16s linear infinite"/><text class="lbl" x="760" y="205" text-anchor="middle">gate</text><g style="animation: k63 16s linear infinite"><text class="lbl" x="760" y="232" text-anchor="middle">all settled</text></g><g><circle class="f-warmdot" cx="380" cy="272" r="7"/><text class="lbl" x="394" y="277">open</text><circle class="f-mutedot" cx="452" cy="272" r="7"/><text class="lbl" x="466" y="277">decided</text><circle class="f-okdot" cx="540" cy="272" r="7"/><text class="lbl" x="554" y="277">resolved, kept on record</text></g></svg></div>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>Model text never becomes shell code</h2><p>What a model wrote reaches a shell command only as a
+  named variable: the block's <code>values</code> set it before the command runs, and bash never parses what it
+  holds. The same holds for untrusted input and the register's data. A shell line that names such a placeholder is
+  refused, by <code>traceworks check</code> and by the run, and nothing of it runs.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 310" role="img" aria-label="A speech bubble holds a model's text with a command substitution in it. Only a variable, REVIEW, travels from the bubble into the command line, which stays as its author wrote it and is accepted. The substitution written straight into the line is refused." style="--still:-9.9s"><path class="f-bubble" d="M40 70H300Q312 70 312 82V140Q312 152 300 152H110L84 176L88 152H40Q28 152 28 140V82Q28 70 40 70z"/><text class="lbl" x="44" y="62">what a model wrote</text><text class="mono onbubble" x="48" y="118">it's fine $(rm -rf ~)</text><rect class="f-shell" x="520" y="200" width="410" height="56" rx="10"/><text class="lbl" x="536" y="282">the command line, as written</text><text class="mono onshell" x="540" y="234">printf '%s\n' "$REVIEW"</text><g style="animation: k64 11s linear infinite"><g style="animation: k65 11s linear infinite"><rect class="f-var" x="80" y="94" width="150" height="40" rx="9"/><text class="mono onvar" x="155" y="120" text-anchor="middle">$REVIEW</text></g></g><path class="s-thread" d="M718 190V214" style="animation: k66 11s linear infinite"/><text class="lbl" x="455" y="190" text-anchor="middle" style="animation: k67 11s linear infinite">handed over by name, in values</text><g style="animation: k68 11s linear infinite"><circle class="f-okdot" cx="900" cy="228" r="11"/><path class="s-onok" d="M894 228L899 233L907 223"/></g><g style="animation: k69 11s linear infinite"><g style="animation: k70 11s linear infinite"><text class="mono warmtxt" x="150" y="118">$(rm -rf ~)</text></g></g><g style="animation: k71 11s linear infinite"><path class="s-x" d="M530 166L552 188M552 166L530 188"/><text class="lbl warmtxt" x="300" y="238">written straight in: refused</text></g></svg></div>
+</section>
+
+<section class="scene">
+  <div class="head"><h2>Checkable, not right</h2><p>Traceworks makes a result checkable; it does not make it right.
+  The record holds what was asked, answered and measured, and who answered a question of the run: the actor, and the
+  agent when one named itself. A second reader, a person or another model, goes over what a run found from
+  that record, and a record that verifies can still hold a wrong finding.</p></div>
+  <div class="tile"><svg viewBox="0 0 960 300" role="img" aria-label="Four lines of a run's record, what was asked, answered and measured and who answered, and verify says the record holds. A magnifying glass goes from each of two findings back to the record: finding 1 holds, finding 2 does not." style="--still:-10.8s"><text class="lbl dim" x="40" y="44">the record of a run</text><rect class="f-row" x="40" y="60" width="300" height="40" rx="8"/><rect class="f-row" x="40" y="110" width="300" height="40" rx="8"/><rect class="f-row" x="40" y="160" width="300" height="40" rx="8"/><rect class="f-row" x="40" y="210" width="300" height="40" rx="8"/><path class="s-chain" d="M70 100V110M70 150V160M70 200V210"/><text class="mono15" x="56" y="86">ai.request</text><text class="lbl dim" x="326" y="86" text-anchor="end">what was asked</text><text class="mono15" x="56" y="136">ai.response</text><text class="lbl dim" x="326" y="136" text-anchor="end">what was answered</text><text class="mono15" x="56" y="186">step.output</text><text class="lbl dim" x="326" y="186" text-anchor="end">what was measured</text><text class="mono15" x="56" y="236">approval.answered</text><text class="lbl dim" x="326" y="236" text-anchor="end">who answered</text><g style="animation: c1 12s linear infinite"><circle class="f-ok" cx="54" cy="276" r="11"/><path class="s-onok" d="M49 276L53 280L60 271"/><text class="lbl" x="74" y="281">verify: the record holds</text></g><text class="lbl dim" x="515" y="56" text-anchor="middle">what the run found</text><rect class="s-paper" x="420" y="66" width="190" height="168" rx="10"/><circle class="f-token" cx="446" cy="113" r="7"/><text class="lbl" x="462" y="118">finding 1</text><path class="s-hashmark" d="M446 138H586"/><circle class="f-token" cx="446" cy="173" r="7"/><text class="lbl" x="462" y="178">finding 2</text><path class="s-hashmark" d="M446 198H586"/><path class="s-thread" d="M438 114L342 128" style="animation: c3 12s linear infinite"/><path class="s-loose" d="M438 174L342 180" style="animation: c5 12s linear infinite"/><g style="animation: c4 12s linear infinite"><circle class="f-ok" cx="636" cy="113" r="11"/><path class="s-onok" d="M631 113L635 117L642 108"/><text class="lbl" x="656" y="118">holds</text></g><g style="animation: c6 12s linear infinite"><path class="s-x" d="M627 164L645 182M645 164L627 182"/><text class="lbl" x="656" y="178">does not hold</text></g><text class="lbl dim" x="840" y="44" text-anchor="middle">a second reader</text><use href="#i-person" x="768" y="64" width="44" height="44"/><text class="lbl" x="790" y="128" text-anchor="middle">a person</text><circle class="s-step-ai" cx="890" cy="86" r="20"/><text class="lbl" x="890" y="128" text-anchor="middle">another model</text><g transform="translate(824 144)" style="animation: c2 12s linear infinite"><use href="#i-glass" width="64" height="64"/></g></svg></div>
+</section>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-folder" viewBox="0 0 120 92"><path class="s-tab" d="M4 14V8Q4 4 8 4H40L48 14z"/><rect class="s-folder" x="4" y="14" width="112" height="74" rx="7"/></symbol>
+<symbol id="i-page" viewBox="0 0 30 38"><rect class="s-paper" x="1" y="1" width="28" height="36" rx="3"/><path class="s-lines" d="M7 11H23M7 18H23M7 25H17"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 26"><rect class="s-badge" x="2" y="11" width="20" height="14" rx="3"/><path class="s-badgeline" d="M7 11V7Q7 2 12 2Q17 2 17 7V11"/></symbol>
+<symbol id="i-pen" viewBox="0 0 26 26"><circle class="s-badge" cx="13" cy="13" r="12"/><path class="s-onbadge" d="M8 18L9 14L16 7L19 10L12 17z"/></symbol>
+<symbol id="i-cloud" viewBox="0 0 110 64"><path class="s-cloud" d="M28 58Q6 58 6 40Q6 24 24 22Q28 6 48 6Q66 6 72 20Q90 16 98 30Q108 34 104 46Q100 58 86 58z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 64 64"><circle class="s-globe" cx="32" cy="32" r="26"/><path class="s-globeline" d="M6 32H58M32 6Q18 32 32 58M32 6Q46 32 32 58M12 18H52M12 46H52"/></symbol>
+<symbol id="i-shield" viewBox="0 0 44 50"><path class="s-shield" d="M22 3L40 10V24Q40 40 22 47Q4 40 4 24V10z"/><path class="s-onbadge2" d="M14 25L20 31L31 18"/></symbol>
+<symbol id="i-person" viewBox="0 0 30 30"><circle class="s-badge" cx="15" cy="15" r="14"/><circle class="s-onbadge" cx="15" cy="11" r="4.5"/><path class="s-onbadge" d="M7 24Q8 17 15 17Q22 17 23 24z"/></symbol>
+<symbol id="i-glass" viewBox="0 0 60 60"><circle class="s-glass" cx="24" cy="24" r="17"/><path class="s-glasshandle" d="M37 37L52 52"/></symbol>
+</defs></svg>
+
+<footer>This page loads nothing from the network. The text behind it: <code>docs/events.md</code>,
+<code>docs/registers.md</code>, <code>docs/security.md</code>, <code>docs/workflow-format.md</code>,
+<code>docs/cli.md</code> and <code>docs/architecture.md</code>. The key features, each explained the same way:
+<a href="features.html">features.html</a>. The register, round by round: <a href="audit-loop.html">audit-loop.html</a>.</footer>
+</div>
+
+<script>
+(function () {
+  var button = document.getElementById("toggle");
+  if (!button) { return; }
+  button.addEventListener("click", function () {
+    var paused = document.body.classList.toggle("paused");
+    button.textContent = paused ? "Play" : "Pause";
+  });
+})();
+</script>
+</body>
+</html>
