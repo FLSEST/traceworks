@@ -15,15 +15,10 @@ and exits.
 It is for work that has to be done the same way again and shown afterwards: checks, audits and reviews of a
 repository, with or without a model, where "what ran, with which inputs, and who decided what" needs an answer.
 
-## What it is for, and what it is not
-
-Work that a model did, or a script, should be open to doubt. Traceworks makes it checkable: what was asked, what
-was answered, what was measured and who decided are on record, and the same run can be made again. So a second
-reader can go over what a run found, from the record and not from a summary. That reader can be a person, or
-another model, which is much faster; its answer is on record in turn.
-
-Traceworks does not make a result right. A workflow that asks the wrong question repeats the wrong answer, run
-after run. Whether a result is worth anything is decided by how well the workflow is built for the case and the
+**What it does not do:** it does not make a result right. Traceworks makes the work of a model or a script
+checkable: what was asked, what was answered, what was measured and who decided are on record, so a second reader,
+a person or another model, can go over what a run found. A workflow that asks the wrong question repeats the wrong
+answer, run after run. Whether a result is worth anything is decided by how well the workflow is built for the
 question, and by someone who reads what it found.
 
 ## The idea
@@ -210,12 +205,9 @@ with a gap, and the gate counts the findings no person has decided on. They diff
 
 Each has a register of its own.
 
-Both were wrong where nobody had looked. The grounded audit ran twice on Traceworks itself, and the two runs
-agreed: no rating moved. Then each of the 19 findings rated `HIGH` was read against the code and every test, by
-an agent working from the record of the run. 3 held as rated. Two faults of the measurement, which PIT's own data
-in the record showed, explain 7 of the others
-([the numbers](examples/mutation-testing-grounded/README.md#two-real-runs)). Two runs that agree show that an
-audit repeats itself, not that it is right.
+Two runs that agree show that an audit repeats itself, not that it is right: of the 19 findings the grounded
+audit rated `HIGH` on Traceworks itself, in two runs that agreed, 3 held as rated when each was read against the
+code ([the numbers](examples/mutation-testing-grounded/README.md#two-real-runs)).
 
 ## Audits and the register
 
