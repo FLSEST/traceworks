@@ -69,6 +69,33 @@ class ProcessTreeTest {
     }
 
     /**
+     * A process without children that ignores SIGTERM: nothing of a tree is left to find after the grace period but
+     * the process itself, which is killed then.
+     */
+    @Test
+    void aLoneProcessThatIgnoresSigterm_isKilledAfterTheGracePeriod() throws Exception {
+        // Shell builtins only: the loop starts no process of its own
+        Process proc = start("trap '' TERM; echo ready; while :; do :; done");
+        try {
+            String first = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try {
+                    return proc.inputReader().readLine();
+                } catch (IOException e) {
+                    return "reading failed: " + e;
+                }
+            }).get(PATIENCE.toSeconds(), TimeUnit.SECONDS);
+            assertThat(first).isEqualTo("ready");
+            assertThat(proc.descendants()).as("a process without children").isEmpty();
+
+            ProcessTree.terminate(proc).get(ProcessTree.GRACE.toSeconds() + 5, TimeUnit.SECONDS);
+
+            assertThat(proc.waitFor(5, TimeUnit.SECONDS)).as("the process ended").isTrue();
+        } finally {
+            proc.destroyForcibly();
+        }
+    }
+
+    /**
      * A cleanup that takes a while gets the grace period to finish: SIGKILL comes only for what is still there after
      * it.
      */
