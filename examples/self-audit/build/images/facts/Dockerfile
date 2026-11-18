@@ -2,8 +2,8 @@
 # with the Maven its maven step runs. Maven comes out of its official image (3.10.0); the JDK is SapMachine 21 on
 # Ubuntu 24.04, the base of this image. Both are pinned by digest, so the same Dockerfile always starts from the same
 # bytes. Nothing else is installed or downloaded: the tool is plain JDK.
-FROM maven:3.10.0-eclipse-temurin-21-noble@sha256:f6d6c7eb62ca6a7034c17bb04a6177a8269ca38e3a1febf95094dfcd97d1305b AS maven
-FROM sapmachine:21-jdk-ubuntu-noble@sha256:701a9f10d16130748b91ec48cbfbf6a48fbe2d0e1de510cb38af8f9e1435856c
+FROM docker.io/library/maven:3.10.0-eclipse-temurin-21-noble@sha256:f6d6c7eb62ca6a7034c17bb04a6177a8269ca38e3a1febf95094dfcd97d1305b AS maven
+FROM docker.io/library/sapmachine:21-jdk-ubuntu-noble@sha256:701a9f10d16130748b91ec48cbfbf6a48fbe2d0e1de510cb38af8f9e1435856c
 LABEL org.opencontainers.image.description="the build facts tool compiled from src/ on Maven 3.10.0 and JDK 21: measures the build, dependencies and registries"
 
 COPY --from=maven /usr/share/maven /usr/share/maven

@@ -275,12 +275,12 @@ class MainTest {
 
         assertThat(r.code()).as(r.out() + r.err()).isZero();
         String started = Files.readAllLines(runFolder(idOf(r)).resolve("events.jsonl")).getFirst();
-        assertThat(started).contains("{\"reference\":\"shell\",\"base\":\"debian:bookworm-slim\",\"description\":\"",
+        assertThat(started).contains("{\"reference\":\"shell\",\"base\":\"docker.io/library/debian:bookworm-slim\",\"description\":\"",
                 "{\"reference\":\"./images/tools\",\"base\":\"eclipse-temurin:21-jdk-noble\",\"description\":"
                         + "\"the tools on JDK 21\"}");
         Result show = exec("show", idOf(r));
         assertThat(show.out()).contains("Images" + System.lineSeparator()
-                + "| shell                    debian:bookworm-slim", "| ./images/tools           eclipse-temurin:21-jdk-noble"
+                + "| shell                    docker.io/library/debian:bookworm-slim", "| ./images/tools           eclipse-temurin:21-jdk-noble"
                 + "   the tools on JDK 21");
     }
 

@@ -78,6 +78,12 @@ final class ContainerArguments {
     static final String TMP = "/tmp:rw,exec,nosuid,nodev,size=1g";
     /** The options of the tmpfs that covers the .git directory of the package: empty, and nothing can be put there. */
     private static final String GIT_COVER = "/.git:ro,size=4k,mode=555";
+    /**
+     * What Podman needs besides: it fills a tmpfs with the files of the directory below it unless the mount says
+     * {@code notmpcopyup}, so the cover would show what it is there to hide. Docker copies nothing and refuses the
+     * option.
+     */
+    private static final String PODMAN_NO_COPY = ",notmpcopyup";
 
     /** The shell a shell command runs in ({@code core.container.ContainerCommandRunner}). */
     static final String SHELL = "/bin/bash";
@@ -210,11 +216,11 @@ final class ContainerArguments {
                                 git.toString()))));
             }
             if (isPackageWithGitDirectory(mount, run, source)) {
-                arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + GIT_COVER));
+                arguments.addAll(List.of("--tmpfs", mountPath("container", mount.containerPath()) + gitCover(client)));
             } else if (i < own) {
                 String inside = packageWithGitDirectoryInside(mount, run, source);
                 if (inside != null) {
-                    arguments.addAll(List.of("--tmpfs", mountPath("container", inside) + GIT_COVER));
+                    arguments.addAll(List.of("--tmpfs", mountPath("container", inside) + gitCover(client)));
                 }
             }
         }
@@ -355,6 +361,11 @@ final class ContainerArguments {
                     + " (sha256:<64 hex digits>)");
         }
         return client == Client.PODMAN ? id.group(1) : imageId;
+    }
+
+    /** The options of the tmpfs over a package's {@code .git}, as {@code client} needs them to leave it empty. */
+    private static String gitCover(Client client) {
+        return client == Client.PODMAN ? GIT_COVER + PODMAN_NO_COPY : GIT_COVER;
     }
 
     /**
