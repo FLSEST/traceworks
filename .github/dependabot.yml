@@ -1,4 +1,5 @@
-# Dependabot: pull requests once a week, for what it can read.
+# Dependabot: pull requests for what it can read, once a week for Maven and the actions, every day for the base
+# images, so that a security fix of an image arrives within a day.
 #
 # It reads the POMs, the actions of .github/workflows and the FROM lines of the Dockerfiles. It does not read a
 # version inside a RUN line (the AI CLIs that the images claude and pi install with npm) or inside a script (PIT in
@@ -38,7 +39,7 @@ updates:
       - /integration-tests/fake-ai/*
       - /integration-tests/packages/*/images/*
     schedule:
-      interval: weekly
+      interval: daily
     groups:
       images:
         patterns: ["*"]
