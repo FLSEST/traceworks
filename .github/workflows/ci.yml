@@ -79,7 +79,16 @@ jobs:
       # fail without them; no test builds them. The jar builds them, as a user would.
       - name: Jar
         run: mvn -B -DskipTests package
+      # Without a setting Traceworks takes Docker where both runtimes are installed, as on the runner: the container
+      # tests of the other modules run with that one. The suite of the Podman leg needs the images in Podman too,
+      # so that leg builds them a second time, with a home that names Podman.
       - name: Built-in images
-        run: java -jar traceworks-cli/target/traceworks.jar images build
+        run: |
+          java -jar traceworks-cli/target/traceworks.jar images build
+          if [ "$TRACEWORKS_IT_RUNTIME" = podman ]; then
+            mkdir -p "$RUNNER_TEMP/podman-home"
+            printf '{"container_runtime": "podman"}\n' > "$RUNNER_TEMP/podman-home/traceworks.json"
+            TRACEWORKS_HOME="$RUNNER_TEMP/podman-home" java -jar traceworks-cli/target/traceworks.jar images build
+          fi
       - name: Container tests and integration tests
         run: mvn -B -Pit verify

@@ -258,7 +258,9 @@ final class ItEnvironment {
                     throw new AssertionError("'" + runtime + " image inspect " + reference + "' failed: "
                             + Files.readString(out, StandardCharsets.UTF_8).strip());
                 }
-                return Files.readString(out, StandardCharsets.UTF_8).strip();
+                // Podman prints the bare hex; the record names an image ID with its algorithm, as Docker prints it.
+                String id = Files.readString(out, StandardCharsets.UTF_8).strip();
+                return id.startsWith("sha256:") ? id : "sha256:" + id;
             } finally {
                 Files.deleteIfExists(out);
             }

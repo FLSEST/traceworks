@@ -446,6 +446,29 @@ class ContainerArgumentsTest {
     }
 
     /**
+     * Podman fills a tmpfs with what the directory below it holds unless told not to, so its cover of the package's
+     * .git would show every file it is there to hide. Docker does not know the option and refuses it.
+     */
+    @Test
+    void arguments_forPodman_tellTheCoverOfTheGitDirectoryNotToCopyWhatItCovers(@TempDir Path home)
+            throws IOException {
+        Path pkg = Files.createDirectories(home.resolve("pkg"));
+        Files.createDirectories(pkg.resolve(".git"));
+        Path workspace = Files.createDirectories(home.resolve("ws"));
+        ContainerRun run = new ContainerRun("traceworks-r1-1", "r1", IMAGE_ID, "/bin/bash", List.of("-c", "true"),
+                "/workspace", List.of(new Mount(workspace.toString(), "/workspace", true),
+                        new Mount(pkg.toString(), "/package", true)),
+                new RunDirectories(workspace.toString(), pkg.toString(), null), false, Map.of(), null, 60,
+                ContainerLimits.DEFAULTS);
+
+        assertThat(ContainerArguments.of(Client.PODMAN, run, USER, UnaryOperator.identity()).arguments())
+                .containsSubsequence("--tmpfs", "/package/.git:ro,size=4k,mode=555,notmpcopyup");
+        assertThat(ContainerArguments.of(Client.DOCKER, run, USER, UnaryOperator.identity()).arguments())
+                .containsSubsequence("--tmpfs", "/package/.git:ro,size=4k,mode=555")
+                .noneMatch(argument -> argument.contains("notmpcopyup"));
+    }
+
+    /**
      * A workspace that holds the package shows the package a second time, at its place in the workspace. With a
      * read-only workspace no second package mount lies there, so the package's .git must be covered at that place
      * too; with a writable one the package's own mount there brings its cover, and the place is covered once.
