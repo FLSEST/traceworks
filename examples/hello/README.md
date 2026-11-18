@@ -13,6 +13,10 @@ question, takes an answer, resumes, and leaves a record you can verify.
 The workflow sets `metadata.gate.expected: true`, so a run must report a gate. `count` does: it prints
 `gate_status: GREEN`.
 
+Each shell block starts with `set -euo pipefail`, so a command that fails, a variable that is not set or a failing
+part of a pipe fails the block instead of being passed over. `traceworks check` notes a shell block without it
+(`missing-strict-mode`).
+
 ## Try it
 
 From the root of the repository, after `mvn -q package`, with `podman` or `docker` installed:
@@ -21,7 +25,7 @@ From the root of the repository, after `mvn -q package`, with `podman` or `docke
 # Once: build the images the example uses. Every step of the run runs in the "shell" image.
 bin/traceworks images build examples/hello
 
-bin/traceworks check examples/hello
+bin/traceworks check examples/hello      # prints "no findings"
 
 # No terminal question: the run parks at "publish" and exits with code 5.
 bin/traceworks run examples/hello --no-input
@@ -35,11 +39,11 @@ bin/traceworks verify <run>              # chain, manifest and ledger: ok
 Leave out `--no-input` in a terminal and the run asks the question there instead of parking.
 
 In the container, the workspace (the directory you run it from) is `/workspace`, read-only, and the package is
-`/package`, so `count` runs `bash "/package/scripts/count-files.sh"` in `/workspace`. On a machine where no container
-runtime works, add `--allow-host-execution` to `run` and `resume`: the steps then run on the host with `bash`, and
-`package_dir` is the package's directory there. The flag, and `allow_host_execution` in `traceworks.json`, are only
-that fallback: where `podman` or `docker` works, the run runs in containers anyway. The first line of `run` says
-which: `in containers (docker 29.1.3)` or `on the host (no container runtime works)`.
+`/package`, so `count` runs `set -euo pipefail; bash "/package/scripts/count-files.sh"` in `/workspace`. On a
+machine where no container runtime works, add `--allow-host-execution` to `run` and `resume`: the steps then run on
+the host with `bash`, and `package_dir` is the package's directory there. The flag, and `allow_host_execution` in
+`traceworks.json`, are only that fallback: where `podman` or `docker` works, the run runs in containers anyway. The
+first line of `run` says which: `in containers (docker 29.1.3)` or `on the host (no container runtime works)`.
 
 Open the `run.html` that the commands print to see the run in a browser.
 
