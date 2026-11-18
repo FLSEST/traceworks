@@ -3,8 +3,9 @@
 Traceworks runs repeatable, traceable workflows. It is a command line tool, not a service: it runs a workflow,
 writes everything that happened to a run folder, and exits.
 
-The key features, each explained on one page with drawings: [features.html](features.html). Open it in a browser;
-it loads nothing from the network. The register, round by round: [audit-loop.html](audit-loop.html).
+How a run goes, from the package to the register, in moving drawings: [how-it-works.html](how-it-works.html). The
+key features, each explained on one page with drawings: [features.html](features.html). The register, round by
+round: [audit-loop.html](audit-loop.html). Open them in a browser; they load nothing from the network.
 
 ## System context: the system and what it talks to
 
@@ -233,6 +234,7 @@ flowchart TB
         aicli["core.ai.cli"]
         compare["core.compare"]
         seal["core.seal"]
+        register["core.register"]
     end
     subgraph base["what the rest builds on"]
         port["core.port"]
@@ -459,6 +461,8 @@ flowchart TD
     run -- "a step fails and on_failure stops" --> failed["FAILED, exit 3"]
     run -- "pause or Ctrl-C once" --> paused["PARKED, exit 5<br>after the step or item in flight"]
     paused -. "traceworks resume" .-> step
+    run -- "SIGTERM, or the process ends" --> interrupted["INTERRUPTED<br>the record has no end; the run can be resumed"]
+    interrupted -. "traceworks resume" .-> step
     run -- "cancel or Ctrl-C twice" --> cancelled["CANCELLED, exit 4"]
     failed --> sealed["finished the same way:<br>manifest, ledger entry, run.html"]
     cancelled --> sealed
