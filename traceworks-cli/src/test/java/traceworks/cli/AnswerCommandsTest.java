@@ -99,4 +99,31 @@ class AnswerCommandsTest {
             assertNoRowStartsInTheWorkflowsText("  ", lines);
         }
     }
+
+    /**
+     * The columns are counted with two for every character from U+1100 on, also for one a terminal gives one
+     * column (U+2500): a first name of such characters would put the believed column of a later name ahead of the
+     * real one, and the later name across a row's end. So the form command is written out only where the whole
+     * line fits one row by that count, which never runs short.
+     */
+    @Test
+    void aFieldNameBehindOneOfNarrowCharactersCountedWide_startsNoRow_andAFormCommandIsOneRowOrAPlaceholder() {
+        String narrow = "\u2500".repeat(18);
+        for (int filler = 0; filler < 90; filler++) {
+            List<String> lines = AnswerCommands.of("  ", "r1", "human-input", List.of(),
+                    List.of(narrow, "x" + "-".repeat(filler) + FORGED));
+
+            assertThat(rows("  ", lines)).as("filler " + filler).noneMatch(row -> row.startsWith("then go on with"));
+        }
+        for (int filler = 0; filler < 90; filler++) {
+            List<String> lines = AnswerCommands.of("  ", "r1", "human-input", List.of(),
+                    List.of(narrow, "x" + "-".repeat(filler) + FORGED));
+
+            assertThat(lines).as("filler " + filler).allSatisfy(line -> assertThat(line.startsWith("|")
+                    || TerminalText.columns("  " + line) <= 80).as(line).isTrue());
+        }
+        assertThat(AnswerCommands.of("  ", "r1", "human-input", List.of(), List.of(narrow, "who"))).containsExactly(
+                "traceworks answer 'r1' --field '<name>=<value>'",
+                "with one --field for each of these names, quoted for your shell:", "| " + narrow, "| who");
+    }
 }

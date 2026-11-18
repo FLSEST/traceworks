@@ -41,6 +41,22 @@ class HumanInputAnswersTest {
         assertThat(HumanInputAnswers.validate("7", pattern).error()).contains("does not match the pattern");
     }
 
+    /**
+     * The whole answer must match, as at the console: against a pattern without anchors an answer that only holds
+     * a match would else pass, and what stands around the match would be stored as a checked value.
+     */
+    @Test
+    void aPatternWithoutAnchors_mustMatchTheWholeAnswer_asAtTheConsole() {
+        var pattern = single("text", Map.of("validation_pattern", "[a-z0-9-]+"));
+
+        assertThat(HumanInputAnswers.validate("release-7", pattern).answer()).isEqualTo("release-7");
+        assertThat(HumanInputAnswers.validate("release-7; rm -rf /", pattern).error())
+                .contains("does not match the pattern");
+        assertThat(HumanInputAnswers.validate("{\"ticket\": \"T-1 and more\", \"note\": \"n\"}", form(
+                Map.of("variable_name", "ticket", "validation_pattern", "T-\\d"), Map.of("variable_name", "note")))
+                .error()).contains("does not match the pattern");
+    }
+
     @Test
     void required_blankAnswer_isRejected_optionalIsKeptEmpty() {
         assertThat(HumanInputAnswers.validate("  ", single("text", Map.of())).error()).contains("a value is required");

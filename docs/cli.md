@@ -439,7 +439,8 @@ the provider's prompt cache held included (docs/events.md, "ai.response").
 A has, `+` for one only run B has, two lines of context, the rest counted. The outputs come from the record as
 `show --full` prints them, so with the same redaction and with control characters made harmless. The diff is
 computed in memory and bounded: when the parts that differ are larger than 4 000 000 line pairs (2 000 by 2 000
-lines, say), the command says so instead. A deleted output blob is named as such.
+lines, say), or one of the outputs has more than 200 000 lines, the command says so instead. A deleted output blob
+is named as such.
 
 **Audit runs.** For two runs of an audit workflow that feed the same register (docs/registers.md), a section
 `Findings (register <key>)` lists the findings that are `new`, `resolved` and `reopened` between the two: the state the
@@ -1580,7 +1581,8 @@ Without a terminal (CI, a pipe), or with `--no-input`, nobody can answer inside 
    An option of an approval and the name of a form's field are text of the workflow, as the question is. A command
    is written out with one only where it stays on one line of a terminal of 80 columns and holds no two blanks in a
    row: an option padded to the terminal's width would otherwise end on a line of its own and read as a hint of
-   Traceworks. With the run's id that is an option of up to 9 characters. For anything longer the command is
+   Traceworks. With the run's id that is an option of up to 9 characters. The command of a form holds every
+   field's name, so it is written out only where all of it fits one such line. For anything longer the command is
    printed once with a placeholder (`--answer '<option>'`, `--field '<name>=<value>'`) and the options or names
    follow on lines marked with `|` (`| ` before each, `|+` where one goes on), as the lines of the question are; type the one you choose, quoted for your
    shell, or copy the command from `run.html`. The hint of a question that does not park the run
@@ -2964,7 +2966,9 @@ without `--source`; no input sets it.
 
 **Sources.** A source is one of:
 
-- a local path; a relative one counts from the working directory, and the record has it as an absolute path;
+- a local path; a relative one counts from the working directory, and the record has it as an absolute path. A
+  local path or a `file://` URL whose path holds `@[` (also written `%40%5B`) is refused, since git reads a host in
+  brackets there and takes only what follows the `]` as the path;
 - an `https://`, `ssh://` or `file://` URL; a `file://` URL with a `?` or a `#` is refused, since git reads them as
   part of the path (write `%3F` or `%23`, or give the path itself), and so is one with a host other than
   `localhost` or with a `%` or a bracket before its path (write `file:///<path>`);

@@ -101,7 +101,7 @@ final class StoredRunPackage {
     static boolean packageChanged(String runId, RunView view, LoadedPackage pkg, boolean allowed) {
         boolean changed = !Objects.equals(pkg.digest(), view.packageDigest());
         if (changed && !allowed) {
-            throw new RunRefusedException(Message.of("The package of run " + runId + " changed since the run started"
+            throw new RunRefusedException(Message.of("The package of run ", Message.quoted(runId), " changed since the run started"
                     + " (digest " + view.packageDigest() + ", now " + pkg.digest() + "); resume with"
                     + " --allow-changed-package to run the definition recorded at the start anyway"));
         }
@@ -120,7 +120,7 @@ final class StoredRunPackage {
      */
     private LoadedPackage currentPackage(String runId, String packageDir, byte[] workflowJson) {
         if (packageDir == null) {
-            throw new RunRefusedException(Message.of("The record of run " + runId + " names no package directory"));
+            throw new RunRefusedException(Message.of("The record of run ", Message.quoted(runId), " names no package directory"));
         }
         String real = preparation.realPath("The package directory of run " + runId, packageDir,
                 () -> preparation.redactedNames(RunRecords.definition(runId, workflowJson), null));

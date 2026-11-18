@@ -12,7 +12,8 @@ import java.util.List;
  * wider than it is, and what follows the break starts a terminal line of its own, without anything that marks it:
  * an option padded to the terminal's width would put its end there, to read as a hint of Traceworks with a command
  * to copy. So a command is written out with such a text only where the text stays on one terminal line and holds
- * no run of blanks ({@link TerminalText#inline}). Else the command is written with a placeholder, and the options
+ * no run of blanks ({@link TerminalText#inline}), and the command of a form, which holds every name, only where
+ * all of it fits one terminal line. Else the command is written with a placeholder, and the options
  * or names follow on marked lines ({@link TerminalText#listed}), broken as the lines of a question are.
  */
 public final class AnswerCommands {
@@ -48,6 +49,9 @@ public final class AnswerCommands {
                 whole &= TerminalText.inline(lead + command, name, quoted);
                 command.append(quoted);
             }
+            // Each name was judged at a column counted with the names before it, and the count gives a narrow
+            // character from U+1100 on two columns: only a line that fits one row by it puts no name across a row
+            whole &= TerminalText.columns(lead + command) <= TerminalText.WIDTH;
             if (whole) {
                 lines.add(command.toString());
             } else {

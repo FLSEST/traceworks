@@ -45,9 +45,10 @@ final class Pausing {
         if (run.tryLockWriter()) {
             // Nobody runs the run; this process holds it until the caller closes it, and writes nothing
             RunView view = RunRecords.view(runId, RunRecords.events(run), false);
-            String next = RunRecords.isFinal(view.status()) ? "a finished run cannot be paused"
-                    : "it has stopped already; go on with traceworks resume " + runId;
-            throw new RunRefusedException(Message.of("Run " + runId + " is not running (" + view.status() + "): " + next));
+            Message next = RunRecords.isFinal(view.status()) ? Message.of("a finished run cannot be paused")
+                    : Message.of("it has stopped already; go on with traceworks resume ", Message.quoted(runId));
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(runId), " is not running (" + view.status()
+                    + "): ", next));
         }
         String requestId = ids.newRequestId();
         run.inbox().post(new InboxRequest(requestId, KIND, null, null, null, null, Map.of(), null, actor,
@@ -66,7 +67,7 @@ final class Pausing {
                     continue;
                 }
                 if (RecordTypes.REQUEST_REFUSED.equals(event.type())) {
-                    throw new RunRefusedException(Message.of("The pause of run " + runId + " was refused: ",
+                    throw new RunRefusedException(Message.of("The pause of run ", Message.quoted(runId), " was refused: ",
                             Message.quoted(event.fields().path("reason").asText())));
                 }
                 if (RecordTypes.RUN_PAUSE_REQUESTED.equals(event.type())) {

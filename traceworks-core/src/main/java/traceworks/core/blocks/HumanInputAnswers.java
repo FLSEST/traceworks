@@ -177,7 +177,7 @@ final class HumanInputAnswers {
                 return Validated.bad(where + "validation_pattern cannot be used: " + problem);
             }
             try {
-                if (!TimedRegex.find(Pattern.compile(pattern), value, PATTERN_TIME_LIMIT)) {
+                if (!TimedRegex.matches(Pattern.compile(pattern), value, PATTERN_TIME_LIMIT)) {
                     return Validated.bad(where + "'" + value + "' does not match the pattern " + pattern);
                 }
             } catch (TimedRegex.TimedOut e) {

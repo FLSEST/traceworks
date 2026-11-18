@@ -6,13 +6,19 @@ import java.util.Optional;
 
 /**
  * A line diff of two texts by their longest common subsequence, in plain Java. The lines the texts start and end
- * with in common are set aside first; the table of the rest is bounded by {@link #MAX_CELLS}, and two texts beyond
- * the bound get no diff, so a caller says so instead of waiting for one.
+ * with in common are set aside first; the table of the rest is bounded by {@link #MAX_CELLS} and each text by
+ * {@link #MAX_LINES}, and two texts beyond a bound get no diff, so a caller says so instead of waiting for one.
  */
 public final class LineDiff {
 
     /** The most cells of the table: the product of the line counts that differ between the common start and end. */
     public static final long MAX_CELLS = 4_000_000;
+
+    /**
+     * The most lines of one text: the table has a row and the diff a line for each, whatever the product is (with an
+     * empty side it is 0).
+     */
+    public static final int MAX_LINES = 200_000;
 
     private LineDiff() {
     }
@@ -33,9 +39,12 @@ public final class LineDiff {
     /**
      * The diff of two lists of lines: every line of both, in order, the removed lines of a change before the added.
      *
-     * @return empty when the part that differs is beyond {@link #MAX_CELLS}
+     * @return empty when the part that differs is beyond {@link #MAX_CELLS}, or a text beyond {@link #MAX_LINES}
      */
     public static Optional<List<Line>> of(List<String> a, List<String> b) {
+        if (a.size() > MAX_LINES || b.size() > MAX_LINES) {
+            return Optional.empty();
+        }
         int start = 0;
         while (start < a.size() && start < b.size() && a.get(start).equals(b.get(start))) {
             start++;

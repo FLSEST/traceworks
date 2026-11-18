@@ -84,7 +84,7 @@ final class RunOutputs {
     List<String> complete(StoredRun run, byte[] catalogJson) {
         String id = run.runId();
         if (!run.inStore()) {
-            throw new RunRefusedException(Message.of("Run " + id + " has finished, and its folder is not in the runs folder of"
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(id), " has finished, and its folder is not in the runs folder of"
                     + " this home, so this home's ledger does not record it; check the copy with traceworks verify ",
                     Message.typed(run.location())));
         }
@@ -145,7 +145,7 @@ final class RunOutputs {
                 ledger.recordStart(id, StartEntry.of(run.events().readAll().getFirst()).toJson());
             }
         } catch (RuntimeException e) {
-            throw new RunRefusedException(Message.of("Run " + id + " cannot resume: the ledger holds no start entry of it and"
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(id), " cannot resume: the ledger holds no start entry of it and"
                     + " could not take one now, and no step runs in a run the ledger does not name: ",
                     Message.of(e)));
         }
