@@ -253,6 +253,25 @@ class RegisterFolderTest {
         assertThat(commands.get(1).fields().path("mounts").toString()).doesNotContain("/register");
     }
 
+    /**
+     * A container run of a workflow that is no audit: no container is handed a register folder, not even an empty
+     * path, which the runtime would take for the working directory of the process.
+     */
+    @Test
+    void containerRun_ofAWorkflowThatIsNoAudit_handsNoContainerARegisterFolder() {
+        fx.settings = OperatorSettings.defaults();
+        fx.withRuntime();
+        fx.containers.on(AppFixture.SHELL_ID, new CommandResult(0, "done\n", "", 1, false));
+
+        RunResult result = fx.services().start(request(AppFixture.BUILD), null, null);
+
+        assertThat(result.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.containers.runs()).hasSize(2).allSatisfy(run -> {
+            assertThat(run.directories().register()).isNull();
+            assertThat(run.mounts()).extracting(Mount::containerPath).doesNotContain("/register");
+        });
+    }
+
     // ---- a folder that changed ----
 
     /**

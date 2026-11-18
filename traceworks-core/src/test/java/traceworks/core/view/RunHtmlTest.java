@@ -466,6 +466,26 @@ class RunHtmlTest {
                 "<p class=\"cut\">cut at 65536 of 70000 characters; the full values are blob ");
     }
 
+    /** A values blob whose content does not hash to its name shows the mark of a changed blob, not an empty list. */
+    @Test
+    void theValuesOfACommand_thatDoNotMatchTheirName_showTheMarkOfAChangedBlob() {
+        started();
+        emit(new StepStarted(0, "store", "shell", 0, false));
+        recorder.recording(request -> new CommandResult(0, "", "", 1, false))
+                .run(new CommandRequest("printf '%s' \"$REVIEW\"", "/w", 30, null, null, null, false)
+                        .withValues(Map.of("REVIEW", "fine")));
+        emit(new StepFinished(0, "store", "shell", StepStatus.COMPLETED, "i", 5, Map.of()));
+        String sha = log.readAll().stream().map(RecordedEvent::parse).map(event -> event.blob("values"))
+                .filter(java.util.Objects::nonNull).findFirst().orElseThrow().sha256();
+        assertThat(render()).contains("<details><summary>value <code>REVIEW</code>");
+
+        blobs.putRaw(sha, "{\"REVIEW\":\"forged value\"}".getBytes(StandardCharsets.UTF_8));
+        String html = render();
+
+        assertThat(html).contains("<p class=\"deleted\">[this blob does not match its name: blob " + sha
+                + " holds content with the SHA-256 ").doesNotContain("value <code>REVIEW</code>", "forged value");
+    }
+
     @Test
     void verificationProblems_areShown() {
         started();

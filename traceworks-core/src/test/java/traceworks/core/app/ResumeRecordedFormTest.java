@@ -44,6 +44,33 @@ class ResumeRecordedFormTest {
         return id;
     }
 
+    /**
+     * The value stands in the workspace only, not in the package: the refusal names the workspace as the record
+     * does all the same, since the recorded workspace says which values were put back.
+     */
+    @Test
+    void aRefusedWorkspace_isNamedAsTheRecordDoes_whenOnlyTheWorkspaceHoldsTheValue() {
+        Path plain = Path.of("/pkg/plain/deploy");
+        fx.packages.put(plain, """
+                {"id": "wf-project", "name": "Project", "blocks": [
+                  {"type": "approval", "name": "ok", "config": {"question": "Go?", "options": ["Yes", "No"]}},
+                  {"type": "shell", "name": "deploy", "config": {"command": "./deploy", "secrets": ["PROJECT"]}}
+                ]}""");
+        String id = services.start(new StartRequest(plain, Map.of(), WORKSPACE, false, false), null, null).runId();
+        services.answer(id, new AnswerRequest("approval", 0, "Yes", null, null));
+        assertThat(services.view(id).packageDir()).isEqualTo(plain.toString());
+        assertThat(fx.events(id).getFirst().fields().path("workspace").asText())
+                .isEqualTo("/work/[redacted:PROJECT]");
+        fx.refusedDirectories.put(WORKSPACE, "it does not exist (" + WORKSPACE + ")");
+
+        assertThatThrownBy(() -> services.resume(resumeOf(id), null, null))
+                .isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("the workspace /work/[redacted:PROJECT] cannot be mounted")
+                .hasMessageContaining("it does not exist (/work/[redacted:PROJECT])")
+                .message().doesNotContain(PROJECT);
+        assertThat(fx.types(id)).doesNotContain(RecordTypes.RUN_RESUMED);
+    }
+
     /** A package that is there and cannot be read: a refusal with the recorded path, not an error with the real one. */
     @Test
     void aPackageThatCannotBeRead_refusesTheResume_namingItAsTheRecordDoes() {
