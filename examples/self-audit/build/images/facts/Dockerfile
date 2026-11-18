@@ -1,9 +1,14 @@
-# The image of the build self-audit's steps: the facts tool (src/), compiled here, on Maven's official image, which
-# brings the JDK the tool runs on and the Maven its maven step runs. The base is pinned by digest, so the same Dockerfile
-# always starts from the same bytes; the tag names Maven 3.9.16 on Eclipse Temurin 21 (Ubuntu 24.04). Nothing else is
-# installed or downloaded: the tool is plain JDK.
-FROM maven:3.9.16-eclipse-temurin-21-noble@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320
-LABEL org.opencontainers.image.description="the build facts tool compiled from src/ on Maven 3.9.16 and JDK 21: measures the build, dependencies and registries"
+# The image of the build self-audit's steps: the facts tool (src/), compiled here, on the JDK the tool runs on and
+# with the Maven its maven step runs. Maven comes out of its official image (3.10.0); the JDK is SapMachine 21 on
+# Ubuntu 24.04, the base of this image. Both are pinned by digest, so the same Dockerfile always starts from the same
+# bytes. Nothing else is installed or downloaded: the tool is plain JDK.
+FROM maven:3.10.0-eclipse-temurin-21-noble@sha256:f6d6c7eb62ca6a7034c17bb04a6177a8269ca38e3a1febf95094dfcd97d1305b AS maven
+FROM sapmachine:21-jdk-ubuntu-noble@sha256:701a9f10d16130748b91ec48cbfbf6a48fbe2d0e1de510cb38af8f9e1435856c
+LABEL org.opencontainers.image.description="the build facts tool compiled from src/ on Maven 3.10.0 and JDK 21: measures the build, dependencies and registries"
+
+COPY --from=maven /usr/share/maven /usr/share/maven
+ENV MAVEN_HOME=/usr/share/maven
+RUN ln -s /usr/share/maven/bin/mvn /usr/bin/mvn
 
 COPY src /opt/facts/src
 RUN find /opt/facts/src -name '*.java' | sort > /tmp/sources \
@@ -14,8 +19,7 @@ RUN find /opt/facts/src -name '*.java' | sort > /tmp/sources \
         > /usr/local/bin/facts \
     && chmod 755 /usr/local/bin/facts
 
-# The official image's entrypoint copies /usr/share/maven/ref into the user's ~/.m2; a step runs bash or the tool
-# directly, so it is reset here.
+# A step runs bash or the tool directly, so no entrypoint of a base image stands in front of it.
 ENTRYPOINT []
 
 # No USER line: Traceworks starts the container with --user, as the person who runs it.
