@@ -1,8 +1,13 @@
-# Dependabot: one pull request a week per group, for what it can read.
+# Dependabot: pull requests once a week, for what it can read.
 #
 # It reads the POMs, the actions of .github/workflows and the FROM lines of the Dockerfiles. It does not read a
 # version inside a RUN line (the AI CLIs that the images claude and pi install with npm) or inside a script (PIT in
 # examples/mutation-testing/scripts/pit.sh): the build audit in examples/self-audit/build looks those up.
+#
+# The groups decide what is merged without a reader (.github/workflows/dependabot-auto-merge.yml): a pull request of
+# the groups build-plugins, actions and images holds patch and minor updates only and is merged once the required
+# checks pass. Everything else stays a pull request for a person: Jackson, the one library in the jar; the test
+# libraries; and every major update, which no group takes and which comes alone.
 version: 2
 updates:
   - package-ecosystem: maven
@@ -10,8 +15,12 @@ updates:
     schedule:
       interval: weekly
     groups:
-      maven:
-        patterns: ["*"]
+      build-plugins:
+        patterns: ["org.apache.maven.plugins:*"]
+        update-types: [minor, patch]
+      test-libraries:
+        patterns: ["org.junit*", "org.assertj:*", "org.mockito:*", "net.bytebuddy:*"]
+        update-types: [minor, patch]
 
   - package-ecosystem: github-actions
     directory: /
@@ -20,6 +29,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+        update-types: [minor, patch]
 
   - package-ecosystem: docker
     directories:
@@ -32,3 +42,4 @@ updates:
     groups:
       images:
         patterns: ["*"]
+        update-types: [minor, patch]
