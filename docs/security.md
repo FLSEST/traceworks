@@ -53,7 +53,7 @@ container gets the same flags, and no workflow or operator setting removes them:
   it either, and a script the digest covers cannot run a payload from there that the digest does not cover. Where the
   workspace holds the package, the directory is covered at the package's place in `/workspace` as well. (A host
   run sees the package as it is. An image directory is hashed whole, a `.git/` in it included, because the build
-  sends all of it.) Verified with Docker 29.1.3; not verified with Podman. A package with a file name that is not
+  sends all of it.) Verified with Docker 29.1.3 and with rootless Podman 4.9.3 and 5.7.0. A package with a file name that is not
 valid text in the system's encoding is refused: the digest names a file by the text of its path, and two names that
 differ only in such bytes would be one.
 
@@ -424,7 +424,9 @@ content, and no blob is written through one.
     with a `secret`; whether Pi asks the server for anything besides the
     chat completion (a list of models, for example); whether Pi sends a plain HTTP request through its proxy as a
     tunnel or as a forwarded request (the proxy takes both); and what Pi makes of a model name with a `:` in it.
-    The container test `AiLocalModelIT` shows the first three in its record. Podman is not verified at all.
+    The container test `AiLocalModelIT` shows the first three in its record. It passes with rootless Podman
+    4.9.3 and 5.7.0 too; with Podman 5 a server on this machine is named `host.containers.internal`, not by
+    the machine's address (docs/cli.md, "Local models").
 - **`ai_images` replaces the built-in image.** The guarantee that AI runs only in the built-in images holds only while
   the operator replaces none (docs/cli.md, "AI images"). A replacement image gets the provider's credentials, the
   workspace (read-only unless the step writes it), the prompt and the network exactly as the built-in image would, and
@@ -447,13 +449,18 @@ content, and no blob is written through one.
   - *The host's own services, on an older runtime.* With Docker 28 or newer the host has no address on the step's
     network (verified with 29.1.3: a service of the host that listens on every address is not reachable). An older
     Docker and Podman do not know that option: there a container may reach what the host itself serves on that
-    address. Not verified on either.
+    address. Not verified on either. What the suite saw with rootless Podman is one observation, not a
+    property Traceworks sets up: with 4.9.3 the step's container did not reach a socket on the machine's
+    address directly, and with 5.7.0 it did not reach it by the name `host.containers.internal`.
   - *Names.* On Docker's internal network a container resolves only the proxy's name, and no outside name
     (verified with 29.1.3 only), so a DNS query carries nothing out. Whether Podman's internal network forwards
     DNS is not verified.
   - *A denied connection is an observation.* It fails no step and changes no gate; look at the run.
   - *The proxy is no TLS inspector.* It tunnels bytes to a listed `host:port` and cannot tell what is inside.
-  - *Podman is not verified at all* for this: the code gives it both networks as one list, and nothing more is known.
+  - *Podman.* The code gives it both networks as one list. The container tests of this section (`AiEgressIT`,
+    `AiWebIT`, `AiLocalModelIT`) pass with rootless Podman 4.9.3 and 5.7.0: a listed target is reached through
+    the proxy, a target nobody listed is denied and recorded, and no direct connection the tests tried worked.
+    Nothing beyond what those tests ask is verified with Podman, and rootful Podman was not run.
 - **Web tools** (`web`, docs/cli.md "Web tools of an AI step"). They are off unless a block sets them and the
   workflow declares `ai.web`. What they open:
   - *Prompt injection from what the model reads.* A page or a search hit is foreign content and can carry
@@ -865,8 +872,9 @@ What a seal does not protect:
 - **Runtime storage elsewhere.** The guard knows the runtimes' default storage (`/var/lib/docker`,
   `/var/lib/containers`, `~/.local/share/docker`, `~/.local/share/containers`). Storage moved elsewhere, such as
   Docker's `data-root` or Podman's under `$XDG_DATA_HOME`, is not refused as a mount.
-- **The container is as strong as the runtime and the kernel.** Traceworks is tested with Docker (29.1.3). Podman is
-  supported by the code but untested in this release.
+- **The container is as strong as the runtime and the kernel.** Traceworks is tested with Docker (29.1.3) and with
+  rootless Podman (4.9.3 on one machine, 5.7.0 in CI): the whole suite passes with both. Where this page says
+  "verified", it names the runtime; where it names Docker alone, Podman was not looked at beyond the suite.
 
 ### Many containers on a desktop machine
 

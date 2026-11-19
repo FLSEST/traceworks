@@ -58,7 +58,7 @@ limit Who chooses the model of an AI step.
 limit A local model
   quote "Local" is what you declared, not what Traceworks verified.
   says  A local model server is what the operator declared in local_models, which no workflow widens, and is not verified: Traceworks sees only its host:port, plain HTTP to it is not encrypted, and with an older Docker or with Podman an AI container can reach a server on the host past the proxy. The call still gets no provider credential.
-  digest 36149ff6fecc22c2
+  digest d0e103d682f715ef
 
 limit `ai_images` replaces the built-in image.
   quote Traceworks never builds, pulls or inspects it
@@ -73,7 +73,7 @@ limit An AI container reaches its provider, and everything a model reads goes th
 limit What the allowlist closes, and what it leaves.
   quote The proxy sees only `host:port`, never which account a connection serves.
   says  The egress proxy closes the open network for an AI container but judges host:port only and inspects no TLS: the provider's host, under any account, and every host of ai_hosts stay reachable, a denied connection is recorded and fails no step, and with ai_network open nothing is refused or recorded.
-  digest 7cf9a97fdf51a0c8
+  digest cad4db922b8b1065
 
 limit Web tools
   quote The proxy sees and records only `host:port`, never the URL
@@ -326,7 +326,7 @@ limit Runtime storage elsewhere.
   digest ed9309f362dd493e
 
 aside The container is as strong as the runtime and the kernel.
-  digest d21be5877eda4b1e
+  digest 8f59a18932e17a63
 
 section Many containers on a desktop machine
 
