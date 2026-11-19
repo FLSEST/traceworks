@@ -215,6 +215,6 @@ no container. The job `integration` runs after it: it builds the jar, builds the
 (`traceworks images build`, which the container tests of the other modules need), and runs `mvn -B -Pit verify`, once
 with `TRACEWORKS_IT_RUNTIME=docker` and once with `podman`. The variable picks the runtime of this suite; the
 container tests of the other modules use the runtime Traceworks detects. The Podman leg builds the built-in images a second
-time, with a home that names Podman, since Traceworks takes Docker where both are installed. That leg may fail
-without failing the workflow: the suite passed with rootless Podman 4.9.3 on a developer's machine on 2026-11-18, and
-has not passed on the runner yet.
+time, with a home that names Podman, since Traceworks takes Docker where both are installed. The suite passed
+with rootless Podman 4.9.3 on a developer's machine on 2026-11-18 and with rootless Podman 5.7.0 on a GitHub runner
+on 2026-11-19, so a failure of that leg fails the workflow, as one of the Docker leg does.

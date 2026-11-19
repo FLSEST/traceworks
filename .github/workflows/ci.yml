@@ -61,9 +61,6 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [docker, podman]
-    # Podman is supported by the code but untested in this release (docs/security.md), so its leg may fail without
-    # failing the workflow. Remove this line once the suite passes with Podman.
-    continue-on-error: ${{ matrix.runtime == 'podman' }}
     env:
       TRACEWORKS_IT_RUNTIME: ${{ matrix.runtime }}
     steps:
