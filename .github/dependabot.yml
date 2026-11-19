@@ -50,3 +50,8 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # The Maven image: its tag begins with Maven's version, so a move from Java 21 to Java 26 in the tag
+      # (3.10.0-eclipse-temurin-21-noble to 3-eclipse-temurin-26-noble) is no major version to Dependabot and came
+      # back every day. The Dockerfiles copy Maven alone out of that image and take Java from another base, and the
+      # build audit (examples/self-audit/build) reports a newer Maven.
+      - dependency-name: "library/maven"
