@@ -1,6 +1,7 @@
 package traceworks.cli.main;
 
 import traceworks.cli.RuntimeSource;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -79,11 +80,11 @@ class PauseCommandTest {
 
     /** Starts the package and waits until its run is RUNNING. */
     private void start(Path pkg) throws InterruptedException {
-        running = CompletableFuture.supplyAsync(
+        running = OwnThread.start("run of " + pkg.getFileName(),
                 () -> exec("run", pkg.toString(), "--allow-host-execution", "--no-input"));
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (exec("runs", "--status", "RUNNING").out().lines().count() != 1) {
-            assertThat(System.nanoTime()).as("waited 30 s for the run to start").isLessThan(end);
+            assertThat(System.nanoTime()).as("waited 30 s for the run to start; " + OwnThread.threads()).isLessThan(end);
             Thread.sleep(20);
         }
     }

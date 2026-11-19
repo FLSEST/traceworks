@@ -7,6 +7,7 @@ import traceworks.core.port.CommandRunner;
 import traceworks.core.port.CommandRunner.CommandRequest;
 import traceworks.core.port.CommandRunner.CommandResult;
 import traceworks.core.util.ProcessTracking;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -227,7 +228,7 @@ class ExecutionContextTest {
             }
             @Override public void finished(ProcessTracking.StopHandle stop) { stepTracker.finished(stop); }
         };
-        CompletableFuture<Long> drained = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<Long> drained = OwnThread.start("drain", () -> {
             long start = System.nanoTime();
             ProcessTracking.bind(observed, () -> {
                 // what a process drain does on the step's thread: report start, wait, report end
@@ -271,7 +272,7 @@ class ExecutionContextTest {
         assertThat(context.sleepUnlessStopped(10)).isTrue();
         assertThat(context.sleepUnlessStopped(-5)).isTrue();
 
-        CompletableFuture<Long> waited = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<Long> waited = OwnThread.start("wait", () -> {
             long start = System.nanoTime();
             assertThat(context.sleepUnlessStopped(60_000)).isFalse();
             return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
@@ -293,7 +294,7 @@ class ExecutionContextTest {
         long anHour = TimeUnit.HOURS.toMillis(1);
         Thread[] sleeper = new Thread[1];
         java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
-        CompletableFuture<Boolean> passedInFull = CompletableFuture.supplyAsync(() -> {
+        CompletableFuture<Boolean> passedInFull = OwnThread.start("full wait", () -> {
             sleeper[0] = Thread.currentThread();
             entered.countDown();
             return context.sleepUnlessStopped(anHour, anHour);

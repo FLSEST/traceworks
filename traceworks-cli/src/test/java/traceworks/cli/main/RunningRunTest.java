@@ -1,6 +1,7 @@
 package traceworks.cli.main;
 
 import traceworks.cli.RuntimeSource;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,7 +85,7 @@ class RunningRunTest {
         Path gate = temp.resolve(name + ".go");
         gates.add(gate);
         Path pkg = heldPackage(name, gate);
-        started.add(CompletableFuture.supplyAsync(
+        started.add(OwnThread.start("run of " + name,
                 () -> exec("run", pkg.toString(), "--allow-host-execution", "--no-input")));
         return gate;
     }
@@ -107,8 +108,8 @@ class RunningRunTest {
     private void awaitRunning(int count) throws InterruptedException {
         await(() -> exec("runs", "--status", "RUNNING").out().lines().count() == count, () -> count
                 + " running runs; runs: " + exec("runs").out() + "; ended: " + started.stream()
-                .filter(CompletableFuture::isDone).map(CompletableFuture::join).toList() + "; pool: "
-                + java.util.concurrent.ForkJoinPool.commonPool());
+                .filter(CompletableFuture::isDone).map(CompletableFuture::join).toList() + "; "
+                + OwnThread.threads());
     }
 
     @Test
@@ -140,8 +141,9 @@ class RunningRunTest {
         assertThat(show.out()).startsWith("Run       " + id).contains("Status    RUNNING", "held flow");
 
         ByteArrayOutputStream watched = new ByteArrayOutputStream();
-        CompletableFuture<Result> watch = CompletableFuture.supplyAsync(() -> exec(watched, "watch"));
-        await(() -> watched.toString(StandardCharsets.UTF_8).contains("(run " + id + ")"), "watch to follow the run");
+        CompletableFuture<Result> watch = OwnThread.start("watch", () -> exec(watched, "watch"));
+        await(() -> watched.toString(StandardCharsets.UTF_8).contains("(run " + id + ")"),
+                () -> "watch to follow the run; " + OwnThread.threads());
         Files.writeString(gate, "go");
         Result followed = watch.get(60, TimeUnit.SECONDS);
 

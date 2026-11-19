@@ -195,7 +195,7 @@ class AiEgressIT extends AiIntegrationTest {
     @Test
     void afterACancel_theProxyAndTheNetworksAreGone() throws Exception {
         String runtime = traceworks.environment().runtime();
-        CompletableFuture<Result> running = CompletableFuture.supplyAsync(() -> traceworks.run("ai-egress-slow"));
+        CompletableFuture<Result> running = traceworks.runBeside("ai-egress-slow");
         String id = awaitRunThatRecorded("step.command");
         awaitContainers(runtime, id, 2);
         List<String> containers = Containers.of(runtime, id);

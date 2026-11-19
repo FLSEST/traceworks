@@ -27,6 +27,7 @@ import traceworks.core.port.Egress;
 import traceworks.core.testing.FakeAiCli;
 import traceworks.core.testing.FakeCommandRunner;
 import traceworks.core.testing.FakeContainerRuntime;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -2328,7 +2329,7 @@ class MainTest {
                  {"type":"approval","name":"confirm","config":{"question":"Go on?","options":["Yes","No"]}}]}""");
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         PrintStream stream = new PrintStream(out, true, StandardCharsets.UTF_8);
-        java.util.concurrent.CompletableFuture<Integer> running = java.util.concurrent.CompletableFuture.supplyAsync(
+        java.util.concurrent.CompletableFuture<Integer> running = OwnThread.start("run of the parent",
                 () -> Main.run(new String[] {"run", parent.toString(), "--allow-host-execution", "--no-input",
                         "--home", home.toString()}, stream, stream, Map.of("TRACEWORKS_ACTOR", "tester"), work, null,
                         RuntimeSource.NONE));

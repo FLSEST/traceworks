@@ -2,6 +2,7 @@ package traceworks.adapters.host;
 
 import traceworks.core.context.ExecutionContext;
 import traceworks.core.testing.BackgroundChild;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -77,7 +78,7 @@ class ProcessTreeTest {
         // Shell builtins only: the loop starts no process of its own
         Process proc = start("trap '' TERM; echo ready; while :; do :; done");
         try {
-            String first = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            String first = OwnThread.start("first line of the process", () -> {
                 try {
                     return proc.inputReader().readLine();
                 } catch (IOException e) {

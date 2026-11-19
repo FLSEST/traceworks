@@ -97,7 +97,7 @@ class StopsIT extends IntegrationTest {
      */
     @Test
     void aCancelDuringTheWaitOfARetry_endsTheRun_andStartsNoFurtherAttempt() throws Exception {
-        CompletableFuture<Result> running = CompletableFuture.supplyAsync(() -> traceworks.run("retry-cancel"));
+        CompletableFuture<Result> running = traceworks.runBeside("retry-cancel");
         RunFolder folder = awaitRunThatRecorded("step.command.finished");
 
         long start = System.nanoTime();

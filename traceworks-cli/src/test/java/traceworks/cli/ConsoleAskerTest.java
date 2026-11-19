@@ -2,6 +2,7 @@ package traceworks.cli;
 
 import traceworks.core.port.BlobRef;
 import traceworks.core.record.QuestionView;
+import traceworks.core.testing.OwnThread;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -15,7 +16,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -217,7 +217,7 @@ class ConsoleAskerTest {
     void endOfInput_leavesTheQuestionToTheInbox() throws Exception {
         typed.close();
 
-        assertThat(CompletableFuture.supplyAsync(() -> asker.ask(approval(List.of("Yes")))).get(5, TimeUnit.SECONDS))
+        assertThat(OwnThread.start("ask", () -> asker.ask(approval(List.of("Yes")))).get(5, TimeUnit.SECONDS))
                 .isEmpty();
         assertThat(asker.ask(approval(List.of("Yes")))).isEmpty();
     }

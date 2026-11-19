@@ -191,6 +191,23 @@ final class Traceworks {
     }
 
     /**
+     * {@link #run} beside the test, on a thread of its own named after the package. A thread borrowed from the
+     * common pool ({@code CompletableFuture.supplyAsync}) may never come: on a machine with two cores that pool
+     * has one thread, and whether it adds one for a piece that blocks depends on the JDK.
+     */
+    java.util.concurrent.CompletableFuture<Result> runBeside(String packageName, String... more) {
+        java.util.concurrent.CompletableFuture<Result> result = new java.util.concurrent.CompletableFuture<>();
+        Thread.ofPlatform().daemon().name("test: run of " + packageName).start(() -> {
+            try {
+                result.complete(run(packageName, more));
+            } catch (Throwable e) {
+                result.completeExceptionally(e);
+            }
+        });
+        return result;
+    }
+
+    /**
      * {@code traceworks run <package> --workspace <workspace> --no-input <more>}: the package from
      * {@code integration-tests/packages/}, with no terminal question.
      */

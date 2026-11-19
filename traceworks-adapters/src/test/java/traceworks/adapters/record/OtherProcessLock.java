@@ -1,5 +1,6 @@
 package traceworks.adapters.record;
 
+import traceworks.core.testing.OwnThread;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -9,7 +10,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.time.Duration;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -43,7 +43,7 @@ public final class OtherProcessLock implements AutoCloseable {
                 StandardCharsets.UTF_8));
         String line;
         try {
-            line = CompletableFuture.supplyAsync(() -> {
+            line = OwnThread.start("first line of the other process", () -> {
                 try {
                     return out.readLine();
                 } catch (IOException e) {
