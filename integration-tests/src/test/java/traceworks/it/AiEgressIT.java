@@ -7,14 +7,10 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -30,9 +26,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * operator's {@code ai_hosts}, with every connection in the record; anywhere with {@code ai_network: "open"}, as
  * before the allowlist.
  *
- * <p>Nothing here needs the internet. The target a container may reach is a socket this test opens on the machine's
- * own address, which the proxy reaches through its outside network; the target it may not reach is a name nobody
- * listed, which the proxy refuses before anything is resolved. The fake Claude CLI asks its proxy for both and tries
+ * <p>Nothing here needs the internet. The target a container may reach is a socket this test opens on this machine
+ * ({@link ItEnvironment#machine()}), which the proxy reaches through its outside network; the target it may not
+ * reach is a name nobody listed, which the proxy refuses before anything is resolved. The fake Claude CLI asks its proxy for both and tries
  * both directly ({@code [fake:connect=...]}).
  */
 class AiEgressIT extends AiIntegrationTest {
@@ -45,7 +41,7 @@ class AiEgressIT extends AiIntegrationTest {
     @BeforeEach
     void listenOnTheMachinesOwnAddress() throws IOException {
         listener = new ServerSocket(0);
-        target = ownAddress() + ":" + listener.getLocalPort();
+        target = ItEnvironment.get().machine() + ":" + listener.getLocalPort();
         Thread.ofVirtual().start(() -> {
             while (!listener.isClosed()) {
                 try (Socket connection = listener.accept()) {
@@ -62,21 +58,6 @@ class AiEgressIT extends AiIntegrationTest {
         listener.close();
     }
 
-    /** An IPv4 address of this machine that is not the loopback: a container reaches the machine by it. */
-    private static String ownAddress() throws IOException {
-        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            if (!network.isUp() || network.isLoopback()) {
-                continue;
-            }
-            for (InetAddress address : Collections.list(network.getInetAddresses())) {
-                if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
-                    return address.getHostAddress();
-                }
-            }
-        }
-        throw new AssertionError("This machine has no IPv4 address besides the loopback, so no container can reach"
-                + " a socket of the test");
-    }
 
     private JsonNode command(RunFolder folder, String step) {
         return folder.ofStep("step.command", folder.stepIndex(step)).getFirst();
