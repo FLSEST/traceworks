@@ -2,12 +2,17 @@ package traceworks.it;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.DatagramSocket;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -38,6 +43,12 @@ final class ItEnvironment {
 
     /** How long building one fake AI image may take: its base is the one of the built-in AI images. */
     private static final long FAKE_IMAGE_TIMEOUT_SECONDS = 600;
+
+    /** The name a Podman container reaches the machine by. */
+    static final String PODMAN_MACHINE = "host.containers.internal";
+
+    /** An address reserved for documentation (TEST-NET-1): beyond the machine, and nothing answers there. */
+    private static final String BEYOND_THE_MACHINE = "192.0.2.1";
 
     private static ItEnvironment shared;
     private static AssertionError failure;
@@ -86,6 +97,45 @@ final class ItEnvironment {
     /** {@code docker} or {@code podman}: the client the suite runs against and checks for leftover containers. */
     String runtime() {
         return runtime;
+    }
+
+    /**
+     * What a container of the suite's runtime reaches this machine by: with Docker the address the machine's default
+     * route leaves from, with Podman the name {@code host.containers.internal}, which Podman writes into every
+     * container's {@code /etc/hosts}. Podman 5 gives its containers' network the machine's own address (pasta), so
+     * that address, asked for from inside, is the network itself and no longer the machine; the name is the machine
+     * with Podman 4 and 5 alike.
+     *
+     * <p>The address comes from a datagram socket "connected" to an address beyond the machine, which tells it
+     * without sending anything. It is the same on every call, unlike the first address of the first interface, which
+     * may be the bridge of a container network of another run that is gone a moment later. A machine without a
+     * default route has only its interfaces to offer: then the first address that is not the loopback's.
+     */
+    String machine() throws IOException {
+        if (runtime.equals("podman")) {
+            return PODMAN_MACHINE;
+        }
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(InetAddress.getByName(BEYOND_THE_MACHINE), 9);
+            InetAddress local = socket.getLocalAddress();
+            if (local instanceof Inet4Address && !local.isLoopbackAddress() && !local.isAnyLocalAddress()) {
+                return local.getHostAddress();
+            }
+        } catch (IOException | RuntimeException e) {
+            // no default route: an interface's own address is all there is
+        }
+        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+            if (!network.isUp() || network.isLoopback()) {
+                continue;
+            }
+            for (InetAddress candidate : Collections.list(network.getInetAddresses())) {
+                if (candidate instanceof Inet4Address && !candidate.isLoopbackAddress()) {
+                    return candidate.getHostAddress();
+                }
+            }
+        }
+        throw new AssertionError("This machine has no IPv4 address besides the loopback, so no container can reach"
+                + " a socket of the test");
     }
 
     /** The shaded {@code traceworks.jar} under test. */

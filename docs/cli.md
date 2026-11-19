@@ -2094,7 +2094,12 @@ run. `traceworks describe` names the server and its URL next to the model.
   mistake, not a barrier: any other name or address of the machine is taken as written. Bind the server to one
   address of the machine that the proxy's container reaches, such as the machine's address in your network (Ollama:
   `OLLAMA_HOST=192.168.1.20`; llama.cpp's server: `--host 192.168.1.20`), and write that address in `url`; a
-  firewall rule that lets only the container runtime's networks in narrows it further. Listening on every address
+  firewall rule that lets only the container runtime's networks in narrows it further. With Podman 5 write the
+  name `host.containers.internal` in `url` instead of the address (`http://host.containers.internal:11434/v1`):
+  Podman 5 gives the network of its rootless containers the machine's own address, so that address, asked for
+  from a container, is that network and no longer the machine, and the connection is refused. The name is in the
+  `/etc/hosts` of every Podman container, the proxy's too, and leads to the machine; Podman 4 knows it as well, and
+  Docker on Linux does not. Listening on every address
   (`0.0.0.0`) works too, and opens more: the server is then reachable from your whole network, and, with a Docker
   older than 28 or with Podman, directly from the container of every AI step, a provider's steps included, past the
   proxy and without a line in `egress`. With Docker 28 or newer the machine has no address on the step's network, so
