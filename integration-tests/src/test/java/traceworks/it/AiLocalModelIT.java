@@ -12,13 +12,9 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -103,7 +99,7 @@ class AiLocalModelIT extends IntegrationTest {
     @BeforeEach
     void startTheStandInServer_andTheEgressImage() throws IOException {
         server = new StandIn();
-        address = ownAddress();
+        address = ItEnvironment.get().machine();
         target = address + ":" + server.port();
         url = "http://" + target + "/v1";
         traceworks.environment().egressImage();
@@ -116,36 +112,6 @@ class AiLocalModelIT extends IntegrationTest {
         }
     }
 
-    /**
-     * The address of this machine that its default route leaves from: the one the proxy's container reaches the
-     * machine by, through its outside network. A datagram socket "connected" to an address beyond the machine tells
-     * it without sending anything. It is the same on every call, unlike the first address of the first interface,
-     * which may be the bridge of a container network of another run that is gone a moment later. A machine without
-     * a default route has only its interfaces to offer: then the first address that is not the loopback's.
-     */
-    private static String ownAddress() throws IOException {
-        try (java.net.DatagramSocket socket = new java.net.DatagramSocket()) {
-            socket.connect(InetAddress.getByName(NO_SUCH_ADDRESS), 9);
-            InetAddress local = socket.getLocalAddress();
-            if (local instanceof Inet4Address && !local.isLoopbackAddress() && !local.isAnyLocalAddress()) {
-                return local.getHostAddress();
-            }
-        } catch (IOException | RuntimeException e) {
-            // no default route: an interface's own address is all there is
-        }
-        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            if (!network.isUp() || network.isLoopback()) {
-                continue;
-            }
-            for (InetAddress candidate : Collections.list(network.getInetAddresses())) {
-                if (candidate instanceof Inet4Address && !candidate.isLoopbackAddress()) {
-                    return candidate.getHostAddress();
-                }
-            }
-        }
-        throw new AssertionError("This machine has no IPv4 address besides the loopback, so no container can reach"
-                + " the stand-in server of the test");
-    }
 
     /** {@code local_models} of the sandbox: the backend {@code llm} is the stand-in, with or without a secret. */
     private void declare(String secret) {

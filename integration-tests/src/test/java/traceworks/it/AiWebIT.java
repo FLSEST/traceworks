@@ -4,14 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -182,7 +178,7 @@ class AiWebIT extends AiIntegrationTest {
                     }
                 }
             });
-            String target = ownAddress() + ":" + listener.getLocalPort();
+            String target = ItEnvironment.get().machine() + ":" + listener.getLocalPort();
             String connect = "\"command\": \"[fake:connect=" + target + ",localhost:443] try\", \"web\": \"fetch\"";
             Path star = variant("web-star", "[\"ai.web\"]", "{" + connect + ", \"web_hosts\": [\"*\"]}");
             Path named = variant("web-named", "[\"ai.web\"]", "{" + connect + ", \"web_hosts\": [\"" + target + "\"]}");
@@ -213,18 +209,4 @@ class AiWebIT extends AiIntegrationTest {
         }
     }
 
-    /** An IPv4 address of this machine that is not the loopback: a container reaches the machine by it. */
-    private static String ownAddress() throws IOException {
-        for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
-            if (!network.isUp() || network.isLoopback()) {
-                continue;
-            }
-            for (InetAddress address : Collections.list(network.getInetAddresses())) {
-                if (address instanceof Inet4Address && !address.isLoopbackAddress()) {
-                    return address.getHostAddress();
-                }
-            }
-        }
-        throw new AssertionError("This machine has no IPv4 address besides the loopback");
-    }
 }
