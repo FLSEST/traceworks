@@ -28,13 +28,15 @@ The details are in [docs/architecture.md](docs/architecture.md#building-and-test
 ### What a full run costs the host
 
 `mvn -Pit verify` is not a light command. Measured with Docker 29, one run created about 830 containers and 40
-networks, 257 network devices on the host in all, and took about 13 minutes
-([integration-tests/README.md](integration-tests/README.md), "What a run costs the host"). On Linux every network
+networks, 257 network devices on the host in all
+([integration-tests/README.md](integration-tests/README.md), "What a run costs the host"). How long it takes depends
+on the machine: about 20 minutes on a laptop, with the build. On Linux every network
 is a bridge and every connection of a container a device pair, and the network services of a desktop react to
 each. Two container-starting builds at once multiply that, so start one when the other has finished.
 `scripts/container-footprint.sh mvn -Pit verify` prints what a run made the runtime create and what it left behind.
 
-CI runs `mvn verify` and then `mvn -Pit verify` on every push and pull request, so a change that touches no
+CI runs `mvn verify` and then `mvn -Pit verify`, with Docker and with Podman, on every pull request and on every
+push to `main`, so a change that touches no
 container code does not need the full run on your machine.
 
 ## Rules

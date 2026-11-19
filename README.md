@@ -270,8 +270,8 @@ security check beside them and the two testing audits.
 **Verified with:**
 
 - Docker 29.1.3, and rootless Podman: the whole suite passed with Podman 4.9.3 on one machine on 2026-11-18 and
-  with Podman 5.7.0 on the CI runner on 2026-11-19, where it runs with every change. `docs/security.md` still
-  states what it says about Podman as not verified.
+  with Podman 5.7.0 on the CI runner on 2026-11-19, where it runs with every change. Rootful Podman was not run.
+  [docs/security.md](docs/security.md) names the runtime wherever it says "verified".
 - Linux. CI runs on Linux only. Where the system has no `setsid` program (macOS), Ctrl-C cancels a run instead of
   pausing it.
 - Stand-in command line tools in place of the models, in every automatic test. No test calls a model or uses a
@@ -285,6 +285,7 @@ package you did not write: a package is code you run.
 
 | File | What it holds |
 |---|---|
+| [docs/how-it-works.html](docs/how-it-works.html) | start here: one run in six stages, as moving drawings (open in a browser) |
 | [docs/features.html](docs/features.html) | the key features, with drawings (open in a browser) |
 | [docs/audit-loop.html](docs/audit-loop.html) | the register and the audit loop, to step through (open in a browser) |
 | [docs/cli.md](docs/cli.md) | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals |

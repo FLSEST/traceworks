@@ -51,5 +51,5 @@ limits is wrong, or worse than the page says, a report is welcome all the same.
 
 Nothing is released yet. Fixes go to the `main` branch, and that is the only supported version.
 
-Traceworks is tested with Docker. Podman is supported by the code and untested, so a report about Podman is
-welcome, and its fix may take longer.
+Traceworks is tested with Docker and with rootless Podman: CI runs the whole suite with both. Rootful Podman is
+not tested, so a report about it is welcome, and its fix may take longer.

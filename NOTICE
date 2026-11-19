@@ -28,9 +28,9 @@ Third-party software
 
 This distribution includes Jackson:
 
-  jackson-databind     2.22.4
-  jackson-core         2.22.4
-  jackson-annotations  2.22
+  jackson-databind     2.23.0
+  jackson-core         2.23.0
+  jackson-annotations  2.23
 
 Copyright FasterXML, LLC. Licensed under the Apache License 2.0. The text of
 that license is in the jar as META-INF/LICENSE, and at
@@ -46,7 +46,7 @@ Schubfach-LICENSE) are in the jar under META-INF/.
 The NOTICE files of the three libraries follow, as they are in their jars.
 
 ------------------------------------------------------------------------------
-NOTICE of jackson-databind 2.22.4 and of jackson-annotations 2.22 (the same
+NOTICE of jackson-databind 2.23.0 and of jackson-annotations 2.23 (the same
 text in both)
 ------------------------------------------------------------------------------
 
@@ -73,7 +73,7 @@ in some artifacts (usually source distributions); but is always available
 from the source code management (SCM) system project uses.
 
 ------------------------------------------------------------------------------
-NOTICE of jackson-core 2.22.4
+NOTICE of jackson-core 2.23.0
 ------------------------------------------------------------------------------
 
 # Jackson JSON processor
