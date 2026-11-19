@@ -7,7 +7,7 @@ A vulnerability is not reported in an issue: see [SECURITY.md](SECURITY.md).
 
 ## Build and test
 
-You need Java 21, Maven, git and `jq`: two tests of the example packages run a script with `jq` on the machine.
+You need Java 21 or newer, Maven, git and `jq`: two tests of the example packages run a script with `jq` on the machine.
 The container tests also need `docker` or `podman`.
 
 ```bash

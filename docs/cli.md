@@ -10,7 +10,8 @@ traceworks --version
 ```
 
 Build it with `mvn -q package` and run `bin/traceworks` from the checkout, or run the jar
-(`traceworks-cli/target/traceworks.jar`) with `java -jar`. It needs Java 21.
+(`traceworks-cli/target/traceworks.jar`) with `java -jar`. It needs Java 21 or newer: CI builds and tests on 21,
+25 and 27.
 
 ## A first run
 

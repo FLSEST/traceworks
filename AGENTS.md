@@ -50,7 +50,7 @@ boundaries enforce the direction. `docs/architecture.md` has the packages, the l
 
 ## Building and testing
 
-You need Java 21, Maven, git and `jq` (two tests of the example packages run a script with `jq` on the machine). The
+You need Java 21 or newer, Maven, git and `jq` (two tests of the example packages run a script with `jq` on the machine). The
 container profiles also need `docker` or `podman`. From the root of the
 repository:
 

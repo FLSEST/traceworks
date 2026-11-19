@@ -39,22 +39,22 @@ ledger on the other:
 
 Three pages explain it with drawings:
 
-- [docs/how-it-works.html](docs/how-it-works.html): start here. One run in six stages, then six more scenes, as
+- [docs/how-it-works.html](https://flsest.github.io/traceworks/how-it-works.html): start here. One run in six stages, then six more scenes, as
   moving drawings: a step in its container, the record as a chain, the ledger, an audit across runs, model text
   and the shell, and what a record does not prove.
-- [docs/features.html](docs/features.html): the key features, each by the same four questions: what goes wrong
+- [docs/features.html](https://flsest.github.io/traceworks/features.html): the key features, each by the same four questions: what goes wrong
   without it, what Traceworks does, where you see it, and what it does not do.
-- [docs/audit-loop.html](docs/audit-loop.html): the register, round by round: an audit that knows when it is done.
+- [docs/audit-loop.html](https://flsest.github.io/traceworks/audit-loop.html): the register, round by round: an audit that knows when it is done.
 
-All three are self-contained pages that load nothing from the network. A repository host shows HTML as source, so open
-them in a browser from a checkout.
+The links lead to the pages as a browser shows them. All three are self-contained files in `docs/` that load nothing
+from the network, so they open from a checkout as well.
 
 ## Quick start
 
 Nothing is released yet: there is no download, no artifact in a Maven repository and no image in a registry. The
 way to get Traceworks is to build it from the sources.
 
-You need Java 21, Maven, git, `bash`, and `docker` or `podman`. The first build downloads the Maven plugins and
+You need Java 21 or newer, Maven, git, `bash`, and `docker` or `podman`. The first build downloads the Maven plugins and
 Jackson, and the first image build downloads a Debian base image and packages, so both need the network once.
 
 ```bash
@@ -106,7 +106,7 @@ exit code. On a machine where no container runtime works, a run can go to the ho
 Nobody has to take it all at once. A workflow with one AI step ([examples/ai-hello](examples/ai-hello/README.md))
 already runs in a container and leaves a record; fixed steps and a register come when a question comes back.
 
-The names are those of [docs/features.html](docs/features.html), where each has its limit written next to it.
+The names are those of [docs/features.html](https://flsest.github.io/traceworks/features.html), where each has its limit written next to it.
 
 | Feature | In one line | Documented in |
 |---|---|---|
@@ -267,17 +267,6 @@ security check beside them and the two testing audits.
 - A web page to click in, and dashboards. `traceworks watch` follows a run in the terminal, and `run.html` and a
   register's `report.html` are static files.
 
-**Verified with:**
-
-- Docker 29.1.3, and rootless Podman: the whole suite passed with Podman 4.9.3 on one machine on 2026-11-18 and
-  with Podman 5.7.0 on the CI runner on 2026-11-19, where it runs with every change. Rootful Podman was not run.
-  [docs/security.md](docs/security.md) names the runtime wherever it says "verified".
-- Linux. CI runs on Linux only. Where the system has no `setsid` program (macOS), Ctrl-C cancels a run instead of
-  pausing it.
-- Stand-in command line tools in place of the models, in every automatic test. No test calls a model or uses a
-  real credential. The web tools of an AI step are tested this way only, and a model server of the operator's own
-  only as a stand-in server that the real Pi command line tool calls.
-
 [docs/security.md](docs/security.md) says what the defaults protect and what they do not. Read it before you run a
 package you did not write: a package is code you run.
 
@@ -285,9 +274,9 @@ package you did not write: a package is code you run.
 
 | File | What it holds |
 |---|---|
-| [docs/how-it-works.html](docs/how-it-works.html) | start here: one run in six stages, as moving drawings (open in a browser) |
-| [docs/features.html](docs/features.html) | the key features, with drawings (open in a browser) |
-| [docs/audit-loop.html](docs/audit-loop.html) | the register and the audit loop, to step through (open in a browser) |
+| [docs/how-it-works.html](https://flsest.github.io/traceworks/how-it-works.html) | start here: one run in six stages, as moving drawings |
+| [docs/features.html](https://flsest.github.io/traceworks/features.html) | the key features, with drawings |
+| [docs/audit-loop.html](https://flsest.github.io/traceworks/audit-loop.html) | the register and the audit loop, to step through |
 | [docs/cli.md](docs/cli.md) | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals |
 | [docs/events.md](docs/events.md) | the run record: the run folder, the hash chain and how to check it by hand, every event type, the manifest, the ledger |
 | [docs/registers.md](docs/registers.md) | registers: audit workflows, findings across runs, items, the register folder of a run, decisions, hooks |

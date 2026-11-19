@@ -105,7 +105,7 @@ class ApprovalGate {
             throws InterruptedException, ExecutionException, TimeoutException {
         boolean parks = false;
         try {
-            return future.get(timeout, unit);
+            return answerOf(future, timeout, unit);
         } catch (RunParkedException e) {
             parks = true;   // the step goes on waiting, outside the process: it does not run again here
             throw e;
@@ -125,6 +125,25 @@ class ApprovalGate {
             if (!parks) {
                 notifyWaiting(false);
             }
+        }
+    }
+
+    /**
+     * The answer of {@code future}, or the exception it was completed with. A future that was completed with a
+     * {@link CancellationException} (a cancel, or the {@link RunParkedException} of a parked run) throws that
+     * exception itself from {@code get} on Java 21, and on a later JDK a new {@code CancellationException} that only
+     * has it as its cause. The caller tells a parked run from a cancelled one by the exception, so it gets the one
+     * the future holds on every JDK.
+     */
+    private static String answerOf(CompletableFuture<String> future, long timeout, TimeUnit unit)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        try {
+            return future.get(timeout, unit);
+        } catch (CancellationException e) {
+            if (e.getCause() instanceof CancellationException completedWith) {
+                throw completedWith;
+            }
+            throw e;
         }
     }
 

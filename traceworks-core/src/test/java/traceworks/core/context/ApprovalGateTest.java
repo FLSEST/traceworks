@@ -57,7 +57,7 @@ class ApprovalGateTest {
         gate.cancel();
 
         assertThat(future).isCompletedExceptionally();
-        assertThatThrownBy(future::join).isInstanceOf(CancellationException.class)
+        assertThatThrownBy(() -> gate.await(future, 1, TimeUnit.SECONDS)).isInstanceOf(CancellationException.class)
                 .hasMessageContaining("Execution cancelled");
         assertThat(gate.currentRequest()).isNull();
     }
@@ -174,7 +174,8 @@ class ApprovalGateTest {
         assertThat(gate.parked()).as("the preset wins over parking").isNull();
         assertThat(gate.currentRequest()).isNull();
         assertThat(events).as("the step never shows waiting").doesNotContain(true);
-        assertThatThrownBy(() -> gate.request(request).join()).as("used up: the same question parks now")
+        assertThatThrownBy(() -> gate.await(gate.request(request), 1, TimeUnit.SECONDS))
+                .as("used up: the same question parks now")
                 .isInstanceOf(RunParkedException.class);
     }
 

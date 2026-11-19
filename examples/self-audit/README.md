@@ -142,8 +142,9 @@ exists but is not judged in a run (a cap cut it, or its call failed) is not aske
 
 ## A run judges what needs a verdict
 
-A page to step through, with a drawing of the loop: [docs/audit-loop.html](../../docs/audit-loop.html). Open it in a
-browser; it loads nothing from the network.
+A page to step through, with a drawing of the loop:
+[docs/audit-loop.html](https://flsest.github.io/traceworks/audit-loop.html). The link leads to the page as a
+browser shows it; the file loads nothing from the network.
 
 Findings alone cannot say "nothing was found here". An audit that only knows findings asks about every item in
 every run, and a model that is asked for a defect finds one: in two rounds of an earlier self-audit of the tests,

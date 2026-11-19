@@ -180,7 +180,7 @@ class MutationTestingPitScriptTest {
         Files.writeString(script, Files.readString(script).replace("pit=1.30.2", "pit=1.30.3"));
         String newerPit = key(project, script, "demo.*");
         String image = Files.readString(dockerfile);
-        String newerFrom = image.replaceFirst("(?m)^FROM docker.io/library/maven:\\S+", "FROM docker.io/library/maven:3.99.0-eclipse-temurin-21");
+        String newerFrom = image.replaceFirst("(?m)^FROM docker.io/library/maven:\\S+", "FROM docker.io/library/maven:3.99.0");
         assertThat(newerFrom).as("the Dockerfile names its Maven image on a FROM line").isNotEqualTo(image);
         Files.writeString(dockerfile, newerFrom);
         String newerImage = key(project, script, "demo.*");

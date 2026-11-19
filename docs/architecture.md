@@ -3,9 +3,10 @@
 Traceworks runs repeatable, traceable workflows. It is a command line tool, not a service: it runs a workflow,
 writes everything that happened to a run folder, and exits.
 
-How a run goes, from the package to the register, in moving drawings: [how-it-works.html](how-it-works.html). The
-key features, each explained on one page with drawings: [features.html](features.html). The register, round by
-round: [audit-loop.html](audit-loop.html). Open them in a browser; they load nothing from the network.
+How a run goes, from the package to the register, in moving drawings:
+[how-it-works.html](https://flsest.github.io/traceworks/how-it-works.html). The key features, each explained on one page with drawings:
+[features.html](https://flsest.github.io/traceworks/features.html). The register, round by round: [audit-loop.html](https://flsest.github.io/traceworks/audit-loop.html). The
+links lead to the pages as a browser shows them; the files are next to this one and load nothing from the network.
 
 ## System context: the system and what it talks to
 
@@ -482,7 +483,7 @@ compile, runtime, provided or system scope, transitive ones included; only test-
 | JUnit Jupiter, AssertJ, Mockito | test | unit tests |
 | Maven Compiler, Surefire, Jar, Dependency and Enforcer plugins | build | compiling, testing, packaging (including the test helpers shared with the adapters' tests), locating the Mockito agent jar, dependency enforcement |
 | Maven Shade plugin | build | puts the command line tool and Jackson into one runnable jar (`traceworks.jar`), so the tool needs no class path |
-| Java 21 | external program | runtime |
+| Java 21 or newer | external program | runtime; the code is compiled for 21 |
 | `docker` or `podman` | external program | runs every executing step in a container |
 | `bash` | external program | runs a step's shell command on the host, only when the operator allows host execution |
 | `git` | external program | the run ledger (every call runs with the operator's git configuration switched off), the git state of a package, and workspace checkouts |

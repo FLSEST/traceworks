@@ -2,9 +2,9 @@
 #
 # secrets:     gitleaks over the whole history with .gitleaks.toml, in the gitleaks image pinned by digest. The
 #              same scan runs on staged changes before a commit: scripts/hooks/pre-commit.
-# build:       mvn -B verify, the unit and component tests of every module. It starts no container: the tests
-#              tagged "container" and the integration tests are left out (docs/architecture.md, "Building and
-#              testing").
+# build:       mvn -B verify, the unit and component tests of every module, once per JDK (21, 25 and 27). It
+#              starts no container: the tests tagged "container" and the integration tests are left out
+#              (docs/architecture.md, "Building and testing").
 # integration: mvn -B -Pit verify, everything: the container tests of the adapters and the command line, then the
 #              black-box suite of integration-tests/ against a real container runtime, once with Docker and once
 #              with Podman. Under -Pit a missing runtime or image fails the test that needs it; nothing is skipped.
@@ -44,12 +44,19 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The jar runs on the JDK of the machine it is started on, which need not be the one it was built for: 21
+        # is the release the code is compiled to, 25 the long-term release after it, 27 the newest. A JDK newer
+        # than 21 once changed what the engine saw of a parked run, and only a build on it showed that.
+        java: ['21', '25', '27']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ matrix.java }}
           cache: maven
       - name: Build and test
         run: mvn -B verify
