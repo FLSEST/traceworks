@@ -269,8 +269,8 @@ security check beside them and the two testing audits.
 
 **Verified with:**
 
-- Docker 29.1.3, and rootless Podman 4.9.3 on one machine, where the whole suite passed on 2026-11-18. On the CI
-  runner the Podman leg has not passed yet and may fail without failing the workflow. `docs/security.md` still
+- Docker 29.1.3, and rootless Podman: the whole suite passed with Podman 4.9.3 on one machine on 2026-11-18 and
+  with Podman 5.7.0 on the CI runner on 2026-11-19, where it runs with every change. `docs/security.md` still
   states what it says about Podman as not verified.
 - Linux. CI runs on Linux only. Where the system has no `setsid` program (macOS), Ctrl-C cancels a run instead of
   pausing it.
