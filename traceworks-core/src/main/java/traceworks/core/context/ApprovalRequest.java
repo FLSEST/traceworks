@@ -1,6 +1,7 @@
 package traceworks.core.context;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
@@ -12,6 +13,7 @@ import java.util.Map;
 public class ApprovalRequest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String HUMAN_INPUT = "human-input";
 
     private final String blockId;
     private final String question;
@@ -154,12 +156,16 @@ public class ApprovalRequest {
     /**
      * The answer as the waiting block receives it. An approval accepts only one of its options
      * - compared case-insensitively, passed on in the option's spelling. Without
-     * this check any free text silently became an approval. Human input
-     * stays free: it expects text, numbers or a JSON form.
+     * this check any free text silently became an approval. A human input takes its answer as it is sent: the value
+     * of a single input, or a form's JSON object of its fields' values, each checked against the rules of its field
+     * ({@link #inputAnswer}).
      *
-     * @throws IllegalArgumentException if an approval does not offer the answer
+     * @throws IllegalArgumentException if an approval does not offer the answer, or a human input's rules refuse it
      */
     public String acceptedAnswer(String answer) {
+        if (HUMAN_INPUT.equals(type)) {
+            return acceptedInput(answer);
+        }
         if (!"approval".equals(type) || options == null || options.isEmpty() || answer == null) {
             return answer;
         }
@@ -176,13 +182,18 @@ public class ApprovalRequest {
      * input answers with the value of its {@code variable_name}; a form ({@link #getFields() fields}) answers with a
      * JSON object of every field's value, an absent field as empty text. Values are sent as text.
      *
+     * <p>Every value is checked against the rules of its input ({@link InputRules}): {@code required}, the
+     * {@code input_type}, the {@code options} of a select and the {@code validation_pattern}. This is the check of
+     * every answer a person or an agent gives, whichever way it comes; a value it refuses reaches no step. A value
+     * is sent in its input's format: a select's option in its spelling, a checkbox's {@code true} or {@code false}.
+     *
      * @param values the value per field, keyed by the field's variable name
      * @throws IllegalStateException    if this request is an approval, which takes one of its options instead
-     * @throws IllegalArgumentException if {@code values} names a field the input does not have, or a single input
-     *                                  gets no value
+     * @throws IllegalArgumentException if {@code values} names a field the input does not have, a single input
+     *                                  gets no value, or the rules of a field refuse its value
      */
     public String inputAnswer(Map<String, ?> values) {
-        if (!"human-input".equals(type)) {
+        if (!HUMAN_INPUT.equals(type)) {
             throw new IllegalStateException("An approval takes one of its options, not input values");
         }
         List<String> names = fieldNames();
@@ -196,15 +207,55 @@ public class ApprovalRequest {
             if (!values.containsKey(variableName)) {
                 throw new IllegalArgumentException("The human input needs a value for '" + variableName + "'");
             }
-            return text(values.get(variableName));
+            return checked(variableName, text(values.get(variableName)), singleRules());
         }
         Map<String, String> form = new LinkedHashMap<>();
-        names.forEach(name -> form.put(name, text(values.get(name))));
+        for (Map<String, Object> field : fields) {
+            if (field.get("variable_name") instanceof String name && !name.isBlank()) {
+                form.put(name, checked(name, text(values.get(name)), InputRules.Rules.ofField(field)));
+            }
+        }
         try {
             return JSON.writeValueAsString(form);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Cannot write the form answer as JSON", e);
         }
+    }
+
+    /** The rules of a single input: the request's own. */
+    private InputRules.Rules singleRules() {
+        return new InputRules.Rules(inputType, options, required, validationPattern);
+    }
+
+    /** The value as the step receives it, or the refusal that names the field and the rule it broke. */
+    private static String checked(String name, String value, InputRules.Rules rules) {
+        InputRules.Checked checked = InputRules.check(value, rules);
+        if (!checked.ok()) {
+            throw new IllegalArgumentException("The human input refuses the value for '" + name + "' ("
+                    + checked.rule() + "): " + checked.problem());
+        }
+        return checked.value();
+    }
+
+    /**
+     * A human input's answer as it is sent ({@link #inputAnswer}), checked again: the value of a single input, or a
+     * form's JSON object.
+     */
+    private String acceptedInput(String answer) {
+        if (fields == null || fields.isEmpty()) {
+            return checked(variableName, text(answer), singleRules());
+        }
+        Map<String, Object> form;
+        try {
+            form = answer == null ? null : JSON.readValue(answer, new TypeReference<LinkedHashMap<String, Object>>() {});
+        } catch (JsonProcessingException e) {
+            form = null;
+        }
+        if (form == null) {
+            throw new IllegalArgumentException("The answer to the form is no JSON object of its fields: "
+                    + fieldNames());
+        }
+        return inputAnswer(form);
     }
 
     /** The variable names of a form's fields in their order, or the single input's variable name. */

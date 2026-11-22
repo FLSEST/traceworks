@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import traceworks.core.port.Clock;
 import traceworks.core.port.Ledger;
 import traceworks.core.port.LedgerRuns;
+import traceworks.core.port.RegisterStore;
 import traceworks.core.port.RunStore;
 import traceworks.core.port.StoredRun;
 import traceworks.core.record.EventChain;
@@ -41,13 +42,15 @@ import java.util.Set;
  * @param open         the runs the ledger saw start and not end, in the order of their start
  * @param endedGone    the runs the ledger saw end whose folder is not in the runs folder, each with its status
  * @param earlierOpen  those of them whose run has not ended, each with its status
- * @param problems     what does not hold, every problem of every run; the acknowledged ones are not among them
+ * @param problems     what does not hold, every problem of every run and of every register; the acknowledged
+ *                     ones are not among them
  * @param acknowledged the problems a person acknowledged, for good, each with the note
  * @param inFlight     the runs whose process is alive and has not written an entry yet that its record calls for:
  *                     between {@code run.started} and the start entry (it waits for the ledger's lock), or between
  *                     {@code run.finished} and the end entry. No failure: the entry is on its way
  * @param records      whether the record of every ended run was verified against the end entry (its chain, its
- *                     blobs and the manifest it gives); without, only its first line and its manifest were read
+ *                     blobs and the manifest it gives), and every register of the home; without, only the first
+ *                     line and the manifest of a run were read, and no register
  */
 public record LedgerReport(int started, int ended, int earlier, List<Open> open, List<Named> endedGone,
                            List<Named> earlierOpen, List<Problem> problems, List<Acknowledged> acknowledged,
@@ -99,7 +102,12 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      *             left: changed, removed or named twice; anchors or acknowledgements that were not only added to), {@code manifest-differs} (the manifest in
      *             the run folder is not the end entry), {@code record-broken} (the record of an ended run does not
      *             verify, or does not give the end entry), {@code unknown-run} (a record without
-     *             {@code ledger_start} that is dated after the ledger began, of which the ledger holds nothing)
+     *             {@code ledger_start} that is dated after the ledger began, of which the ledger holds nothing),
+     *             {@code register-broken} (a register does not verify: its chain, its blobs, the project its log
+     *             names, or its log against its anchors; the sentence ends with the state of its log, so that an
+     *             acknowledgement covers that state only), {@code register-gone} (the ledger anchors a register
+     *             this home does not hold). The two of a register are listed under the name of the register
+     *             ({@link Ledger#registerName}) in place of a run id
      * @param text the sentence for a person. It holds what tells this problem from another one of its kind (a
      *             SHA-256, a commit), because an acknowledgement covers a problem by its kind and its sentence
      */
@@ -131,22 +139,23 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
      * @return the report after it
      * @throws RunRefusedException if the note is empty, or the check reports nothing of that run
      */
-    static LedgerReport acknowledge(Ledger ledger, RunStore store, Clock clock, String actor, String runRef,
-                                    String note) {
+    static LedgerReport acknowledge(Ledger ledger, RunStore store, RegisterStore registers, Clock clock,
+                                    String actor, String runRef, String note) {
         if (note == null || note.isBlank()) {
             throw new RunRefusedException(Message.of("An acknowledgement needs a note that says why: --note \"...\""));
         }
-        LedgerReport before = of(ledger, store, clock, true);
+        LedgerReport before = of(ledger, store, registers, clock, true);
         Set<String> reported = new LinkedHashSet<>();
         before.problems().forEach(problem -> reported.add(problem.runId()));
         List<String> hits = reported.contains(runRef) ? List.of(runRef) : runRef.length() < RunStore.MIN_PREFIX
                 ? List.of() : reported.stream().filter(id -> id.startsWith(runRef)).toList();
         if (hits.size() != 1) {
             throw new RunRefusedException(hits.isEmpty()
-                    ? Message.of("The check of the ledger reports nothing of a run ", Message.typed(runRef),
-                    ": there is nothing to acknowledge (traceworks verify lists what it reports)")
+                    ? Message.of("The check of the ledger reports nothing under the name ", Message.typed(runRef),
+                    ": there is nothing to acknowledge (traceworks verify lists what it reports, each problem"
+                            + " under its name: a run id, or the name of a register)")
                     : Message.of(Message.typed(runRef), " is the start of " + hits.size()
-                    + " runs the check reports; name one of them whole"));
+                    + " names the check lists problems under; give one of them whole"));
         }
         String id = hits.getFirst();
         ObjectNode line = JSON.createObjectNode();
@@ -160,10 +169,10 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         try {
             ledger.acknowledge(id, JSON.writeValueAsBytes(line));
         } catch (IOException | RuntimeException e) {
-            throw new RunRefusedException(Message.of("The ledger could not take the acknowledgement of run " + id + ": ",
+            throw new RunRefusedException(Message.of("The ledger could not take the acknowledgement of " + id + ": ",
                     Message.of(e)));
         }
-        return of(ledger, store, clock, true);
+        return of(ledger, store, registers, clock, true);
     }
 
     /** Collects the problems, each once, in the order they are found. */
@@ -184,11 +193,13 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
 
     /**
      * @param records whether to verify the record of every ended run against its end entry: the chain, the blobs
-     *                and the manifest the record gives. It reads every record and every blob of the home; without
-     *                it, a record that was forged while its manifest was left alone is found by
-     *                {@code traceworks verify <run>} only
+     *                and the manifest the record gives; and every register of the home: its chain, its blobs, the
+     *                project its log names and its log against its anchors. It reads every record, every register
+     *                and every blob of the home; without it, a record that was forged while its manifest was left
+     *                alone is found by {@code traceworks verify <run>} only, and a register that does not hold by
+     *                {@code traceworks findings <key> verify} only
      */
-    static LedgerReport of(Ledger ledger, RunStore store, Clock clock, boolean records) {
+    static LedgerReport of(Ledger ledger, RunStore store, RegisterStore registers, Clock clock, boolean records) {
         Instant now = clock.now();
         LedgerRuns named;
         try {
@@ -320,6 +331,10 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
             }
         }
 
+        if (records) {
+            registers(ledger, registers, problems);
+        }
+
         // An acknowledgement covers a problem by what the check said of it then: its kind and its sentence
         List<Acknowledged> acknowledged = new ArrayList<>();
         for (LedgerRuns.Run run : named.runs()) {
@@ -350,6 +365,145 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
         }
         return new LedgerReport(started, ended, earlier, open, endedGone, earlierOpen,
                 List.copyOf(problems.found.values()), acknowledged, inFlight, records);
+    }
+
+    /**
+     * Every register of the home, as {@code traceworks findings <key> verify} judges one: its chain, its blobs,
+     * the project its log names (a folder that was copied names another) and its log against its anchors. A
+     * register from before registers had projects is judged as one, against the anchors an earlier version wrote
+     * under its key alone. And every register the ledger anchors must be there: a folder that was removed with its
+     * log takes the findings and the decisions with it, and only the ledger still names it. Each problem is listed
+     * under the name of its register ({@link Ledger#registerName}).
+     */
+    private static void registers(Ledger ledger, RegisterStore registers, Problems problems) {
+        Set<Ledger.Anchored> held = new LinkedHashSet<>();
+        Set<String> assigned = new LinkedHashSet<>();
+        Set<String> unlisted = new LinkedHashSet<>();
+        List<String> keys;
+        try {
+            keys = registers.keys();
+        } catch (RuntimeException e) {
+            throw new RecordDamagedException("The registers of this home cannot be listed, so they cannot be"
+                    + " checked: " + e.getMessage());
+        }
+        for (String key : keys) {
+            boolean fromBefore;
+            List<String> projects;
+            try {
+                fromBefore = registers.unassigned(key);
+                projects = registers.projects(key);
+            } catch (RuntimeException e) {
+                // What lies at the key cannot be said, so nothing of it is reported as gone as well
+                problems.add(Ledger.registerName(key, null), "register-broken", "the registers of the key " + key
+                        + " cannot be listed: " + e.getMessage());
+                unlisted.add(key);
+                continue;
+            }
+            if (fromBefore) {
+                held.add(new Ledger.Anchored(key, null));
+                try (RegisterStore.Opened opened = registers.openUnassigned(key)) {
+                    register(ledger, registers, opened, problems);
+                } catch (RuntimeException e) {
+                    problems.add(Ledger.registerName(key, null), "register-broken", "the register " + key
+                            + " from before registers had projects cannot be read: " + e.getMessage());
+                }
+            }
+            for (String project : projects) {
+                held.add(new Ledger.Anchored(key, project));
+                try (RegisterStore.Opened opened = registers.open(key, project)) {
+                    register(ledger, registers, opened, problems);
+                    if (assigned(opened)) {
+                        assigned.add(key);   // the anchors an earlier version wrote under the key are its own
+                    }
+                } catch (RuntimeException e) {
+                    problems.add(Ledger.registerName(key, project), "register-broken", "the register "
+                            + RegisterOutcome.named(key, project) + " cannot be read: " + e.getMessage());
+                }
+            }
+        }
+        List<Ledger.Anchored> anchored;
+        try {
+            anchored = ledger.anchoredRegisters();
+        } catch (RuntimeException e) {
+            throw new RecordDamagedException("The ledger cannot be relied on, so it cannot be said which registers"
+                    + " it anchors: " + e.getMessage());
+        }
+        for (Ledger.Anchored register : anchored) {
+            if (held.contains(register) || (register.project() == null && assigned.contains(register.key()))
+                    || unlisted.contains(register.key())) {
+                continue;
+            }
+            problems.add(Ledger.registerName(register.key(), register.project()), "register-gone",
+                    register.project() == null
+                            ? "the ledger holds anchors of the register " + register.key() + " from before registers"
+                            + " had projects, and this home holds neither that register nor one that was assigned"
+                            + " from it: its folder was removed or renamed"
+                            : "the ledger anchors the register " + RegisterOutcome.named(register.key(),
+                            register.project()) + ", and this home holds no such register: its folder was removed"
+                            + " or renamed");
+        }
+    }
+
+    /**
+     * Whether the log of a register says that it was assigned to its project. A log that cannot be read says
+     * nothing, and accounts for nothing: the check of the register reported it already, once.
+     */
+    private static boolean assigned(RegisterStore.Opened opened) {
+        try {
+            return Findings.assigned(opened.events().readAll());
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * The problems of one register that is open, each as {@code findings <key> verify} words it, followed by the
+     * state of the register's log ({@link #logState}): an acknowledgement covers a problem by its sentence, and
+     * must cover that state of the register only. What a problem is about beside the log is in its sentence
+     * already: the digest of an edited {@code state.json}, what an edited blob hashes to, why a log cannot be
+     * read. A register whose name does not say its key and project ({@link Ledger#registerName} of a long key and
+     * project) has them at the beginning of each sentence.
+     */
+    private static void register(Ledger ledger, RegisterStore registers, RegisterStore.Opened opened,
+                                 Problems problems) {
+        String name = Ledger.registerName(opened.key(), opened.project());
+        List<String> found = Findings.verified(opened, ledger, registers).report().problems();
+        if (found.isEmpty()) {
+            return;
+        }
+        String state = logState(opened);
+        String whose = name.startsWith(Ledger.REGISTER_NAME_HASHED) ? "the register "
+                + RegisterOutcome.named(opened.key(), opened.project()) + ": " : "";
+        found.forEach(problem -> problems.add(name, "register-broken", whose + problem + state));
+    }
+
+    /**
+     * What tells a problem of a register from a later one of the same words: the head of its log as it is, or
+     * that it has none. The head alone does not change when a line before the last is changed again, so the
+     * sentence holds a digest of every line too, as that of a record does ({@link #record}). Nothing for a log
+     * that cannot be read: the problem says that.
+     */
+    private static String logState(RegisterStore.Opened opened) {
+        List<byte[]> lines;
+        try {
+            lines = opened.events().readAll();
+        } catch (RuntimeException e) {
+            return "";
+        }
+        if (lines.isEmpty()) {
+            return " (the register's log has no line)";
+        }
+        try {
+            java.security.MessageDigest all = java.security.MessageDigest.getInstance("SHA-256");
+            for (byte[] line : lines) {
+                all.update(line);
+                all.update((byte) '\n');
+            }
+            return " (the register's log ends with the line " + EventChain.sha256Hex(lines.getLast())
+                    + "; its lines have the SHA-256 " + java.util.HexFormat.of().formatHex(all.digest()) + ")";
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     /**
@@ -523,8 +677,8 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
     }
 
     /**
-     * The record of an ended run against its end entry: the chain and the blobs must verify, and the manifest the
-     * record gives must be the end entry byte for byte. So a record that was rewritten while its manifest was left
+     * The record of an ended run against its end entry: the chain and the blobs must verify, nothing may follow the
+     * last line feed, and the manifest the record gives must be the end entry byte for byte. So a record that was rewritten while its manifest was left
      * alone does not pass.
      *
      * @return what is wrong, with the head of the record as it is; {@code null} for nothing
@@ -532,8 +686,11 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
     private static String record(StoredRun run, String id, byte[] end) {
         try {
             List<byte[]> lines = run.events().readAll();
-            traceworks.core.record.ChainReport chain =
-                    traceworks.core.record.ChainVerifier.verify(id, lines, run.blobs());
+            // The record has an end entry, so it is ended: bytes after its last line feed are a problem here as
+            // they are for verify <run>, which must not fail what this check passes
+            byte[] tail = run.events().tail();
+            traceworks.core.record.ChainReport chain = Verification.afterTheLastLine(
+                    traceworks.core.record.ChainVerifier.verify(id, lines, run.blobs()), true, tail);
             if (!chain.intact()) {
                 // The sentence is what an acknowledgement covers, so it names the whole record as it is: a digest
                 // of every line and of every problem (a changed blob's problem names what the blob holds). Whatever
@@ -547,13 +704,15 @@ public record LedgerReport(int started, int ended, int earlier, List<Open> open,
                     all.update(problem.getBytes(StandardCharsets.UTF_8));
                     all.update((byte) '\n');
                 }
+                all.update(tail);   // what follows the last line feed, so that other bytes are another sentence
                 return "the record does not verify (" + chain.problems().getFirst() + "; "
                         + chain.problems().size() + (chain.problems().size() == 1 ? " problem" : " problems")
                         + " in all; its lines and problems have the SHA-256 "
                         + java.util.HexFormat.of().formatHex(all.digest()) + "; it ends with the line "
                         + chain.head() + "): traceworks verify " + id + " says more";
             }
-            return Verification.matches(end, RunRecords.view(id, RunRecords.parse(id, lines), false), run.blobs())
+            return Verification.matches(end, RunRecords.view(id, RunRecords.parse(id, lines), false), run.blobs(),
+                    Verification.namesStarter(lines))
                     ? null : "the end entry of the ledger is not the manifest the record gives (the record ends with"
                     + " the line " + chain.head() + "): traceworks verify " + id + " says more";
         } catch (java.security.NoSuchAlgorithmException e) {

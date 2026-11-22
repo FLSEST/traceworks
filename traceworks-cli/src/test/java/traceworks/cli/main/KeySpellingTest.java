@@ -92,7 +92,7 @@ class KeySpellingTest {
     }
 
     private Result run(Path pkg) {
-        return exec("run", pkg.toString(), "--allow-host-execution", "--no-input");
+        return exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input");
     }
 
     private static String runId(Result run) {
@@ -130,11 +130,11 @@ class KeySpellingTest {
 
         Result first = run(camelCase);
         assertThat(first.code()).as(first.all()).isZero();
-        assertThat(first.out()).contains("register spelling: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(first.out()).contains("register spelling of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
         Result second = run(underscore);
         assertThat(second.code()).as(second.all()).isZero();
         assertThat(second.out()).as("the same register, the same finding")
-                .contains("register spelling: 0 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register spelling of shop: 0 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(exec("findings", "spelling", "list").out()).contains("A.java");
 
         Result show = exec("show", runId(first));
@@ -156,7 +156,8 @@ class KeySpellingTest {
         for (Path pkg : List.of(both, audit)) {
             Result check = exec("check", pkg.toString());
             Result run = run(pkg);
-            Result unchecked = exec("run", pkg.toString(), "--allow-host-execution", "--no-input", "--no-check");
+            Result unchecked = exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input",
+                    "--no-check");
             Result describe = exec("describe", pkg.toString());
 
             for (Result refused : List.of(check, run, unchecked, describe)) {
@@ -191,7 +192,7 @@ class KeySpellingTest {
 
         assertThat(resumed.code()).as(resumed.all()).isZero();
         assertThat(resumed.out()).as("report_block and default_context of the recorded definition were read")
-                .contains("register spelling: 1 new, 0 resolved, 0 reopened, 1 open now");
+                .contains("register spelling of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(exec("findings", "spelling", "list").out()).contains("A.java");
         assertThat(exec("show", id).out()).contains("COMPLETED");
         assertThat(exec("verify", id).code()).isZero();

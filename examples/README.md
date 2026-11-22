@@ -10,6 +10,10 @@ bin/traceworks run examples/<name> --workspace <a directory>
 
 `bin/traceworks describe examples/<name>` shows what a package will do before it runs, and starts nothing.
 
+An audit (`audit-hello`, `mutation-testing` and the self-audits) keeps its findings in a register per project, so
+its run also names the project it works on, in your word: `--project <key>`. Without one the run is refused
+before it starts ([docs/registers.md](../docs/registers.md), "The project of a run").
+
 ## Start here
 
 | Package | What it shows | AI |

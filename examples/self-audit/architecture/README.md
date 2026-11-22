@@ -48,7 +48,7 @@ From the root of a Traceworks checkout, which is the workspace the audit reads:
 ```bash
 traceworks images build examples/self-audit/architecture    # once: the shell, claude and architecture images
 traceworks check examples/self-audit/architecture
-traceworks run examples/self-audit/architecture
+traceworks run examples/self-audit/architecture --project traceworks
 ```
 
 The `verdicts` step calls Claude, so it needs your Claude credentials (see "AI steps" in
@@ -94,7 +94,7 @@ command, and the commands use the toolkit in `cli`), was removed by moving the e
 ## The register
 
 The workflow is an audit (`metadata.audit`, key `architecture`): the `report` step ends its output with the audit
-result envelope, and the register `architecture` under the home keeps the findings across runs
+result envelope, and the register `architecture` of the run's project, under the home, keeps the findings across runs
 ([docs/registers.md](../../../docs/registers.md)). The envelope carries every measured finding (`layer-violation`,
 `forbidden-io`, `package-cycle`, severity HIGH) and every verified `split` or `move` verdict rated medium or high
 (`verdict-split`, `verdict-move`, with that severity, the file as subject, the quoted lines as evidence); a `fine`
@@ -122,8 +122,8 @@ its file. The register keeps the digest and the run of each item's last verdict 
 | `open` and the digest is the same, or an open verdict of the file is in `{{ audit_findings }}` | asks again, in the places the files above leave (`--max-candidates`) |
 
 So the cap counts the files of one run, not the files there are: the ones that are settled free their places, and
-over some runs every candidate is judged once. `traceworks findings architecture` shows how many items are settled,
-and `traceworks findings architecture items` lists them. Raise `--verdict-version` in `workflow.json` when the
+over some runs every candidate is judged once. `traceworks findings` shows how many items of each register are
+settled, and `traceworks findings architecture items` lists them. Raise `--verdict-version` in `workflow.json` when the
 prompt or the instructions change what is asked, and every file is judged again. Where nothing sets
 `{{ audit_items }}` (an older Traceworks), every candidate is judged, as before.
 

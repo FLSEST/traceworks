@@ -11,7 +11,7 @@ script finds.
 
 ```
 traceworks images build examples/mutation-testing-grounded
-traceworks run examples/mutation-testing-grounded --workspace ~/src/my-project \
+traceworks run examples/mutation-testing-grounded --workspace ~/src/my-project --project my-project \
     --input modules=core,service --input classes='com.example.*'
 traceworks findings mutation-testing-grounded
 ```
@@ -85,8 +85,8 @@ package. The cache folder belongs to the image of one package too, so this audit
 when `mutation-testing` measured them.
 
 `scripts/findings.sh` and `scripts/report.sh` are this audit's own. The register is its own as well
-(`mutation-testing-grounded`): a register belongs to one workflow, and the two audits rate differently, so each
-keeps its own findings and decisions.
+(`mutation-testing-grounded`): a register key belongs to one workflow, and the two audits rate differently, so each
+keeps its own findings and decisions, per project (`--project`).
 
 ## Two real runs
 

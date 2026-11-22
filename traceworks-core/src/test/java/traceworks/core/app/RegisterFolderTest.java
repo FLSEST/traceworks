@@ -111,7 +111,7 @@ class RegisterFolderTest {
         fx.services().start(request(AUDIT), null, null);
         int seq;
         String head;
-        try (RegisterStore.Opened opened = fx.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fx.registers.open("hello", AppFixture.PROJECT)) {
             RegisterLog log = new RegisterLog(opened, fx.clock);
             seq = log.lastSeq();
             head = log.head();
@@ -303,7 +303,7 @@ class RegisterFolderTest {
         RunResult result = fx.services().start(request(AUDIT), null, null);
         VerifyReport before = fx.services().verify(result.runId());
         assertThat(before.ok()).isTrue();
-        assertThat(before.register()).isEqualTo("ok (4 files of the register hello, before its first line)");
+        assertThat(before.register()).isEqualTo("ok (4 files of the register hello of shop, before its first line)");
 
         fx.run(result.runId()).registerFolder().put("extra.txt", new byte[] {1});
         VerifyReport added = fx.services().verify(result.runId());
@@ -333,7 +333,7 @@ class RegisterFolderTest {
         VerifyReport gone = fx.services().verify(second.runId());
 
         assertThat(intact.ok()).isTrue();
-        assertThat(intact.register()).isEqualTo("ok (4 files of the register hello at seq " + seq + ")");
+        assertThat(intact.register()).isEqualTo("ok (4 files of the register hello of shop at seq " + seq + ")");
         assertThat(changed.ok()).isFalse();
         assertThat(changed.register()).contains("previous-report.md", "is not the file the run started with");
         assertThat(gone.ok()).isFalse();
@@ -386,7 +386,7 @@ class RegisterFolderTest {
     void aBlobOfTheRegisterThatDoesNotHashToItsName_refusesTheRun() {
         fx.services().start(request(AUDIT), null, null);
         String reportBlob;
-        try (RegisterStore.Opened opened = fx.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fx.registers.open("hello", AppFixture.PROJECT)) {
             reportBlob = new RegisterLog(opened, fx.clock).read().stream()
                     .filter(event -> event.text("report_blob") != null).findFirst().orElseThrow().text("report_blob");
         }
@@ -394,9 +394,9 @@ class RegisterFolderTest {
 
         assertThatThrownBy(() -> fx.services().start(request(AUDIT), null, null))
                 .isInstanceOf(RunRefusedException.class)
-                .hasMessageContaining("the register hello cannot be read")
+                .hasMessageContaining("the register hello of shop cannot be read")
                 .hasMessageContaining("does not hash to its name")
-                .hasMessageContaining("findings hello verify");
+                .hasMessageContaining("'traceworks findings hello verify --project shop'");
     }
 
     /** The findings a report stated are a blob too: one that was edited in place refuses the run as well. */
@@ -404,7 +404,7 @@ class RegisterFolderTest {
     void aFindingsBlobThatWasEditedInPlace_refusesTheRun() {
         fx.services().start(request(AUDIT), null, null);
         String findingsBlob;
-        try (RegisterStore.Opened opened = fx.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fx.registers.open("hello", AppFixture.PROJECT)) {
             findingsBlob = new RegisterLog(opened, fx.clock).read().stream()
                     .filter(event -> event.text("findings_blob") != null).findFirst().orElseThrow()
                     .text("findings_blob");
@@ -415,7 +415,7 @@ class RegisterFolderTest {
 
         assertThatThrownBy(() -> fx.services().start(request(AUDIT), null, null))
                 .isInstanceOf(RunRefusedException.class)
-                .hasMessageContaining("the register hello cannot be read")
+                .hasMessageContaining("the register hello of shop cannot be read")
                 .hasMessageContaining("does not hash to its name");
     }
 }

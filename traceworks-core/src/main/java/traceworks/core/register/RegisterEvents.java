@@ -4,6 +4,14 @@ package traceworks.core.register;
 public final class RegisterEvents {
 
     public static final String CREATED = "register.created";
+
+    /**
+     * A register from before registers had projects was assigned to one: {@code project}, by {@code actor}. From
+     * this line on it is the register of its key and that project; the lines before it are the same chain. A
+     * version that does not know the line refuses to replay the log, which is right: it would keep the register
+     * under its key alone.
+     */
+    public static final String ASSIGNED = "register.assigned";
     public static final String REPORT_APPLIED = "report.applied";
     public static final String REPORT_REJECTED = "report.rejected";
     public static final String FINDING_NEW = "finding.new";

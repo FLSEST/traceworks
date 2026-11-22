@@ -29,7 +29,8 @@ class GithubIssuesHookTest {
     private static final Path HOOK = Path.of("../examples/hooks/github-issues.sh").toAbsolutePath().normalize();
 
     private static final String DIFF = """
-            {"format": 1, "register": "architecture", "workflow_id": "wf-1", "run_id": "run-7", "report_valid": true,
+            {"format": 1, "register": "architecture", "project": "shop", "workflow_id": "wf-1", "run_id": "run-7",
+             "report_valid": true,
              "new": [{"id": "aaaa1111bbbb2222", "rule_key": "layer-rule", "subject": "core/Engine.java",
                       "severity": "HIGH", "title": "core reads a file", "description": "Engine opens a path itself.",
                       "evidence": "Engine.java:12 Files.readString", "tags": [], "status": "OPEN"}],
@@ -156,7 +157,7 @@ class GithubIssuesHookTest {
                 "[HIGH] layer-rule: core/Engine.java");
         assertThat(calls.get(0).get(6)).isEqualTo("--body");
         assertThat(calls.get(0).get(7)).isEqualTo("""
-                Register `architecture`, finding `aaaa1111bbbb2222`, run `run-7`.
+                Register `architecture` of `shop`, finding `aaaa1111bbbb2222`, run `run-7`.
 
                 core reads a file
 
@@ -164,13 +165,13 @@ class GithubIssuesHookTest {
 
                 Evidence: Engine.java:12 Files.readString
 
-                Details: `traceworks findings architecture show aaaa1111bbbb2222`""");
+                Details: `traceworks findings architecture show aaaa1111bbbb2222 --project shop`""");
         assertThat(calls.get(1)).contains("[MEDIUM] cycle: cli -> core");
-        assertThat(calls.get(1).get(7)).isEqualTo("Register `architecture`, finding `eeee3333`, run `run-7`, reopened: "
-                + "seen_again.\n\na cycle\n\nEvidence: cli.X -> core.Y\n\nDetails: `traceworks findings architecture show "
-                + "eeee3333`");
+        assertThat(calls.get(1).get(7)).isEqualTo("Register `architecture` of `shop`, finding `eeee3333`, run `run-7`,"
+                + " reopened: seen_again.\n\na cycle\n\nEvidence: cli.X -> core.Y\n\nDetails: `traceworks findings"
+                + " architecture show eeee3333 --project shop`");
         assertThat(ran.stderr()).contains("opened an issue in owner/repo: [HIGH] layer-rule: core/Engine.java")
-                .contains("register architecture: 2 finding(s) resolved; close their issues by hand");
+                .contains("register architecture of shop: 2 finding(s) resolved; close their issues by hand");
     }
 
     @Test
@@ -191,7 +192,7 @@ class GithubIssuesHookTest {
         Ran ran = hook(DIFF.replace("\"report_valid\": true", "\"report_valid\": false"), Map.of(), "owner/repo");
 
         assertThat(ran.code()).isZero();
-        assertThat(ran.stderr()).contains("register architecture: the report of run run-7 was rejected");
+        assertThat(ran.stderr()).contains("register architecture of shop: the report of run run-7 was rejected");
         assertThat(ghCalls()).isEmpty();
     }
 

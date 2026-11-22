@@ -116,32 +116,48 @@ final class Comparing {
         if (keyA == null && keyB == null) {
             return null;
         }
-        if (keyA == null || !keyA.equals(keyB)) {
+        // The same register is the same key and the same project: two projects of one audit have two registers
+        String project = viewA.project();
+        if (keyA == null || !keyA.equals(keyB) || !java.util.Objects.equals(project, viewB.project())) {
             return FindingsDelta.notCompared(keyA == null ? keyB : keyA, "the two runs do not feed the same register");
         }
-        if (!registers.keys().contains(keyA)) {
-            return FindingsDelta.notCompared(keyA, "this home has no register " + keyA);
+        if (project == null) {
+            // Runs of a version that kept one register per key: what that register held after each is not told
+            // from the registers of projects, so nothing is said of their findings, also not that there were none
+            return FindingsDelta.notCompared(keyA, "the two runs are from before registers were kept per project"
+                    + " (their records name no project), so their findings are not compared");
         }
-        try (RegisterStore.Opened opened = registers.open(keyA)) {
+        String name = RegisterOutcome.named(keyA, project);
+        try {
+            if (!registers.projects(keyA).contains(project)) {
+                return FindingsDelta.notCompared(keyA, "this home has no register " + name);
+            }
+        } catch (RuntimeException e) {
+            return FindingsDelta.notCompared(keyA, "the register " + name + " cannot be read: " + e.getMessage());
+        }
+        try (RegisterStore.Opened opened = registers.open(keyA, project)) {
             List<RegisterEvent> events = new RegisterLog(opened, clock).read();
             RegisterState[] states = new RegisterState[2];
             String[] ids = {a.runId(), b.runId()};
             for (int i = 0; i < 2; i++) {
                 RegisterEvent applied = applied(events, ids[i]);
                 if (applied == null) {
-                    return FindingsDelta.notCompared(keyA, "the register " + keyA + " did not apply the report of run "
+                    return FindingsDelta.notCompared(keyA, "the register " + name + " did not apply the report of run "
                             + ids[i] + ", so it holds no state after it");
                 }
                 byte[] state = opened.blobs().get(applied.text("state_blob")).orElse(null);
                 if (state == null) {
-                    return FindingsDelta.notCompared(keyA, "the state the register " + keyA + " recorded after run "
+                    return FindingsDelta.notCompared(keyA, "the state the register " + name + " recorded after run "
                             + ids[i] + " is deleted");
                 }
                 states[i] = StateJson.read(state);
             }
             return delta(keyA, states[0], states[1]);
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            return FindingsDelta.notCompared(keyA, "the register " + keyA + " cannot be read: " + e.getMessage());
+        } catch (traceworks.core.port.BlobStore.ChangedBlobException e) {
+            throw e;   // ends the command as a damaged record does
+        } catch (RuntimeException e) {
+            // Whatever the store or a line throws: the comparison says why it names no findings, and goes on
+            return FindingsDelta.notCompared(keyA, "the register " + name + " cannot be read: " + e.getMessage());
         }
     }
 

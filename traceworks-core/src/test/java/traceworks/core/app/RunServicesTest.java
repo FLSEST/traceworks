@@ -551,6 +551,108 @@ class RunServicesTest {
         assertThat(fx.commands.commands()).containsExactly("echo Operator");
     }
 
+    // ---- the rules of a human input hold for every answer ----
+
+    /**
+     * The defect of TODO 342a71a5: {@code traceworks answer} to a parked run took a value its field's
+     * {@code validation_pattern} refuses, and the shell step after it got the value filled in.
+     */
+    @Test
+    void answer_toAParkedHumanInput_thatItsPatternRefuses_isRefused_recordsNothing_andTheQuestionStillWaits() {
+        String id = services.start(request(AppFixture.GUARDED), null, null).runId();
+        int before = fx.events(id).size();
+
+        AnswerResult refused = services.answer(id, new AnswerRequest("human-input", null, "abc; rm -rf x", null,
+                null));
+
+        assertThat(refused.accepted()).isFalse();
+        assertThat(refused.runParked()).isTrue();
+        assertThat(refused.message()).isEqualTo("The human input refuses the value for 'n' (validation_pattern):"
+                + " 'abc; rm -rf x' does not match the pattern [0-9]+");
+        assertThat(fx.events(id)).as("nothing is recorded").hasSize(before);
+        assertThat(services.view(id).parkedAnswer()).as("the question still waits").isNull();
+        assertThat(fx.run(id).writerAlive()).isFalse();
+
+        assertThat(services.answer(id, new AnswerRequest("human-input", null, "42", null, null)).accepted()).isTrue();
+        assertThat(services.resume(resumeOf(id), null, null).status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.commands.commands()).containsExactly("echo 42");
+    }
+
+    /** A form given with {@code --field}: each field against its own rules, and a select in its option's spelling. */
+    @Test
+    void answer_toAParkedForm_checksEachField_andRecordsTheSelectInItsOptionsSpelling() {
+        String id = services.start(request(AppFixture.RELEASE), null, null).runId();
+
+        AnswerResult badVersion = services.answer(id, new AnswerRequest("human-input", null, null,
+                Map.of("version", "1.4.0; rm -rf x", "channel", "beta"), null));
+        AnswerResult badChannel = services.answer(id, new AnswerRequest("human-input", null, null,
+                Map.of("version", "1.4.0", "channel", "nightly"), null));
+        AnswerResult missing = services.answer(id, new AnswerRequest("human-input", null, null,
+                Map.of("version", "1.4.0"), null));
+
+        assertThat(badVersion.message()).contains("'version' (validation_pattern)");
+        assertThat(badChannel.message()).contains("'channel' (options)", "'nightly' is none of the options");
+        assertThat(missing.message()).contains("'channel' (required)");
+        assertThat(List.of(badVersion, badChannel, missing)).noneMatch(AnswerResult::accepted);
+        assertThat(fx.ofType(id, "approval.answered")).isEmpty();
+
+        AnswerResult answered = services.answer(id, new AnswerRequest("human-input", null, null,
+                Map.of("version", "1.4.0", "channel", "Stable"), null));
+        assertThat(answered.accepted()).as(answered.message()).isTrue();
+        assertThat(fx.text(id, fx.ofType(id, "approval.answered").getFirst(), "answer"))
+                .isEqualTo("{\"version\":\"1.4.0\",\"channel\":\"stable\"}");
+        assertThat(services.resume(resumeOf(id), null, null).status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.commands.commands()).containsExactly("echo 1.4.0 stable");
+    }
+
+    /** A running run: the run's process refuses the request, and the question stays open for the next answer. */
+    @Test
+    void answer_toARunningHumanInput_thatItsPatternRefuses_isRefusedByTheRun_andTheQuestionStaysOpen()
+            throws Exception {
+        Events events = new Events();
+        StartRequest interactive = new StartRequest(AppFixture.GUARDED, Map.of(), WORKSPACE, false, true);
+        Background<RunResult> running = inBackground(
+                () -> services.start(interactive, events, question -> Optional.empty()));
+        String id = events.await("approval.requested").run();
+
+        AnswerResult refused = services.answer(id, new AnswerRequest("human-input", null, "abc; rm -rf x", null,
+                null));
+
+        assertThat(refused.accepted()).isFalse();
+        assertThat(refused.runParked()).isFalse();
+        assertThat(refused.message()).contains("'n' (validation_pattern)", "does not match the pattern [0-9]+");
+        assertThat(fx.ofType(id, "request.refused")).singleElement().satisfies(e ->
+                assertThat(e.fields().path("reason").asText()).contains("'n' (validation_pattern)"));
+        assertThat(fx.ofType(id, "approval.answered")).isEmpty();
+        assertThat(services.view(id).steps().getFirst().status()).as("the question still waits")
+                .isEqualTo(StepStatus.WAITING_APPROVAL);
+
+        assertThat(services.answer(id, new AnswerRequest("human-input", null, "42", null, null)).accepted()).isTrue();
+        assertThat(running.join().status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.commands.commands()).containsExactly("echo 42");
+    }
+
+    /**
+     * The prompt of a run in the foreground: an answer its asker gives that the rules refuse does not reach the step;
+     * the question stays open, and the inbox can still answer it.
+     */
+    @Test
+    void anAnswerAtTheTerminal_thatThePatternRefuses_doesNotReachTheStep() throws Exception {
+        Events events = new Events();
+        StartRequest interactive = new StartRequest(AppFixture.GUARDED, Map.of(), WORKSPACE, false, true);
+        Background<RunResult> running = inBackground(
+                () -> services.start(interactive, events, question -> Optional.of("abc; rm -rf x")));
+        String id = events.await("approval.requested").run();
+
+        AnswerResult answered = services.answer(id, new AnswerRequest("human-input", null, "42", null, null));
+
+        assertThat(answered.accepted()).as(answered.message()).isTrue();
+        assertThat(running.join().status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.ofType(id, "approval.answered")).singleElement()
+                .satisfies(e -> assertThat(e.fields().path("source").asText()).isEqualTo("inbox"));
+        assertThat(fx.commands.commands()).containsExactly("echo 42");
+    }
+
     @Test
     void resume_withoutAnAnswer_isRefused() {
         String id = services.start(request(DEPLOY), null, null).runId();
@@ -1236,6 +1338,27 @@ class RunServicesTest {
         assertThat(running.join().status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(fx.types(id)).doesNotContain("run.parked");
         assertThat(fx.claude.prompts()).as("the AI proposed once").hasSize(1);
+    }
+
+    /** A process that must end leaves a run that waits at such a question interrupted, and resumable. */
+    @Test
+    void interruptRunsAtAQuestion_leavesTheRunThatWaitsInTheProcessInterrupted_andNoOther() throws Exception {
+        String parkedId = services.start(request(DEPLOY), null, null).runId();
+        fx.withClaude();
+        fx.claude.answers("Yes");
+        Events events = new Events();
+        Background<RunResult> running = inBackground(
+                () -> services.start(request(AppFixture.SHADOW), events, null));
+        String id = events.await("approval.requested").run();
+
+        List<String> interrupted = services.interruptRunsAtAQuestion();
+
+        assertThat(interrupted).containsExactly(id);
+        assertThat(running.failure()).isInstanceOf(EventLogException.class);
+        assertThat(services.view(id).status()).isEqualTo(RunStatus.INTERRUPTED);
+        assertThat(fx.types(id)).doesNotContain("run.finished", "run.cancel_requested", "run.pause_requested");
+        assertThat(services.view(parkedId).status()).isEqualTo(RunStatus.PARKED);
+        assertThat(services.interruptRunsAtAQuestion()).isEmpty();
     }
 
     @Test

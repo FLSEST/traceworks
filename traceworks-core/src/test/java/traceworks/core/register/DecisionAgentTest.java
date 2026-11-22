@@ -31,7 +31,7 @@ class DecisionAgentTest {
     private static final Instant T2 = Instant.parse("2026-11-17T11:00:00Z");
     private static final String FIXTURE = "/registers/decided-before-agent/";
 
-    private final RegisterState empty = RegisterState.empty("arch", "wf-1", "architecture");
+    private final RegisterState empty = RegisterState.empty("arch", "wf-1", "architecture").ofProject("shop");
 
     private static Report report(RegisterStore.Opened opened, String... subjects) {
         List<ReportedFinding> findings = new java.util.ArrayList<>();
@@ -58,8 +58,10 @@ class DecisionAgentTest {
                 "operator@host", agent, at, null);
     }
 
+    /** The register verifies as what its first line says it is: of a project, or from before registers had one. */
     private static void holds(RegisterStore.Opened opened) {
-        ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+        String project = RegisterEvent.parse(opened.events().readAll().getFirst()).text("project");
+        ChainReport report = RegisterVerifier.verify("arch", project, opened.events().readAll(), opened.blobs(),
                 opened.state());
         assertThat(report.intact()).as(report.problems().toString()).isTrue();
     }
@@ -120,10 +122,10 @@ class DecisionAgentTest {
     @Test
     void theLineOfADecision_carriesTheAgentBesideTheActor_andTheStateDoesToo() throws IOException {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "architecture");
+            writer.created("wf-1", "architecture", "shop");
             RegisterState state = writer.applied(empty, report(opened, "A.java", "B.java"), null, "head-1").state();
 
             state = dismiss(writer, state, "A.java", "claude-code", T1);
@@ -156,10 +158,10 @@ class DecisionAgentTest {
     @Test
     void aDecisionWithoutAnAgent_isTheLineItAlwaysWas_andTheRegisterRequiresNothingNew() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "architecture");
+            writer.created("wf-1", "architecture", "shop");
             RegisterState state = writer.applied(empty, report(opened, "A.java"), null, "head-1").state();
 
             state = dismiss(writer, state, "A.java", null, T1);
@@ -182,10 +184,10 @@ class DecisionAgentTest {
     @Test
     void theRequirement_isWrittenOnce_beforeTheFirstLineWithAnAgent_alsoForAReopening() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "architecture");
+            writer.created("wf-1", "architecture", "shop");
             RegisterState state = writer.applied(empty, report(opened, "A.java", "B.java"), null, "head-1").state();
             state = dismiss(writer, state, "A.java", null, T1);
 
@@ -217,7 +219,7 @@ class DecisionAgentTest {
     @Test
     void theRequirementOfAnAgent_isKnownToThisVersion_andAnotherOneIsStillRefused() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.open("arch")) {
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
             RegisterState state = RegisterReplay.replay("arch", List.of(line(0, "register.requires",
                     "\"feature\":\"decision_agent\"")), opened.blobs());
 
@@ -268,7 +270,7 @@ class DecisionAgentTest {
     private static InMemoryRegisterStore earlierRegister() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
         String text = new String(resource("events.jsonl"), StandardCharsets.UTF_8);
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             for (String line : text.split("\n")) {
                 opened.events().append(line.getBytes(StandardCharsets.UTF_8));
                 for (var fields = RegisterEvent.parse(line.getBytes(StandardCharsets.UTF_8)).fields().fields();
@@ -288,7 +290,7 @@ class DecisionAgentTest {
     @Test
     void aRegisterOfTheVersionBefore_verifiesUnchanged_andFoldsToTheBytesItRecorded() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.open("arch")) {
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
             holds(opened);
             RegisterState state = RegisterReplay.replay("arch", new RegisterLog(opened, () -> T1).read(),
                     opened.blobs());
@@ -304,7 +306,7 @@ class DecisionAgentTest {
     @Test
     void aDecisionWithoutAnAgentOnARegisterOfTheVersionBefore_addsNoRequirement() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterState state = RegisterReplay.replay("arch", log.read(), opened.blobs());
             int before = log.read().size();
@@ -325,7 +327,7 @@ class DecisionAgentTest {
     @Test
     void aDecisionOfAnAgentOnARegisterOfTheVersionBefore_statesTheRequirementFirst_andVerifies() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterState state = RegisterReplay.replay("arch", log.read(), opened.blobs());
 

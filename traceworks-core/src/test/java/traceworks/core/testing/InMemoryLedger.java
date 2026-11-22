@@ -97,9 +97,9 @@ public final class InMemoryLedger implements Ledger {
         this.began = at;
     }
 
-    /** A problem of the anchors of the register {@code key}, as the git ledger words one. */
-    public synchronized void anchorProblem(String key, String sentence) {
-        changes.computeIfAbsent("registers." + key, id -> new ArrayList<>()).add(sentence);
+    /** A problem of the anchors of the register of {@code key} and {@code project}, as the git ledger words one. */
+    public synchronized void anchorProblem(String key, String project, String sentence) {
+        changes.computeIfAbsent(Ledger.registerName(key, project), id -> new ArrayList<>()).add(sentence);
     }
 
 
@@ -179,19 +179,61 @@ public final class InMemoryLedger implements Ledger {
     }
 
     private final Map<String, List<RegisterAnchor>> anchors = new LinkedHashMap<>();
+    /** What an earlier version anchored under a key alone, before registers had projects. */
+    private final Map<String, List<RegisterAnchor>> earlierAnchors = new LinkedHashMap<>();
     private RuntimeException anchorFailure;
 
     @Override
-    public synchronized void anchorRegister(String key, int seq, String head) {
+    public synchronized void anchorRegister(String key, String project, RegisterAnchor anchor) {
         if (anchorFailure != null) throw anchorFailure;
-        List<RegisterAnchor> list = anchors.computeIfAbsent(key, k -> new ArrayList<>());
-        RegisterAnchor anchor = new RegisterAnchor(seq, head);
+        if (anchor.written() == null) throw new IllegalArgumentException("An anchor says what was written");
+        if (!traceworks.core.register.RegisterAnchors.shaped(anchor.written())) {
+            throw new IllegalArgumentException("An anchor says no value that has not the shape of its field");
+        }
+        List<RegisterAnchor> list = anchors.computeIfAbsent(key + "/" + project, k -> new ArrayList<>());
         if (list.isEmpty() || !list.getLast().equals(anchor)) list.add(anchor);
     }
 
     @Override
-    public synchronized List<RegisterAnchor> registerAnchors(String key) {
-        return List.copyOf(anchors.getOrDefault(key, List.of()));
+    public synchronized List<RegisterAnchor> registerAnchors(String key, String project) {
+        if (anchorReadFailure != null) throw anchorReadFailure;
+        return List.copyOf(anchors.getOrDefault(key + "/" + project, List.of()));
+    }
+
+    private RuntimeException anchorReadFailure;
+
+    /** Every read of the anchors from now on throws {@code failure}, as a ledger git cannot read would. */
+    public synchronized void failAnchorReads(RuntimeException failure) {
+        this.anchorReadFailure = failure;
+    }
+
+    @Override
+    public synchronized List<Anchored> anchoredRegisters() {
+        if (anchorReadFailure != null) throw anchorReadFailure;
+        List<Anchored> anchored = new ArrayList<>();
+        earlierAnchors.keySet().forEach(key -> anchored.add(new Anchored(key, null)));
+        anchors.keySet().forEach(name -> anchored.add(new Anchored(name.substring(0, name.indexOf('/')),
+                name.substring(name.indexOf('/') + 1))));
+        return anchored;
+    }
+
+    @Override
+    public synchronized List<RegisterAnchor> earlierRegisterAnchors(String key) {
+        if (anchorReadFailure != null) throw anchorReadFailure;
+        return List.copyOf(earlierAnchors.getOrDefault(key, List.of()));
+    }
+
+    /** Adds an anchor as an earlier version wrote it: under the key alone, before registers had projects. */
+    public synchronized void anchorEarlier(String key, int seq, String head) {
+        earlierAnchors.computeIfAbsent(key, k -> new ArrayList<>()).add(new RegisterAnchor(seq, head));
+    }
+
+    /**
+     * Puts {@code anchor} in the place of the anchor at {@code index} of {@code key} and {@code project}, as a
+     * ledger whose history was written anew with another line would hold it.
+     */
+    public synchronized void replaceAnchor(String key, String project, int index, RegisterAnchor anchor) {
+        anchors.get(key + "/" + project).set(index, anchor);
     }
 
     /** Every anchoring from now on throws {@code failure}, as a ledger without git would; {@code null} ends that. */
@@ -199,8 +241,8 @@ public final class InMemoryLedger implements Ledger {
         this.anchorFailure = failure;
     }
 
-    /** Drops the anchors of {@code key}, as a register written before anchors existed has none. */
-    public synchronized void forgetAnchors(String key) {
-        anchors.remove(key);
+    /** Drops the anchors of {@code key} and {@code project}, as a register written before anchors existed has none. */
+    public synchronized void forgetAnchors(String key, String project) {
+        anchors.remove(key + "/" + project);
     }
 }

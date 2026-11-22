@@ -3,9 +3,9 @@ package traceworks.cli;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import traceworks.core.app.QuestionAsker;
+import traceworks.core.context.InputRules;
 import traceworks.core.port.BlobRef;
 import traceworks.core.record.QuestionView;
-import traceworks.core.util.TimedRegex;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -13,7 +13,6 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,20 +21,17 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * Asks the questions of a run on the terminal. One reader thread owns the input for the whole session and queues the
  * lines it reads, so a question that is interrupted (answered elsewhere, timed out) never swallows the line meant for
- * the next one. Questions are asked one at a time. An answer is checked against the options before it is returned; a
- * typo is asked again.
+ * the next one. Questions are asked one at a time. An answer is checked before it is returned, an approval's against
+ * its options and a human input's against the rules the run checks every answer with ({@link InputRules}); a typo is
+ * asked again.
  */
 public final class ConsoleAsker implements QuestionAsker {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    /** How long checking one typed value against a workflow's pattern may take. */
-    private static final Duration PATTERN_TIME_LIMIT = Duration.ofSeconds(2);
     /** The end of the input. */
     private static final String EOF = new String("<eof>");
 
@@ -148,8 +144,8 @@ public final class ConsoleAsker implements QuestionAsker {
     private Optional<String> human(QuestionView question, String text) throws InterruptedException {
         question(text);
         if (question.fields() == null || question.fields().isEmpty()) {
-            String value = value(text(question.defaultValue(), ""), question.required(), pattern(question.pattern()),
-                    question.options());
+            String value = value(text(question.defaultValue(), ""), new InputRules.Rules(question.inputType(),
+                    question.options(), question.required(), question.pattern()));
             return value == null ? Optional.empty() : Optional.of(value);
         }
         Map<String, Object> form = new LinkedHashMap<>();
@@ -159,8 +155,7 @@ public final class ConsoleAsker implements QuestionAsker {
             // A label is the workflow's text, as an option is
             TerminalText.shown(LEAD, "", "", "", "", List.of(String.valueOf(label)))
                     .forEach(shown -> out.println(LEAD + shown));
-            String value = value(string(field.get("default_value")), !Boolean.FALSE.equals(field.get("required")),
-                    pattern(field.get("validation_pattern")), strings(field.get("options")));
+            String value = value(string(field.get("default_value")), InputRules.Rules.ofField(field));
             if (value == null) {
                 return Optional.empty();
             }
@@ -173,11 +168,14 @@ public final class ConsoleAsker implements QuestionAsker {
         }
     }
 
-    /** One value: asks again until it is acceptable; {@code null} when the input ends. */
-    private String value(String defaultValue, boolean required, String pattern, List<String> options)
-            throws InterruptedException {
-        if (!options.isEmpty()) {
-            options("one of:", options);
+    /**
+     * One value: asks again until the rules of its input take it, as the run checks it ({@link InputRules}); the
+     * value in the input's format, or {@code null} when the input ends. A select shows its options.
+     */
+    private String value(String defaultValue, InputRules.Rules rules) throws InterruptedException {
+        boolean select = "select".equals(rules.inputType()) && !rules.options().isEmpty();
+        if (select) {
+            options("one of:", rules.options());
         }
         // What comes back from here is the person's own answer, and the step stores it without the protection the
         // default had (a default may be made of a step's or a model's output). An empty line therefore takes the
@@ -197,26 +195,15 @@ public final class ConsoleAsker implements QuestionAsker {
                         + " does not take it: type the value");
                 continue;
             }
-            String value = line.isEmpty() ? defaultValue : line;
-            if (value.isEmpty() && required) {
-                out.println("  a value is required");
-            } else if (!options.isEmpty() && !value.isEmpty() && !options.contains(value)) {
-                options("not one of:", options);
-            } else if (pattern != null && !value.isEmpty()) {
-                Boolean matches = matches(pattern, value);
-                if (matches == null) {
-                    // The pattern is the workflow's own; asking again would never end, and the step checks the
-                    // answer once more
-                    TerminalText.println(out, "  could not be checked against the pattern in time, so it is taken as"
-                            + " it is: ", TerminalText.safe(pattern));
-                    return value;
-                } else if (!matches) {
-                    TerminalText.println(out, "  does not match ", TerminalText.safe(pattern));
-                } else {
-                    return value;
-                }
+            InputRules.Checked checked = InputRules.check(line.isEmpty() ? defaultValue : line, rules);
+            if (checked.ok()) {
+                return checked.value();
+            }
+            if (InputRules.OPTIONS.equals(checked.rule())) {
+                options("not one of:", rules.options());
             } else {
-                return value;
+                // The value, the options and the pattern it names are text from outside
+                TerminalText.println(out, "  ", TerminalText.safe(checked.problem()));
             }
         }
     }
@@ -230,21 +217,6 @@ public final class ConsoleAsker implements QuestionAsker {
      */
     private void options(String caption, List<String> options) {
         TerminalText.shown(LEAD, caption, " ", "", "", options).forEach(line -> out.println(LEAD + line));
-    }
-
-    /**
-     * Whether the value matches the workflow's pattern; {@code null} when that cannot be told within
-     * {@link #PATTERN_TIME_LIMIT}. The pattern is the workflow's, and so is a default value: neither may hang the
-     * console, which holds the turn of every other question while it asks.
-     */
-    private static Boolean matches(String pattern, String value) {
-        try {
-            return TimedRegex.matches(Pattern.compile(pattern), value, PATTERN_TIME_LIMIT);
-        } catch (PatternSyntaxException e) {
-            return true;   // the step reports a broken pattern
-        } catch (TimedRegex.TimedOut e) {
-            return null;
-        }
     }
 
     private String prompt() throws InterruptedException {
@@ -274,15 +246,7 @@ public final class ConsoleAsker implements QuestionAsker {
         return ref == null ? "" : blobText.apply(ref.sha256()).orElse(missing);
     }
 
-    private static String pattern(Object value) {
-        return value == null || value.toString().isEmpty() ? null : value.toString();
-    }
-
     private static String string(Object value) {
         return value == null ? "" : value.toString();
-    }
-
-    private static List<String> strings(Object value) {
-        return value instanceof List<?> list ? list.stream().map(String::valueOf).toList() : List.of();
     }
 }

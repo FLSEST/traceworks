@@ -46,6 +46,18 @@ final class EventFields {
                 f.set("uses", uses(topLevel ? e.position() : -1));
                 yield new Mapped(RecordTypes.STEP_STARTED, f);
             }
+            case PackageCalled e -> {
+                // What run.started says of the run's own package, in the same fields, for the package of a child
+                ObjectNode workflow = f.putObject("workflow");
+                workflow.put("id", e.workflowId());
+                workflow.put("name", e.workflowName());
+                f.put("reference", e.reference());
+                ObjectNode pkg = f.putObject("package");
+                pkg.put("dir", e.packageDir());
+                pkg.put("digest", e.packageDigest());
+                f.set("definition", blobs.of(e.workflowJson()));
+                yield new Mapped(RecordTypes.RUN_PACKAGE, f);
+            }
             case StepWaiting e -> {
                 f.put("step", e.stepIndex());
                 f.put("waiting", e.waiting());

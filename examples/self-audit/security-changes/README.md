@@ -42,11 +42,11 @@ From the root of a Traceworks checkout, which is the workspace the check reads:
 
 ```bash
 traceworks images build examples/self-audit/security-changes            # once, and again when images/ changed
-traceworks run examples/self-audit/security-changes --input since=v0.1.0       # since a tag
-traceworks run examples/self-audit/security-changes --input since=4f2a91c      # since a commit
-traceworks run examples/self-audit/security-changes --input since=2026-11-10   # since a date
-traceworks run examples/self-audit/security-changes                            # since the last run of this check
-traceworks run examples/self-audit/security-changes --input full_audit=4f2a91c # and name the last full audit
+traceworks run examples/self-audit/security-changes --project traceworks --input since=v0.1.0       # since a tag
+traceworks run examples/self-audit/security-changes --project traceworks --input since=4f2a91c      # since a commit
+traceworks run examples/self-audit/security-changes --project traceworks --input since=2026-11-10   # since a date
+traceworks run examples/self-audit/security-changes --project traceworks                            # since the last run of this check
+traceworks run examples/self-audit/security-changes --project traceworks --input full_audit=4f2a91c # and name the last full audit
 traceworks findings security-changes list
 ```
 
@@ -398,9 +398,9 @@ high finding here either: it stays open for a person. `--verdict-version` is 2 h
 nothing by itself: an area the register calls settled and that no change picks stays as it is, and one that a
 change picks is judged with the limits.
 
-**What the instructions cost.** 19.6 KB in every call, about 4 900 input tokens, 3 600 of them the limits. A check
+**What the instructions cost.** 25.1 KB in every call, about 6 300 input tokens, 4 700 of them the limits. A check
 of the changes makes one call per changed, neighbouring or carried area: on the commits of November 2026 between 0
-and 57 calls a run, so at most about 280 000 instruction tokens, most of them read from a provider's prompt cache.
+and 57 calls a run, so at most about 360 000 instruction tokens, most of them read from a provider's prompt cache.
 
 ## Tests
 

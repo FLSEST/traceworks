@@ -54,6 +54,9 @@ class RunComparerTest {
         List<traceworks.core.model.ModelPick> modelChoices = List.of();
         /** Whether the record can name a cut of an output; an earlier version's cannot. */
         boolean recordsCuts = true;
+        /** Whether the record names the packages its child runs came from; an earlier version's does not. */
+        boolean recordsCalled = true;
+        List<Manifest.CalledPackage> called = List.of();
         final List<StepView> steps = new ArrayList<>();
         final Map<String, RunView> children = new LinkedHashMap<>();
 
@@ -99,9 +102,9 @@ class RunComparerTest {
             RunView view = new RunView(id, "wf", "Wf", "/pkg", digest, commit, dirty, "operator", "MANUAL", execution, T0,
                     T0.plusSeconds(3), status, null, gate, steps, null, null, null, blob("definition"),
                     blob(inputsDigest), children, 10, "head", List.of(), List.of(), network, aiHosts, null, null,
-                    modelChoices, null, false, null, recordsCuts);
+                    modelChoices, null, false, null, recordsCuts, null, recordsCalled, null);
             Manifest manifest = new Manifest(id, "wf", "Wf", digest, blob(inputsDigest).sha256(), execution, images,
-                    models, 10, "head", status, gate, T0, T0.plusSeconds(3), version);
+                    models, 10, "head", status, gate, T0, T0.plusSeconds(3), version, null, null, null, called);
             return new RunFacts(view, manifest, inputs, aiImages);
         }
     }
@@ -162,6 +165,85 @@ class RunComparerTest {
         assertThat(compare(cut, old).notes()).hasSize(1);
         assertThat(compare(old, whole).notes()).as("no cut anywhere").isEmpty();
         assertThat(compare(whole, cut).differences()).as("both can say").hasSize(1);
+    }
+
+    private static Manifest.CalledPackage called(String workflowId, String digest) {
+        return new Manifest.CalledPackage(workflowId, digest);
+    }
+
+    /**
+     * The package digest covers the package a run was started with. A package a child run was loaded from is
+     * compared like it: another digest, or a package only one run called, fails the check, with its own words.
+     */
+    @Test
+    void aCalledPackageThatDiffers_failsTheCheck_likeThePackageDigest() {
+        Run a = new Run("run-a").shell("build", "out");
+        a.called = List.of(called("wf-lib", "d1"), called("wf-tools", "t1"));
+        Run same = new Run("run-same").shell("build", "out");
+        same.called = a.called;
+        Run changed = new Run("run-changed").shell("build", "out");
+        changed.called = List.of(called("wf-lib", "d2"), called("wf-tools", "t1"));
+        Run more = new Run("run-more").shell("build", "out");
+        more.called = List.of(called("wf-extra", "e1"), called("wf-lib", "d1"), called("wf-lib", "d2"),
+                called("wf-tools", "t1"));
+        Run none = new Run("run-none").shell("build", "out");
+
+        RunComparison equal = compare(a, same);
+        assertThat(equal.reproduced()).isTrue();
+        assertThat(equal.header()).extracting(Field::name).containsSubsequence("package digest", "package commit",
+                "called package wf-lib", "called package wf-tools", "inputs digest");
+        assertThat(field(equal, "called package wf-lib")).isEqualTo(new Field("called package wf-lib", "d1", "d1"));
+
+        RunComparison differs = compare(a, changed);
+        assertThat(differs.differences()).containsExactly("a called package differs: wf-lib");
+        assertThat(field(differs, "called package wf-lib").same()).isFalse();
+        assertThat(field(differs, "called package wf-tools").same()).isTrue();
+
+        assertThat(compare(a, more).differences()).as("one more package, and one from two digests")
+                .containsExactly("a called package differs: wf-extra, wf-lib");
+        assertThat(field(compare(a, more), "called package wf-lib").b()).isEqualTo("d1, d2");
+        assertThat(field(compare(a, more), "called package wf-extra").a()).isNull();
+        assertThat(compare(none, a).differences()).containsExactly("a called package differs: wf-lib, wf-tools");
+        assertThat(compare(none, new Run("run-other").shell("build", "out")).header()).extracting(Field::name)
+                .as("no run called a package: the header is what it was").noneMatch(n -> n.startsWith("called"));
+
+        changed.digest = "e".repeat(64);
+        assertThat(compare(a, changed).differences()).as("after the package digest, before the inputs")
+                .containsExactly("the package digest differs", "a called package differs: wf-lib");
+    }
+
+    /**
+     * A record of an earlier version does not say which package a child run came from. Against it the called
+     * packages are not compared, and a note says so: when the other run names one, or when the silent run has a
+     * child run, which may have come from another package. Without either there is nothing to say.
+     */
+    @Test
+    void aRecordThatCannotNameItsCalledPackages_isANote_notADifference() {
+        Run old = new Run("run-old").shell("build", "out");
+        old.recordsCalled = false;
+        Run calls = new Run("run-new").shell("build", "out");
+        calls.called = List.of(called("wf-lib", "d1"));
+        Run plain = new Run("run-plain").shell("build", "out");
+        String note = "run run-old is of a version that does not record the packages a run calls: the called"
+                + " packages of the two runs are not compared";
+
+        RunComparison comparison = compare(old, calls);
+
+        assertThat(comparison.reproduced()).as(comparison.differences().toString()).isTrue();
+        assertThat(comparison.notes()).containsExactly(note);
+        assertThat(comparison.header()).extracting(Field::name).noneMatch(n -> n.startsWith("called package"));
+        assertThat(compare(calls, old).notes()).containsExactly(note);
+        assertThat(compare(old, plain).notes()).as("no child run and no called package anywhere").isEmpty();
+
+        Run oldWithChild = new Run("run-old").step("call", "sub-workflow", false, StepStatus.COMPLETED, "out",
+                List.of(), List.of(), List.of("child-1"));
+        oldWithChild.recordsCalled = false;
+        oldWithChild.children.put("child-1", Run.view("child-1", List.of(), Map.of()));
+        Run plainWithStep = new Run("run-plain").step("call", "sub-workflow", false, StepStatus.COMPLETED, "out",
+                List.of(), List.of(), List.of());
+        assertThat(compare(oldWithChild, plainWithStep).notes()).as("its child run may be of another package")
+                .containsExactly(note);
+        assertThat(compare(plainWithStep, oldWithChild).reproduced()).isTrue();
     }
 
     private static RunComparison compare(Run a, Run b) {

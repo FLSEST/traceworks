@@ -28,6 +28,11 @@ public final class StateJson {
         root.put("key", state.key());
         root.put("workflow_id", state.workflowId());
         root.put("category", state.category());
+        if (state.project() != null) {
+            // Only for a register that names its project: the state of a register from before projects keeps the
+            // bytes it always had, and the verifier compares bytes
+            root.put("project", state.project());
+        }
         root.put("last_report", state.lastReport() == null ? null : map(
                 "run_id", state.lastReport().runId(),
                 "finished_at", instant(state.lastReport().finishedAt()),
@@ -224,7 +229,7 @@ public final class StateJson {
                 last.path("valid").asBoolean(false));
         return new RegisterState(root.path("format").asInt(1), root.path("key").asText(), text(root, "workflow_id"),
                 text(root, "category"), lastReport, findings, root.path("valid_reports").asInt(0), items,
-                namesDecidedSeverity);
+                namesDecidedSeverity, text(root, "project"));
     }
 
     private static Map<String, Object> map(Object... keyValues) {

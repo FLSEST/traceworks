@@ -2,6 +2,7 @@ package traceworks.adapters.ledger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -17,6 +18,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import traceworks.core.port.Ledger;
 import org.junit.jupiter.api.io.TempDir;
 
 class GitLedgerTest {
@@ -213,65 +215,507 @@ class GitLedgerTest {
     private static final String HEAD_A = "a".repeat(64);
     private static final String HEAD_B = "b".repeat(64);
 
+    /** An anchor of a write that added no line: what was written is said, and is nothing. */
+    /**
+     * Reproduced 2026-11-21: for a key and a project of 120 characters each the acknowledgement failed, since
+     * {@code acks/<name>.jsonl} was longer than a file name may be.
+     */
+    @Test
+    void aProblemOfARegisterWithTheLongestKeyAndProject_canBeAcknowledged() {
+        String key = "k".repeat(128);
+        String project = "p".repeat(128);
+        ledger().anchorRegister(key, project, anchor(3, HEAD_A));
+        String name = traceworks.core.port.Ledger.registerName(key, project);
+
+        ledger().acknowledge(name, "{\"note\":\"looked at\"}".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(1, ledger().registerAnchors(key, project).size());
+        traceworks.core.port.LedgerRuns.Run listed = ledger().runs().runs().stream()
+                .filter(run -> run.runId().equals(name)).findFirst().orElseThrow();
+        assertTrue(new String(listed.acks(), StandardCharsets.UTF_8).contains("looked at"));
+    }
+
     private static traceworks.core.port.RegisterAnchor anchor(int seq, String head) {
+        return new traceworks.core.port.RegisterAnchor(seq, head, NOTHING);
+    }
+
+    private static final traceworks.core.port.RegisterAnchor.Written NOTHING =
+            new traceworks.core.port.RegisterAnchor.Written(new java.util.TreeMap<>(), List.of(), List.of(), List.of(),
+                    List.of());
+
+    /** An anchor as a version before registers had projects wrote it: the sequence number and the head alone. */
+    private static traceworks.core.port.RegisterAnchor earlier(int seq, String head) {
         return new traceworks.core.port.RegisterAnchor(seq, head);
     }
 
     @Test
     void anAnchor_isOneCommit_andTheLedgerKeepsEveryAnchorInOrder() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         ledger().record("r1", "COMPLETED", manifest("r1"));
-        ledger().anchorRegister("security", 5, HEAD_B);
-        ledger().anchorRegister("testing", 0, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(5, HEAD_B));
+        ledger().anchorRegister("testing", "shop", anchor(0, HEAD_A));
 
-        assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), ledger().registerAnchors("security"));
-        assertEquals(List.of(anchor(0, HEAD_A)), ledger().registerAnchors("testing"));
+        assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), ledger().registerAnchors("security", "shop"));
+        assertEquals(List.of(anchor(0, HEAD_A)), ledger().registerAnchors("testing", "shop"));
         assertEquals("4", git("rev-list", "--count", "HEAD").strip());
-        assertTrue(git("log", "-1", "--format=%s").strip().matches("register testing seq 0 sha256:[0-9a-f]{64}"));
-        assertEquals("{\"seq\":3,\"head\":\"" + HEAD_A + "\"}\n{\"seq\":5,\"head\":\"" + HEAD_B + "\"}\n",
-                git("show", "HEAD:registers/security.jsonl"));
+        assertTrue(git("log", "-1", "--format=%s").strip().matches("anchor testing/shop seq 0 sha256:[0-9a-f]{64}"));
+        assertEquals("{\"seq\":3,\"head\":\"" + HEAD_A + "\",\"lines\":{}}\n{\"seq\":5,\"head\":\"" + HEAD_B
+                + "\",\"lines\":{}}\n", git("show", "HEAD:anchors/security/shop.jsonl"));
         assertArrayEquals(manifest("r1"), ledger().find("r1").orElseThrow());
         assertEquals("", git("status", "--porcelain"));
     }
 
     @Test
     void theSameAnchorAgain_addsNothing_andARegisterWithoutAnchorsHasNone() throws Exception {
-        assertEquals(List.of(), ledger().registerAnchors("security"));
-        ledger().anchorRegister("security", 3, HEAD_A);
-        ledger().anchorRegister("security", 3, HEAD_A);
+        assertEquals(List.of(), ledger().registerAnchors("security", "shop"));
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
 
-        assertEquals(List.of(anchor(3, HEAD_A)), ledger().registerAnchors("security"));
+        assertEquals(List.of(anchor(3, HEAD_A)), ledger().registerAnchors("security", "shop"));
         assertEquals("1", git("rev-list", "--count", "HEAD").strip());
     }
 
     /** The anchors are read from HEAD: a file edited in the ledger's working tree neither counts nor is committed. */
     @Test
     void anchors_areReadFromHead_notFromTheWorkingTree() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
-        Files.writeString(home.resolve("ledger/registers/security.jsonl"), "");
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
+        Files.writeString(home.resolve("ledger/anchors/security/shop.jsonl"), "");
 
-        assertEquals(List.of(anchor(3, HEAD_A)), ledger().registerAnchors("security"));
-        ledger().anchorRegister("security", 4, HEAD_B);
-        assertEquals(List.of(anchor(3, HEAD_A), anchor(4, HEAD_B)), ledger().registerAnchors("security"));
+        assertEquals(List.of(anchor(3, HEAD_A)), ledger().registerAnchors("security", "shop"));
+        ledger().anchorRegister("security", "shop", anchor(4, HEAD_B));
+        assertEquals(List.of(anchor(3, HEAD_A), anchor(4, HEAD_B)), ledger().registerAnchors("security", "shop"));
+    }
+
+    // ---- what an anchor says was written ----
+
+    private static traceworks.core.port.RegisterAnchor.Written written(Map<String, Integer> lines, List<String> runs,
+                                                                         List<String> actors, List<String> agents,
+                                                                         List<String> decided) {
+        return new traceworks.core.port.RegisterAnchor.Written(new java.util.TreeMap<>(lines), runs, actors, agents,
+                decided);
+    }
+
+    /** Adds {@code line} to the anchors of hello and {@code project} by a commit of the form this version makes. */
+    private void appendToTheAnchorsOfHello(String project, String line, int seq) throws Exception {
+        String path = "anchors/hello/" + project + ".jsonl";
+        byte[] after = (git("show", "HEAD:" + path) + line + "\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(home.resolve("ledger").resolve(path), after);
+        git(ME, "commit", "-q", "-m", "anchor hello/" + project + " seq " + seq + " sha256:" + sha256(after), "--",
+                path);
+    }
+
+    /**
+     * The line of an anchor holds what was written beside the sequence number and the head: the count of each type
+     * of line, sorted, the run, the actor, the agent and the findings decided, each only when there is one; one
+     * run, actor or agent as a word and more as a sorted list. And nothing else. The commit's subject stays.
+     */
+    @Test
+    void theLineOfAnAnchor_holdsWhatWasWritten_andNothingElse_andIsReadBackAsItWas() throws Exception {
+        var report = new traceworks.core.port.RegisterAnchor(3, HEAD_A, written(Map.of("report.applied", 1,
+                "finding.new", 3, "register.created", 1), List.of("20261120-101500-ab12"), List.of(), List.of(),
+                List.of()));
+        var decision = new traceworks.core.port.RegisterAnchor(4, HEAD_B, written(Map.of("finding.dismissed", 1),
+                List.of(), List.of("operator@host"), List.of("claude-code"), List.of("f".repeat(64))));
+        var both = new traceworks.core.port.RegisterAnchor(9, HEAD_A, written(Map.of("report.applied", 2,
+                "finding.accepted", 1, "finding.reopened", 1), List.of("run-a", "run-b"),
+                List.of("ann@host", "operator@other.host"), List.of("claude-code", "codex"),
+                List.of("a".repeat(64), "b".repeat(64))));
+
+        ledger().anchorRegister("hello", "shop", report);
+        ledger().anchorRegister("hello", "shop", decision);
+        ledger().anchorRegister("hello", "shop", both);
+
+        assertEquals("{\"seq\":3,\"head\":\"" + HEAD_A + "\",\"lines\":{\"finding.new\":3,\"register.created\":1,"
+                + "\"report.applied\":1},\"run\":\"20261120-101500-ab12\"}\n"
+                + "{\"seq\":4,\"head\":\"" + HEAD_B + "\",\"lines\":{\"finding.dismissed\":1},\"actor\":\"operator@host\","
+                + "\"agent\":\"claude-code\",\"decided\":[\"" + "f".repeat(64) + "\"]}\n"
+                + "{\"seq\":9,\"head\":\"" + HEAD_A + "\",\"lines\":{\"finding.accepted\":1,\"finding.reopened\":1,"
+                + "\"report.applied\":2},\"run\":[\"run-a\",\"run-b\"],\"actor\":[\"ann@host\",\"operator@other.host\"],"
+                + "\"agent\":[\"claude-code\",\"codex\"],\"decided\":[\"" + "a".repeat(64) + "\",\"" + "b".repeat(64)
+                + "\"]}\n", git("show", "HEAD:anchors/hello/shop.jsonl"));
+        assertEquals(List.of(report, decision, both), ledger().registerAnchors("hello", "shop"));
+        assertEquals("anchor hello/shop seq 9 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/anchors/hello/shop.jsonl"))), git("log", "-1", "--format=%s").strip());
+        assertTrue(ledger().runs().runs().isEmpty(), ledger().runs().runs().toString());
+    }
+
+    /**
+     * A value in an anchor line has a shape: the run is a run id, a finding its id, an agent a name, a type of
+     * line one this version knows, an actor a text of 1 to 255 characters without a control character, or each the
+     * marker that stands for a value of another shape. A line that holds anything else is no anchor.
+     */
+    @Test
+    void aLineWhoseValuesHaveNotTheShapeOfTheirFields_isNoAnchor_andTheMarkerIsReadBack() throws Exception {
+        String marker = traceworks.core.register.RegisterAnchors.MALFORMED;
+        var marked = new traceworks.core.port.RegisterAnchor(0, HEAD_A, written(Map.of(marker, 1,
+                "finding.dismissed", 1), List.of(marker), List.of(marker, "operator@host"), List.of(marker),
+                List.of(marker, "f".repeat(64))));
+        ledger().anchorRegister("hello", "shop", marked);
+        assertEquals(List.of(marked), ledger().registerAnchors("hello", "shop"));
+
+        int n = 0;
+        for (String line : List.of(
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"run\":\"Mallory was here\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"actor\":\"operator\\u0007the host\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"actor\":\"" + "a".repeat(256) + "\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"actor\":\"\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"agent\":\"Zoë\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"agent\":\"two  spaces\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"decided\":[\"f-1\"]}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{\"any text at all\":1}}")) {
+            String project = "p" + n++;
+            ledger().anchorRegister("hello", project, anchor(0, HEAD_A));
+            appendToTheAnchorsOfHello(project, line, 1);
+
+            IllegalStateException refused = assertThrows(IllegalStateException.class,
+                    () -> ledger().registerAnchors("hello", project), line);
+            assertTrue(refused.getMessage().contains("is no anchor"), refused.getMessage());
+        }
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("hello", "web",
+                new traceworks.core.port.RegisterAnchor(0, HEAD_A, written(Map.of("report.applied", 1),
+                        List.of("Mallory was here"), List.of(), List.of(), List.of()))),
+                "nor is such an anchor written");
+    }
+
+    /**
+     * Reproduced 2026-11-21: the actor {@code Zoë Brontë <zoe@example.org>} was no value an anchor could hold.
+     * An actor is the operator's own text: it is written as it is and read back as the same anchor.
+     */
+    @Test
+    void anAnchorWithAnActorOfSpacesAndLettersBeyondAscii_isWrittenAndReadBack() throws Exception {
+        String zoe = "Zoë Brontë <zoe@example.org>";
+        var decision = new traceworks.core.port.RegisterAnchor(0, HEAD_A, written(Map.of("finding.dismissed", 1),
+                List.of(), List.of(zoe), List.of(), List.of("f".repeat(64))));
+
+        ledger().anchorRegister("hello", "shop", decision);
+
+        assertEquals(List.of(decision), ledger().registerAnchors("hello", "shop"));
+        assertTrue(Files.readString(home.resolve("ledger/anchors/hello/shop.jsonl")).contains("\"actor\":\"" + zoe
+                + "\""));
+    }
+
+    /** This version writes no anchor that does not say what was written. */
+    @Test
+    void anAnchorThatDoesNotSayWhatWasWritten_isRefused_andWritesNothing() {
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("hello", "shop", earlier(3, HEAD_A)));
+        assertTrue(Files.notExists(home.resolve("ledger/anchors")));
+    }
+
+    /**
+     * A line with the sequence number and the head alone, in the file of a key and a project, is read as an anchor
+     * that says nothing of what was written: the check of the register reports it, since no version writes it there.
+     */
+    @Test
+    void aLineWithoutLines_inAFilePerProject_isReadAsAnAnchorThatSaysNothing() throws Exception {
+        ledger().anchorRegister("hello", "shop", anchor(0, HEAD_A));
+        appendToTheAnchorsOfHello("shop", "{\"seq\":1,\"head\":\"" + HEAD_B + "\"}", 1);
+
+        assertEquals(List.of(anchor(0, HEAD_A), earlier(1, HEAD_B)), ledger().registerAnchors("hello", "shop"));
+    }
+
+    /** A line of a file per project that holds anything but what an anchor holds is no anchor, and fails its reader. */
+    @Test
+    void aLineOfAFilePerProject_thatHoldsMoreOrOtherThanAnAnchor_failsItsReader() throws Exception {
+        int n = 0;
+        for (String line : List.of(
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{\"finding.new\":1},\"title\":\"Big A.java\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{\"finding.new\":\"one\"}}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":[]}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"run\":\"r1\"}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"run\":7}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"actor\":[\"a\",3]}",
+                "{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{},\"decided\":\"f1\"}",
+                "{\"seq\":-1,\"head\":\"" + HEAD_B + "\",\"lines\":{}}",
+                "{\"seq\":1,\"head\":\"nope\",\"lines\":{}}",
+                "{\"seq\":1,\"lines\":{}}",
+                "[1]", "not json")) {
+            String project = "p" + n++;
+            ledger().anchorRegister("hello", project, anchor(0, HEAD_A));
+            appendToTheAnchorsOfHello(project, line, 1);
+
+            IllegalStateException e = assertThrows(IllegalStateException.class,
+                    () -> ledger().registerAnchors("hello", project), line);
+            assertTrue(e.getMessage().contains("line 2 of anchors/hello/" + project + ".jsonl")
+                    && e.getMessage().contains("is no anchor"), line + ": " + e.getMessage());
+        }
+    }
+
+    /** The file an earlier version wrote holds the sequence number and the head alone; a fuller line there is none. */
+    @Test
+    void aFullerLine_inTheFileOfTheEarlierShape_isNoAnchor() throws Exception {
+        anchorAsAnEarlierVersionDid("hello", 3, HEAD_A);
+        Path file = home.resolve("ledger/registers/hello.jsonl");
+        byte[] after = (Files.readString(file) + "{\"seq\":4,\"head\":\"" + HEAD_B + "\",\"lines\":{}}\n")
+                .getBytes(StandardCharsets.UTF_8);
+        Files.write(file, after);
+        git(ME, "commit", "-q", "-m", "register hello seq 4 sha256:" + sha256(after), "--", "registers/hello.jsonl");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ledger().earlierRegisterAnchors("hello"));
+        assertTrue(e.getMessage().contains("line 2 of registers/hello.jsonl") && e.getMessage().contains("is no anchor"),
+                e.getMessage());
+    }
+
+    // ---- anchors per key and project, and the anchors an earlier version wrote per key ----
+
+    /** Commits one more anchor as a version before registers had projects did: {@code registers/<key>.jsonl}. */
+    private void anchorAsAnEarlierVersionDid(String key, int seq, String head) throws Exception {
+        Path file = home.resolve("ledger/registers/" + key + ".jsonl");
+        Files.createDirectories(file.getParent());
+        if (Files.notExists(home.resolve("ledger/.git"))) {
+            ledger().prepare();
+        }
+        String before = Files.exists(file) ? Files.readString(file) : "";
+        byte[] after = (before + "{\"seq\":" + seq + ",\"head\":\"" + head + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(file, after);
+        git("add", "--", "registers/" + key + ".jsonl");
+        git(ME, "commit", "-q", "-m", "register " + key + " seq " + seq + " sha256:" + sha256(after), "--",
+                "registers/" + key + ".jsonl");
+    }
+
+    /** The anchors of two projects of one key are two files, each with its own commits. */
+    @Test
+    void theAnchorsOfTwoProjectsOfOneKey_areTwoFiles_andNeitherHoldsALineOfTheOther() throws Exception {
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
+        ledger().anchorRegister("security", "web", anchor(1, HEAD_B));
+        ledger().anchorRegister("security", "shop", anchor(5, HEAD_B));
+
+        assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), ledger().registerAnchors("security", "shop"));
+        assertEquals(List.of(anchor(1, HEAD_B)), ledger().registerAnchors("security", "web"));
+        assertEquals(List.of(), ledger().registerAnchors("security", "other"));
+        assertEquals(List.of(), ledger().earlierRegisterAnchors("security"));
+        assertEquals("{\"seq\":3,\"head\":\"" + HEAD_A + "\",\"lines\":{}}\n{\"seq\":5,\"head\":\"" + HEAD_B
+                + "\",\"lines\":{}}\n", git("show", "HEAD:anchors/security/shop.jsonl"));
+        assertEquals("{\"seq\":1,\"head\":\"" + HEAD_B + "\",\"lines\":{}}\n",
+                git("show", "HEAD:anchors/security/web.jsonl"));
+        assertEquals("anchor security/shop seq 5 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/anchors/security/shop.jsonl"))), git("log", "-1", "--format=%s").strip());
+        assertEquals("anchor security/web seq 1 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/anchors/security/web.jsonl"))), git("log", "-1", "--skip=1", "--format=%s")
+                .strip());
+        assertTrue(ledger().runs().runs().isEmpty(), "anchors that are as their commits left them are no problem");
+        ledger().prepare();
+    }
+
+    /** A project key that would leave the folder of its key is no anchor, and nothing is written. */
+    @Test
+    void anAnchorOfAProjectKeyThatIsNone_isRefused_andWritesNothing() {
+        for (String bad : List.of("..", "a/b", "Shop", "", "../x")) {
+            assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", bad, anchor(1, HEAD_A)), bad);
+            assertThrows(IllegalArgumentException.class, () -> ledger().registerAnchors("security", bad), bad);
+        }
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", null, anchor(1, HEAD_A)));
+        assertThrows(IllegalArgumentException.class, () -> ledger().earlierRegisterAnchors("a/b"));
+        assertTrue(Files.notExists(home.resolve("ledger/registers")));
+        assertTrue(Files.notExists(home.resolve("ledger/anchors")));
+    }
+
+    /**
+     * A ledger that holds anchors of the earlier shape, {@code registers/<key>.jsonl} committed as
+     * {@code register <key> seq <n>}, stays a valid ledger: this version knows those commits, reads the anchors, and
+     * writes its own beside them, never into that file.
+     */
+    @Test
+    void aLedgerWithAnchorsOfTheEarlierShape_isAccepted_read_andNeverWrittenInto() throws Exception {
+        anchorAsAnEarlierVersionDid("hello", 3, HEAD_A);
+        anchorAsAnEarlierVersionDid("hello", 5, HEAD_B);
+        byte[] earlier = Files.readAllBytes(home.resolve("ledger/registers/hello.jsonl"));
+
+        ledger().prepare();
+        assertEquals(List.of(earlier(3, HEAD_A), earlier(5, HEAD_B)), ledger().earlierRegisterAnchors("hello"));
+        assertEquals(List.of(), ledger().registerAnchors("hello", "shop"));
+        ledger().anchorRegister("hello", "shop", anchor(6, HEAD_A));
+        ledger().recordStart("r1", start("r1"));
+
+        assertEquals(List.of(anchor(6, HEAD_A)), ledger().registerAnchors("hello", "shop"));
+        assertEquals(List.of(earlier(3, HEAD_A), earlier(5, HEAD_B)), ledger().earlierRegisterAnchors("hello"));
+        assertArrayEquals(earlier, git("show", "HEAD:registers/hello.jsonl").getBytes(StandardCharsets.UTF_8),
+                "no new line in the file of the earlier shape");
+        assertEquals("anchors/hello/shop.jsonl\nregisters/hello.jsonl\nstarts/r1.json\n",
+                git("ls-tree", "-r", "--name-only", "HEAD"));
+        assertTrue(changesOf("registers.hello").isEmpty(), changesOf("registers.hello").toString());
+        assertTrue(changesOf("anchors.5.hello.shop").isEmpty(), changesOf("anchors.5.hello.shop").toString());
+    }
+
+    /**
+     * The anchors of a key and a project lie under {@code anchors/}, and {@code registers/} holds only the files of
+     * the earlier shape. So no key collides with the file an earlier version wrote for another one: a key that
+     * ends like an anchor file is anchored beside the earlier file of its stem.
+     */
+    @Test
+    void aKeyThatEndsLikeAnAnchorFile_isAnchoredBesideTheEarlierFileOfItsStem() throws Exception {
+        anchorAsAnEarlierVersionDid("hello", 3, HEAD_A);
+
+        ledger().anchorRegister("hello.jsonl", "shop", anchor(0, HEAD_B));
+        ledger().anchorRegister("hello", "shop.jsonl", anchor(1, HEAD_B));
+
+        assertEquals(List.of(anchor(0, HEAD_B)), ledger().registerAnchors("hello.jsonl", "shop"));
+        assertEquals(List.of(anchor(1, HEAD_B)), ledger().registerAnchors("hello", "shop.jsonl"));
+        assertEquals(List.of(earlier(3, HEAD_A)), ledger().earlierRegisterAnchors("hello"));
+        assertEquals(List.of(), ledger().earlierRegisterAnchors("hello.jsonl"));
+        assertEquals("anchors/hello.jsonl/shop.jsonl\nanchors/hello/shop.jsonl.jsonl\nregisters/hello.jsonl\n",
+                git("ls-tree", "-r", "--name-only", "HEAD"));
+        assertEquals("anchor hello/shop.jsonl seq 1 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/anchors/hello/shop.jsonl.jsonl"))), git("log", "-1", "--format=%s").strip());
+        ledger().prepare();
+        assertTrue(ledger().runs().runs().isEmpty(), ledger().runs().runs().toString());
+    }
+
+    /** The shape of a file per project under {@code registers/}, which no version wrote into a ledger, is none. */
+    @Test
+    void anAnchorFileOfAProjectUnderRegisters_isNoEntryOfALedger() throws Exception {
+        ledger().anchorRegister("hello", "shop", anchor(0, HEAD_A));
+        Path file = home.resolve("ledger/registers/hello/shop.jsonl");
+        Files.createDirectories(file.getParent());
+        byte[] line = ("{\"seq\":0,\"head\":\"" + HEAD_A + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(file, line);
+        git("add", "--", "registers/hello/shop.jsonl");
+        git(ME, "commit", "-q", "-m", "register hello/shop seq 0 sha256:" + sha256(line), "--",
+                "registers/hello/shop.jsonl");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().prepare());
+        assertTrue(e.getMessage().contains("registers/hello"), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("hello", "shop", anchor(1, HEAD_B)));
+    }
+
+    /**
+     * A key and a project may both hold dots. The name their anchors are listed and acknowledged under is never
+     * the same for two registers: {@code a.b} of {@code c} is not {@code a} of {@code b.c}.
+     */
+    @Test
+    void theAnchorsOfTwoRegistersWhoseKeyAndProjectJoinToTheSameWords_areListedUnderTwoNames() throws Exception {
+        ledger().anchorRegister("a.b", "c", anchor(0, HEAD_A));
+        ledger().anchorRegister("a", "b.c", anchor(0, HEAD_A));
+        byte[] forged = ("{\"seq\":0,\"head\":\"" + HEAD_B + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(home.resolve("ledger/anchors/a.b/c.jsonl"), forged);
+        git(ME, "commit", "-q", "-m", "anchor a.b/c seq 0 sha256:" + sha256(forged), "--", "anchors/a.b/c.jsonl");
+
+        String rewritten = Ledger.registerName("a.b", "c");
+        String intact = Ledger.registerName("a", "b.c");
+        assertNotEquals(rewritten, intact);
+        assertEquals("anchors.3.a.b.c", rewritten);
+        assertEquals("anchors.1.a.b.c", intact);
+        assertEquals(1, changesOf(rewritten).size(), changesOf(rewritten).toString());
+        assertTrue(changesOf(intact).isEmpty(), changesOf(intact).toString());
+        ledger().acknowledge(rewritten, "{\"note\":\"looked at\"}".getBytes(StandardCharsets.UTF_8));
+        assertTrue(ledger().runs().runs().stream().anyMatch(run -> run.runId().equals(rewritten)
+                && run.acks() != null));
+        assertTrue(ledger().runs().runs().stream().noneMatch(run -> run.runId().equals(intact)));
+    }
+
+    /** The ledger names every register it anchors, so one whose folder is gone is still known. */
+    @Test
+    void theLedger_namesEveryRegisterItAnchors() throws Exception {
+        assertEquals(List.of(), ledger().anchoredRegisters());
+        anchorAsAnEarlierVersionDid("hello", 3, HEAD_A);
+        ledger().anchorRegister("hello", "shop", anchor(4, HEAD_B));
+        ledger().anchorRegister("a.b", "c", anchor(0, HEAD_A));
+        ledger().recordStart("r1", start("r1"));
+
+        assertEquals(java.util.Set.of(new Ledger.Anchored("hello", null), new Ledger.Anchored("hello", "shop"),
+                new Ledger.Anchored("a.b", "c")), java.util.Set.copyOf(ledger().anchoredRegisters()));
+        assertEquals(3, ledger().anchoredRegisters().size());
+    }
+
+    /** The anchors of the earlier shape are judged as they always were: a file that was rewritten is found. */
+    @Test
+    void anchorsOfTheEarlierShapeThatWereRewritten_areFound_andFailTheirReader() throws Exception {
+        anchorAsAnEarlierVersionDid("hello", 3, HEAD_A);
+        anchorAsAnEarlierVersionDid("hello", 5, HEAD_B);
+        ledger().anchorRegister("hello", "shop", anchor(6, HEAD_A));
+        byte[] forged = ("{\"seq\":3,\"head\":\"" + HEAD_B + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(home.resolve("ledger/registers/hello.jsonl"), forged);
+        git(ME, "commit", "-q", "-m", "register hello seq 3 sha256:" + sha256(forged), "--", "registers/hello.jsonl");
+
+        List<String> found = changesOf("registers.hello");
+        assertTrue(found.stream().anyMatch(change -> change.contains("registers/hello.jsonl")
+                && change.contains("is no beginning of the file")), found.toString());
+        assertTrue(changesOf("anchors.5.hello.shop").isEmpty(), "the anchors of the project are as they were");
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ledger().earlierRegisterAnchors("hello"));
+        assertTrue(e.getMessage().contains("registers/hello.jsonl"), e.getMessage());
+        assertEquals(List.of(anchor(6, HEAD_A)), ledger().registerAnchors("hello", "shop"));
+    }
+
+    /**
+     * The check of the whole home lists the anchors of a register under a name of its key and its project, so the
+     * anchors of two projects are told apart, and such a problem can be acknowledged like one of a run.
+     */
+    @Test
+    void rewrittenAnchorsOfOneProject_areListedUnderItsKeyAndProject_andCanBeAcknowledged() throws Exception {
+        ledger().anchorRegister("hello", "shop", anchor(0, HEAD_A));
+        ledger().anchorRegister("hello", "shop", anchor(1, HEAD_B));
+        ledger().anchorRegister("hello", "web", anchor(0, HEAD_A));
+        byte[] forged = ("{\"seq\":0,\"head\":\"" + HEAD_B + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(home.resolve("ledger/anchors/hello/shop.jsonl"), forged);
+        git(ME, "commit", "-q", "-m", "anchor hello/shop seq 0 sha256:" + sha256(forged), "--",
+                "anchors/hello/shop.jsonl");
+
+        assertTrue(changesOf("anchors.5.hello.shop").stream().anyMatch(change ->
+                change.contains("anchors/hello/shop.jsonl")), changesOf("anchors.5.hello.shop").toString());
+        assertTrue(changesOf("anchors.5.hello.web").isEmpty(), changesOf("anchors.5.hello.web").toString());
+        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("hello", "shop"));
+        assertEquals(List.of(anchor(0, HEAD_A)), ledger().registerAnchors("hello", "web"));
+        ledger().acknowledge("anchors.5.hello.shop", "{\"note\":\"restored from a copy\"}"
+                .getBytes(StandardCharsets.UTF_8));
+        assertTrue(ledger().runs().runs().stream().anyMatch(run -> run.runId().equals("anchors.5.hello.shop")
+                && run.acks() != null));
+    }
+
+    /** What an entry path is stays closed: a file at a path of no shape this version writes is no entry. */
+    @Test
+    void aFileBelowTheFolderOfAKey_thatIsNoAnchorFile_makesTheLedgerNoneOfThisVersion() throws Exception {
+        ledger().anchorRegister("hello", "shop", anchor(0, HEAD_A));
+        // each path, and what the listing names of it first: the file, or the folder that no anchor lies in
+        for (Map.Entry<String, String> entry : Map.of("anchors/hello/shop/deeper.jsonl", "anchors/hello/shop (tree",
+                "anchors/hello/notes.txt", "anchors/hello/notes.txt", "anchors/hello/Shop.jsonl",
+                "anchors/hello/Shop.jsonl").entrySet()) {
+            String path = entry.getKey();
+            Path file = home.resolve("ledger").resolve(path);
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, "x\n");
+            git("add", "--", path);
+            git(ME, "commit", "-q", "-m", known(), "--", path);
+
+            IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().prepare(), path);
+            assertTrue(e.getMessage().contains("its HEAD holds " + entry.getValue())
+                    && e.getMessage().contains("is no entry of a ledger"), e.getMessage());
+            git("reset", "-q", "--hard", "HEAD~1");
+        }
+        ledger().prepare();
+    }
+
+    /** An attributes file in the folder of a key could change the bytes of its anchors on their way in. */
+    @Test
+    void anAttributesFileInTheFolderOfAKey_isRefused() throws Exception {
+        ledger().anchorRegister("hello", "shop", anchor(0, HEAD_A));
+        Files.writeString(home.resolve("ledger/anchors/hello/.gitattributes"), "*.jsonl text eol=crlf\n");
+
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> ledger().anchorRegister("hello", "shop", anchor(1, HEAD_B)));
+        assertTrue(e.getMessage().contains("anchors/hello/.gitattributes"), e.getMessage());
+        assertThrows(IllegalStateException.class, () -> ledger().prepare());
     }
 
     @Test
     void anAnchorThatIsNoAnchor_isRefused_andWritesNothing() {
-        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("../x", 1, HEAD_A));
-        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", -1, HEAD_A));
-        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", 1, "nope\n"));
-        assertThrows(IllegalArgumentException.class, () -> ledger().registerAnchors("a/b"));
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("../x", "shop", anchor(1, HEAD_A)));
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", "shop", anchor(-1, HEAD_A)));
+        assertThrows(IllegalArgumentException.class, () -> ledger().anchorRegister("security", "shop", anchor(1, "nope\n")));
+        assertThrows(IllegalArgumentException.class, () -> ledger().registerAnchors("a/b", "shop"));
         assertTrue(Files.notExists(home.resolve("ledger/registers")));
+        assertTrue(Files.notExists(home.resolve("ledger/anchors")));
     }
 
     @Test
     void anAnchorFileThatCannotBeRead_isAnError_notAnEmptyList() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
-        Files.writeString(home.resolve("ledger/registers/security.jsonl"), "{\"seq\":3,\"head\":\"" + HEAD_A + "\"}\nnot a line\n");
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
+        Files.writeString(home.resolve("ledger/anchors/security/shop.jsonl"),
+                git("show", "HEAD:anchors/security/shop.jsonl") + "not a line\n");
         git("-c", "user.name=x", "-c", "user.email=x@y.invalid", "commit", "-q", "-am", known());
 
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
-        assertTrue(e.getMessage().contains("registers/security.jsonl")
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security", "shop"));
+        assertTrue(e.getMessage().contains("anchors/security/shop.jsonl")
                 && e.getMessage().contains("a commit that names another file"), e.getMessage());
     }
 
@@ -288,7 +732,7 @@ class GitLedgerTest {
                         if (thread == 2) {
                             ledger.record("run-" + i, "COMPLETED", manifest("run-" + i));
                         } else {
-                            ledger.anchorRegister("security", thread * 10 + i, HEAD_A);
+                            ledger.anchorRegister("security", "shop", anchor(thread * 10 + i, HEAD_A));
                         }
                     }
                     return null;
@@ -300,7 +744,7 @@ class GitLedgerTest {
             pool.shutdownNow();
         }
         assertEquals("12", git("rev-list", "--count", "HEAD").strip());
-        assertEquals(8, ledger().registerAnchors("security").size());
+        assertEquals(8, ledger().registerAnchors("security", "shop").size());
     }
 
     @Test
@@ -309,7 +753,7 @@ class GitLedgerTest {
         GitLedger blocked = new GitLedger(home.resolve("file/ledger"), home.resolve("ledger.lock"));
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> blocked.anchorRegister("security", 1, HEAD_A));
+                () -> blocked.anchorRegister("security", "shop", anchor(1, HEAD_A)));
         assertTrue(e.getMessage().contains("Cannot write the ledger"), e.getMessage());
     }
 
@@ -322,18 +766,18 @@ class GitLedgerTest {
         Path placed = home.resolve("placed/ledger");
         GitLedger inFolder = new GitLedger(placed, placed.resolve("ledger.lock"));
 
-        inFolder.anchorRegister("security", 3, HEAD_A);
+        inFolder.anchorRegister("security", "shop", anchor(3, HEAD_A));
         inFolder.record("r1", "COMPLETED", manifest("r1"));
-        inFolder.anchorRegister("security", 5, HEAD_B);
+        inFolder.anchorRegister("security", "shop", anchor(5, HEAD_B));
 
         assertTrue(Files.isRegularFile(placed.resolve("ledger.lock")));
-        assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), inFolder.registerAnchors("security"));
+        assertEquals(List.of(anchor(3, HEAD_A), anchor(5, HEAD_B)), inFolder.registerAnchors("security", "shop"));
         ProcessBuilder tree = new ProcessBuilder("git", "-C", placed.toString(), "ls-tree", "-r", "--name-only", "HEAD")
                 .redirectErrorStream(true);
         Process process = tree.start();
         String files = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(0, process.waitFor(), files);
-        assertEquals("registers/security.jsonl\nruns/r1.json\n", files);
+        assertEquals("anchors/security/shop.jsonl\nruns/r1.json\n", files);
     }
 
     /** Empties a directory tree but keeps the directory itself. */
@@ -351,47 +795,47 @@ class GitLedgerTest {
      */
     @Test
     void aLedgerWhoseHeadIsGarbage_failsToReadAndToAnchor_insteadOfReadingAsEmpty() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         Files.writeString(home.resolve("ledger/.git/HEAD"), "garbage\n");
 
         IllegalStateException read = assertThrows(IllegalStateException.class,
-                () -> ledger().registerAnchors("security"));
+                () -> ledger().registerAnchors("security", "shop"));
         assertTrue(read.getMessage().contains("cannot be read"), read.getMessage());
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
     }
 
     @Test
     void aLedgerWhoseObjectsAreGone_failsToReadAndToAnchor_andKeepsNoNewAnchorFile() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         String before = git("rev-parse", "HEAD").strip();
         empty(home.resolve("ledger/.git/objects"));
 
-        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security", "shop"));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
         assertEquals(before, git("rev-parse", "HEAD").strip(), "no commit that holds the one new line alone");
     }
 
     @Test
     void aLedgerPathThatIsAFile_failsToReadAndToAnchor() throws Exception {
         Files.writeString(home.resolve("ledger"), "a file where the ledger should be");
-        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security", "shop"));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
 
     }
 
     /** What is honestly empty stays empty: no folder, a folder with the lock alone, a repository without a commit. */
     @Test
     void aLedgerThatDoesNotExistYet_orHasNoCommit_orNoFileOfTheRegister_hasNoAnchors() throws Exception {
-        assertEquals(List.of(), ledger().registerAnchors("security"));
+        assertEquals(List.of(), ledger().registerAnchors("security", "shop"));
         Path placed = Files.createDirectories(home.resolve("placed/ledger"));
         Files.writeString(placed.resolve("ledger.lock"), "");
-        assertEquals(List.of(), new GitLedger(placed, placed.resolve("ledger.lock")).registerAnchors("security"));
+        assertEquals(List.of(), new GitLedger(placed, placed.resolve("ledger.lock")).registerAnchors("security", "shop"));
         ledger().prepare();
-        assertEquals(List.of(), ledger().registerAnchors("security"));
+        assertEquals(List.of(), ledger().registerAnchors("security", "shop"));
         ledger().record("r1", "COMPLETED", manifest("r1"));
-        assertEquals(List.of(), ledger().registerAnchors("security"));
-        ledger().anchorRegister("testing", 0, HEAD_A);
-        assertEquals(List.of(), ledger().registerAnchors("security"));
+        assertEquals(List.of(), ledger().registerAnchors("security", "shop"));
+        ledger().anchorRegister("testing", "shop", anchor(0, HEAD_A));
+        assertEquals(List.of(), ledger().registerAnchors("security", "shop"));
     }
 
     /** The file of the branch HEAD names, as git wrote it after the first commit. */
@@ -406,15 +850,15 @@ class GitLedgerTest {
      */
     @Test
     void aLedgerWhoseBranchFileIsEmptyOrZeroed_failsToReadAndToAnchor_insteadOfReadingAsUnborn() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         Path ref = branchRef();
         for (byte[] damage : List.of(new byte[0], new byte[41])) {
             Files.write(ref, damage);
 
             IllegalStateException read = assertThrows(IllegalStateException.class,
-                    () -> ledger().registerAnchors("security"));
+                    () -> ledger().registerAnchors("security", "shop"));
             assertTrue(read.getMessage().contains("cannot be read"), read.getMessage());
-            assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+            assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
         }
     }
 
@@ -424,11 +868,11 @@ class GitLedgerTest {
      */
     @Test
     void aLedgerWhoseBranchFileIsDeleted_failsToReadAndToAnchor_andGetsNoNewHistory() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         Files.delete(branchRef());
 
-        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security", "shop"));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
         assertEquals("", git("for-each-ref").strip(), "no branch was made anew");
     }
 
@@ -444,28 +888,28 @@ class GitLedgerTest {
      */
     @Test
     void aLedgerWhoseTreeIsGone_failsToReadAndToAnchor_insteadOfReadingAsEmpty() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         String before = git("rev-parse", "HEAD").strip();
         Files.delete(objectFile("HEAD^{tree}"));
 
         IllegalStateException read = assertThrows(IllegalStateException.class,
-                () -> ledger().registerAnchors("security"));
+                () -> ledger().registerAnchors("security", "shop"));
         assertTrue(read.getMessage().contains("cannot be listed"), read.getMessage());
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
         assertEquals(before, git("rev-parse", "HEAD").strip(), "no commit that holds the one new line alone");
     }
 
     /** HEAD lists the anchor file, but its content is gone: that is no empty anchor file. */
     @Test
     void aLedgerWhoseAnchorFileContentIsGone_failsToReadAndToAnchor_insteadOfReadingAsEmpty() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         String before = git("rev-parse", "HEAD").strip();
-        Files.delete(objectFile("HEAD:registers/security.jsonl"));
+        Files.delete(objectFile("HEAD:anchors/security/shop.jsonl"));
 
         IllegalStateException read = assertThrows(IllegalStateException.class,
-                () -> ledger().registerAnchors("security"));
+                () -> ledger().registerAnchors("security", "shop"));
         assertTrue(read.getMessage().contains("cannot be shown"), read.getMessage());
-        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", 4, HEAD_B));
+        assertThrows(IllegalStateException.class, () -> ledger().anchorRegister("security", "shop", anchor(4, HEAD_B)));
         assertEquals(before, git("rev-parse", "HEAD").strip(), "no commit that holds the one new line alone");
     }
 
@@ -578,7 +1022,7 @@ class GitLedgerTest {
         ledger.recordStart("r2", start("r2"));
         ledger.record("r2", "FAILED", manifest("r2"));
         ledger.record("old", "COMPLETED", manifest("old"));
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
         git(ME, "rm", "-q", "starts/r1.json");
         git(ME, "commit", "-q", "-m", known());
 
@@ -654,12 +1098,12 @@ class GitLedgerTest {
     /** The anchors are read through the same check: a ledger that is not one history gives no anchors. */
     @Test
     void registerAnchors_refuseALedgerThatIsNotOneHistory() throws Exception {
-        ledger().anchorRegister("security", 3, HEAD_A);
+        ledger().anchorRegister("security", "shop", anchor(3, HEAD_A));
         String older = git("rev-parse", "HEAD").strip();
-        ledger().anchorRegister("security", 4, HEAD_B);
+        ledger().anchorRegister("security", "shop", anchor(4, HEAD_B));
         git(ME, "replace", git("rev-parse", "HEAD").strip(), older);
 
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security"));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("security", "shop"));
         assertTrue(e.getMessage().contains("not one history") && e.getMessage().contains("replace ref"), e.getMessage());
     }
 
@@ -798,10 +1242,10 @@ class GitLedgerTest {
     void theCommitOfAnEntry_namesItsSha256() throws Exception {
         ledger().recordStart("r1", start("r1"));
         assertEquals("run r1 STARTED sha256:" + sha256(start("r1")), git("log", "-1", "--format=%B").strip());
-        ledger().anchorRegister("hello", 0, "a".repeat(64));
-        ledger().anchorRegister("hello", 1, "b".repeat(64));
-        assertEquals("register hello seq 1 sha256:" + sha256(Files.readAllBytes(
-                home.resolve("ledger/registers/hello.jsonl"))), git("log", "-1", "--format=%B").strip());
+        ledger().anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
+        ledger().anchorRegister("hello", "shop", anchor(1, "b".repeat(64)));
+        assertEquals("anchor hello/shop seq 1 sha256:" + sha256(Files.readAllBytes(
+                home.resolve("ledger/anchors/hello/shop.jsonl"))), git("log", "-1", "--format=%B").strip());
     }
 
     /** An entry as a commit of a version before hashes added it, by hand here: the subject alone. */
@@ -833,19 +1277,19 @@ class GitLedgerTest {
     @Test
     void anAnchorFileRewrittenByAnotherCommit_isAProblemOfTheRegister_andFailsItsReader() throws Exception {
         GitLedger ledger = ledger();
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
-        ledger.anchorRegister("hello", 1, "b".repeat(64));
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
+        ledger.anchorRegister("hello", "shop", anchor(1, "b".repeat(64)));
         ledger.runs();
 
-        Files.writeString(home.resolve("ledger/registers/hello.jsonl"), "{\"seq\":0,\"head\":\"" + "c".repeat(64)
+        Files.writeString(home.resolve("ledger/anchors/hello/shop.jsonl"), "{\"seq\":0,\"head\":\"" + "c".repeat(64)
                 + "\"}\n");
-        git(ME, "commit", "-q", "-m", known(), "--", "registers/hello.jsonl");
+        git(ME, "commit", "-q", "-m", known(), "--", "anchors/hello/shop.jsonl");
 
-        assertEquals(2, changesOf("registers.hello").size(), changesOf("registers.hello").toString());
-        assertTrue(changesOf("registers.hello").stream().allMatch(change -> change.contains("registers/hello.jsonl")
-                && change.contains("is no beginning of the file")), changesOf("registers.hello").toString());
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger.registerAnchors("hello"));
-        assertTrue(e.getMessage().contains("registers/hello.jsonl"), e.getMessage());
+        assertEquals(2, changesOf("anchors.5.hello.shop").size(), changesOf("anchors.5.hello.shop").toString());
+        assertTrue(changesOf("anchors.5.hello.shop").stream().allMatch(change -> change.contains("anchors/hello/shop.jsonl")
+                && change.contains("is no beginning of the file")), changesOf("anchors.5.hello.shop").toString());
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger.registerAnchors("hello", "shop"));
+        assertTrue(e.getMessage().contains("anchors/hello/shop.jsonl"), e.getMessage());
     }
 
     /** A merge can bring in a change that the walk over the commits' own changes does not show. */
@@ -876,7 +1320,7 @@ class GitLedgerTest {
         for (org.junit.jupiter.api.function.Executable write : List.<org.junit.jupiter.api.function.Executable>of(
                 () -> ledger().prepare(), () -> ledger().recordStart("r1", start("r1")),
                 () -> ledger().record("r1", "COMPLETED", manifest("r1")),
-                () -> ledger().anchorRegister("hello", 0, "a".repeat(64)),
+                () -> ledger().anchorRegister("hello", "shop", anchor(0, "a".repeat(64))),
                 () -> ledger().acknowledge("r1", "{}".getBytes(StandardCharsets.UTF_8)), () -> ledger().runs())) {
             IllegalStateException e = assertThrows(IllegalStateException.class, write);
             assertTrue(e.getMessage().contains(".git"), e.getMessage());
@@ -1079,20 +1523,20 @@ class GitLedgerTest {
     @Test
     void anAnchorFileRewrittenUnderACorrectHash_isFound_alsoByTheReaderOfTheAnchors() throws Exception {
         GitLedger ledger = ledger();
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
-        ledger.anchorRegister("hello", 1, "b".repeat(64));
-        ledger.anchorRegister("hello", 2, "c".repeat(64));
-        assertTrue(changesOf("registers.hello").isEmpty());
-        assertEquals(3, ledger.registerAnchors("hello").size());
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
+        ledger.anchorRegister("hello", "shop", anchor(1, "b".repeat(64)));
+        ledger.anchorRegister("hello", "shop", anchor(2, "c".repeat(64)));
+        assertTrue(changesOf("anchors.5.hello.shop").isEmpty());
+        assertEquals(3, ledger.registerAnchors("hello", "shop").size());
 
         byte[] forged = (anchorLine(0, "a".repeat(64)) + anchorLine(1, "d".repeat(64))).getBytes(StandardCharsets.UTF_8);
-        Files.write(home.resolve("ledger/registers/hello.jsonl"), forged);
-        git(ME, "commit", "-q", "-m", "register hello seq 1 sha256:" + sha256(forged), "--", "registers/hello.jsonl");
+        Files.write(home.resolve("ledger/anchors/hello/shop.jsonl"), forged);
+        git(ME, "commit", "-q", "-m", "anchor hello/shop seq 1 sha256:" + sha256(forged), "--", "anchors/hello/shop.jsonl");
 
-        List<String> found = changesOf("registers.hello");
-        assertTrue(found.stream().anyMatch(change -> change.contains("registers/hello.jsonl")
+        List<String> found = changesOf("anchors.5.hello.shop");
+        assertTrue(found.stream().anyMatch(change -> change.contains("anchors/hello/shop.jsonl")
                 && change.contains("is no beginning of the file")), found.toString());
-        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("hello"));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("hello", "shop"));
         assertTrue(e.getMessage().contains("is no beginning of the file"), e.getMessage());
     }
 
@@ -1142,21 +1586,21 @@ class GitLedgerTest {
     @Test
     void aFileNamedHead_inTheLedgerFolder_doesNotStopTheReaders() throws Exception {
         ledger().recordStart("r1", start("r1"));
-        ledger().anchorRegister("hello", 0, "a".repeat(64));
+        ledger().anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
         Files.writeString(home.resolve("ledger/HEAD"), "not a commit");
 
         ledger().prepare();
         assertEquals(1, ledger().runs().runs().size());
         assertArrayEquals(start("r1"), ledger().findStart("r1").orElseThrow());
-        assertEquals(1, ledger().registerAnchors("hello").size());
+        assertEquals(1, ledger().registerAnchors("hello", "shop").size());
         ledger().recordStart("r2", start("r2"));
     }
 
     private void refusedAsEarlier(GitLedger ledger, String names) {
         for (org.junit.jupiter.api.function.Executable call : List.<org.junit.jupiter.api.function.Executable>of(
-                ledger::prepare, ledger::runs, () -> ledger.findStart("r1"), () -> ledger.registerAnchors("hello"),
+                ledger::prepare, ledger::runs, () -> ledger.findStart("r1"), () -> ledger.registerAnchors("hello", "shop"),
                 () -> ledger.recordStart("r9", start("r9")), () -> ledger.record("r9", "COMPLETED", manifest("r9")),
-                () -> ledger.anchorRegister("hello", 7, "a".repeat(64)), () -> ledger.changes("r1"),
+                () -> ledger.anchorRegister("hello", "shop", anchor(7, "a".repeat(64))), () -> ledger.changes("r1"),
                 () -> ledger.acknowledge("r1", "{}".getBytes(StandardCharsets.UTF_8)))) {
             RuntimeException e = assertThrows(RuntimeException.class, call);
             assertTrue(e.getMessage().contains("was written by an earlier version") && e.getMessage().contains(names)
@@ -1198,18 +1642,18 @@ class GitLedgerTest {
     void aCommitOfAKnownSubjectThatDoesNotMatchTheTree_isAProblemOfItsPath_notOfTheLedger() throws Exception {
         GitLedger ledger = ledger();
         ledger.recordStart("r1", start("r1"));
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
         // names a path it does not add; names a hash the file does not have; names a file again
         git(ME, "commit", "-q", "--allow-empty", "-m", "run r2 COMPLETED sha256:" + "0".repeat(64));
         git(ME, "commit", "-q", "--allow-empty", "-m", "run r1 STARTED sha256:" + "1".repeat(64));
-        git(ME, "commit", "-q", "--allow-empty", "-m", "register hello seq 9 sha256:" + "2".repeat(64));
+        git(ME, "commit", "-q", "--allow-empty", "-m", "anchor hello/shop seq 9 sha256:" + "2".repeat(64));
         git(ME, "commit", "-q", "--allow-empty", "-m", "run r3 ACKNOWLEDGED sha256:" + "3".repeat(64));
 
         assertTrue(changesOf("r2").getFirst().contains("names runs/r2.json, and the ledger does not hold it"),
                 changesOf("r2").toString());
         assertTrue(changesOf("r1").getFirst().contains("2 commits name starts/r1.json"), changesOf("r1").toString());
-        assertTrue(changesOf("registers.hello").getFirst().contains("is no beginning of the file"),
-                changesOf("registers.hello").toString());
+        assertTrue(changesOf("anchors.5.hello.shop").getFirst().contains("is no beginning of the file"),
+                changesOf("anchors.5.hello.shop").toString());
         assertTrue(changesOf("r3").getFirst().contains("names acks/r3.jsonl, and the ledger does not hold it"),
                 changesOf("r3").toString());
         ledger.prepare();
@@ -1222,20 +1666,20 @@ class GitLedgerTest {
     @Test
     void aCommitThatLeavesAnAnchorFileNoLonger_isFound() throws Exception {
         GitLedger ledger = ledger();
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
-        String one = sha256(Files.readAllBytes(home.resolve("ledger/registers/hello.jsonl")));
-        ledger.anchorRegister("hello", 1, "b".repeat(64));
-        String two = sha256(Files.readAllBytes(home.resolve("ledger/registers/hello.jsonl")));
-        assertTrue(changesOf("registers.hello").isEmpty());
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
+        String one = sha256(Files.readAllBytes(home.resolve("ledger/anchors/hello/shop.jsonl")));
+        ledger.anchorRegister("hello", "shop", anchor(1, "b".repeat(64)));
+        String two = sha256(Files.readAllBytes(home.resolve("ledger/anchors/hello/shop.jsonl")));
+        assertTrue(changesOf("anchors.5.hello.shop").isEmpty());
 
-        git(ME, "commit", "-q", "--allow-empty", "-m", "register hello seq 1 sha256:" + two);
-        assertEquals(1, changesOf("registers.hello").size(), changesOf("registers.hello").toString());
-        assertTrue(changesOf("registers.hello").getFirst().contains("no longer than the commit before it"),
-                changesOf("registers.hello").toString());
-        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("hello"));
+        git(ME, "commit", "-q", "--allow-empty", "-m", "anchor hello/shop seq 1 sha256:" + two);
+        assertEquals(1, changesOf("anchors.5.hello.shop").size(), changesOf("anchors.5.hello.shop").toString());
+        assertTrue(changesOf("anchors.5.hello.shop").getFirst().contains("no longer than the commit before it"),
+                changesOf("anchors.5.hello.shop").toString());
+        assertThrows(IllegalStateException.class, () -> ledger().registerAnchors("hello", "shop"));
 
-        git(ME, "commit", "-q", "--allow-empty", "-m", "register hello seq 0 sha256:" + one);
-        assertEquals(2, changesOf("registers.hello").size(), changesOf("registers.hello").toString());
+        git(ME, "commit", "-q", "--allow-empty", "-m", "anchor hello/shop seq 0 sha256:" + one);
+        assertEquals(2, changesOf("anchors.5.hello.shop").size(), changesOf("anchors.5.hello.shop").toString());
     }
 
     /** A beginning ends with a line: a file whose last line has no line feed, and one with CRLF, are judged as bytes. */
@@ -1300,14 +1744,14 @@ class GitLedgerTest {
         ledger.prepare();
         ledger.recordStart("r1", start("r1"));
         ledger.record("r1", "COMPLETED", manifest("r1"));
-        ledger.anchorRegister("hello", 0, "a".repeat(64));
-        ledger.anchorRegister("hello", 1, "b".repeat(64));
+        ledger.anchorRegister("hello", "shop", anchor(0, "a".repeat(64)));
+        ledger.anchorRegister("hello", "shop", anchor(1, "b".repeat(64)));
         ledger.acknowledge("r1", "{\"note\":\"x\"}".getBytes(StandardCharsets.UTF_8));
 
         assertEquals(64, head().length());
         assertArrayEquals(start("r1"), ledger.findStart("r1").orElseThrow());
         assertArrayEquals(manifest("r1"), ledger.find("r1").orElseThrow());
-        assertEquals(2, ledger.registerAnchors("hello").size());
+        assertEquals(2, ledger.registerAnchors("hello", "shop").size());
         assertTrue(run("r1").changes().isEmpty(), run("r1").changes().toString());
         Files.writeString(home.resolve("ledger/starts/r1.json"), "edited in place");
         assertArrayEquals(start("r1"), run("r1").start());

@@ -16,13 +16,13 @@ workflow.
 
 ```mermaid
 flowchart LR
-    subgraph run["traceworks run examples/self-audit/<topic>"]
+    subgraph run["traceworks run examples/self-audit/<topic> --project traceworks"]
         facts["facts — shell, deterministic<br>measures, chooses what gets judged,<br>and gives each item its open findings"]
         verdicts["verdicts — foreach, AI, tools: read<br>one item per call, a line quoted for every claim,<br>an answer for every open finding"]
         report["report — shell, deterministic<br>checks every quote, counts, sets the gate,<br>writes the envelope: findings, and what is gone"]
         facts --> verdicts --> report
     end
-    report --> register[("register <topic><br>new · seen · resolved · reopened")]
+    report --> register[("register <topic> of the project<br>new · seen · resolved · reopened")]
     register --> triage{"triage — a person or an agent<br>checks each new finding against the code"}
     triage -- "it holds" --> fix["fix on a branch, test first<br>(or accept as a risk, with a review date)"]
     triage -- "it does not" --> dismiss["findings <topic> dismiss --note ..."]
@@ -59,15 +59,26 @@ flowchart LR
 ## A round
 
 ```bash
-traceworks images build examples/self-audit/security     # once per package, and again when its images/ changed
-traceworks run examples/self-audit/security
-traceworks findings security list                        # new, seen, resolved, reopened
-traceworks findings security show <id>                   # one finding with its detail: the issue, the fix, the quoted line
-traceworks findings security dismiss <id> --note "..."   # it does not hold, and why
-traceworks findings security accept <id> --note "..."    # it holds and stays: a risk that is carried, with a review date
-traceworks run examples/self-audit/security              # again: what was fixed in between is resolved
-traceworks diff <first run> <second run>                 # what else changed between the rounds
+traceworks images build examples/self-audit/security                # once per package, and again when its images/ changed
+traceworks run examples/self-audit/security --project traceworks    # the project: this repository, in your word
+traceworks findings security list                                   # new, seen, resolved, reopened
+traceworks findings security show <id>                              # one finding with its detail: the issue, the fix, the quoted line
+traceworks findings security dismiss <id> --note "..."              # it does not hold, and why
+traceworks findings security accept <id> --note "..."               # it holds and stays: a risk that is carried, with a review date
+traceworks run examples/self-audit/security --project traceworks    # again: what was fixed in between is resolved
+traceworks diff <first run> <second run>                            # what else changed between the rounds
 ```
+
+**The project.** A register is kept per audit and per project, so every run of an audit names the project it works
+on: here `--project traceworks`, since these audits run on the repository they lie in. The key is your word, and
+the same package run with another key on another checkout keeps a register of its own, with its own findings and
+decisions (docs/registers.md, "The project of a run"). A run without a project is refused before it starts. The
+`findings` commands need no `--project` while a key has one project. To leave the option out of every run, bind
+the key to the checkout once, in `traceworks.json` of the home: `"projects": {"traceworks": "/path/to/the/checkout"}`.
+A run in that folder is then of that project, and a run there with another key is refused. A `findings` command
+without `--project` then means the project of the folder it is run in: in the folder of a declared project that
+has no register of the key it is refused and names the projects the key has, so run it in the checkout or name
+the project.
 
 Every report step writes its findings twice: as a Markdown report for a reader, and as data (`findings.jsonl`, one
 JSON object per finding) for `findings <topic> show` and for scripts. Both are in the record of the run; the register
@@ -161,7 +172,7 @@ as `{{ audit_items }}`, and its fact step compares:
 | `open`, with the same digest | asks about its findings again, in the places that are left under the cap |
 
 ```bash
-traceworks findings                 # per register: items 87 of 110 settled: 71 clean, 16 decided; 20 open, 3 not judged
+traceworks findings                 # per register (key and project): items 87 of 110 settled: 71 clean, 16 decided; 20 open, 3 not judged
 traceworks findings security items  # each area with its state and the digest of its last verdict
 ```
 
@@ -266,8 +277,8 @@ that would leave commits after the last run unjudged (`skip=yes` goes on knowing
 then).
 
 ```bash
-traceworks run examples/self-audit/security-changes --input since=v0.1.0
-traceworks run examples/self-audit/security-changes        # since the workspace commit of the last run of this check
+traceworks run examples/self-audit/security-changes --project traceworks --input since=v0.1.0
+traceworks run examples/self-audit/security-changes --project traceworks   # since the workspace commit of the last run of this check
 ```
 
 Its gate speaks about the changes only, and its report says how many areas of the project it did not look at. A
@@ -293,7 +304,7 @@ changed or are open.
 Which model judges: `security` opens a model choice, `judge`, and a run picks one of its options with
 `--input judge=fable` (the default, `claude-fable-5-2` through Claude), `judge=opus` (`claude-opus-5-5` through
 Claude) or `judge=astra` (`openai/gpt-6-astra` through Pi); a run needs the image and the credential of the provider
-it picked only. All three feed the register `security`, where a finding is the same finding whoever reported it, and
+it picked only. All three feed the register `security` of the run's project, where a finding is the same finding whoever reported it, and
 a verdict of one judge settles an item for the next ([security/README.md](security/README.md), "The model that
 judges"). `security-changes` opens the same choice, and `architecture` judges with
 `claude-opus-5-5`, named in its `workflow.json`.

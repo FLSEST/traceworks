@@ -134,7 +134,7 @@ final class Starting {
         }
         inputs.putAll(request.inputs());
         RunPreparation.Prepared prepared = preparation.prepare(target, runtime, pkg, request.workspace(), inputs,
-                "The run is refused");
+                "The run is refused", request.project(), true);
         // Before anything is cloned or created: a resume makes real again what the record holds redacted
         RunPreparation.refuseAReplacement("package directory", pkg.directory().toString());
         RunPreparation.refuseAReplacement("package directory", prepared.packageDirectory());
@@ -171,7 +171,7 @@ final class Starting {
             String unnoted;
             try (RunSession session = new RunSession(run, recorder, actor, listener, asker)) {
                 recorder.runStarted(runStart(pkg, inputs, target, runtime, workspace, checkout, inputsFrom, seal,
-                        prepared.modelPicks(), handover));
+                        prepared.modelPicks(), handover, request.project()).by(RunRecords.agent(request.agent())));
                 // The ledger first, then the first step: a run that began is named outside its own folder
                 unnoted = noteStart(run);
                 if (unnoted == null) {
@@ -280,7 +280,6 @@ final class Starting {
         }
     }
 
-    /** What {@code run.started} records of a new run. */
     /**
      * The inputs an earlier run was started with, from its {@code run.started}.
      *
@@ -302,10 +301,11 @@ final class Starting {
         return RunRecords.inputs(earlier.runId(), bytes);
     }
 
+    /** What {@code run.started} records of a new run. */
     private RunStart runStart(LoadedPackage pkg, Map<String, Object> inputs, RunTarget target,
                               ContainerRuntime runtime, String workspace, Checkouts.Started checkout,
                               String inputsFrom, SealStatus seal, List<ModelPick> modelPicks,
-                              RegisterHandover handover) {
+                              RegisterHandover handover, String project) {
         WorkflowDefinition definition = pkg.definition();
         return new RunStart(definition.id(), definition.name(), pkg.directory().toString(), pkg.digest(),
                 pkg.gitCommit(), pkg.gitDirty(), pkg.workflowJson(), inputs, TriggerSource.MANUAL, actor,
@@ -313,7 +313,8 @@ final class Starting {
                 runtime == null ? null : new RunStart.Runtime(runtime.name(), runtime.version()),
                 settings.outputLimitMib(), settings.aiImages(), workspace, checkout == null ? null : checkout.checkout().source(),
                 checkout == null ? null : checkout.checkout().sha(), settings.runOutputBudgetMib(), inputsFrom,
-                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover, settings.localModels());
+                imageFacts(pkg), settings.aiNetwork(), sealView(seal), modelPicks, handover, settings.localModels(),
+                project);
     }
 
     /** The seal as {@code run.started} records it; {@code null} for a package that is not sealed. */

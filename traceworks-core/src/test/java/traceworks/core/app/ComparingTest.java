@@ -30,7 +30,8 @@ class ComparingTest {
     private final AppFixture fx = new AppFixture();
 
     private String run(Path pkg, Map<String, String> inputs) {
-        RunResult result = fx.services().start(new StartRequest(pkg, inputs, WORKSPACE, false, false), null, null);
+        RunResult result = fx.services().start(new StartRequest(pkg, inputs, WORKSPACE, false, false)
+                .inProject(AppFixture.PROJECT), null, null);
         assertThat(result.status()).as(String.valueOf(result.error())).isEqualTo(RunStatus.COMPLETED);
         return result.runId();
     }
@@ -209,13 +210,94 @@ class ComparingTest {
         report("A.java");
         String first = run(AUDIT, Map.of());
         fx.commands.on("./report", "# Report\n\n<!-- traceworks:audit-result:v1\n{not json\n-->\n");
-        String second = fx.services().start(new StartRequest(AUDIT, Map.of(), WORKSPACE, false, false), null, null)
-                .runId();
+        String second = fx.services().start(new StartRequest(AUDIT, Map.of(), WORKSPACE, false, false)
+                .inProject(AppFixture.PROJECT), null, null).runId();
 
         RunComparison.FindingsDelta delta = fx.services().compare(first, second).findings();
 
         assertThat(delta.register()).isEqualTo("hello");
         assertThat(delta.note()).contains(second, "did not apply");
         assertThat(delta.added()).isEmpty();
+    }
+
+    /** A register that cannot be listed or read is a note of the comparison, never a failure of the program. */
+    @Test
+    void aRegisterThatCannotBeListedOrRead_isANoteOfTheComparison() {
+        auditPackage();
+        report("A.java");
+        String first = run(AUDIT, Map.of());
+        String second = run(AUDIT, Map.of());
+        fx.registers.failProjects("hello", new java.io.UncheckedIOException("Cannot list the registers in"
+                + " /home/registers/hello: Permission denied", new java.io.IOException("Permission denied")));
+
+        RunComparison.FindingsDelta unlisted = fx.services().compare(first, second).findings();
+
+        assertThat(unlisted.note()).contains("cannot be read").contains("Permission denied");
+        fx.registers.failProjects("hello", null);
+        fx.registers.failReads("hello", AppFixture.PROJECT, new java.io.UncheckedIOException("Cannot read"
+                + " events.jsonl: Permission denied", new java.io.IOException("Permission denied")));
+
+        RunComparison.FindingsDelta unread = fx.services().compare(first, second).findings();
+
+        assertThat(unread.note()).contains("cannot be read").contains("Permission denied");
+    }
+
+    /**
+     * A finished audit run of a version before registers were kept per project, in this home: the run {@code id}
+     * of {@code source} with the project (and what says that the ledger names it) taken out of its first line and
+     * the chain of the lines after it made anew. Its finalisation is written by this version, from that record.
+     */
+    private String earlier(AppFixture source, String id) throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+        try (var created = fx.store.create(id, fx.clock.now())) {
+            String previous = null;
+            for (byte[] raw : source.run(id).log().readAll()) {
+                var line = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(raw);
+                if (previous == null) {
+                    assertThat(line.path("project").asText()).isEqualTo(AppFixture.PROJECT);
+                    line.remove(java.util.List.of("project", "ledger_starter"));
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) line.path("register")).remove("project");
+                } else {
+                    line.put("prev", previous);
+                }
+                previous = created.events().append(traceworks.core.record.RecordJson.json(line));
+            }
+            created.writeRegisterFiles(new java.util.LinkedHashMap<>(source.run(id).registerFolder()));
+        }
+        source.run(id).blobs().all().forEach(fx.run(id).blobs()::put);
+        fx.services().resume(AppFixture.resumeOf(id), null, null);
+        assertThat(fx.registers.keys()).as("ended now, it feeds no register of this version").isEmpty();
+        assertThat(fx.services().verify(id).ok()).as(fx.services().verify(id).toString()).isTrue();
+        return id;
+    }
+
+    /**
+     * Two audit runs whose records name no project are from before registers were kept per project. Their findings
+     * are not compared, and nothing says that they fed no register: the register of that version took their reports.
+     */
+    @Test
+    void twoAuditRunsWhoseRecordsNameNoProject_areFromBeforeRegistersPerProject_notRunsThatFedNoRegister()
+            throws Exception {
+        AppFixture source = new AppFixture();
+        String pkg = """
+                {"id": "wf-audit", "name": "Audit", "metadata": {"audit": {"enabled": true, "key": "hello",
+                   "category": "example", "report_block": "report"}}, "blocks": [
+                  {"type": "shell", "name": "report", "config": {"command": "./report"}}
+                ]}""";
+        source.packages.put(AUDIT, pkg);
+        fx.packages.put(AUDIT, pkg);
+        source.commands.on("./report", "# Report\n\n<!-- traceworks:audit-result:v1\n{\"snapshotComplete\":true,"
+                + "\"findings\":[]}\n-->\n");
+        String first = source.services().start(request(AUDIT), null, null).runId();
+        String second = source.services().start(request(AUDIT), null, null).runId();
+
+        RunComparison.FindingsDelta delta = fx.services().compare(earlier(source, first), earlier(source, second))
+                .findings();
+
+        assertThat(delta.register()).isEqualTo("hello");
+        assertThat(delta.note()).contains("from before registers were kept per project")
+                .contains("their findings are not compared").doesNotContain("fed no register");
+        assertThat(delta.added()).isEmpty();
+        assertThat(delta.resolved()).isEmpty();
     }
 }

@@ -52,6 +52,47 @@
                 <targetPath>META-INF</targetPath>
                 <filtering>false</filtering>
             </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <!-- What "traceworks mcp" tells a client about writing a workflow (the tools guide and examples): the
+                 format document and the workflow and README of some example packages, as the repository has them,
+                 carried by the jar so that the server needs no checkout. The list is McpGuide's. -->
+            <resource>
+                <directory>${project.basedir}/../docs</directory>
+                <targetPath>traceworks-guide</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>workflow-format.md</include>
+                    <include>registers.md</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../examples</directory>
+                <targetPath>traceworks-guide/examples</targetPath>
+                <filtering>false</filtering>
+                <includes>
+                    <include>hello/workflow.json</include>
+                    <include>hello/README.md</include>
+                    <include>hello/scripts/count-files.sh</include>
+                    <include>ai-hello/workflow.json</include>
+                    <include>ai-hello/README.md</include>
+                    <include>audit-hello/workflow.json</include>
+                    <include>audit-hello/README.md</include>
+                    <include>audit-hello/catalog.json</include>
+                    <include>audit-hello/scripts/measure.sh</include>
+                    <include>audit-hello/scripts/report.sh</include>
+                    <include>self-audit/build/workflow.json</include>
+                    <include>self-audit/build/README.md</include>
+                    <include>self-audit/architecture/workflow.json</include>
+                    <include>self-audit/architecture/README.md</include>
+                    <include>self-audit/security/workflow.json</include>
+                    <include>self-audit/security/README.md</include>
+                    <include>self-audit/security-changes/workflow.json</include>
+                    <include>self-audit/security-changes/README.md</include>
+                </includes>
+            </resource>
         </resources>
         <plugins>
             <!-- The jar is made anew in every build. Shading replaces it with the jar that holds the other modules

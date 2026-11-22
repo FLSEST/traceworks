@@ -6,6 +6,7 @@ import traceworks.cli.Command;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.FindingLines;
+import traceworks.cli.ProjectOption;
 import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.core.app.RunCheck;
@@ -38,6 +39,10 @@ import java.util.stream.Collectors;
  * <p>The seal of the package is checked when the run starts, whatever {@code --no-check} says: a sealed package
  * whose seal does not hold starts no run (exit 6). {@code --allow-unsealed} is the operator's flag for an unsealed
  * package under {@code require_seal: unattended}.
+ *
+ * <p>The project of the run is {@code --project KEY}, or the project the home's {@code projects} setting binds to
+ * the folder the run works in ({@link ProjectOption#ofRun}); a key that names another project than that folder is
+ * refused before the run exists (exit 6).
  */
 public final class RunCommand implements Command {
 
@@ -47,6 +52,12 @@ public final class RunCommand implements Command {
             .option("workspace", "DIR", "the directory the steps work in (default: the working directory)")
             .option("source", "PATH|URL", "work in a new checkout of this git repository, not in a workspace")
             .option("ref", "REF", "the branch, tag or commit of --source to check out (default: its HEAD)")
+            .option(ProjectOption.NAME, ProjectOption.VALUE, "the project the run works on, in your word: it is"
+                    + " recorded with the run, and the run of an audit workflow needs one, since its register is"
+                    + " kept per project. Without it, the project is the one \"projects\" in traceworks.json"
+                    + " binds to the folder the run works in (its workspace, or the repository --source names"
+                    + " as a path or a file: URL)"
+                    + " or to a folder above it; a key that names another project than that folder is refused")
             .flag("allow-host-execution", "allow a host run where no container runtime works: shell steps without"
                     + " an image then run on the host")
             .flag("no-input", "never ask on the terminal; a question parks the run")
@@ -86,6 +97,8 @@ public final class RunCommand implements Command {
             throw new UsageException(Message.of("no such package: ", Message.typed(pkg)));
         }
         Map<String, String> inputs = inputs(args);
+        // A key that is none is a usage error, whatever else the command line says
+        ProjectOption.of(args);
         String threshold = threshold(args.option("fail-on-gate"));
         String source = source(context, args);
         String ref = args.option("ref");
@@ -94,9 +107,11 @@ public final class RunCommand implements Command {
         }
         Path workspace = source != null ? null : args.option("workspace") == null ? context.workingDirectory()
                 : context.resolve(args.option("workspace"));
+        String project = ProjectOption.ofRun(args, context.projects(), source == null ? workspace
+                : localSource(source));
         boolean interactive = context.interactive(args.has("no-input"));
         StartRequest request = new StartRequest(pkg, inputs, workspace, args.has("allow-host-execution"), interactive,
-                source, ref, args.option("inputs-from"), context.attended(args.has("allow-unsealed")));
+                source, ref, args.option("inputs-from"), context.attended(args.has("allow-unsealed")), project);
 
         RunServices services = context.services();
         if (!checked(context, services.checkBeforeRun(request, !args.has("no-check")))) {
@@ -143,6 +158,15 @@ public final class RunCommand implements Command {
         }
         return !source.startsWith("-") && SourceCheckout.isLocalPath(source) ? context.resolve(source).toString()
                 : source;
+    }
+
+    /**
+     * The repository a {@code --source} names when it names a path of this machine, which is the folder its run
+     * works in for the projects of the home: a path, and a {@code file:} URL, which is judged like its path.
+     * {@code null} for a source that is no local path, which has no folder, and for a source the start refuses.
+     */
+    private static Path localSource(String source) {
+        return traceworks.adapters.pkg.GitSourceCheckout.localRepository(source).orElse(null);
     }
 
     private static Map<String, String> inputs(Parsed args) {

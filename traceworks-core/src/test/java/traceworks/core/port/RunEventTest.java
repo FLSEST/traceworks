@@ -14,6 +14,7 @@ import traceworks.core.port.RunEvent.ForEachItemFinished;
 import traceworks.core.port.RunEvent.ForEachItemStarted;
 import traceworks.core.port.RunEvent.GateReported;
 import traceworks.core.port.RunEvent.OutputRecorded;
+import traceworks.core.port.RunEvent.PackageCalled;
 import traceworks.core.port.RunEvent.RunFinished;
 import traceworks.core.port.RunEvent.RunParked;
 import traceworks.core.port.RunEvent.RunStatusChanged;
@@ -148,6 +149,7 @@ class RunEventTest {
             case ForEachItemFinished e -> "foreach item finished";
             case AgenticProgress e -> "agentic progress";
             case ChildRunEvent e -> "child run event";
+            case PackageCalled e -> "package called";
             case Checkpoint e -> "checkpoint";
             case RunStatusChanged e -> "run status";
             case RunParked e -> "run parked";

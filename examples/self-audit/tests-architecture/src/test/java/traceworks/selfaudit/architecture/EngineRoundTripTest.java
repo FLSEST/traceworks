@@ -79,7 +79,7 @@ class EngineRoundTripTest {
         // the check before a run refuses (absolute-home-path) wherever they lie below a home directory
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
-        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--workspace",
+        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--project", "shop", "--workspace",
                         temp.resolve("work").toString(), "--home", home.toString(), "--no-input",
                         "--allow-host-execution", "--quiet", "--no-check"},
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8),
@@ -149,7 +149,7 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
 
         // The first run: every file gets the verdict split
@@ -157,7 +157,7 @@ class EngineRoundTripTest {
             Files.writeString(pkg.resolve("answer-" + id + ".json"), split(id));
         }
         String first = cli(env, run);
-        assertThat(first).contains("register roundtrip: 3 new, 0 resolved, 0 reopened, 3 open now");
+        assertThat(first).contains("register roundtrip of shop: 3 new, 0 resolved, 0 reopened, 3 open now");
 
         // The second run: split again, fine now, and a verdict whose quote is in no line
         Files.writeString(pkg.resolve("answer-C02.json"), "{\"candidate\":\"C02\",\"verdict\":\"fine\",\"reason\":\"One job"
@@ -166,7 +166,7 @@ class EngineRoundTripTest {
                 + "\"evidence\":[{\"line\":1,\"quote\":\"this is in no line\"}],\"members\":[],\"target\":\"\"}");
         String second = cli(env, run);
 
-        assertThat(second).as(first).contains("register roundtrip: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them"
+        assertThat(second).as(first).contains("register roundtrip of shop: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them"
                 + " not mentioned by this report");
         List<String> list = cli(env, "findings", "roundtrip", "list", "--all", "--home", home.toString()).lines().toList();
         assertThat(list).hasSize(3)
@@ -246,14 +246,14 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-items"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] start = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] start = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         String itemA = "app/src/main/java/p/A.java";
         String itemB = "app/src/main/java/p/B.java";
 
         String first = cli(env, start);
         assertThat(Files.readAllLines(asked)).as(first).containsExactly(itemA, itemB);
-        assertThat(first).contains("register items: 0 new, 0 resolved, 0 reopened, 0 open now; items 2 of 2 settled, "
+        assertThat(first).contains("register items of shop: 0 new, 0 resolved, 0 reopened, 0 open now; items 2 of 2 settled, "
                 + "2 judged in this run");
         Files.delete(asked);
 
@@ -267,7 +267,7 @@ class EngineRoundTripTest {
         String third = cli(env, start);
         assertThat(Files.readAllLines(asked)).containsExactly(itemA);
         assertThat(third).as("the call failed: one file not judged, and the report is applied")
-                .contains("register items: 0 new, 0 resolved, 0 reopened, 0 open now; items 1 of 2 settled, "
+                .contains("register items of shop: 0 new, 0 resolved, 0 reopened, 0 open now; items 1 of 2 settled, "
                         + "0 judged in this run");
         assertThat(cli(env, "findings", "items", "items", "--home", home.toString()))
                 .matches("not judged  [0-9a-f]{16}  " + Pattern.quote(itemA) + "\n"

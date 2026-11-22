@@ -3,6 +3,7 @@ package traceworks.adapters.ledger;
 import traceworks.adapters.pkg.GitProcess;
 import traceworks.core.port.Ids;
 import traceworks.core.model.AuditConfig;
+import traceworks.core.model.ProjectKey;
 import traceworks.core.port.Ledger;
 import traceworks.core.port.LedgerRuns;
 import traceworks.core.port.RegisterAnchor;
@@ -24,9 +25,17 @@ import java.util.concurrent.locks.ReentrantLock;
  * The ledger as a git repository: one commit per started run adds {@code starts/<run-id>.json}, the start entry, with
  * the message {@code run <run-id> STARTED}; one commit per finished run adds {@code runs/<run-id>.json}, a
  * byte-identical copy of the manifest, with the message {@code run <run-id> <STATUS>}; and one commit per write of a
- * register adds a line to {@code registers/<key>.jsonl}, the anchor of the register's head, with the message
- * {@code register <key> seq <n>}. Every message ends with {@code  sha256:<hex>}, the SHA-256 of the file after the
- * commit, which is what a reader later judges the file by ({@link #judge}).
+ * register adds a line to {@code anchors/<key>/<project>.jsonl}, the anchor of the register's head and what was
+ * written since the anchor before it, with the message {@code anchor <key>/<project> seq <n>}. Every message ends
+ * with {@code  sha256:<hex>}, the SHA-256 of the file after the commit, which is what a reader later judges the
+ * file by ({@link #judge}).
+ *
+ * <p>A version before registers had projects anchored a register by its key alone: {@code registers/<key>.jsonl},
+ * committed as {@code register <key> seq <n>}. Those commits and files are known here, so a ledger that holds them
+ * stays one this version reads and writes; they are read ({@link #earlierRegisterAnchors}) and judged like every
+ * other file, and never added to. The anchors of a key and a project lie in a folder of their own,
+ * {@code anchors/}, so that no key collides with a file of the earlier shape: under {@code registers/} a key that
+ * ends in {@code .jsonl} would need a folder where the earlier file of its stem lies.
  *
  * <p>Commits are serialised by one in-JVM lock (a {@link FileChannel} lock alone does not exclude threads of the
  * same JVM) and an exclusive lock on the lock file for processes. The lock channel is the only one opened on the lock
@@ -44,8 +53,11 @@ public final class GitLedger implements Ledger {
     private static final ReentrantLock JVM_LOCK = new ReentrantLock();
     private static final java.util.regex.Pattern KEY = java.util.regex.Pattern.compile(AuditConfig.KEY);
     private static final java.util.regex.Pattern HEAD = java.util.regex.Pattern.compile("[0-9a-f]{64}");
+    /** A line that holds the sequence number and the head alone: all an anchor of an earlier version says. */
     private static final java.util.regex.Pattern ANCHOR =
             java.util.regex.Pattern.compile("\\{\"seq\":(\\d{1,9}),\"head\":\"([0-9a-f]{64})\"\\}");
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     /** The status a start entry has in its commit message; no run status has this name. */
     static final String STARTED = "STARTED";
@@ -57,18 +69,32 @@ public final class GitLedger implements Ledger {
     /** {@code run <run-id> <WORD> sha256:<hex>}: the word, and the SHA-256 of the file after the commit. */
     private static final java.util.regex.Pattern SUBJECT =
             java.util.regex.Pattern.compile("run (" + RUN_ID + ") ([A-Z_]+) sha256:(" + SHA256 + ")");
+    /**
+     * {@code anchor <key>/<project> seq <n> sha256:<hex>}, and {@code register <key> seq <n> sha256:<hex>}, the
+     * subject of an anchor a version before registers had projects wrote. The groups: the key and the project of
+     * the first, the key of the second, the SHA-256.
+     */
     private static final java.util.regex.Pattern ANCHOR_SUBJECT = java.util.regex.Pattern.compile(
-            "register (" + AuditConfig.KEY + ") seq \\d{1,9} sha256:(" + SHA256 + ")");
+            "(?:anchor (" + AuditConfig.KEY + ")/(" + ProjectKey.PATTERN + ")|register (" + AuditConfig.KEY
+                    + ")) seq \\d{1,9} sha256:(" + SHA256 + ")");
     /** A record of {@code ls-tree -r -t -z}: mode, type, object id, a tab, the path. */
     private static final java.util.regex.Pattern LISTED =
             java.util.regex.Pattern.compile("(\\d{6}) (\\w+) ([0-9a-f]{40}|[0-9a-f]{64})\\t(.+)",
                     java.util.regex.Pattern.DOTALL);
+    /** Every folder the ledger holds: the five of its entries, and under anchors/ one per key. */
     private static final java.util.regex.Pattern FOLDER =
-            java.util.regex.Pattern.compile("starts|runs|acks|registers");
+            java.util.regex.Pattern.compile("starts|runs|acks|registers|anchors|anchors/" + AuditConfig.KEY);
+    /**
+     * The anchors of a register: of a key and a project under {@code anchors/}, or of a key alone under
+     * {@code registers/} as an earlier version wrote them. The groups: the key and the project of the first, the
+     * key of the second.
+     */
+    private static final java.util.regex.Pattern ANCHOR_PATH = java.util.regex.Pattern.compile(
+            "anchors/(" + AuditConfig.KEY + ")/(" + ProjectKey.PATTERN + ")\\.jsonl|registers/(" + AuditConfig.KEY
+                    + ")\\.jsonl");
     /** Every path the ledger holds a file at. */
     private static final java.util.regex.Pattern ENTRY_PATH = java.util.regex.Pattern.compile(
-            "(?:starts|runs)/" + RUN_ID + "\\.json|acks/" + RUN_ID + "\\.jsonl|registers/" + AuditConfig.KEY
-                    + "\\.jsonl");
+            "(?:starts|runs)/" + RUN_ID + "\\.json|acks/" + RUN_ID + "\\.jsonl|" + ANCHOR_PATH.pattern());
     /** The path of an entry of a run. */
     private static final java.util.regex.Pattern RUN_PATH =
             java.util.regex.Pattern.compile("(starts|runs|acks)/(" + RUN_ID + ")\\.jsonl?");
@@ -221,8 +247,8 @@ public final class GitLedger implements Ledger {
             boolean file = type.equals("blob") && mode.equals("100644") && ENTRY_PATH.matcher(path).matches();
             if (!folder && !file) {
                 throw tampered("its HEAD holds " + path + " (" + type + ", mode " + mode + "), which is no entry of a"
-                        + " ledger: a regular file under starts/, runs/, acks/ or registers/. Traceworks did not"
-                        + " commit it. If the commit that added it is the newest, take that commit back ('git -C "
+                        + " ledger: a regular file under starts/, runs/, acks/, anchors/ or registers/. Traceworks"
+                        + " did not commit it. If the commit that added it is the newest, take that commit back ('git -C "
                         + directory + " reset --hard HEAD~1'); else move the ledger folder aside, and the next run"
                         + " starts a new ledger");
             }
@@ -318,7 +344,8 @@ public final class GitLedger implements Ledger {
             java.util.regex.Matcher run = subject == null ? null : SUBJECT.matcher(subject);
             java.util.regex.Matcher anchor = subject == null ? null : ANCHOR_SUBJECT.matcher(subject);
             String path = subject == null ? null
-                    : anchor.matches() ? "registers/" + anchor.group(1) + ".jsonl"
+                    : anchor.matches() ? anchorFile(anchor.group(1) != null ? anchor.group(1) : anchor.group(3),
+                            anchor.group(2))
                     : !run.matches() ? null
                     : run.group(2).equals(STARTED) ? "starts/" + run.group(1) + ".json"
                     : FINAL.contains(run.group(2)) ? "runs/" + run.group(1) + ".json"
@@ -330,7 +357,7 @@ public final class GitLedger implements Ledger {
                         + " none this version writes");
             }
             messages.add(new Message(position++, commit.group(1), subject, path,
-                    anchor.matches() ? null : run.group(2), anchor.matches() ? anchor.group(2) : run.group(3)));
+                    anchor.matches() ? null : run.group(2), anchor.matches() ? anchor.group(4) : run.group(3)));
         }
         return messages;
     }
@@ -466,20 +493,43 @@ public final class GitLedger implements Ledger {
         return beginnings;
     }
 
-    /** The name a path's problems are listed under: the run, or {@code registers.<key>} for the anchors. */
+    /**
+     * The name a path's problems are listed under: the run, or for the anchors of a register the name of the
+     * register ({@link Ledger#registerName}), which no two registers share. The name has the form of a run id, so
+     * that such a problem is acknowledged like one of a run.
+     */
     private static String owner(String path) {
         java.util.regex.Matcher run = RUN_PATH.matcher(path);
         if (run.matches()) return run.group(2);
-        return path.startsWith("registers/") ? "registers." + path.substring("registers/".length(),
-                path.length() - ".jsonl".length()) : null;
+        Ledger.Anchored anchored = anchored(path);
+        return anchored == null ? null : Ledger.registerName(anchored.key(), anchored.project());
+    }
+
+    /** The register whose anchors lie at {@code path}; {@code null} for a path that holds no anchors. */
+    private static Ledger.Anchored anchored(String path) {
+        java.util.regex.Matcher anchors = ANCHOR_PATH.matcher(path);
+        return !anchors.matches() ? null : anchors.group(1) != null
+                ? new Ledger.Anchored(anchors.group(1), anchors.group(2)) : new Ledger.Anchored(anchors.group(3), null);
+    }
+
+    /** The registers HEAD holds anchors of, by the paths of its files. */
+    @Override
+    public List<Ledger.Anchored> anchoredRegisters() {
+        requireOneHistory();
+        List<Ledger.Anchored> registers = new java.util.ArrayList<>();
+        for (String path : listing().keySet()) {
+            Ledger.Anchored anchored = anchored(path);
+            if (anchored != null) registers.add(anchored);
+        }
+        return registers;
     }
 
     /**
      * Every run the ledger names. The subjects of the commits say which runs started and ended: a later commit can
      * remove a file, not an earlier message. The files of HEAD are what the ledger holds now, and each must be what
      * its commits say ({@link #judge}); what is not is a change of its run ({@link LedgerRuns.Run#changes}), and for
-     * the anchors of a register one of {@code registers.<key>}. Nothing for a ledger that does not exist yet or has
-     * no commit.
+     * the anchors of a register one of the register ({@link Ledger#registerName}). Nothing for a ledger that does
+     * not exist yet or has no commit.
      *
      * @throws IllegalStateException if the ledger cannot be read, holds something that is no entry, or something
      *                               that lets git show another history than its commits ({@link #requireOneHistory})
@@ -749,8 +799,20 @@ public final class GitLedger implements Ledger {
             throw tampered("it has the file .git/commondir, which names another repository");
         }
         // Attributes can make git store other bytes than it is given, and show others than it stored
-        for (String file : List.of(".git/info/attributes", ".gitattributes", "starts/.gitattributes",
-                "runs/.gitattributes", "acks/.gitattributes", "registers/.gitattributes")) {
+        List<String> files = new java.util.ArrayList<>(List.of(".git/info/attributes", ".gitattributes",
+                "starts/.gitattributes", "runs/.gitattributes", "acks/.gitattributes", "registers/.gitattributes",
+                "anchors/.gitattributes"));
+        // The anchors of a register lie one folder deeper, in the folder of its key
+        Path anchors = directory.resolve("anchors");
+        if (Files.isDirectory(anchors, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            try (java.util.stream.Stream<Path> keys = Files.list(anchors)) {
+                keys.map(key -> "anchors/" + key.getFileName() + "/.gitattributes").sorted().forEach(files::add);
+            } catch (IOException e) {
+                throw new IllegalStateException("The ledger " + directory + " cannot be read: its folder anchors"
+                        + " cannot be listed (" + e + ")", e);
+            }
+        }
+        for (String file : files) {
             if (Files.exists(directory.resolve(file), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
                 throw tampered("it has the attributes file " + file);
             }
@@ -828,36 +890,154 @@ public final class GitLedger implements Ledger {
     }
 
     /**
-     * Adds one line to {@code registers/<key>.jsonl} and commits it as {@code register <key> seq <n>}. The file as
-     * HEAD holds it is what the line is added to, so a file edited in the working tree does not count. The anchor
-     * the file already ends with is not added again.
+     * Adds one line to {@code anchors/<key>/<project>.jsonl} and commits it as
+     * {@code anchor <key>/<project> seq <n>}. The file as HEAD holds it is what the line is added to, so a file
+     * edited in the working tree does not count. The anchor the file already ends with is not added again.
+     *
+     * <p>The line holds what the anchor says was written ({@link #line}); the subject of the commit says no more
+     * than it did.
      */
     @Override
-    public void anchorRegister(String key, int seq, String head) {
-        Path relative = anchorFile(key);
+    public void anchorRegister(String key, String project, RegisterAnchor anchor) {
+        String relative = anchorFile(key, requireProject(project));
+        int seq = anchor.seq();
+        String head = anchor.head();
         if (seq < 0 || head == null || !HEAD.matcher(head).matches()) {
-            throw new IllegalArgumentException("Invalid anchor of the register " + key + ": seq " + seq);
+            throw new IllegalArgumentException("Invalid anchor of the register " + key + " of " + project + ": seq "
+                    + seq);
+        }
+        if (anchor.written() == null) {
+            throw new IllegalArgumentException("Invalid anchor of the register " + key + " of " + project + ": seq "
+                    + seq + " does not say what was written");
+        }
+        if (!traceworks.core.register.RegisterAnchors.shaped(anchor.written())) {
+            // Nothing of the value is repeated: it is what must not reach the ledger
+            throw new IllegalArgumentException("Invalid anchor of the register " + key + " of " + project + ": seq "
+                    + seq + " says a value that has not the shape of its field");
         }
         try {
-            commit(relative.toString(), ("{\"seq\":" + seq + ",\"head\":\"" + head + "\"}\n")
-                    .getBytes(StandardCharsets.UTF_8), "register " + key + " seq " + seq, true, null);
+            commit(relative, (line(anchor) + "\n").getBytes(StandardCharsets.UTF_8),
+                    "anchor " + key + "/" + project + " seq " + seq, true, null);
         } catch (UncheckedIOException e) {
             throw new IllegalStateException("Cannot write the ledger " + directory + ": " + e.getCause(), e);
         }
     }
 
     /**
-     * The anchors {@code registers/<key>.jsonl} holds in HEAD. None for a ledger that does not exist yet (no folder,
-     * or a folder git has not been started in), for one without a commit, and for one whose HEAD does not hold the
-     * file. A ledger that exists and cannot be read is an error, never an empty list: "no anchor" must not be what a
-     * damaged ledger says. The file is judged as every other reader judges it ({@link #judge}): one that was
-     * rewritten is an error too.
+     * The anchors {@code anchors/<key>/<project>.jsonl} holds in HEAD. None for a ledger that does not exist yet
+     * (no folder, or a folder git has not been started in), for one without a commit, and for one whose HEAD does
+     * not hold the file. A ledger that exists and cannot be read is an error, never an empty list: "no anchor" must
+     * not be what a damaged ledger says. The file is judged as every other reader judges it ({@link #judge}): one
+     * that was rewritten is an error too.
      */
     @Override
-    public List<RegisterAnchor> registerAnchors(String key) {
-        Path relative = anchorFile(key);
+    public List<RegisterAnchor> registerAnchors(String key, String project) {
+        return anchorsIn(anchorFile(key, requireProject(project)), false);
+    }
+
+    /**
+     * The anchors {@code registers/<key>.jsonl} holds in HEAD: what a version before registers had projects wrote
+     * of the register {@code key}. Read and judged as {@link #registerAnchors}; this version adds no line to it.
+     */
+    @Override
+    public List<RegisterAnchor> earlierRegisterAnchors(String key) {
+        return anchorsIn(anchorFile(key, null), true);
+    }
+
+    /**
+     * The line of an anchor in {@code anchors/<key>/<project>.jsonl}: {@code seq}, {@code head}, then what was
+     * written. {@code lines} is each type of line with its count, sorted by type; {@code run}, {@code actor} and
+     * {@code agent} are absent for none, a word for one and a sorted list for more; {@code decided} is the list of
+     * the findings decided, absent for none. Nothing else: the ledger holds no content of a register.
+     */
+    private static String line(RegisterAnchor anchor) {
+        com.fasterxml.jackson.databind.node.ObjectNode node = JSON.createObjectNode();
+        node.put("seq", anchor.seq());
+        node.put("head", anchor.head());
+        com.fasterxml.jackson.databind.node.ObjectNode lines = node.putObject("lines");
+        anchor.written().lines().forEach(lines::put);
+        named(node, "run", anchor.written().runs());
+        named(node, "actor", anchor.written().actors());
+        named(node, "agent", anchor.written().agents());
+        if (!anchor.written().decided().isEmpty()) {
+            anchor.written().decided().forEach(node.putArray("decided")::add);
+        }
+        try {
+            return JSON.writeValueAsString(node);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("The anchor of seq " + anchor.seq() + " cannot be written as JSON", e);
+        }
+    }
+
+    private static void named(com.fasterxml.jackson.databind.node.ObjectNode node, String field, List<String> values) {
+        if (values.size() == 1) {
+            node.put(field, values.getFirst());
+        } else if (values.size() > 1) {
+            values.forEach(node.putArray(field)::add);
+        }
+    }
+
+    /**
+     * The anchor a line of {@code anchors/<key>/<project>.jsonl} is; {@code null} for a line that is none. A line
+     * is an anchor only when it is, byte for byte, what {@link #line} writes of what it says, and every value in it
+     * has the shape of its field (a run id, the id of a finding, a name, a type of line, or the marker for a value
+     * of another shape), so nothing but what an anchor holds can stand in the ledger as one, and no free text. A line with the sequence number and the head alone is read
+     * as an anchor that does not say what was written ({@link RegisterAnchor#written} is {@code null}): no version
+     * writes it into this file, and the check of the register reports it.
+     */
+    private static RegisterAnchor anchorOf(String line) {
+        java.util.regex.Matcher brief = ANCHOR.matcher(line);
+        if (brief.matches()) {
+            return new RegisterAnchor(Integer.parseInt(brief.group(1)), brief.group(2));
+        }
+        com.fasterxml.jackson.databind.JsonNode node;
+        try {
+            node = JSON.readTree(line);
+        } catch (IOException e) {
+            return null;
+        }
+        if (node == null || !node.isObject() || !node.path("seq").isInt() || !node.path("head").isTextual()
+                || !node.path("lines").isObject()) {
+            return null;
+        }
+        java.util.SortedMap<String, Integer> lines = new java.util.TreeMap<>();
+        for (Map.Entry<String, com.fasterxml.jackson.databind.JsonNode> count : node.get("lines").properties()) {
+            if (!count.getValue().isInt()) return null;
+            lines.put(count.getKey(), count.getValue().intValue());
+        }
+        List<String> runs = words(node.get("run"));
+        List<String> actors = words(node.get("actor"));
+        List<String> agents = words(node.get("agent"));
+        List<String> decided = words(node.get("decided"));
+        if (runs == null || actors == null || agents == null || decided == null) {
+            return null;
+        }
+        RegisterAnchor anchor = new RegisterAnchor(node.get("seq").intValue(), node.get("head").textValue(),
+                new RegisterAnchor.Written(lines, runs, actors, agents, decided));
+        return anchor.seq() >= 0 && HEAD.matcher(anchor.head()).matches() && line.equals(line(anchor))
+                && traceworks.core.register.RegisterAnchors.shaped(anchor.written()) ? anchor : null;
+    }
+
+    /** The words of a field that holds one word or a list of them; none for no field, {@code null} for anything else. */
+    private static List<String> words(com.fasterxml.jackson.databind.JsonNode value) {
+        if (value == null) return List.of();
+        if (value.isTextual()) return List.of(value.textValue());
+        if (!value.isArray()) return null;
+        List<String> words = new java.util.ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode word : value) {
+            if (!word.isTextual()) return null;
+            words.add(word.textValue());
+        }
+        return words;
+    }
+
+    /**
+     * @param earlier whether the file is the one a version before registers had projects wrote, whose lines hold
+     *                the sequence number and the head alone
+     */
+    private List<RegisterAnchor> anchorsIn(String relative, boolean earlier) {
         requireOneHistory();
-        Judged judged = judge(relative.toString()::equals, false);
+        Judged judged = judge(relative::equals, false);
         List<String> broken = new java.util.ArrayList<>();
         judged.problems().forEach((path, found) -> {
             if (judged.rewritten().contains(path)) broken.addAll(found);
@@ -865,19 +1045,18 @@ public final class GitLedger implements Ledger {
         if (!broken.isEmpty()) {
             throw tampered(String.join("; ", broken));
         }
-        String text = new String(judged.contents().getOrDefault(relative.toString(), new byte[0]),
-                StandardCharsets.UTF_8);
+        String text = new String(judged.contents().getOrDefault(relative, new byte[0]), StandardCharsets.UTF_8);
         List<RegisterAnchor> anchors = new java.util.ArrayList<>();
         int number = 0;
         for (String line : text.split("\n")) {
             number++;
             if (line.isEmpty()) continue;
-            java.util.regex.Matcher anchor = ANCHOR.matcher(line);
-            if (!anchor.matches()) {
+            RegisterAnchor anchor = earlier && !ANCHOR.matcher(line).matches() ? null : anchorOf(line);
+            if (anchor == null) {
                 throw new IllegalStateException("line " + number + " of " + relative + " in the ledger " + directory
                         + " is no anchor");
             }
-            anchors.add(new RegisterAnchor(Integer.parseInt(anchor.group(1)), anchor.group(2)));
+            anchors.add(anchor);
         }
         return List.copyOf(anchors);
     }
@@ -952,11 +1131,25 @@ public final class GitLedger implements Ledger {
         }
     }
 
-    private static Path anchorFile(String key) {
+    /**
+     * The path of the anchors of a register in the ledger, with {@code /} between its parts as git names it:
+     * {@code anchors/<key>/<project>.jsonl}. The file a version before registers had projects wrote for a key alone
+     * is {@code registers/<key>.jsonl}; the two lie in two folders, so no key of one is in the way of the other.
+     *
+     * @param project the project the register is of; {@code null} for the file of the earlier shape
+     */
+    private static String anchorFile(String key, String project) {
         if (key == null || !KEY.matcher(key).matches()) {
             throw new IllegalArgumentException("Invalid register key: " + key);
         }
-        return Path.of("registers", key + ".jsonl");
+        return project == null ? "registers/" + key + ".jsonl" : "anchors/" + key + "/" + project + ".jsonl";
+    }
+
+    private static String requireProject(String project) {
+        if (!ProjectKey.matches(project)) {
+            throw new IllegalArgumentException("Invalid project key: " + project);
+        }
+        return project;
     }
 
     private static void requireRunId(String runId) {

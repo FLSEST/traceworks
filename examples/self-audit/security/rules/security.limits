@@ -34,7 +34,7 @@ limit Registers
   quote But they can **add** to both
   quote **Who decided is a label, not a proof.**
   says  A line appended to a register's log after its last anchor is accepted and named as unproven until the next write anchors it; whoever can write both the register's folder and the ledger can add a forged decision with its anchor without a trace, though not rewrite one unnoticed: decisions are not signed. The agent beside the actor of a decision or of a run's answer is self-declared and unsigned: it can be left out or be any name within its bounds.
-  digest 8d9436d603a9a5af
+  digest 8952800d5be8193c
 
 limit The register folder of a run
   quote In a host run nothing keeps a command from writing the folder
@@ -169,7 +169,39 @@ limit The record is tamper-evident, not signed.
 limit The places are the operator's.
   quote It does not know a folder that an earlier value of a setting named
   says  runs_dir, ledger_dir and registers_dir are read from traceworks.json only and checked as written; the mount check on real paths covers the folders they name and those of the home, not a folder an earlier value of a setting named.
-  digest fc8fb416acb6aadc
+  digest b616b2d60392bc00
+
+limit The project of a run is the operator's word.
+  quote so a wrong `--project` mixes two projects
+  quote two first runs of two workflows with one key at the same moment are not excluded
+  says  A register is kept per workflow key and project, and the project is a key the operator gives, unsigned and compared with nothing in the workspace: a run started with the key of another project reads and feeds that project's register. No workspace or package can name a project, and an audit run without one is refused. One workflow per key is checked against the registers that can be read, not locked.
+  digest 7d20b470a7a624f4
+
+limit The `projects` setting compares folders, not what is in them.
+  quote a setting that binds the wrong folder mixes two projects as a wrong `--project` does
+  quote A folder moved or renamed without the setting changed is a run without a project
+  says  The projects setting of traceworks.json binds a project key to a folder by real path, and a run with another key there, or with that key elsewhere, is refused. It is the operator's word and compares folders, not content: a wrong setting mixes two projects, a folder moved without the setting changed is a run without a project, and an undeclared key in an undeclared folder is taken as given.
+  digest d08eb244ad7203c4
+
+limit Every run of one key and project must look at the same workspace.
+  quote Traceworks does not check that two runs of one register looked at the same thing
+  says  A register is fed by full snapshots, so every run of one key and project must look at the same workspace: a run in a subfolder of a declared project, or on another checkout under the same key, resolves what it does not see, and Traceworks does not check that two runs of one register looked at the same thing.
+  digest 3350574422551386
+
+limit The actor is the one free text in the ledger.
+  quote can put any text of that shape into the ledger with the next anchor
+  says  An anchor in the ledger holds the actor of a decision or an assignment as the register's log has it, when it is 1 to 255 characters without a control character: whoever can append a line to a register's log by hand can put any text of that shape into the ledger, format characters included. Every other value of an anchor is an id, a count or the bounded name of an agent.
+  digest 44cdcc7fde313fc0
+
+limit A resume with a changed package is named, not undone.
+  quote It runs the definition recorded at the start, with the package's files as they are now.
+  says  A resume with --allow-changed-package runs the definition recorded at the start with the package's files as they are now, and is refused for a run whose recorded definition calls its own package as a child or names a child with a placeholder; the record names the packages the run went on with after its start, without repeats (resumed_with), and diff counts them, which says that the package was another one, not what changed in it.
+  digest a90300ef1bf3c892
+
+limit An earlier version in a home of this one.
+  quote A run of this version that an earlier version resumed or cancelled no longer verifies
+  says  A version from before registers had projects does not see a register kept per project, refuses a ledger that holds an anchor of this version, and leaves a run of this version that it resumed or cancelled with a manifest that no longer verifies.
+  digest 9b3337a226538f32
 
 section Seals
 
@@ -198,7 +230,7 @@ limit A called package is loaded again when its block runs.
   quote A called package changed in between runs changed.
   quote a called package that lies in the workspace can be rewritten by a step
   says  A called package is checked when the run starts and resumes and loaded again when its block runs, without a comparison: changed in between, also by a step of the run in a writable workspace, it runs changed with the run's secrets. A workflow an unsealed package names through a placeholder is not checked at all.
-  digest d915a69a5099ee69
+  digest d17628a99f2e83e5
 
 limit Whoever writes the home is the operator.
   quote What is not guarded is what the settings do not name
@@ -346,7 +378,7 @@ limit Patterns and reports are read under a time limit.
   quote the thread is left behind, busy until the Traceworks process ends
   quote it refuses some patterns the engine would match quickly
   says  A workflow's regular expression is matched under a time limit; a match that does not end leaves a busy thread behind until the process ends, and the check of a pattern's counts multiplies them all, so it refuses some patterns the engine would match quickly.
-  digest 97c7421834e500f3
+  digest 003b045d93fbf5cd
 
 limit A token in a `--source` URL
   quote every process on the machine can read it in the process list while the clone runs
@@ -366,7 +398,49 @@ limit A source path is checked, then cloned.
 limit Paths in a package.
   quote may name its workflow by any path on the machine
   says  A sub-workflow or foreach block may name its workflow by any path on the machine that the package itself writes; a path from a step's output or a model is untrusted input and never reaches workflow_id.
-  digest ed6d5e86044d75dc
+  digest cf01309bc462dc1a
+
+section The MCP server
+
+limit A switch gives the client the whole power it names.
+  quote The bounds of a server only slow a loop down
+  says  With --allow-run an MCP client starts any package of the package folders with any inputs and cancels any run it sees; with --allow-decide it decides on any finding of its project; a server bounds only the pace (4 runs at a time, 30 changing and 600 calls a minute); in a package folder that is or holds a run's workspace, a step that may write it can leave a package the client runs; a switch works only where mcp.allow of the home names it.
+  digest 8d0cc19f7e588147
+
+limit A client that may decide assigns a register from before.
+  quote nothing checks that the register was kept for
+  says  With --allow-decide an MCP client assigns a register from before registers had projects to the project the server's folder is bound to, and to no other; nothing checks that the register was kept for that project, an assignment is made once, and its line names the actor and no agent.
+  digest efbdbdaba508167d
+
+limit A client that may run and answer approves itself.
+  quote nothing
+  says  An MCP client of a server started with both --allow-run and --allow-answer can start a run and answer its approval itself; the record names the agent in both lines.
+  digest 74d907c94efabb5f
+
+limit The name of the agent is what the client says.
+  quote unsigned and unchecked beyond its form
+  says  The agent an MCP server records comes from the operator's --agent, from TRACEWORKS_AGENT or from the client's own clientInfo.name, unsigned and checked for its form only; a change without a name that passes the check is refused.
+  digest 9171f51ed6d0ec01
+
+limit A result can carry text that steers a model.
+  quote the line is a label, not a filter
+  says  A result of an MCP tool holds text of workflows, step outputs, models and findings with control characters replaced and a first line that says it is data, in its text and as the first field of its data; the text itself is not filtered.
+  digest fca8ddca4855090e
+
+limit A client that reads, reads everything of its project.
+  quote there is no
+  says  Every MCP client reads all runs and registers of the project the server's folder is bound to, and all runs that name no project, with their step outputs and their files events.jsonl and run.html; a run of another project is unknown to it. Secrets are redacted in the record, and there is no per-run permission.
+  digest 5a908f8b9e776501
+
+limit Whoever writes the server's input is the client.
+  quote There is no authentication
+  says  The MCP server has no authentication: whatever writes to its standard input speaks as the client, with the user and the home of the server; the server opens no socket.
+  digest 0b30e5506b51c90b
+
+limit The runs of a server end with it.
+  quote A client that goes away mid-run therefore stops the run
+  says  A run started through the MCP server belongs to its process: at the end of its input the server asks its runs to pause and waits, leaves a run that waits for an answer in the process INTERRUPTED, and a server told to end leaves its runs as traceworks run does (INTERRUPTED and resumable, or cancelled where the end of the process cancels).
+  digest 648d2e23d7bb16a7
 
 source docs/events.md
 

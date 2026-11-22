@@ -405,6 +405,43 @@ class RunHtmlTest {
                 "<details><summary>inputs</summary>");
     }
 
+    /**
+     * The package digest is of the package the run was started with. The packages its child runs were loaded from
+     * stand next to it, each once: in the header by workflow and digest, in the Workflow section with the directory.
+     */
+    @Test
+    void theCalledPackages_areNamedWhereThePackageDigestIs() {
+        started();
+        byte[] json = "{}".getBytes(StandardCharsets.UTF_8);
+        emit(new StepStarted(0, "fetch", "foreach", 0, false),
+                new ChildRunEvent("c1", new PackageCalled("wf-lib", "Lib <b>", "../lib", "/pkgs/lib", "digest-a",
+                        json)),
+                new ChildRunEvent("c2", new PackageCalled("wf-lib", "Lib <b>", "../lib", "/pkgs/lib", "digest-a",
+                        json)),
+                new ChildRunEvent("c3", new PackageCalled("wf-<i>", "Other", "wf-<i>", "/pkgs/o", "digest-b", json)),
+                new RunFinished(RunStatus.COMPLETED, Map.of(), null));
+
+        String html = render();
+
+        assertThat(html).contains("<tr><th>package</th><td>digest-1</td></tr>\n"
+                        + "<tr><th>calls</th><td>wf-lib digest-a</td></tr>\n"
+                        + "<tr><th>calls</th><td>wf-&lt;i&gt; digest-b</td></tr>\n",
+                "<tr><th>digest</th><td>digest-1</td></tr>\n"
+                        + "<tr><th>calls</th><td>wf-lib, digest digest-a, package /pkgs/lib</td></tr>\n"
+                        + "<tr><th>calls</th><td>wf-&lt;i&gt;, digest digest-b, package /pkgs/o</td></tr>\n");
+        assertThat(html.split("<th>calls</th>", -1)).as("each package once in each place").hasSize(5);
+    }
+
+    @Test
+    void aRunThatCalledNoOtherPackage_hasNoSuchRow() {
+        started();
+        emit(new StepStarted(0, "fetch", "sub-workflow", 0, false),
+                new ChildRunEvent("c1", new RunFinished(RunStatus.COMPLETED, Map.of(), null)),
+                new RunFinished(RunStatus.COMPLETED, Map.of(), null));
+
+        assertThat(render()).doesNotContain("<th>calls</th>");
+    }
+
     /** What an intervention set aside is shown with it; one that kept nothing shows nothing after its words. */
     @Test
     void anIntervention_showsWhatItKept() {

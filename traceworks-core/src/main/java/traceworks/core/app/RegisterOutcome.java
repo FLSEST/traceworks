@@ -21,9 +21,18 @@ import java.util.Map;
  * @param anchorNote what this write found when it compared the register with its anchors before it wrote: lines
  *                after the last anchor, which it took as they were and recorded ({@code register.unanchored}), or a
  *                log that does not match its anchors; {@code null} when the last line was anchored
+ * @param project the project the register is of: that of the run, as its {@code run.started} names it; {@code null}
+ *                for a run that names none, which feeds no register
  */
 public record RegisterOutcome(String key, boolean applied, String reason, Map<Change.Kind, Integer> counts,
-                              Integer hookExitCode, ItemTally items, String unanchored, String anchorNote) {
+                              Integer hookExitCode, ItemTally items, String unanchored, String anchorNote,
+                              String project) {
+
+    /** An outcome that names no project. */
+    public RegisterOutcome(String key, boolean applied, String reason, Map<Change.Kind, Integer> counts,
+                           Integer hookExitCode, ItemTally items, String unanchored, String anchorNote) {
+        this(key, applied, reason, counts, hookExitCode, items, unanchored, anchorNote, null);
+    }
 
     /** An outcome of a write that found the register's last line anchored. */
     public RegisterOutcome(String key, boolean applied, String reason, Map<Change.Kind, Integer> counts,
@@ -54,24 +63,40 @@ public record RegisterOutcome(String key, boolean applied, String reason, Map<Ch
 
     /** The same outcome, with the exit code of the hook that ran afterwards. */
     public RegisterOutcome withHook(int exitCode) {
-        return new RegisterOutcome(key, applied, reason, counts, exitCode, items, unanchored, anchorNote);
+        return new RegisterOutcome(key, applied, reason, counts, exitCode, items, unanchored, anchorNote, project);
+    }
+
+    /** The same outcome, of the register of this project. */
+    public RegisterOutcome ofProject(String named) {
+        return new RegisterOutcome(key, applied, reason, counts, hookExitCode, items, unanchored, anchorNote, named);
+    }
+
+    /** The register by its key and its project, for a person: {@code hello of shop}; the key alone without one. */
+    public String name() {
+        return named(key, project);
+    }
+
+    /** A register by its key and its project, for a person: {@code hello of shop}; the key alone without one. */
+    public static String named(String key, String project) {
+        return project == null ? key : key + " of " + project;
     }
 
     /** The same outcome, with the items of its report counted. */
     public RegisterOutcome withItems(ItemTally tally) {
-        return new RegisterOutcome(key, applied, reason, counts, hookExitCode, tally, unanchored, anchorNote);
+        return new RegisterOutcome(key, applied, reason, counts, hookExitCode, tally, unanchored, anchorNote,
+                project);
     }
 
     /** The same outcome, with the reason the ledger gave for not anchoring it; {@code null} keeps what it has. */
     public RegisterOutcome withUnanchored(String why) {
         return why == null ? this
-                : new RegisterOutcome(key, applied, reason, counts, hookExitCode, items, why, anchorNote);
+                : new RegisterOutcome(key, applied, reason, counts, hookExitCode, items, why, anchorNote, project);
     }
 
     /** The same outcome, with what the write found of the anchors before it wrote; {@code null} keeps what it has. */
     public RegisterOutcome withAnchorNote(String note) {
         return note == null ? this : new RegisterOutcome(key, applied, reason, counts, hookExitCode, items,
-                unanchored, anchorNote == null ? note : anchorNote + "; " + note);
+                unanchored, anchorNote == null ? note : anchorNote + "; " + note, project);
     }
 
     public RegisterOutcome {

@@ -4,6 +4,7 @@ package traceworks.core.record;
 public final class RecordTypes {
 
     public static final String RUN_STARTED = "run.started";
+    public static final String RUN_PACKAGE = "run.package";
     public static final String STEP_STARTED = "step.started";
     public static final String STEP_WAITING = "step.waiting";
     public static final String STEP_COMMAND = "step.command";

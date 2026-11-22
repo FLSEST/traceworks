@@ -22,7 +22,7 @@ class RegisterLogTest {
 
     @Test
     void append_chainsLikeARun_withTheRegisterGenesis() {
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, clock);
             String head0 = log.append("register.created", Map.of("workflow_id", "wf-1", "category", "c"));
             String head1 = log.append("report.rejected", Map.of("run_id", "r1", "reason", "x"));
@@ -42,10 +42,10 @@ class RegisterLogTest {
 
     @Test
     void aLogOpenedAgain_continuesAfterItsLastLine() {
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             new RegisterLog(opened, clock).append("register.created", Map.of());
         }
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, clock);
             log.append("report.rejected", Map.of("run_id", "r1"));
 
@@ -56,7 +56,7 @@ class RegisterLogTest {
 
     @Test
     void aFieldThatIsNoJsonValue_isRefused() {
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, clock);
 
             assertThatThrownBy(() -> log.append("x", Map.of("bad", new Object())))

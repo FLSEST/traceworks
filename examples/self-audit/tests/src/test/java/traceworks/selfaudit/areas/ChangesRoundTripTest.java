@@ -148,8 +148,9 @@ class ChangesRoundTripTest {
     }
 
     private String run(String... more) {
-        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--workspace", repo.toString(), "--home",
-                home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"));
+        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--project", "shop", "--workspace",
+                repo.toString(), "--home", home.toString(), "--no-input", "--allow-host-execution", "--quiet",
+                "--no-check"));
         args.addAll(List.of(more));
         return cli(args.toArray(String[]::new));
     }
@@ -207,7 +208,7 @@ class ChangesRoundTripTest {
                 + "\"process_start\"," + found + "]}");
         String one = run("--input", "since=" + first);
 
-        assertThat(one).contains("register security-changes: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(one).contains("register security-changes of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(askedAndForgotten()).containsExactly(CALLER + ": neighbour of Runner.run(String)",
                 RUNNER + ": changed");
         String report = newest("security-changes-report.md");
@@ -230,7 +231,7 @@ class ChangesRoundTripTest {
                 + "\"K1\",\"status\":\"holds\"," + found + "]}");
         String two = run();
 
-        assertThat(two).as(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(two).as(one).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(askedAndForgotten()).containsExactly(LONE + ": changed",
                 RUNNER + ": an open finding of an earlier run");
         assertThat(newest("security-changes-report.md"))
@@ -250,7 +251,7 @@ class ChangesRoundTripTest {
                 + "\"K1\",\"status\":\"gone\",\"reason\":\"it never held\"}]}");
         String three = run();
 
-        assertThat(three).as(two).contains("register security-changes: 0 new, 1 resolved, 0 reopened, 0 open now");
+        assertThat(three).as(two).contains("register security-changes of shop: 0 new, 1 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).containsExactly(RUNNER + ": an open finding of an earlier run");
         assertThat(newest("security-changes-report.md")).startsWith("# Security check of the changes\n\n**Gate:**"
                 + " YELLOW: nothing changed since " + third.substring(0, 12) + ": no verified finding; 1 of 1 areas"
@@ -261,7 +262,7 @@ class ChangesRoundTripTest {
         // The fourth run: nothing changed and nothing is open, so nobody is asked, and the gate stays YELLOW
         String four = run();
 
-        assertThat(four).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(four).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).isEmpty();
         assertThat(newest("security-changes-report.md")).contains("**Gate:** YELLOW: nothing changed since ",
                 "3 of 3 items settled", "**Nothing changed.** No file of the workspace differs from the base, the"
@@ -276,7 +277,7 @@ class ChangesRoundTripTest {
         Files.writeString(pkg.resolve("answer-A001.json"), "no answer");
         String one = run("--input", "since=" + first);
 
-        assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(one).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).hasSize(2);
         assertThat(items()).startsWith("not judged  ").contains(CALLER, RUNNER);
 
@@ -289,7 +290,7 @@ class ChangesRoundTripTest {
         git("commit", "--quiet", "-m", "no process");
         String two = run();
 
-        assertThat(two).as(one).contains("register security-changes:");
+        assertThat(two).as(one).contains("register security-changes of shop:");
         assertThat(askedAndForgotten()).containsExactly(CALLER + ": neighbour of Runner.run(String)");
         assertThat(items()).matches("clean       [0-9a-f]{16}  " + Pattern.quote(CALLER) + "\n");
     }
@@ -307,7 +308,7 @@ class ChangesRoundTripTest {
                 + "\"process_start\",\"severity\":\"high\",\"line\":4,\"quote\":\"new ProcessBuilder(c, c).start();\","
                 + "\"issue\":\"i\",\"fix\":\"f\"}]}");
         String one = run("--input", "since=" + first);
-        assertThat(one).contains("register security-changes: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(one).contains("register security-changes of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
         askedAndForgotten();
         Files.delete(pkg.resolve("answer-A004.json"));
 
@@ -316,7 +317,7 @@ class ChangesRoundTripTest {
         git("commit", "--quiet", "-m", "move");
         String two = run();
 
-        assertThat(two).as(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(two).as(one).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 1 open now");
         String report = newest("security-changes-report.md");
         assertThat(report).startsWith("# Security check of the changes\n\n**Gate:** RED: of the changes since ")
                 .contains("1 changed Java file that no compiled source root holds",
@@ -335,7 +336,7 @@ class ChangesRoundTripTest {
 
         String one = run("--input", "since=" + first);
 
-        assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(one).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(newest("security-changes-report.md")).startsWith("# Security check of the changes\n\n**Gate:**"
                 + " YELLOW: of the changes since " + first.substring(0, 12) + ": 1 changed file this check cannot"
                 + " judge; ").contains("so the gate is not GREEN: `run.sh`");
@@ -354,7 +355,7 @@ class ChangesRoundTripTest {
 
         String one = run("--input", "since=" + first);
 
-        assertThat(one).contains("register security-changes: 0 new, 0 resolved, 0 reopened, 0 open now");
+        assertThat(one).contains("register security-changes of shop: 0 new, 0 resolved, 0 reopened, 0 open now");
         assertThat(askedAndForgotten()).as("the disk is the base: nothing to judge").isEmpty();
         assertThat(newest("security-changes-report.md")).contains("**Gate:** YELLOW: nothing changed since ",
                 "| The next run without `since` starts from | `" + first + "`");
@@ -362,7 +363,7 @@ class ChangesRoundTripTest {
         git("checkout", "--quiet", "--", ".");
         String two = run();
 
-        assertThat(two).as(one).contains("register security-changes:");
+        assertThat(two).as(one).contains("register security-changes of shop:");
         assertThat(askedAndForgotten()).as("the commit the first run did not see is judged now")
                 .containsExactly(CALLER + ": neighbour of Runner.run(String)", RUNNER + ": changed");
         assertThat(newest("security-changes-report.md"))
@@ -388,7 +389,7 @@ class ChangesRoundTripTest {
             two = run("--input", "since=" + first);
         }
 
-        assertThat(two).as(one).contains("register security-changes:");
+        assertThat(two).as(one).contains("register security-changes of shop:");
         assertThat(askedAndForgotten()).contains(RUNNER + ": changed");
         assertThat(newest("security-changes-report.md"))
                 .contains("| Base: the commit the changes are measured from | `" + first + "`");

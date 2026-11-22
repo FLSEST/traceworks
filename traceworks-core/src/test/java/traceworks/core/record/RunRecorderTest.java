@@ -170,6 +170,31 @@ class RunRecorderTest {
         assertThat(nodes.get(2).get("run").asText()).isEqualTo(RUN);
     }
 
+    /**
+     * The line of a child run of another package: the fields run.started has for the run's own package, in the same
+     * order, with the reference between them and the workflow.json as a blob.
+     */
+    @Test
+    void aCalledPackage_isALineOfTheChildRun_withTheFieldsOfRunStarted() throws Exception {
+        byte[] json = "{\"id\":\"wf-lib\"}".getBytes(StandardCharsets.UTF_8);
+        recorder.emit(new ChildRunEvent("child-1", new PackageCalled("wf-lib", "Lib", "../lib", "/pkgs/lib",
+                "digest-lib", json)));
+
+        JsonNode node = lines().get(0);
+        List<String> names = new java.util.ArrayList<>();
+        node.fieldNames().forEachRemaining(names::add);
+        assertThat(names).containsExactly("seq", "at", "type", "run", "parent", "prev", "workflow", "reference",
+                "package", "definition");
+        assertThat(node.get("type").asText()).isEqualTo("run.package");
+        assertThat(node.get("run").asText()).isEqualTo("child-1");
+        assertThat(node.get("parent").asText()).isEqualTo(RUN);
+        assertThat(node.get("workflow").toString()).isEqualTo("{\"id\":\"wf-lib\",\"name\":\"Lib\"}");
+        assertThat(node.get("reference").asText()).isEqualTo("../lib");
+        assertThat(node.get("package").toString()).isEqualTo("{\"dir\":\"/pkgs/lib\",\"digest\":\"digest-lib\"}");
+        assertThat(node.get("definition").get("sha256").asText()).isEqualTo(EventChain.sha256Hex(json));
+        assertThat(blobs.get(EventChain.sha256Hex(json)).orElseThrow()).isEqualTo(json);
+    }
+
     @Test
     void commands_areAttributedToTheRunningStep() throws Exception {
         FakeCommandRunner fake = new FakeCommandRunner().otherwise(FakeCommandRunner.exit(3, "x"));

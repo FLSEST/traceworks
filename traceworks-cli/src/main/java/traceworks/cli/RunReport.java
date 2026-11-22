@@ -74,7 +74,7 @@ public final class RunReport {
         }
         files(out, record, result, folder);
         if (result.register() != null) {
-            TerminalText.println(out, "  register ", TerminalText.safe(result.register().key()), ": ",
+            TerminalText.println(out, "  register ", TerminalText.safe(result.register().name()), ": ",
                     TerminalText.oneLine(result.register().summary()));
         }
         if (result.status() == RunStatus.PARKED) {

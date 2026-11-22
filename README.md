@@ -122,7 +122,7 @@ The names are those of [docs/features.html](https://flsest.github.io/traceworks/
 | Any tool, in a container | A step runs whatever tool an image holds; SARIF output becomes facts that later steps and the register can use | [docs/cli.md](docs/cli.md#tool-mode-of-the-shell-block) |
 | Secrets protected | A step gets only the secrets it names; every value is redacted in the record and in what the tool prints | [docs/cli.md](docs/cli.md#secrets), [docs/events.md](docs/events.md#redaction) |
 | Controllable | Pause, resume and cancel; approval and input blocks where a person, or an AI actor the workflow names, must decide; gates as `GREEN`, `YELLOW` or `RED` | [docs/cli.md](docs/cli.md#interactive-and-parked-runs) |
-| The register | What an audit knows across its runs: findings with an identity, the decisions on them with who made each, reused verdicts, in a hash-chained log; the next run gets it as files | [docs/registers.md](docs/registers.md) |
+| The register | What an audit knows across its runs, kept per audit and project: findings with an identity, the decisions on them with who made each, reused verdicts, in a hash-chained log; the next run gets it as files | [docs/registers.md](docs/registers.md) |
 | Lean | One runnable jar with one runtime library; plain files in one directory; no database, no service | [docs/architecture.md](docs/architecture.md#dependencies) |
 
 ## AI steps
@@ -250,14 +250,15 @@ The version is `0.1.0-SNAPSHOT`. There is no release.
 Docker or Podman, the four built-in images (`shell`, `claude`, `pi`, `egress`), the run record and the ledger with
 `verify`, `show`, `watch`, `run.html` and `diff`, pause and resume, secrets and their redaction, AI steps with
 Claude Code and Pi behind the allowlist proxy, Pi on a model server of the operator's own, model choices, named
-values for shell steps, seals, registers with `traceworks findings`, the three self-audit packages, the short
-security check beside them and the two testing audits.
+values for shell steps, seals, registers per audit and project with `traceworks findings`, a server for MCP
+clients (`traceworks mcp`), the three self-audit packages, the short security check beside them and the two
+testing audits.
 
 **Not built yet:**
 
 - Signatures of the record. A manifest, the ledger, an approval in a run and a decision in a register are not
   signed. The record is tamper-evident, not signed; only a package can be signed, by its seal.
-- A server for MCP clients, and MCP servers for AI steps.
+- MCP servers for AI steps.
 - An export of a workflow to BPMN.
 
 **Left out on purpose:**
@@ -277,9 +278,10 @@ package you did not write: a package is code you run.
 | [docs/how-it-works.html](https://flsest.github.io/traceworks/how-it-works.html) | start here: one run in six stages, as moving drawings |
 | [docs/features.html](https://flsest.github.io/traceworks/features.html) | the key features, with drawings |
 | [docs/audit-loop.html](https://flsest.github.io/traceworks/audit-loop.html) | the register and the audit loop, to step through |
-| [docs/cli.md](docs/cli.md) | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals |
+| [docs/blocks.md](docs/blocks.md) | the block types: what each does, its settings and an example, and one workflow in which they work together |
+| [docs/cli.md](docs/cli.md) | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals, the server for MCP clients |
 | [docs/events.md](docs/events.md) | the run record: the run folder, the hash chain and how to check it by hand, every event type, the manifest, the ledger |
-| [docs/registers.md](docs/registers.md) | registers: audit workflows, findings across runs, items, the register folder of a run, decisions, hooks |
+| [docs/registers.md](docs/registers.md) | registers: audit workflows, a register per audit and project, findings across runs, items, the register folder of a run, decisions, hooks |
 | [docs/security.md](docs/security.md) | what the defaults protect and what they do not |
 | [docs/architecture.md](docs/architecture.md) | modules, ports and adapters, layers, the life of a run, the dependencies and their reasons, building and testing |
 | [docs/workflow-format.md](docs/workflow-format.md) | the workflow format: the key names, and every rule of the format and of a run, each with its reason |

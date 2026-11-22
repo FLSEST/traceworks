@@ -3,11 +3,11 @@ package traceworks.cli.main;
 import traceworks.cli.Args;
 import traceworks.cli.Args.Parsed;
 import traceworks.cli.Command;
+import traceworks.cli.CommandLine;
 import traceworks.cli.Context;
 import traceworks.cli.ExitCodes;
 import traceworks.cli.RuntimeSource;
 import traceworks.cli.SecretReader;
-import traceworks.cli.TerminalText;
 import traceworks.cli.UsageException;
 import traceworks.cli.command.AnswerCommand;
 import traceworks.cli.command.ApproveCommand;
@@ -29,14 +29,8 @@ import traceworks.cli.command.ShowCommand;
 import traceworks.cli.command.UnsealCommand;
 import traceworks.cli.command.VerifyCommand;
 import traceworks.cli.command.WatchCommand;
-import traceworks.core.app.KeptCheckoutNotice;
-import traceworks.core.app.RecordDamagedException;
-import traceworks.core.app.RequestQueuedException;
-import traceworks.core.app.RunRefusedException;
+import traceworks.cli.mcp.McpCommand;
 import traceworks.core.app.TraceworksVersion;
-import traceworks.core.port.AmbiguousRunException;
-import traceworks.core.port.NoSuchRunException;
-import traceworks.core.port.RunReferenceTooShortException;
 import traceworks.core.util.Message;
 
 import java.io.InputStream;
@@ -56,7 +50,7 @@ public final class Main {
             new AnswerCommand(), new PauseCommand(), new CancelCommand(), new RunsCommand(), new ShowCommand(), new WatchCommand(),
             new VerifyCommand(), new RenderCommand(), new CheckCommand(), new DescribeCommand(), new ImagesCommand(),
             new CredentialsCommand(), new FindingsCommand(), new DiffCommand(), new SealCommand(), new UnsealCommand(),
-            new SealsCommand());
+            new SealsCommand(), new McpCommand());
 
     private Main() {
     }
@@ -86,8 +80,19 @@ public final class Main {
      */
     public static int run(String[] args, PrintStream out, PrintStream err, Map<String, String> env,
                           Path workingDirectory, InputStream console, RuntimeSource runtimes, SecretReader secrets) {
-        String command = "";
-        try {
+        return run(args, out, err, env, workingDirectory, console, runtimes, secrets, null);
+    }
+
+    /**
+     * Like {@link #run(String[], PrintStream, PrintStream, Map, Path, InputStream, RuntimeSource, SecretReader)} with
+     * the standard input of the process as it is, which {@code mcp} reads its messages from; {@code null} when
+     * there is none.
+     */
+    public static int run(String[] args, PrintStream out, PrintStream err, Map<String, String> env,
+                          Path workingDirectory, InputStream console, RuntimeSource runtimes, SecretReader secrets,
+                          InputStream stdin) {
+        String[] command = {""};
+        return CommandLine.guarded(err, () -> command[0], () -> {
             String[] argv = args;
             String leadingHome = null;
             while (argv.length > 0 && (argv[0].equals("--home") || argv[0].startsWith("--home="))) {
@@ -121,7 +126,7 @@ public final class Main {
                     .orElseThrow(() -> new UsageException(cmd[0].startsWith("-")
                             ? Message.of("unknown option ", Message.typed(cmd[0]))
                             : Message.of("unknown command '", Message.typed(cmd[0]), "'")));
-            command = chosen.spec().name();
+            command[0] = chosen.spec().name();
             Parsed parsed = Args.parse(chosen.spec(), List.of(cmd).subList(1, cmd.length));
             if (parsed.has("help")) {
                 out.print(chosen.spec().usage());
@@ -129,43 +134,8 @@ public final class Main {
             }
             String home = parsed.has("home") ? parsed.option("home") : leadingHome;
             return chosen.run(new Context(out, err, env, workingDirectory, console, home, runtimes,
-                    secrets), parsed);
-        } catch (UsageException e) {
-            // A message quotes what it refuses: an argument, a name of a workflow, a text of a record. It is a
-            // text from outside as a whole, so a long one goes on on marked lines and none starts a line unmarked
-            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
-            err.println("see 'traceworks " + (command.isEmpty() ? "" : command + " ") + "--help'");
-            return ExitCodes.USAGE;
-        } catch (RequestQueuedException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
-            return ExitCodes.QUEUED;
-        } catch (RecordDamagedException | traceworks.core.port.BlobStore.ChangedBlobException e) {
-            // One line, not cut: it names the blob or line and ends with the verify command
-            TerminalText.println(err, "traceworks: ", TerminalText.safe(e.getMessage().replaceAll("\\s+", " ")));
-            keptCheckouts(err, e);
-            return ExitCodes.VERIFY_FAILED;
-        } catch (RunRefusedException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
-            keptCheckouts(err, e);
-            return ExitCodes.REFUSED;
-        } catch (NoSuchRunException | AmbiguousRunException | RunReferenceTooShortException e) {
-            TerminalText.println(err, "traceworks: ", TerminalText.of(e));
-            return ExitCodes.USAGE;
-        } catch (Exception | Error e) {
-            TerminalText.println(err, "traceworks: internal error: " + e.getClass().getSimpleName(),
-                    e.getMessage() == null ? "" : TerminalText.seq(": ", TerminalText.oneLine(e.getMessage())));
-            keptCheckouts(err, e);
-            return ExitCodes.INTERNAL;
-        }
-    }
-
-    /** The checkouts of runs' sources that the failure {@code e} left behind, one line each. */
-    private static void keptCheckouts(PrintStream err, Throwable e) {
-        for (Throwable suppressed : e.getSuppressed()) {
-            if (suppressed instanceof KeptCheckoutNotice kept) {
-                TerminalText.println(err, "traceworks: ", TerminalText.of(kept));
-            }
-        }
+                    secrets, stdin), parsed);
+        });
     }
 
     /** Without a terminal. */
@@ -218,7 +188,7 @@ public final class Main {
         boolean terminal = isTerminal(System.console());
         int code = run(args, System.out, System.err, System.getenv(), Path.of("").toAbsolutePath(),
                 terminal ? System.in : null, RuntimeSource.MACHINE,
-                terminal ? Main::typed : SecretReader.piped(System.in));
+                terminal ? Main::typed : SecretReader.piped(System.in), System.in);
         System.out.flush();
         System.exit(code);
     }

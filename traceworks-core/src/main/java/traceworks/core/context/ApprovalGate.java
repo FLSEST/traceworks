@@ -175,9 +175,19 @@ class ApprovalGate {
      * wait's end (a timeout, a cancel) closes the question under the same lock, so an answer that comes at that very
      * moment either resolves the question, with what goes with it, or does neither.
      *
+     * <p>The answer reaches the question only as the question takes it ({@link ApprovalRequest#acceptedAnswer}): an
+     * approval's option in its spelling, a human input's value that the rules of its fields take. It is checked
+     * before the lock is taken, since a workflow's pattern may take its time.
+     *
      * @param whenResolved runs under the gate's lock, so it must not wait for the run; {@code null} for nothing
+     * @throws IllegalArgumentException if the question does not take the answer; it stays open
      */
-    synchronized boolean resolve(ApprovalRequest question, String answer, Runnable whenResolved) {
+    boolean resolve(ApprovalRequest question, String answer, Runnable whenResolved) {
+        String accepted = question == null ? answer : question.acceptedAnswer(answer);
+        return resolveChecked(question, accepted, whenResolved);
+    }
+
+    private synchronized boolean resolveChecked(ApprovalRequest question, String answer, Runnable whenResolved) {
         if (question == null || currentRequest.get() != question) {
             return false;
         }
@@ -221,10 +231,11 @@ class ApprovalGate {
 
     /**
      * The preset answer as a completed future when {@code request} is the question it answers (same step and type),
-     * and then used up. An approval receives it as one of its options, in the option's spelling, as an answer in the
-     * process does ({@link ApprovalRequest#acceptedAnswer}). A failed future ({@link PresetAnswerException}) when that
-     * step now asks another question or the answer is not one of its options; {@code null} when it answers another
-     * step.
+     * and then used up. An approval receives it as one of its options, in the option's spelling, and a human input
+     * as the rules of its fields take it, as an answer in the process does ({@link ApprovalRequest#acceptedAnswer}).
+     * A failed future ({@link PresetAnswerException}) when that step now asks another question, the answer is not
+     * one of its options, or the rules of the input refuse it (a record of an earlier version, a package changed
+     * since); {@code null} when it answers another step.
      */
     private CompletableFuture<String> takePreset(ApprovalRequest request) {
         Preset answer = preset;
@@ -240,8 +251,9 @@ class ApprovalGate {
         try {
             return CompletableFuture.completedFuture(request.acceptedAnswer(answer.answer()));
         } catch (IllegalArgumentException e) {
-            return CompletableFuture.failedFuture(new PresetAnswerException(
-                    "the answer given while the run was parked is not an offered option: " + e.getMessage()));
+            return CompletableFuture.failedFuture(new PresetAnswerException("the answer given while the run was parked "
+                    + ("human-input".equals(request.getType()) ? "is refused: " : "is not an offered option: ")
+                    + e.getMessage()));
         }
     }
 

@@ -228,12 +228,12 @@ class LedgerCheckTest {
         fx.run(starting).simulateOtherWriter(true);
         fx.run(ending).simulateOtherWriter(true);
 
-        LedgerReport soon = LedgerReport.of(fx.ledger, fx.store, later(fx, java.time.Duration.ofSeconds(90)), true);
+        LedgerReport soon = LedgerReport.of(fx.ledger, fx.store, fx.registers, later(fx, java.time.Duration.ofSeconds(90)), true);
         assertThat(soon.ok()).isTrue();
         assertThat(soon.inFlight()).extracting(LedgerReport.Named::detail).allSatisfy(detail ->
                 assertThat(detail).containsPattern("is not written yet \\(run\\.(started|finished) 9\\d s ago\\)"));
 
-        LedgerReport late = LedgerReport.of(fx.ledger, fx.store, later(fx, LedgerReport.IN_FLIGHT.plusSeconds(60)), true);
+        LedgerReport late = LedgerReport.of(fx.ledger, fx.store, fx.registers, later(fx, LedgerReport.IN_FLIGHT.plusSeconds(60)), true);
         assertThat(late.inFlight()).isEmpty();
         assertThat(codes(late)).containsExactlyInAnyOrder(tuple(starting, "no-start-entry"),
                 tuple(ending, "no-end-entry"));
@@ -383,6 +383,30 @@ class LedgerCheckTest {
     }
 
     /**
+     * Bytes after the last line feed of an ended record: no writer appends there, and {@code verify <run>} reports
+     * them. The check of the home must not pass what the check of the run fails, and its sentence names the bytes, so
+     * that an acknowledgement covers them and no others. Found by the security check of the changes, 2026-11-21.
+     */
+    @Test
+    void bytesAfterTheLastLineOfAnEndedRecord_failTheCheckOfTheHome_andOtherBytesAreAnotherSentence() {
+        String id = finished();
+        assertThat(services.ledgerReport().ok()).isTrue();
+
+        fx.run(id).log().tearTail("{\"seq\":99,\"type\":\"x".getBytes(StandardCharsets.UTF_8));
+
+        LedgerReport report = services.ledgerReport();
+        assertThat(codes(report)).containsExactly(tuple(id, "record-broken"));
+        String first = report.problems().getFirst().text();
+        assertThat(first).contains("19 bytes after the last line feed of the log, after run.finished",
+                "traceworks verify " + id);
+        assertThat(services.acknowledge(id, "a test wrote them").ok()).isTrue();
+        fx.run(id).log().tearTail("{\"seq\":99,\"type\":\"y".getBytes(StandardCharsets.UTF_8));
+        assertThat(codes(services.ledgerReport())).as("other bytes of the same length, another sentence")
+                .containsExactly(tuple(id, "record-broken"));
+        assertThat(services.ledgerReport(false).ok()).as("--quick reads no record").isTrue();
+    }
+
+    /**
      * An acknowledged broken record is acknowledged as it was: the sentence names all of it, so whatever changes in
      * the record afterwards (another blob, the same blob once more) is another sentence, which the acknowledgement
      * does not cover.
@@ -508,17 +532,22 @@ class LedgerCheckTest {
         assertThat(services.verify(ours).ok()).isFalse();
     }
 
-    /** A problem of the anchors of a register is listed under registers.<key>, and acknowledged like one of a run. */
+    /**
+     * A problem of the anchors of a register is listed under the name of the register
+     * ({@link traceworks.core.port.Ledger#registerName}), and acknowledged like one of a run.
+     */
     @Test
     void aProblemOfTheAnchorsOfARegister_isListedAndAcknowledgedLikeOneOfARun() {
-        fx.ledger.anchorProblem("hello", "commit 4f1d2c3b4a59 (\"register hello seq 1\") names registers/hello.jsonl"
-                + " without a SHA-256");
+        fx.ledger.anchorProblem("hello", "shop", "commit 4f1d2c3b4a59 (\"anchor hello/shop seq 1\") names"
+                + " anchors/hello/shop.jsonl without a SHA-256");
 
         LedgerReport report = services.ledgerReport();
-        assertThat(codes(report)).containsExactly(tuple("registers.hello", "entry-changed"));
+        String name = traceworks.core.port.Ledger.registerName("hello", "shop");
+        assertThat(name).isEqualTo("anchors.5.hello.shop");
+        assertThat(codes(report)).containsExactly(tuple(name, "entry-changed"));
         assertThat(report.open()).isEmpty();
 
-        LedgerReport after = services.acknowledge("registers.hello", "one run of an older jar on 2026-11-16");
+        LedgerReport after = services.acknowledge(name, "one run of an older jar on 2026-11-16");
         assertThat(after.ok()).isTrue();
         assertThat(after.acknowledged()).singleElement().satisfies(ack ->
                 assertThat(ack.said()).contains("commit 4f1d2c3b4a59"));
@@ -741,10 +770,10 @@ class LedgerCheckTest {
         assertThatThrownBy(() -> services.acknowledge(lost, "  ")).isInstanceOf(RunRefusedException.class)
                 .hasMessageContaining("needs a note");
         assertThatThrownBy(() -> services.acknowledge(healthy, "why not")).isInstanceOf(RunRefusedException.class)
-                .hasMessageContaining("reports nothing of a run");
+                .hasMessageContaining("reports nothing under the name " + healthy);
         assertThatThrownBy(() -> services.acknowledge("0000", "all of them"))
-                .as("one run at a time").isInstanceOf(RunRefusedException.class)
-                .hasMessageContaining("the start of 2 runs");
+                .as("one name at a time").isInstanceOf(RunRefusedException.class)
+                .hasMessageContaining("the start of 2 names the check lists problems under");
         assertThat(services.ledgerReport().acknowledged()).isEmpty();
         assertThat(services.ledgerReport().ok()).isFalse();
     }

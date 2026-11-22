@@ -39,4 +39,17 @@ public interface WorkflowResolver {
     default boolean fromAnotherPackage(WorkflowDefinition child) {
         return false;
     }
+
+    /**
+     * The package {@code child}, a workflow this resolver returned, was loaded from, for the record of the run that
+     * starts it as a child: the reference this resolver was asked for and the package as loaded for that call.
+     * {@code null} for a child of the run's own package as the run started with it, which the run's package digest
+     * covers, and, the default, for a resolver that knows no packages. A child of the run's own package that was
+     * loaded with another digest (the package changed while the run ran) is named like one of another package.
+     *
+     * @throws IllegalArgumentException if this resolver did not return {@code child}
+     */
+    default CalledPackage calledPackage(WorkflowDefinition child) {
+        return null;
+    }
 }

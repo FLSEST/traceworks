@@ -61,7 +61,9 @@ final class Verification {
         Optional<byte[]> copy = run.inStore() ? ledger.find(run.runId()) : Optional.empty();
 
         RunView view = viewOf(lines);
-        String manifestState = manifest.map(json -> agrees(json, run.runId(), chain, view, run.blobs()))
+        boolean namesStarter = namesStarter(lines);
+        String manifestState = manifest.map(json -> agrees(json, run.runId(), chain, view, run.blobs(),
+                        namesStarter))
                 .orElse(finished ? VerifyReport.MISSING : VerifyReport.NOT_CHECKED);
         String ledgerState;
         if (ledgerReason != null) {
@@ -76,7 +78,7 @@ final class Verification {
         } else if (manifest.isPresent()) {
             ledgerState = Arrays.equals(copy.get(), manifest.get()) ? VerifyReport.OK : VerifyReport.MISMATCH;
         } else {
-            ledgerState = agrees(copy.get(), run.runId(), chain, view, run.blobs());
+            ledgerState = agrees(copy.get(), run.runId(), chain, view, run.blobs(), namesStarter);
         }
         if (run.inStore()) {
             // An entry is added once, by the commit that names it: one that a later commit changed is not the
@@ -146,7 +148,56 @@ final class Verification {
                     + " with the run.started line " + noted.get().runStarted() + ", and the first line of this record"
                     + " is " + (line == null ? "not readable" : line);
         }
+        String starter = starter(noted.get().starter(), first, namesStarter(lines));
+        if (starter != null) {
+            return VerifyReport.MISMATCH + ": " + starter;
+        }
         return VerifyReport.OK + " (the ledger noted the start, run.started " + line.substring(0, 12) + ")";
+    }
+
+    /**
+     * Whether the record says that the entries of the ledger for its run name the project and who started it
+     * ({@code ledger_starter} in {@code run.started}). A record that does not is one of an earlier version, whose
+     * entries named neither.
+     */
+    static boolean namesStarter(List<byte[]> lines) {
+        try {
+            return !lines.isEmpty() && RecordedEvent.parse(lines.getFirst()).fields()
+                    .path(traceworks.core.record.RunRecorder.LEDGER_STARTER).asBoolean(false);
+        } catch (IllegalArgumentException e) {
+            return false;   // the chain report names the line
+        }
+    }
+
+    /**
+     * The project and the actor the start entry names against those of {@code run.started}; {@code null} when they
+     * agree. An entry of a version that named neither says nothing of them, and holds for a record of such a
+     * version that names no project. A record that says that its entries name the starter
+     * ({@link #namesStarter}) has an entry that does: one without both was stripped of them.
+     */
+    private static String starter(traceworks.core.record.RunStarter noted, RecordedEvent first,
+                                  boolean namesStarter) {
+        String project = first.fields().path("project").asText(null);
+        String actor = first.fields().path("actor").asText(null);
+        if (noted == null && namesStarter) {
+            return "the start entry of the ledger names neither the project of the run nor who started it, and"
+                    + " run.started says that the entries of the ledger name both ("
+                    + traceworks.core.record.RunRecorder.LEDGER_STARTER + ")";
+        }
+        if (noted == null) {
+            return project == null ? null : "the start entry of the ledger names no project, and run.started names"
+                    + " the project " + project;
+        }
+        if (!java.util.Objects.equals(noted.project(), project)) {
+            return "the start entry of the ledger names " + (noted.project() == null ? "no project"
+                    : "the project " + noted.project()) + ", and run.started names " + (project == null
+                    ? "no project" : "the project " + project);
+        }
+        if (!java.util.Objects.equals(noted.actor(), actor)) {
+            return "the start entry of the ledger says that " + noted.actor() + " started the run, and run.started"
+                    + " names the actor " + actor;
+        }
+        return null;
     }
 
     /**
@@ -175,7 +226,7 @@ final class Verification {
         }
         String problem = new RegisterFolder(run, recorded).problem();
         return problem != null ? problem : VerifyReport.OK + " (" + recorded.files().size()
-                + (recorded.files().size() == 1 ? " file" : " files") + " of the register " + recorded.key()
+                + (recorded.files().size() == 1 ? " file" : " files") + " of the register " + recorded.name()
                 + (recorded.seq() == null ? ", " : " ") + recorded.position() + ")";
     }
 
@@ -214,7 +265,7 @@ final class Verification {
      * a problem. A parked or interrupted run's are a line its killed writer did not finish, which its next writer
      * cuts off and records as {@code run.recovered}: no problem.
      */
-    private static ChainReport afterTheLastLine(ChainReport chain, boolean finished, byte[] tail) {
+    static ChainReport afterTheLastLine(ChainReport chain, boolean finished, byte[] tail) {
         if (tail.length == 0 || !finished) {
             return chain;
         }
@@ -266,8 +317,10 @@ final class Verification {
      * was deleted, the models cannot all be told from the record, and the ones the bytes name are taken as far as
      * they are possible ({@link Manifest#modelsPossible}): every model the remaining blobs name, and no more further
      * models than blobs are deleted.
+     *
+     * @param namesStarter whether the record says that its entries name the starter ({@link #namesStarter})
      */
-    static boolean matches(byte[] json, RunView view, BlobStore blobs) {
+    static boolean matches(byte[] json, RunView view, BlobStore blobs, boolean namesStarter) {
         JsonNode written;
         try {
             written = MAPPER.readTree(json);
@@ -283,6 +336,11 @@ final class Verification {
             // A manifest of a version that did not name the run.started line. A run whose start the ledger noted
             // was finished by a version that names it, so its manifest must
             expected = expected.withoutRunStarted();
+        }
+        if (!written.has("project") && !written.has("actor") && view.project() == null && !namesStarter) {
+            // A manifest of a version that named neither the project nor who started the run. A record that names
+            // a project, or that says that its entries name the starter, has a manifest that names both
+            expected = expected.withoutStarter();
         }
         if (Manifest.metadataDeleted(view, blobs)) {
             List<String> models = new ArrayList<>();
@@ -313,9 +371,10 @@ final class Verification {
      * {@code ok} when the manifest is this run's, names the chain's head and event count, and is byte for byte the
      * manifest the record gives ({@link #matches}, so a rewritten status or gate shows), else {@code mismatch}.
      */
-    private static String agrees(byte[] json, String runId, ChainReport chain, RunView view, BlobStore blobs) {
-        return VerifyReport.OK.equals(agrees(json, runId, chain)) && view != null && matches(json, view, blobs)
-                ? VerifyReport.OK : VerifyReport.MISMATCH;
+    private static String agrees(byte[] json, String runId, ChainReport chain, RunView view, BlobStore blobs,
+                                 boolean namesStarter) {
+        return VerifyReport.OK.equals(agrees(json, runId, chain)) && view != null
+                && matches(json, view, blobs, namesStarter) ? VerifyReport.OK : VerifyReport.MISMATCH;
     }
 
     /** {@code ok} when the manifest is this run's and names the chain's head and event count, else {@code mismatch}. */

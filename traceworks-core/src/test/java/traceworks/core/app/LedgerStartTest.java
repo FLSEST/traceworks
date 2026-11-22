@@ -85,11 +85,336 @@ class LedgerStartTest {
 
         JsonNode before = startEntry(first).path("register");
         assertThat(before.path("key").asText()).isEqualTo("hello");
+        assertThat(before.path("project").asText()).as("the register is that of the run's project")
+                .isEqualTo(AppFixture.PROJECT);
         assertThat(before.path("seq").isNull()).as("no register yet").isTrue();
+        List<String> fields = new java.util.ArrayList<>();
+        startEntry(first).fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).as("the fields of a start entry, in their order").containsExactly("run_id", "started_at",
+                "run_started", "workflow_id", "package_digest", "project", "actor", "register", "traceworks_version");
+        List<String> ofTheRegister = new java.util.ArrayList<>();
+        before.fieldNames().forEachRemaining(ofTheRegister::add);
+        assertThat(ofTheRegister).containsExactly("key", "project", "seq", "head");
         JsonNode read = startEntry(second).path("register");
         JsonNode recorded = fx.events(second).getFirst().fields().path("register");
         assertThat(read.path("seq").asInt()).isEqualTo(recorded.path("seq").asInt());
         assertThat(read.path("head").asText()).isEqualTo(recorded.path("head").asText()).hasSize(64);
+    }
+
+    // ---- the project of a run, and who started it ----
+
+    private JsonNode manifest(String id) throws Exception {
+        return JSON.readTree(fx.run(id).readManifest().orElseThrow());
+    }
+
+    /** The ledger is one for all runs of a home: its entries say which project each run worked on, and who started it. */
+    @Test
+    void theStartEntryAndTheEndEntry_nameTheProjectOfTheRun_andWhoStartedIt() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+
+        RecordedEvent started = fx.events(id).getFirst();
+        assertThat(started.fields().path("actor").asText()).isEqualTo(AppFixture.ACTOR);
+        for (JsonNode entry : List.of(startEntry(id), manifest(id), JSON.readTree(fx.ledger.find(id).orElseThrow()))) {
+            assertThat(entry.path("project").asText()).isEqualTo(AppFixture.PROJECT);
+            assertThat(entry.path("actor").asText()).as("exactly what run.started records")
+                    .isEqualTo(started.fields().path("actor").asText());
+        }
+        assertThat(fx.ledger.find(id).orElseThrow()).as("the end entry is the manifest, byte for byte")
+                .isEqualTo(fx.run(id).readManifest().orElseThrow());
+        assertThat(services.verify(id).ok()).isTrue();
+    }
+
+    @Test
+    void theEntriesOfARunWithoutAProject_holdANullProject_andTheActor() throws Exception {
+        String id = services.start(request(BUILD).inProject(null), null, null).runId();
+
+        for (JsonNode entry : List.of(startEntry(id), manifest(id))) {
+            assertThat(entry.has("project")).as("the field is there").isTrue();
+            assertThat(entry.path("project").isNull()).isTrue();
+            assertThat(entry.path("actor").asText()).isEqualTo(AppFixture.ACTOR);
+        }
+        assertThat(services.verify(id).ok()).isTrue();
+    }
+
+    /** The start entry as the ledger holds it, with one of its values replaced. */
+    private void replaceInStartEntry(String id, String field, String value) throws Exception {
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.put(field, value);
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+    }
+
+    @Test
+    void verify_ofAStartEntryThatNamesAnotherProjectThanTheRecord_fails() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+        replaceInStartEntry(id, "project", "web");
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH).contains("the project web")
+                .contains("the project " + AppFixture.PROJECT);
+    }
+
+    @Test
+    void verify_ofAStartEntryThatNamesAProject_forARunThatNamedNone_fails() throws Exception {
+        String id = services.start(request(BUILD).inProject(null), null, null).runId();
+        replaceInStartEntry(id, "project", "web");
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH).contains("the project web")
+                .contains("no project");
+    }
+
+    @Test
+    void verify_ofAStartEntryThatNamesAnotherActorThanTheRecord_fails() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+        replaceInStartEntry(id, "actor", "mallory@elsewhere");
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH).contains("mallory@elsewhere")
+                .contains(AppFixture.ACTOR);
+    }
+
+    /**
+     * An entry of an earlier version names neither: it stays valid for a record of an earlier version, which does
+     * not say that its entries name the starter ({@code ledger_starter}) and names no project.
+     */
+    @Test
+    void aStartEntryOfAnEarlierVersion_withoutProjectAndActor_staysValid() throws Exception {
+        String id = loadEarlier();
+        services.answer(id, new AnswerRequest("approval", 1, "Yes", null, null));
+        assertThat(services.resume(resumeOf(id), null, null).status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(fx.events(id).getFirst().fields().has("ledger_starter")).as("a record of an earlier version")
+                .isFalse();
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.remove(List.of("project", "actor"));
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.start()).startsWith(VerifyReport.OK);
+        assertThat(report.ok()).isTrue();
+        assertThat(StartEntry.parse(fx.ledger.findStart(id).orElseThrow()).orElseThrow().starter()).isNull();
+    }
+
+    // ---- the record says that its ledger entries name the starter ----
+
+    /** The marker of run.started, in the way ledger_start marks the start entry. */
+    @Test
+    void runStarted_saysThatTheEntriesOfTheLedgerNameTheStarter() {
+        String with = services.start(request(BUILD), null, null).runId();
+        String without = services.start(request(BUILD).inProject(null), null, null).runId();
+
+        for (String id : List.of(with, without)) {
+            JsonNode started = fx.events(id).getFirst().fields();
+            assertThat(started.path("ledger_start").asBoolean()).isTrue();
+            assertThat(started.path("ledger_starter").isBoolean()).as("a marker, as ledger_start is").isTrue();
+            assertThat(started.path("ledger_starter").asBoolean()).isTrue();
+        }
+    }
+
+    /**
+     * Reproduced 2026-11-21: for a run without a project, deleting "project" and "actor" from the start entry, the
+     * end entry and the manifest still verified, since entries of an earlier version have neither. The record says
+     * now that its entries name the starter, so their absence is found.
+     */
+    @Test
+    void strippingProjectAndActorFromTheStartEntry_ofARunWithoutAProject_isFound() throws Exception {
+        String id = services.start(request(BUILD).inProject(null), null, null).runId();
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.remove(List.of("project", "actor"));
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH)
+                .contains("names neither the project of the run nor who started it")
+                .contains("ledger_starter");
+    }
+
+    /** The actor alone, taken out of the start entry of a run without a project. */
+    @Test
+    void strippingTheActorFromTheStartEntry_ofARunWithoutAProject_isFound() throws Exception {
+        String id = services.start(request(BUILD).inProject(null), null, null).runId();
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.remove("actor");
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH).contains(AppFixture.ACTOR);
+    }
+
+    @Test
+    void strippingProjectAndActorFromTheManifestAndTheEndEntry_ofARunWithoutAProject_isFound() {
+        String id = services.start(request(BUILD).inProject(null), null, null).runId();
+        rewriteManifest(id, manifest -> manifest
+                .replaceFirst("(?m)^ {2}\"project\" : (null|\"[^\"]*\"),\\R", "")
+                .replaceFirst("(?m)^ {2}\"actor\" : \"[^\"]*\",\\R", ""));
+        assertThat(new String(fx.run(id).readManifest().orElseThrow(), StandardCharsets.UTF_8))
+                .doesNotContain("\"project\"", "\"actor\"");
+
+        VerifyReport report = services.verify(id);
+        LedgerReport home = services.ledgerReport();
+
+        assertThat(report.manifest()).isEqualTo(VerifyReport.MISMATCH);
+        assertThat(report.ok()).isFalse();
+        assertThat(home.problems()).as("the check of the whole home finds it too")
+                .anySatisfy(problem -> {
+                    assertThat(problem.runId()).isEqualTo(id);
+                    assertThat(problem.code()).isEqualTo("record-broken");
+                    assertThat(problem.text()).contains("is not the manifest the record gives");
+                });
+    }
+
+    /** A record that names a project was started by a version whose entry names it: one without it is not its entry. */
+    @Test
+    void aStartEntryWithoutProjectAndActor_forARecordThatNamesAProject_fails() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.remove(List.of("project", "actor"));
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.ok()).isFalse();
+        assertThat(report.start()).startsWith(VerifyReport.MISMATCH)
+                .contains("names neither the project of the run nor who started it");
+    }
+
+    /**
+     * Makes the record of {@code id} one that does not say that its entries name the starter: its first line
+     * without the marker, and every line after it chained to the one before, as a version before the marker would
+     * have written the same run.
+     *
+     * @return the SHA-256 of the first line as it is now
+     */
+    private String withoutTheMarker(String id) throws Exception {
+        var log = fx.run(id).log();
+        List<byte[]> lines = log.readAll();
+        log.dropLast(lines.size());
+        String prev = null;
+        for (byte[] line : lines) {
+            com.fasterxml.jackson.databind.node.ObjectNode node =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) JSON.readTree(line);
+            if (prev == null) {
+                assertThat(node.remove("ledger_starter")).as("the marker of this version").isNotNull();
+            } else {
+                node.put("prev", prev);
+            }
+            prev = log.append(traceworks.core.record.RecordJson.json(node));
+        }
+        return traceworks.core.record.EventChain.sha256Hex(log.readAll().getFirst());
+    }
+
+    /**
+     * A record that names a project and does not say that its entries name the starter: the project is compared
+     * all the same, as every field the entry and the first line share. An entry that names none is not the entry
+     * of that record, and one that names the project of the record holds.
+     */
+    @Test
+    void aStartEntryWithoutAProject_forARecordWithoutTheMarkerThatNamesAProject_fails() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+        String firstLine = withoutTheMarker(id);
+        assertThat(fx.events(id).getFirst().fields().has("ledger_starter")).isFalse();
+        assertThat(fx.events(id).getFirst().fields().path("project").asText()).isEqualTo(AppFixture.PROJECT);
+        com.fasterxml.jackson.databind.node.ObjectNode entry =
+                (com.fasterxml.jackson.databind.node.ObjectNode) startEntry(id);
+        entry.put("run_started", firstLine);
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        assertThat(services.verify(id).start()).as("the entry names the project and the actor of the record")
+                .startsWith(VerifyReport.OK);
+
+        entry.remove(List.of("project", "actor"));
+        fx.ledger.replaceStart(id, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(entry));
+
+        VerifyReport report = services.verify(id);
+
+        assertThat(report.start()).isEqualTo(VerifyReport.MISMATCH + ": the start entry of the ledger names no"
+                + " project, and run.started names the project " + AppFixture.PROJECT);
+        assertThat(report.ok()).isFalse();
+    }
+
+    private void rewriteManifest(String id, java.util.function.UnaryOperator<String> change) {
+        byte[] changed = change.apply(new String(fx.run(id).readManifest().orElseThrow(), StandardCharsets.UTF_8))
+                .getBytes(StandardCharsets.UTF_8);
+        fx.run(id).writeManifest(changed);
+        fx.ledger.forgeEnd(id, "COMPLETED", changed);
+    }
+
+    /** The manifest is written again from the record and compared byte for byte: a changed project or actor shows. */
+    @Test
+    void aManifestWhoseProjectOrActorWasChanged_doesNotVerify() throws Exception {
+        String id = services.start(request(BUILD), null, null).runId();
+        String original = new String(fx.run(id).readManifest().orElseThrow(), StandardCharsets.UTF_8);
+        assertThat(original).contains("\"project\" : \"shop\"", "\"actor\" : \"operator@box\"");
+
+        rewriteManifest(id, manifest -> manifest.replace("\"project\" : \"shop\"", "\"project\" : \"web\""));
+        VerifyReport project = services.verify(id);
+        rewriteManifest(id, manifest -> original.replace("\"actor\" : \"operator@box\"", "\"actor\" : \"mallory@x\""));
+        VerifyReport actor = services.verify(id);
+
+        assertThat(project.manifest()).isEqualTo(VerifyReport.MISMATCH);
+        assertThat(project.ok()).isFalse();
+        assertThat(actor.manifest()).isEqualTo(VerifyReport.MISMATCH);
+        assertThat(actor.ok()).isFalse();
+    }
+
+    /**
+     * A manifest of an earlier version names neither, and still verifies for a record of an earlier version, which
+     * names no project and does not say that its entries name the starter. Not for a record that names a project.
+     */
+    @Test
+    void aManifestOfAnEarlierVersion_withoutProjectAndActor_staysValid_butNotForARecordThatNamesAProject()
+            throws Exception {
+        String without = loadEarlier();
+        services.cancel(without);
+        String with = services.start(request(BUILD), null, null).runId();
+        java.util.function.UnaryOperator<String> strip = manifest -> manifest
+                .replaceFirst("(?m)^ {2}\"project\" : (null|\"[^\"]*\"),\\R", "")
+                .replaceFirst("(?m)^ {2}\"actor\" : \"[^\"]*\",\\R", "");
+        byte[] stripped = strip.apply(new String(fx.run(without).readManifest().orElseThrow(),
+                StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
+        fx.run(without).writeManifest(stripped);
+        fx.ledger.forgeEnd(without, "CANCELLED", stripped);
+        rewriteManifest(with, strip);
+        assertThat(new String(stripped, StandardCharsets.UTF_8)).doesNotContain("\"project\"", "\"actor\"");
+        assertThat(new String(fx.run(with).readManifest().orElseThrow(), StandardCharsets.UTF_8))
+                .doesNotContain("\"project\"", "\"actor\"");
+
+        VerifyReport earlier = services.verify(without);
+        VerifyReport ofAProject = services.verify(with);
+
+        assertThat(earlier.manifest()).isEqualTo(VerifyReport.OK);
+        assertThat(earlier.ledger()).isEqualTo(VerifyReport.OK);
+        assertThat(ofAProject.manifest()).as("the record names a project").isEqualTo(VerifyReport.MISMATCH);
+        assertThat(ofAProject.ok()).isFalse();
+    }
+
+    /** A record of an earlier version that this version ends: its manifest names no project, and who started it. */
+    @Test
+    void aRunOfAnEarlierVersionThatEndsNow_getsEntriesWithANullProject() throws Exception {
+        String id = loadEarlier();
+        services.cancel(id);
+
+        JsonNode manifest = manifest(id);
+        assertThat(manifest.has("project")).isTrue();
+        assertThat(manifest.path("project").isNull()).isTrue();
+        assertThat(manifest.path("actor").asText())
+                .isEqualTo(fx.events(id).getFirst().fields().path("actor").asText());
+        assertThat(services.verify(id).manifest()).isEqualTo(VerifyReport.OK);
     }
 
     /** Fail closed: without the entry no step runs. The run ends FAILED, and the start is refused. */

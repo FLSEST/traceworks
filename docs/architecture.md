@@ -32,7 +32,7 @@ What lies inside belongs to what lies outside.
   in a container.
 - **The workspace** is the project the steps look at. It belongs neither to the package nor to the tool and is
   mounted read-only unless a step says otherwise.
-- **The home** is the operator's folder, and only the tool writes it: one folder per run, one register per audit,
+- **The home** is the operator's folder, and only the tool writes it: one folder per run, one register per audit and project,
   and the ledger that holds the state of both.
 - **`run`** turns the left into the right: a package, its inputs and a workspace give a run.
 
@@ -109,6 +109,9 @@ The diagrams on this page are Mermaid; GitHub and most Markdown viewers render t
 flowchart LR
     subgraph cli["traceworks-cli — the command line"]
         Main["cli.main · Main"] --> Commands["cli.command · run, resume, show, …"]
+        Main --> Mcp["cli.mcp · the MCP server"]
+        Mcp --> Commands
+        Mcp --> Wiring
         Commands --> Wiring["cli · Wiring, Args, Context"]
     end
     subgraph core["traceworks-core — the domain, no I/O of its own"]
@@ -125,8 +128,8 @@ flowchart LR
         Host["adapters.host · bash on the host"]
         Container["adapters.container · docker / podman client"]
         Ai["adapters.ai · the Claude and Pi CLIs"]
-        Folder["adapters.record · the run folder"]
-        Ledger["adapters.ledger · git"]
+        Folder["adapters.record · the run folder, the registers"]
+        Ledger["adapters.ledger · git, the one ledger of the home"]
         Pkg["adapters.pkg · packages, checkouts"]
     end
     Wiring --> App
@@ -136,11 +139,18 @@ flowchart LR
     Host --> Bash[("bash")]
     Ledger --> Git[("git")]
     Pkg --> Git
-    Folder --> Files[("the run folder below the runs folder<br>(home/runs/ or runs_dir)")]
+    Folder --> Files[("plain files with a hash chain:<br>the run folders (home/runs/ or runs_dir),<br>a register per workflow key and project<br>(home/registers/ or registers_dir)")]
     Docker --> Images["containers from the built-in and package images;<br>an AI step runs its CLI in one of them"]
 ```
 
 Maven enforces the direction: the core depends on nothing of Traceworks, the adapters on the core, the CLI on both.
+
+**The MCP server** (`traceworks mcp`, docs/cli.md, "mcp") is a second front end in the CLI module, the package
+`cli.mcp`, and no module of its own: it runs the commands of `cli.command` in its process with their output
+captured, and calls `core.app` directly where a command would follow a run to its end. A module would have to
+depend on the CLI for the commands, the wiring and the terminal text, or copy them. What a failed command comes to
+(its message and its exit code) is said once, in `cli.CommandLine`, for `Main` and for the server. The protocol
+(JSON-RPC 2.0, one message per line) is written with Jackson, without an SDK.
 
 The core never holds a process. A runner that starts one (the adapters behind `CommandRunner` and
 `ContainerRuntime`) reports a stop handle for it to the step's tracker (`core.util.ProcessTracking`), and a cancel of
@@ -166,8 +176,8 @@ the run calls the handles; how a process and everything it started end is the ad
 | `Inbox` | the requests that other processes drop for a running run |
 | `PackageLoader` | reads a package directory: `workflow.json`, the package digest, the git state and the bytes of the seal file when the package carries one |
 | `SourceCheckout` | the checkout of a git repository that a run started with `--source` works in: cloned below the home and detached at one commit without running anything of the source, and removed again |
-| `Ledger` | notes the start of a run before its first step, commits the manifest of a finished run and finds both again; lists the runs it names with their entries, and keeps the acknowledgement of a run; anchors the head of a register after every write, and lists the anchors |
-| `RegisterStore` | the registers of the home (docs/registers.md): one per key, each a hash-chained log, blobs and the derived `state.json` and `report.html`; opened for reading, or for writing under the one lock per register that serialises the writers of every process |
+| `Ledger` | notes the start of a run before its first step, commits the manifest of a finished run and finds both again; lists the runs it names with their entries, and keeps the acknowledgement of a run; anchors the head of a register, by key and project, after every write, lists the anchors and says which registers it anchors. One ledger serves the whole home: all runs of all projects and workflows |
+| `RegisterStore` | the registers of the home (docs/registers.md): one per workflow key and project, each a hash-chained log, blobs and the derived `state.json` and `report.html`; opened for reading, or for writing under the one lock per register that serialises the writers of every process |
 | `HookRunner` | runs an operator's hook: a program on the host, started without a shell, with a payload on its standard input |
 | `SealStore` | the seals of the home (docs/cli.md, "seal, unseal and seals"): the hash-chained seal log, opened for reading or for writing under its one lock, the operator's allowed signers file, and the seal file `traceworks.seal` of a package directory |
 | `Signer` | signs for the operator: an SSH signature over a message, made with the operator's key by `ssh-keygen`. The core verifies what it returns itself and trusts no signer |
@@ -181,8 +191,8 @@ the run calls the handles; how a process and everything it started end is the ad
 | `core.record` | turns engine events into record lines: the recorder (with the recording command runner and AI providers), the hash chain, blobs, the manifest and the chain verifier; reads a record back into a `RunView` |
 | `core.view` | renders a `RunView` to `run.html`; pure, no I/O |
 | `core.describe` | what a package will do, before any run (`traceworks describe`): reads a loaded package into a `WorkflowDescription` with the rules the run reads a block by, and prints it as text; `core.view` renders it as a page. Pure, no I/O |
-| `core.app` | the use cases the command line calls: start, resume, answer, cancel, verify, list, show and compare runs, and build images. They decide where a run runs its steps (a container run, or, where no container runtime works, a host run with the operator's consent) and check before the run exists that it can. They use ports only, so another front end (an MCP server) can reuse them. `RunServices` is their one entry point: starting, resuming, answering and cancelling a run each have a class of their own (`Starting`, `Resuming`, `Answering`, `Cancelling`); what a start and a resume share, the start check and the options the engine runs the run with, sits in `RunPreparation` |
-| `core.context` | the state of a run while it runs: the execution context with its variables and their trust (taint tracking of untrusted input), placeholders and templates, the output budget, the approval gate a step parks at, and the registration of the run's process |
+| `core.app` | the use cases the command line calls: start, resume, answer, cancel, verify, list, show and compare runs, and build images. They decide where a run runs its steps (a container run, or, where no container runtime works, a host run with the operator's consent) and check before the run exists that it can. They use ports only, so another front end reuses them: the MCP server (`cli.mcp`) does. `RunServices` is their one entry point: starting, resuming, answering and cancelling a run each have a class of their own (`Starting`, `Resuming`, `Answering`, `Cancelling`); what a start and a resume share, the start check and the options the engine runs the run with, sits in `RunPreparation` |
+| `core.context` | the state of a run while it runs: the execution context with its variables and their trust (taint tracking of untrusted input), placeholders and templates, the output budget, the approval gate a step parks at, the rules every answer to a human input is checked against (`InputRules`), and the registration of the run's process |
 | `core.gate` | gate verdicts: parsing the `gate_status` markers a step writes, the synthetic description of a `checked_command`, and whether a workflow expects a verdict at all |
 | `core.register` | findings across runs (docs/registers.md): the envelope and `todo_item:` parsers, the identity and reconciliation of findings, evidence verification, dispositions, the register log and its replay; pure, through the ports |
 | `core.compare` | compares two finished runs from their views of the record (`traceworks diff`, docs/cli.md): the header, the inputs, the steps and AI calls matched by name, item and order, the rule for "run B reproduced run A", and a bounded line diff in plain Java; pure, no I/O |
@@ -257,7 +267,8 @@ flowchart TB
 
 Solid arrows are the dependencies that are allowed between the layers (a package may use any package of a lower
 layer); the dotted ones name the three dependencies inside the middle layer that the rules forbid, so that the engine
-knows the executors only through `BlockExecutor` and the record only through `RunEvents`.
+knows the executors only through `BlockExecutor` and the record only through `RunEvents`. The executors, one per
+block type and registered in `CoreBlocks.registry`, are described type by type in [docs/blocks.md](blocks.md).
 
 The seal check of a run sits in `core.app`, with the other checks before a run (`SealAdmission`, called first by a
 start and by a resume): it loads nothing itself, judges the loaded package with `core.seal`, and records a refusal
@@ -272,10 +283,10 @@ with the resolver a run uses.
 | `adapters.container` | the container runtime through the `docker` or `podman` client: detection, the fixed secure command line, the check of a step's own mounts and of the run's own directories, timeout, cancel and removal of containers |
 | `adapters.images` | the built-in images Traceworks builds, from the jar's resources |
 | `adapters.ai` | the AI command line tools: each turns a call into its CLI's arguments, environment and stdin, and reads the CLI's stream into an outcome (Claude, Pi); the system prompt reaches them in a file of the container |
-| `adapters.record` | the run folder: event log, blob store, inbox, writer lock (`run.lock`), manifest and `run.html` files; and the register folders under `registers/<key>/` (`FileRegisterStore`: log, blobs, `state.json`, `report.html`, `register.lock`); and the seals of the home (`FileSealStore`: the seal log `seals/events.jsonl` with `seals.lock`, the allowed signers file, and the seal file of a package) |
+| `adapters.record` | the run folder: event log, blob store, inbox, writer lock (`run.lock`), manifest and `run.html` files; and the register folders under `registers/<key>/<project>/` (`FileRegisterStore`: log, blobs, `state.json`, `report.html`, `register.lock`); and the seals of the home (`FileSealStore`: the seal log `seals/events.jsonl` with `seals.lock`, the allowed signers file, and the seal file of a package) |
 | `adapters.ledger` | the ledger as a git repository |
 | `adapters.pkg` | the package loader, the package digest, the git state of a package, the `images/<name>/` directories of a package (each with the digest of its directory), the checkout of a source, and the one way every git call is started (no fsmonitor, no hooks, no inherited `GIT_*` variable) |
-| `adapters.config` | `traceworks.json` in the home, `credentials.json`, and `HomeLayout`: where the home keeps its runs, ledger, registers, checkouts and caches, and the files the seal settings name (`signing_key`, `allowed_signers`), which the mount guard keeps steps from. It is the one place that knows these paths; the command line hands them to the other adapters |
+| `adapters.config` | `traceworks.json` in the home, `credentials.json`, `Projects` (the folders the operator bound to project keys, and which declared project a folder is of), and `HomeLayout`: where the home keeps its runs, ledger, registers, checkouts and caches, and the files the seal settings name (`signing_key`, `allowed_signers`), which the mount guard keeps steps from. It is the one place that knows these paths; the command line hands them to the other adapters |
 | `adapters.sign` | `SshKeygenSigner`: signs with `ssh-keygen -Y sign` and the operator's SSH key, in a temporary directory of its own, with only what `ssh-keygen` needs of the environment |
 | `adapters.system` | the system clock and random ids |
 
@@ -387,8 +398,13 @@ sequenceDiagram
     participant Engine as core.engine · WorkflowEngine
     participant Runtime as adapters.container · docker
     participant Ledger as adapters.ledger · git
+    participant Register as adapters.record · the register of the run's project
 
-    Person->>CLI: traceworks run PACKAGE --input K=V
+    Person->>CLI: traceworks run PACKAGE --input K=V --project KEY
+    Note over CLI: the project of the run (cli · ProjectOption): --project,<br>or the key the home's projects setting binds to the folder the run works in
+    alt the key and the folder name two projects
+        CLI-->>Person: refused, exit 6 — no run folder exists
+    end
     CLI->>Services: checkBeforeRun(request)
     Note over Services: the analyzer's findings on the package (core.analyzer),<br>as traceworks check reports them, for this run's inputs
     alt a finding is an ERROR (and no --no-check)
@@ -402,12 +418,16 @@ sequenceDiagram
     end
     Services->>Check: start check
     Note over Check: admission of the workflow, a container runtime,<br>the images, the mounts, every secret and AI credential
+    opt an audit workflow
+        Check->>Register: read what the register of this key and project knows
+        Note over Check: refused without a project, for a register of another workflow or project,<br>for one from before projects that is not assigned, and for one the ledger anchors whose log is gone
+    end
     alt the check fails
         Check-->>Person: refused, exit 6 — no run folder exists
     end
-    Services->>Store: create the run folder, take run.lock
-    Services->>Recorder: run.started (definition and inputs as blobs)
-    Services->>Ledger: commit the start entry (the hash of run.started)
+    Services->>Store: create the run folder, take run.lock<br>(an audit: write what the register knew into register/)
+    Services->>Recorder: run.started (definition and inputs as blobs, the project,<br>the head of the register the run read)
+    Services->>Ledger: commit the start entry<br>(the hash of run.started, the project, who started the run)
     alt the ledger cannot take it
         Services->>Recorder: run.finished FAILED, no step ran
         Services-->>Person: refused, exit 6 — the run folder stays
@@ -419,6 +439,7 @@ sequenceDiagram
         Note over Runtime: an AI call: the run's two networks (made once) and the egress proxy first,<br>the container behind it, then the proxy removed
         Runtime-->>Engine: exit code, stdout, stderr (values redacted),<br>an AI call's connections
         Engine->>Recorder: step.command, step.output, step.files, step.finished
+        Note over Engine,Recorder: a child run whose workflow was not loaded from the package the run started with<br>(another package, or the run's own after it changed while the run ran) begins with run.package:<br>that package and its digest, which the run's package digest does not cover.<br>A child of the run's own package as it started has no such line
         Engine->>Recorder: run.checkpoint (the state a resume continues from)
     end
     alt a step asks a person
@@ -426,8 +447,12 @@ sequenceDiagram
         Services-->>Person: exit 5, the commands to answer and resume
     else the run ends
         Engine->>Recorder: run.finished COMPLETED | COMPLETED_WITH_ERRORS | FAILED | CANCELLED
-        Services->>Store: verify the chain, write manifest.json
+        Services->>Store: verify the chain, write manifest.json<br>(the head, the project, who started, the called packages)
         Services->>Ledger: commit the manifest
+        opt an audit workflow
+            Services->>Register: apply the report to the register of the run's project:<br>new, seen, resolved, reopened
+            Services->>Ledger: commit the anchor of that register<br>(seq, head, what was written and by whom)
+        end
         Services->>Store: write run.html
         Services-->>Person: the summary (status, record, report, files) — exit 0, 1, 3 or 4
     end
@@ -448,7 +473,7 @@ flowchart TD
     analyze -- "no error" --> seal{"seal check"}
     seal -- "the seal does not hold,<br>or a seal is required" --> sealrefused["refused, exit 6<br>a REFUSED line in the seal log"]
     seal -- "sealed and valid, or unsealed" --> check{"start check"}
-    check -- "fails" --> refused
+    check -- "fails (also: an audit run without a project,<br>or whose register cannot be used)" --> refused
     check -- "passes" --> step["next block"]
     step --> kind{"what the block does"}
     kind -- "command or AI call" --> run["runs in a container<br>events and checkpoint recorded"]
@@ -458,7 +483,7 @@ flowchart TD
     parked -. "traceworks approve / answer,<br>then resume" .-> step
     run --> next{"more blocks?"}
     next -- "yes" --> step
-    next -- "no" --> done["finished: manifest, ledger entry, run.html<br>COMPLETED 0 · COMPLETED_WITH_ERRORS 1"]
+    next -- "no" --> done["finished: manifest, ledger entry, run.html;<br>an audit: its report into the register of its project,<br>and the register's anchor into the ledger<br>COMPLETED 0 · COMPLETED_WITH_ERRORS 1"]
     run -- "a step fails and on_failure stops" --> failed["FAILED, exit 3"]
     run -- "pause or Ctrl-C once" --> paused["PARKED, exit 5<br>after the step or item in flight"]
     paused -. "traceworks resume" .-> step

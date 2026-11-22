@@ -291,6 +291,22 @@ public final class GitSourceCheckout implements SourceCheckout {
     }
 
     /**
+     * The repository on this machine that {@code source} names, which is the folder its run works in for the
+     * projects of the home: a path, and the path of a {@code file://} URL as git reads it. Empty for a source
+     * elsewhere, which has no folder of this machine, and for a source the checkout refuses, whose run never
+     * starts.
+     */
+    public static java.util.Optional<Path> localRepository(String source) {
+        try {
+            // Read as the checkout reads it, so the folder judged is the one git will open
+            String path = Source.parse(source).localPath();
+            return path == null ? java.util.Optional.empty() : java.util.Optional.of(Path.of(path));
+        } catch (IllegalArgumentException e) {
+            return java.util.Optional.empty();   // also a path that is none (InvalidPathException)
+        }
+    }
+
+    /**
      * A source as git reads it and as the record names it.
      *
      * @param given    the source as given, which only the clone call sees

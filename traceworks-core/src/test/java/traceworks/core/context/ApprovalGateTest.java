@@ -192,6 +192,40 @@ class ApprovalGateTest {
         assertThat(otherStep).isNotDone();
     }
 
+    /**
+     * A resumed step takes the answer given while the run was parked only if the rules of its input take it now:
+     * a record written before answers were checked, or a package changed since, cannot hand on a value they refuse.
+     */
+    @Test
+    void aPreset_ofAHumanInput_thatTheRulesOfTheInputRefuse_failsTheQuestion() {
+        gate.preset(1, "human-input", "How many?", "abc; rm -rf x", java.util.List.of());
+
+        CompletableFuture<String> future = gate.request(ApprovalRequest.builder().question("How many?").stepIndex(1)
+                .type("human-input").variableName("n").inputType("text").required(true)
+                .validationPattern("[0-9]+").build());
+
+        assertThatThrownBy(() -> gate.await(future, 1, TimeUnit.SECONDS))
+                .isInstanceOf(PresetAnswerException.class)
+                .hasMessage("the answer given while the run was parked is refused: The human input refuses the value"
+                        + " for 'n' (validation_pattern): 'abc; rm -rf x' does not match the pattern [0-9]+");
+    }
+
+    /** Whatever calls it, an answer reaches an open human input only if the input's rules take it. */
+    @Test
+    void resolve_aHumanInputWithAValueItsRulesRefuse_isRefused_andTheQuestionStaysOpen() throws Exception {
+        ApprovalRequest request = ApprovalRequest.builder().question("How many?").stepIndex(1).type("human-input")
+                .variableName("n").inputType("text").required(true).validationPattern("[0-9]+").build();
+        CompletableFuture<String> future = gate.request(request);
+
+        assertThatThrownBy(() -> gate.resolve(request, "abc; rm -rf x"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'n' (validation_pattern)");
+        assertThat(future).isNotDone();
+        assertThat(gate.currentRequest()).isSameAs(request);
+        assertThat(gate.resolve(request, "42")).isTrue();
+        assertThat(future.get()).isEqualTo("42");
+    }
+
     @Test
     void aPreset_forAChangedQuestion_failsTheQuestion() {
         gate.preset(1, "approval", "Deploy?", "Yes", java.util.List.of());

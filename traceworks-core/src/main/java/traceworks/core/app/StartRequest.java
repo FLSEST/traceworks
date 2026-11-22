@@ -1,5 +1,7 @@
 package traceworks.core.app;
 
+import traceworks.core.model.ProjectKey;
+
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -26,11 +28,34 @@ import java.util.Map;
  * @param attended           whether the run counts as attended for the operator's {@code require_seal: unattended}:
  *                           Traceworks has a terminal, or the command line carries the operator's flag for an
  *                           unsealed package
- * @throws IllegalArgumentException if both a workspace and a source are given, or a ref without a source
+ * @param project            the key of the project the run works on, the operator's word ({@link ProjectKey}),
+ *                           from the command line or from the home's {@code projects} setting, which whoever
+ *                           builds the request resolves; {@code null} for none. The run of an audit workflow needs
+ *                           one: its register is that of its project
+ * @param agent              the agent that starts the run under the actor, by the name it gave itself
+ *                           ({@link traceworks.core.register.DecisionAgent}); {@code null} for a start no agent
+ *                           claims. A name that is none refuses the run
+ * @throws IllegalArgumentException if both a workspace and a source are given, a ref without a source, or a project
+ *                                  that is no project key
  */
 public record StartRequest(Path packageLocation, Map<String, String> inputs, Path workspace,
                            boolean allowHostExecution, boolean interactive, String source, String ref,
-                           String inputsFrom, boolean attended) {
+                           String inputsFrom, boolean attended, String project, String agent) {
+
+    /** A request no agent claims. */
+    public StartRequest(Path packageLocation, Map<String, String> inputs, Path workspace, boolean allowHostExecution,
+                        boolean interactive, String source, String ref, String inputsFrom, boolean attended,
+                        String project) {
+        this(packageLocation, inputs, workspace, allowHostExecution, interactive, source, ref, inputsFrom, attended,
+                project, null);
+    }
+
+    /** A request of a run that names no project. */
+    public StartRequest(Path packageLocation, Map<String, String> inputs, Path workspace, boolean allowHostExecution,
+                        boolean interactive, String source, String ref, String inputsFrom, boolean attended) {
+        this(packageLocation, inputs, workspace, allowHostExecution, interactive, source, ref, inputsFrom, attended,
+                null);
+    }
 
     /** A request of a run nobody attends, as far as {@code require_seal} asks. */
     public StartRequest(Path packageLocation, Map<String, String> inputs, Path workspace, boolean allowHostExecution,
@@ -52,6 +77,21 @@ public record StartRequest(Path packageLocation, Map<String, String> inputs, Pat
         if (ref != null && source == null) {
             throw new IllegalArgumentException("A ref needs a source to check it out of");
         }
+        if (project != null) {
+            ProjectKey.checked(project);
+        }
+    }
+
+    /** The same request for the project {@code key}; {@code null} for a run that names none. */
+    public StartRequest inProject(String key) {
+        return new StartRequest(packageLocation, inputs, workspace, allowHostExecution, interactive, source, ref,
+                inputsFrom, attended, key, agent);
+    }
+
+    /** The same request, asked for by {@code agent} under the actor; {@code null} for a start no agent claims. */
+    public StartRequest by(String agent) {
+        return new StartRequest(packageLocation, inputs, workspace, allowHostExecution, interactive, source, ref,
+                inputsFrom, attended, project, agent);
     }
 
     /** A run in {@code workspace}, without a source. */

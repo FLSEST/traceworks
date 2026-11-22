@@ -14,8 +14,8 @@ host, holds the record and the credentials, and hands each container only what i
 flowchart LR
     subgraph host["the host — your machine"]
         tw["Traceworks process<br>reads the package, starts one container per step,<br>writes the record"]
-        gets["what a step may get, and only this:<br>the workspace, read-only at /workspace<br>the package, read-only at /package<br>the run's scratch directory, writable at /scratch<br>in an audit run, what its register knew, read-only at /register (no AI step)<br>the secrets the step declares, by name<br>(an AI step: its provider's one credential)"]
-        never["what no container ever sees:<br>the Traceworks home — record, credentials.json, ledger<br>~/.ssh, ~/.aws, ~/.claude and other logins<br>the Docker or Podman socket<br>other runs, the rest of your environment"]
+        gets["what a step may get, and only this:<br>the workspace, read-only at /workspace<br>the package, read-only at /package<br>the run's scratch directory, writable at /scratch<br>in an audit run, what the register of its project knew, read-only at /register (no AI step)<br>the secrets the step declares, by name<br>(an AI step: its provider's one credential)"]
+        never["what no container ever sees:<br>the Traceworks home — record, credentials.json, ledger, registers<br>~/.ssh, ~/.aws, ~/.claude and other logins<br>the Docker or Podman socket<br>other runs, the rest of your environment"]
     end
     subgraph container["one step = one container"]
         step["runs as your user · root file system read-only<br>all capabilities dropped · no new privileges<br>4 GB · 1024 processes · 2 CPUs · /tmp of 1 GiB<br>image resolved before the start, never pulled"]
@@ -23,7 +23,7 @@ flowchart LR
         aiStep["AI step: the provider's CLI in its built-in image<br>prompt on stdin, tools: none by default<br>network: only the provider's API, through an allowlist proxy<br>every connection in the record"]
     end
     subgraph home["the Traceworks home"]
-        record[("the record of the run<br>events.jsonl, blobs, manifest, ledger entry")]
+        record[("the record of the run<br>events.jsonl, blobs, manifest,<br>its start and end entry in the one ledger of the home")]
     end
     tw -- "starts" --> step
     gets == "mounted or passed in" ==> step
@@ -218,17 +218,37 @@ the findings a report stated, which came from a model and are data. Its output r
 and page: the tail of its standard error, unredacted, so a hook must not print a secret. A hook that runs past its
 timeout, or never reads its input, is ended.
 
-**Registers** (docs/registers.md). A register's log is hash-chained and its blobs are verified by name, as a run's,
+**Registers** (docs/registers.md). A register is kept per workflow key and per project, and a run reads and feeds
+the register of its own project alone: the findings of one project are not resolved by a run on another, and a
+decision made for one does not cover the other. The first line of a register's log names its project, and a log
+says once whose it is, so a folder that was copied or renamed to another project is refused by every run and every
+command, also with one more `register.created` appended to it. A register from before registers had projects is
+assigned to a project once: a copy of it that lies at the key again is refused by `findings <key> assign`. A
+register the ledger anchors whose log is gone is not begun anew: every run and every command that shows or decides
+its findings is refused until its folder is back, and an acknowledgement in `verify` begins nothing. Where the
+ledger is there and cannot be listed, it cannot say which projects a key has, and a `findings` command that names
+no project is refused. A register's log is hash-chained and its blobs are
+verified by name, as a run's,
 and its head is anchored in the ledger after every write (a report, the hook's line, a decision), so `findings <key>
-verify` finds a changed last line and a cut end. A register written before anchors existed is not anchored until
+verify` finds a changed last line and a cut end; `traceworks verify` without a run checks every register of the
+home the same way, and names one the ledger anchors that the home no longer holds. Only these two commands check
+the chain: a line changed in the middle is found by them, while `findings <key> list`, a decision and the feed of
+a run still work on such a log. A register written before
+anchors existed is not anchored until
 its next write; `verify` says so. **Lines appended after the last anchor are accepted.** Someone who can write the
 register's folder, and nothing else, can append a line that chains (a forged decision); it looks like what a writer
 leaves that was cut off before its anchor, so `verify` holds, names the lines as unproven, and the next write takes
 them and anchors the head. What shows it: `verify` until then, the note of that next write, and the line
 `register.unanchored` it records in the log with the sequence numbers. A register's folder is therefore still worth
 the protection of the ledger's. Whoever can write the ledger too cannot rewrite the register unnoticed: the anchors
-are only added to, and a rewritten anchor file is found. But they can **add** to both: append a forged decision that
-chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace
+are only added to, and a rewritten anchor file is found. An anchor also says what was written since the one
+before it (the count of each type of line, the run, the actor, the agent and the ids of the findings a person
+decided, and no content of the register), and `verify` compares that with the log, so the ledger alone tells which
+run fed a register and who decided. Each value has the shape of its field or is replaced by a marker; the actor
+is the one free text among them ("The actor is the one free text in the ledger", below).
+But they can **add** to both: append a forged decision that
+chains, then the anchor of the new head, and `findings <key> verify` says `anchor    ok` with no trace; what the
+anchor says is derived from the log and unsigned, so the forged line gets a well-formed anchor
 (docs/events.md, "What the ledger shows, and what it does not"). Signatures of decisions would close that; they are
 not built. **Who decided is a label, not a proof.** A decision names its actor, who ran the command, and beside it
 the agent that decided under that actor when the caller named one (`--agent`, or `TRACEWORKS_AGENT`). The name is
@@ -296,8 +316,41 @@ in it and takes only what follows the `]` as the path. When
 Traceworks reads the commit and the state of a package that has its own `.git`, git gets no transport at all: an
 empty `GIT_ALLOW_PROTOCOL`, which a `protocol.<name>.allow` of the package's config cannot widen, and no lazy fetch.
 
+**The MCP server** (docs/cli.md, "mcp"). `traceworks mcp` talks to its client over its standard input and output
+and opens no socket. Without a switch it offers only tools that read: a package, the runs, a record, the registers.
+What starts or stops a run (`--allow-run`), answers its question (`--allow-answer`) or decides on a finding
+(`--allow-decide`) exists only where the operator who started the server said so, and where the home allows it:
+`mcp.allow` in the home's `traceworks.json` names what a server may be started to change, and a server started
+with a switch its home does not allow does not start. So the configuration of a client, which starts the server,
+opens nothing alone. A tool behind a switch that is not set is not listed, and a call of it is refused. No client can set a switch, give the consent to a host run, name a
+workspace, a source or a run by its folder, skip the check before a run, run an unsealed package where
+`require_seal` asks for a seal, or reach `credentials`, `seal`, `unseal` and `images build`: no tool has an
+argument for any of it. A package a client names must lie, by its real path, in a folder the operator gave
+(`--packages`, else the working directory), and so must the package of a run it resumes. No client chooses a
+project: the project of a run it starts, and of every register it reads or decides in, is the one `projects` in
+the home's `traceworks.json` binds to the folder the server works in. An argument `project` is taken only when it
+names exactly that project. In a folder bound to none, a run of an audit workflow, a run that names a project and
+every tool on a register are refused, and nothing is written; the registers of other projects are neither listed,
+read nor decided in, and a register from before registers had projects is assigned to the project of the folder
+alone, where the operator opened deciding. A client sees the runs of that project and the runs that name none:
+the run of another project is answered by every tool and resource as a run that does not exist, and the check of
+the whole home (`verify` without a run), which names the runs and registers of every project, is no tool. A run
+started through
+the server passes the checks of `traceworks run` and runs under the same encapsulation, with the settings the
+server read when it started. Every change records an agent beside the actor, and a client without a name
+that serves changes nothing; the one exception is `findings_assign`, whose line names the actor alone, since the
+command has no agent for an assignment. Standard output carries protocol messages only: what a command prints is captured and
+returned as the text of a result, which begins with a line that says it is data, as its data does.
+
 **The record** is a hash chain: `traceworks verify` finds a changed or removed line, lines copied from another run, a
-changed blob, and a manifest or ledger entry that does not match the log. Every other command reads a blob of a run
+changed blob, and a manifest or ledger entry that does not match the log. The package digest a run records covers
+the package it was started with. A workflow of another package that a block calls is recorded too: its child run
+begins with a line that names the package, its digest as loaded for that call and its `workflow.json`
+(`run.package`), the manifest and the end entry of the ledger list every called package (`called_packages`), and
+`traceworks diff` counts a called package that differs like a package digest that differs, and compares the called
+packages call by call. A child of the run's own package is named the same way when the package changed while the
+run ran. So two runs whose called workflow changed do not read as the same. Every other command reads a blob of a
+run
 or a register checked against its name: one that acts on it (a resume, a feed of a register, a decision, the list of
 findings, `diff`, `--inputs-from`) refuses as for a damaged record (exit 8) and names the blob, and a view (`show`,
 `run.html`, `diff --outputs`, `findings show`) shows a mark in its place, says that it does not match its name, and
@@ -319,9 +372,12 @@ three groups:
   is younger than five minutes; and a ledger
   with replace refs, a shallow or grafts file, alternates, a `.git` that is not a plain directory, a second
   branch, a merge, a detached HEAD, a commit HEAD does not reach, or a setting of its own that is not allowed
-  there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). An honest
+  there (docs/events.md, "The ledger's own git settings"; the same rule refuses a run before it starts). It also finds
+  an entry of a run that names another project or another starter than the record (`verify <run>`), a register
+  that does not verify, and a register the ledger anchors that the home no longer holds. An honest
   cause is acknowledged with a note, which the ledger keeps and the check lists for good; it covers what the check
-  said then and nothing that comes later.
+  said then and nothing that comes later (for a register: that state of its log, and for an edited `state.json`
+  or blob that content, so a register that changes again is reported again).
 - **What a ledger that others hold adds:** a rewritten history that no reference names any more is not found on
   this machine. The ledger is a plain git repository, so the operator can push it to a remote they do not control
   alone and that refuses a rewritten history (a protected branch without force push, or an append-only mirror).
@@ -332,7 +388,8 @@ three groups:
   safe as the machine, so the time between two pushes is the time in which a run can still be hidden.
   The acknowledgements and the anchors of a register are judged by every hash their commits named, each a beginning
   of the file as it is, so a rewritten file is found also under a correct hash of the new file; and the check
-  verifies the record of every ended run against its end entry, unless `--quick` is given.
+  verifies the record of every ended run against its end entry, and every register of the home against its own
+  chain and its anchors, unless `--quick` is given.
 - **What nothing in this version finds:** what was before a new ledger, and that there was one. A ledger this
   version does not accept is moved aside and not read, and one hand-made commit forces that; the new ledger says
   nothing of earlier runs and register lines, and the home does not record the restart. The move itself is the
@@ -674,6 +731,48 @@ content, and no blob is written through one.
   What keeps a step from a place is the mount check, on real paths, at the start of every run and for every mount;
   it covers the folders the settings name and the folders of the home they replace. It does not know a folder that
   an earlier value of a setting named: after a change, move the old folder or keep runs away from it.
+- **The project of a run is the operator's word.** A register is kept per workflow key and per project, and the
+  project is a key the operator gives (`run --project KEY`). It is unsigned, like the actor, and nothing compares
+  it with the workspace: a run started with the key of another project reads that project's findings and decisions
+  and feeds its register, so a wrong `--project` mixes two projects. What Traceworks does about it: nothing in a
+  workspace or a package can name a project, an audit run without one is refused, there is no default project, the
+  record and the ledger name the key every run was started with, and a register folder copied to another project
+  is refused. A key belongs to one workflow across all its projects, which is checked against the registers that
+  can be read, not locked: two first runs of two workflows with one key at the same moment are not excluded.
+- **The `projects` setting compares folders, not what is in them.** `projects` in `traceworks.json` binds a
+  project key to a folder, and a run in or below that folder is of that project; a run there with another key, or
+  with that key elsewhere, is refused. The setting is the operator's word too: no workflow, workspace or package
+  sets it, and nothing checks that the folder holds what the key says, so a setting that binds the wrong folder
+  mixes two projects as a wrong `--project` does. Folders are compared by their real paths when a run starts. A
+  folder moved or renamed without the setting changed is a run without a project (an audit run is refused then),
+  and whatever lies at the declared path now is taken for the project. A run from a `--source` that is no path of
+  this machine has no folder (a `file:` URL is judged like its path), and an undeclared key in an undeclared
+  folder is taken on the operator's word.
+- **Every run of one key and project must look at the same workspace.** A register is fed by full snapshots: a
+  measured finding that a report does not state is resolved. A run in a subfolder of a declared project is of that
+  project and resolves what it does not see, and so does a run on another checkout under the same key. Traceworks
+  does not check that two runs of one register looked at the same thing (docs/registers.md, "What a register does
+  not do").
+- **The actor is the one free text in the ledger.** An anchor holds no content of a register: a run id, the ids
+  of findings, counts by type of line and the bounded name of an agent. The actor of a decision or an assignment
+  is held as the register's log has it, when it is 1 to 255 characters without a control character, so that a
+  name such as `Zoë Brontë <zoe@example.org>` is not lost. Whoever can append a line to a register's log by
+  hand can put any text of that shape into the ledger with the next anchor, and format characters such as
+  bidirectional marks pass. Any other actor reads `(malformed)` there.
+- **A resume with a changed package is named, not undone.** `resume --allow-changed-package` goes on although the
+  package is no longer the one the run started with. It runs the definition recorded at the start, with the
+  package's files as they are now. A run whose recorded definition calls its own package as a child is refused
+  such a resume, since the child would run the changed package beside that definition; what it calls is read from
+  the recorded definition and the packages it reaches as they are now, and a `workflow_id` with a placeholder
+  refuses too. A child of another package is loaded as it is at each call, as in every run. The
+  record names the packages the run went on with after its start, in order and without repeats (`package_digest`
+  of `run.resumed`, `resumed_with` in the manifest and the end entry of the ledger), and `traceworks diff` counts
+  them. That says that the package was another one, not what changed in it.
+- **An earlier version in a home of this one.** A version from before registers had projects does not see a
+  register kept per project (it looks for a log in the folder of the key), and it refuses a ledger that holds an
+  anchor of this version. A run of this version that an earlier version resumed or cancelled no longer verifies:
+  its manifest lacks the project and the starter its record promises. Do not go back to an earlier version in a
+  home this version wrote.
 
 ### Seals
 
@@ -732,7 +831,8 @@ What a seal does not protect:
   `workspace_writable: true` a container sees only the run's own package read-only inside the workspace, so a
   called package that lies in the workspace can be rewritten by a step, or by a model with write tools, before its
   block runs, and its steps then get the secrets the run took at its start. Keep called packages outside every
-  workspace a run writes. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
+  workspace a run writes. What ran is recorded, not prevented: the child run's first line names the digest of the
+  package as it was loaded for that call (`run.package`), the manifest lists it, and `traceworks diff` shows it. A workflow named through a placeholder (`workflow_id: "{{ ... }}"`) in
   an unsealed package is not known at the start at all, so a sealed package reached that way is not checked.
 - **Whoever writes the home is the operator.** `traceworks.json`, `allowed_signers` and the seal log are files of
   the home. Someone who can write them can allow a key of their own, switch `require_seal` off or undo
@@ -900,7 +1000,9 @@ this setting is the usual one for Docker hosts and has not been verified here.
   clone of a private source needs them.
 - **Patterns and reports are read under a time limit.** A workflow's `validation_pattern` is a regular expression
   from the package, and the value it checks may be a model's answer; Java's regex engine has no timeout. The check
-  of one value gives up after 2 seconds: the answer is refused (an AI actor's), or asked again (at the console).
+  of one value gives up after 2 seconds: the answer is refused (an AI actor's, or one given with `traceworks
+  answer`), or asked again (at the console). A pattern given up so is not tried again in that process, and every
+  later value against it is refused there too: a guard that cannot be read lets nothing through.
   The `todo_item:` lines of an audit's report are read within 10 seconds, or the report is rejected; the audit
   envelope is found in one pass over the report. The patterns of a `compress` block have had their time budget
   from the start. The clock is read where the engine reads a character, and the engine can spend any time without
@@ -933,3 +1035,46 @@ this setting is the usual one for Docker hosts and has not been verified here.
   writes.
 - **Paths in a package.** A `sub-workflow` or `foreach` block may name its workflow by any path on the machine. Run
   only packages you trust.
+
+### The MCP server
+
+- **A switch gives the client the whole power it names.** With `--allow-run` a client starts any package of the
+  package folders with any inputs and cancels any run it sees, also one it did not start. With
+  `--allow-decide` it accepts or dismisses any finding of any register of the project the folder of the server is
+  bound to. A model that reads untrusted text may be
+  talked into each of these calls. The bounds of a server only slow a loop down: 4 runs at a time, 30 calls a
+  minute that change something and 600 calls a minute in all, for each server a client starts. A switch works
+  only where `mcp.allow` in the home's `traceworks.json` names it, which whoever can write that file can add. Set
+  a switch for a client you would hand the command line to, and give it a package folder that holds only what it may run.
+  A server with `--allow-run` wants the folder named (`--packages`), and nothing checks what you name: a folder
+  that is or holds the workspace of a run is one where a step that may write the workspace can leave a package
+  that the client then runs.
+- **A client that may decide assigns a register from before.** With `--allow-decide` a client gives a register
+  from before registers had projects the project the folder of the server is bound to. That says for good whose
+  decisions the register holds, and a register is assigned once: nothing checks that the register was kept for
+  that project, so a server started in the wrong folder, or a model talked into the call, binds the decisions of
+  one project to another. The line of the assignment names the actor and no agent.
+- **A client that may run and answer approves itself.** With `--allow-run` and `--allow-answer` the client starts
+  a run and answers the approval that was meant for a person. The record names the agent in both lines; nothing
+  refuses it.
+- **The name of the agent is what the client says.** It comes from the operator's `--agent`, from
+  `TRACEWORKS_AGENT`, or from the client's own `clientInfo.name`, unsigned and unchecked beyond its form: a client
+  can call itself anything, and two clients can share a name. The actor is the user the server runs as.
+- **A result can carry text that steers a model.** What a tool returns holds text of workflows, outputs of steps,
+  answers of models and findings. Each result begins with a line that says so, as text and as the first field of
+  its data, and control characters are replaced, but the text itself reaches the client as it is: the line is a
+  label, not a filter, and what the client's model does with the text is the client's business.
+- **A client that reads, reads everything of its project.** Every tool that reads is open to every client: all
+  runs of the project the folder of the server is bound to, and all runs that name no project, with the outputs of
+  their steps and their files `events.jsonl` and `run.html` as resources, and all registers of that project. A run
+  without a project is seen by the clients of every server of the home, whatever folder it worked in. Secrets are
+  redacted in the record as for every reader, and nothing else is held back: there is no per-run permission, and
+  what a client's model reads may leave the machine with the client.
+- **Whoever writes the server's input is the client.** There is no authentication: the process that started the
+  server, or anything that can write to its standard input, speaks as the client, with the user and the home of
+  the server.
+- **The runs of a server end with it.** A run started through the server belongs to its process: when the input
+  ends the server asks its runs to pause and waits for the step in flight, a run that waits for an answer in the
+  process is left `INTERRUPTED`, and a server that is told to end leaves its runs as `traceworks run` does
+  (`INTERRUPTED`, or cancelled where the end of the process cancels). A client that goes away mid-run therefore
+  stops the run; `traceworks resume` goes on.

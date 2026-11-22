@@ -18,7 +18,8 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * The summary written when a run ends: what ran, where, with which inputs and images, and the head of the record.
+ * The summary written when a run ends: what ran (the run's package and every package it called), where, with which
+ * inputs and images, and the head of the record.
  * Manifests are unsigned, and the tool versions are empty, in this version. A run of a sealed package names the seal:
  * {@code seal} is {@code sealed}, followed by the seal digest, the signer and the key's fingerprint; any other run
  * says {@code unsealed} and has none of the three.
@@ -33,11 +34,53 @@ import java.util.TreeSet;
  * @param runStarted   the SHA-256 of the {@code run.started} line, which the start entry of the ledger names too, so
  *                     an end entry can be matched to its start entry without the run folder; {@code null} for a
  *                     manifest of a version that did not name it, which then has no such field
+ * @param starter      the project of the run and who started it, as {@code run.started} records them, so that the
+ *                     end entry of the ledger names both; {@code null} for a manifest of a version that named
+ *                     neither, which then has no such fields
+ * @param calledPackages every package a child run of the run was loaded from that is not what the run started
+ *                     with (another package, or the run's own with another digest, changed while the run ran),
+ *                     each {@code {workflow_id, package_digest}} once, sorted: {@code packageDigest} covers the
+ *                     package the run was started with only. Empty for a run that called none and for a record of a
+ *                     version that did not name them; the manifest then has no such field
+ * @param resumedWith  the packages the run went on with after its start ({@code --allow-changed-package}), in
+ *                     order and without repeats ({@link RunView#resumedWith}): {@code packageDigest} is the
+ *                     package at the start only. Resumed twice with one changed package it holds that package
+ *                     once. Empty for a run that only ever went on with the package of its start and for a
+ *                     manifest of a version that did not list them; the manifest then has no such field
  */
 public record Manifest(String runId, String workflowId, String workflowName, String packageDigest,
                        String inputsDigest, String execution, List<Image> images, List<String> models, int events,
                        String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
-                       String version, SealView seal, String runStarted) {
+                       String version, SealView seal, String runStarted, RunStarter starter,
+                       List<CalledPackage> calledPackages, List<String> resumedWith) {
+
+    /** A manifest of a run that was resumed with no other package than the one it started with. */
+    public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
+                    String inputsDigest, String execution, List<Image> images, List<String> models, int events,
+                    String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
+                    String version, SealView seal, String runStarted, RunStarter starter,
+                    List<CalledPackage> calledPackages) {
+        this(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images, models, events, head,
+                status, gate, startedAt, finishedAt, version, seal, runStarted, starter, calledPackages, List.of());
+    }
+
+    /** A manifest of a run that called no workflow of another package. */
+    public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
+                    String inputsDigest, String execution, List<Image> images, List<String> models, int events,
+                    String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
+                    String version, SealView seal, String runStarted, RunStarter starter) {
+        this(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images, models, events, head,
+                status, gate, startedAt, finishedAt, version, seal, runStarted, starter, List.of());
+    }
+
+    /** A manifest that names neither the project nor who started the run, as an earlier version wrote it. */
+    public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
+                    String inputsDigest, String execution, List<Image> images, List<String> models, int events,
+                    String head, RunStatus status, GateView gate, Instant startedAt, Instant finishedAt,
+                    String version, SealView seal, String runStarted) {
+        this(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images, models, events, head,
+                status, gate, startedAt, finishedAt, version, seal, runStarted, null);
+    }
 
     /** A manifest that does not name the {@code run.started} line, as an earlier version wrote it. */
     public Manifest(String runId, String workflowId, String workflowName, String packageDigest,
@@ -67,6 +110,8 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
     public Manifest {
         images = List.copyOf(images);
         models = List.copyOf(models);
+        calledPackages = List.copyOf(calledPackages);
+        resumedWith = List.copyOf(resumedWith);
     }
 
     /**
@@ -80,6 +125,29 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
 
     private static final Comparator<Image> IMAGE_ORDER =
             Comparator.comparing(Image::reference).thenComparing(Image::id);
+
+    /**
+     * A package a child run of the run was loaded from, as the child's {@code run.package} line names it.
+     *
+     * @param workflowId    the {@code id} of the workflow that ran as the child
+     * @param packageDigest the digest of its package as loaded for the call
+     */
+    public record CalledPackage(String workflowId, String packageDigest) {}
+
+    private static final Comparator<CalledPackage> CALLED_ORDER =
+            Comparator.comparing(CalledPackage::workflowId, Comparator.nullsFirst(Comparator.naturalOrder()))
+                    .thenComparing(CalledPackage::packageDigest, Comparator.nullsFirst(Comparator.naturalOrder()));
+
+    /**
+     * The packages the child runs of {@code view} were loaded from, at every depth, each
+     * {@code {workflow_id, package_digest}} once, sorted: what a manifest lists. A package that changed between two
+     * calls of one run is there with both digests.
+     */
+    public static List<CalledPackage> calledPackages(RunView view) {
+        Set<CalledPackage> called = new TreeSet<>(CALLED_ORDER);
+        view.packageCalls().forEach(call -> called.add(new CalledPackage(call.workflowId(), call.packageDigest())));
+        return List.copyOf(called);
+    }
 
     /**
      * @param blobs   where the step metadata is, for the models; a deleted metadata blob names no model
@@ -96,7 +164,18 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
         return new Manifest(view.runId(), view.workflowId(), view.workflowName(), view.packageDigest(),
                 view.inputs() == null ? null : view.inputs().sha256(), view.execution(), List.copyOf(images),
                 models, view.eventCount(), view.head(), view.status(), view.gate(), view.startedAt(),
-                view.finishedAt(), version, view.seal(), view.runStarted());
+                view.finishedAt(), version, view.seal(), view.runStarted(),
+                new RunStarter(view.project(), view.actor()), calledPackages(view), resumedWith(view));
+    }
+
+    /**
+     * The package digests a manifest lists as those the run was resumed with: the ones the record's resumes name
+     * ({@link RunView#resumedWith}), where the version that wrote the manifest lists them
+     * ({@link RunView#recordsResumedWith}); none for a record whose last start or resume is of a version that did
+     * not, since its manifest has no such field.
+     */
+    public static List<String> resumedWith(RunView view) {
+        return view.recordsResumedWith() ? view.resumedWith() : List.of();
     }
 
     /**
@@ -150,13 +229,25 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
     /** The same manifest with other models, for a check that cannot tell them from the record. */
     public Manifest withModels(List<String> otherModels) {
         return new Manifest(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images,
-                otherModels, events, head, status, gate, startedAt, finishedAt, version, seal, runStarted);
+                otherModels, events, head, status, gate, startedAt, finishedAt, version, seal, runStarted, starter,
+                calledPackages, resumedWith);
     }
 
     /** The same manifest without the {@code run.started} line, as a version that did not name it wrote it. */
     public Manifest withoutRunStarted() {
         return new Manifest(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images,
-                models, events, head, status, gate, startedAt, finishedAt, version, seal, null);
+                models, events, head, status, gate, startedAt, finishedAt, version, seal, null, starter,
+                calledPackages, resumedWith);
+    }
+
+    /**
+     * The same manifest without the project and without who started the run, as a version that named neither wrote
+     * it.
+     */
+    public Manifest withoutStarter() {
+        return new Manifest(runId, workflowId, workflowName, packageDigest, inputsDigest, execution, images,
+                models, events, head, status, gate, startedAt, finishedAt, version, seal, runStarted, null,
+                calledPackages, resumedWith);
     }
 
     /** The images of the commands that started a container, in the run and its children; a refused one has no ID. */
@@ -199,7 +290,28 @@ public record Manifest(String runId, String workflowId, String workflowName, Str
         ObjectNode workflow = root.putObject("workflow");
         workflow.put("id", workflowId);
         workflow.put("name", workflowName);
+        if (starter != null) {
+            // Always both, the project as null for a run that names none: a manifest without them is one of a
+            // version that named neither
+            root.put("project", starter.project());
+            root.put("actor", starter.actor());
+        }
         root.put("package_digest", packageDigest);
+        if (!calledPackages.isEmpty()) {
+            // Only for a run that called a workflow of another package: every other manifest keeps its bytes
+            ArrayNode calledArray = root.putArray("called_packages");
+            for (CalledPackage called : calledPackages) {
+                ObjectNode entry = calledArray.addObject();
+                entry.put("workflow_id", called.workflowId());
+                entry.put("package_digest", called.packageDigest());
+            }
+        }
+        if (!resumedWith.isEmpty()) {
+            // Only for a run that was resumed with another package than it started with: every other manifest
+            // keeps its bytes
+            ArrayNode resumedArray = root.putArray("resumed_with");
+            resumedWith.forEach(resumedArray::add);
+        }
         if (seal == null) {
             root.put("seal", "unsealed");
         } else {

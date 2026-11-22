@@ -7,7 +7,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@code human-input} (package {@code human-input}): the question parks the run, {@code traceworks answer --value}
- * records the value, and after {@code traceworks resume} the next step reads it from the block's variable.
+ * refuses a value the field's {@code validation_pattern} does not match and records one it matches, and after
+ * {@code traceworks resume} the next step reads it from the block's variable.
  */
 class HumanInputIT extends IntegrationTest {
 
@@ -26,6 +27,10 @@ class HumanInputIT extends IntegrationTest {
         assertThat(folder.blob(requested.path("question"))).isEqualTo("Who should be greeted?");
         assertThat(folder.only("run.parked").path("kind").asText()).isEqualTo("human-input");
 
+        Result refused = traceworks.exec("answer", id, "--value", "Anna; id");
+        assertThat(refused.code()).as(refused.describe()).isEqualTo(6);
+        assertThat(refused.err()).contains("'who' (validation_pattern)", "does not match the pattern [A-Za-z]+");
+        assertThat(folder.ownEvents("approval.answered")).as("nothing is recorded").isEmpty();
         Result answer = traceworks.exec("answer", id, "--value", "Anna");
         assertThat(answer.code()).as(answer.describe()).isZero();
         Result resume = traceworks.exec("resume", id, "--no-input");

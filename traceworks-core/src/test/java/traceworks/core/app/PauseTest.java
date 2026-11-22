@@ -131,7 +131,8 @@ class PauseTest {
         assertThat(resumed.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(fx.commands.commands()).containsExactly("./build", "./test");
         assertThat(fx.ofType(id, "run.resumed").getFirst().fields().path("records")).extracting(n -> n.asText())
-                .as("the resume says what it records, as the start does").containsExactly("output_cut", "answer_agent");
+                .as("the resume says what it records, as the start does")
+                .containsExactly("output_cut", "answer_agent", "called_packages", "resumed_with", "request_agent");
         assertThat(services.view(id).recordsOutputCut()).isTrue();
         assertThat(services.verify(id).ok()).isTrue();
     }

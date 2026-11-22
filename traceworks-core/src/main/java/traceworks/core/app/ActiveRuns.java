@@ -4,6 +4,8 @@ import traceworks.core.engine.RunOutcome;
 import traceworks.core.port.ContainerRuntime;
 import traceworks.core.port.Ids;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -83,6 +85,26 @@ final class ActiveRuns {
                 run.runtime().removeLeftovers(run.runId());
             }
         }
+    }
+
+    /**
+     * Leaves interrupted, as {@link #interruptAll} does, every active run that waits for an answer in this process;
+     * the others go on.
+     *
+     * @return the runs it interrupted
+     */
+    List<String> interruptWaiting() {
+        List<String> interrupted = new ArrayList<>();
+        for (ActiveRun run : active) {
+            if (run.session().waitsAtAQuestion()) {
+                run.session().interrupt();
+                if (run.runtime() != null) {
+                    run.runtime().removeLeftovers(run.runId());
+                }
+                interrupted.add(run.runId());
+            }
+        }
+        return interrupted;
     }
 
     /** A run this process executes, and the runtime its containers run on ({@code null} for none). */

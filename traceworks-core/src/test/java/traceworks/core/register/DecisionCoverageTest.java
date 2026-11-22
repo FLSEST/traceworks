@@ -32,7 +32,7 @@ class DecisionCoverageTest {
     private static final Instant T3 = Instant.parse("2026-11-13T10:00:00Z");
     private static final String FIXTURE = "/registers/decided-before-severity/";
 
-    private final RegisterState empty = RegisterState.empty("arch", "wf-1", "architecture");
+    private final RegisterState empty = RegisterState.empty("arch", "wf-1", "architecture").ofProject("shop");
 
     private static ReportedFinding stated(Severity severity, String evidence) {
         return new ReportedFinding("size", "A.java", severity, "A is long", "d", evidence, List.of());
@@ -208,10 +208,10 @@ class DecisionCoverageTest {
     void theLog_namesTheSetting_theSeverityDecidedOn_andWhyTheFindingIsOpenAgain_andReplaysToTheSameState() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
         Clock clock = () -> T1;
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, clock);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "architecture");
+            writer.created("wf-1", "architecture", "shop");
             RegisterState state = writer.applied(empty, report(opened, "run-1", T1, stated(Severity.LOW, "E1")),
                     null, "head-1").state();
             state = decide(writer, state, true, T1);
@@ -240,7 +240,7 @@ class DecisionCoverageTest {
             RegisterState replayed = RegisterReplay.replay("arch", events, opened.blobs());
             assertThat(replayed).isEqualTo(state);
             assertThat(only(replayed).status()).isEqualTo(FindingStatus.DISMISSED);
-            ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+            ChainReport report = RegisterVerifier.verify("arch", "shop", opened.events().readAll(), opened.blobs(),
                     opened.state());
             assertThat(report.intact()).as(report.problems().toString()).isTrue();
         }
@@ -250,10 +250,10 @@ class DecisionCoverageTest {
     @Test
     void anAcceptanceInTheLog_namesItsReviewDateAndItsEvidence_andReplaysToTheSameState() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "architecture");
+            writer.created("wf-1", "architecture", "shop");
             RegisterState state = writer.applied(empty, report(opened, "run-1", T1, stated(Severity.HIGH, "320 LOC")),
                     null, "head-1").state();
             Finding after = Disposition.accept(only(state), "known", "operator", T2, T3);
@@ -269,7 +269,7 @@ class DecisionCoverageTest {
             assertThat(accepted.text("severity")).isEqualTo("HIGH");
             assertThat(only(state).disposition().until()).isEqualTo(T3);
             assertThat(RegisterReplay.replay("arch", events, opened.blobs())).isEqualTo(state);
-            ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+            ChainReport report = RegisterVerifier.verify("arch", "shop", opened.events().readAll(), opened.blobs(),
                     opened.state());
             assertThat(report.intact()).as(report.problems().toString()).isTrue();
         }
@@ -278,7 +278,7 @@ class DecisionCoverageTest {
     @Test
     void aReportIsNotApplied_withTheRuleOfAnEarlierVersion() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterWriter writer = new RegisterWriter(new RegisterLog(opened, () -> T1), opened.blobs());
 
             assertThatThrownBy(() -> writer.applied(empty, report("run-1", T1), null, null, "head-1",
@@ -301,7 +301,7 @@ class DecisionCoverageTest {
     private static InMemoryRegisterStore earlierRegister() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
         String text = new String(resource("events.jsonl"), StandardCharsets.UTF_8);
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             for (String line : text.split("\n")) {
                 opened.events().append(line.getBytes(StandardCharsets.UTF_8));
                 for (var fields = RegisterEvent.parse(line.getBytes(StandardCharsets.UTF_8)).fields().fields();
@@ -321,8 +321,8 @@ class DecisionCoverageTest {
     @Test
     void aRegisterOfAnEarlierVersion_verifies_andFoldsToTheBytesItRecorded() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.open("arch")) {
-            ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
+            ChainReport report = RegisterVerifier.verify("arch", null, opened.events().readAll(), opened.blobs(),
                     opened.state());
 
             assertThat(report.intact()).as(report.problems().toString()).isTrue();
@@ -343,7 +343,7 @@ class DecisionCoverageTest {
     @Test
     void theNextReportOnARegisterOfAnEarlierVersion_reopensWhatWasDecidedOnALowerSeverity() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T3);
             RegisterState before = RegisterReplay.replay("arch", log.read(), opened.blobs());
 
@@ -363,7 +363,7 @@ class DecisionCoverageTest {
                     "report.applied", "register.requires", "report.applied");
             assertThat(new String(StateJson.write(applied.state()), StandardCharsets.UTF_8))
                     .contains("\"severity\":\"LOW\",\"until\":null}");
-            ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+            ChainReport report = RegisterVerifier.verify("arch", null, opened.events().readAll(), opened.blobs(),
                     opened.state());
             assertThat(report.intact()).as(report.problems().toString()).isTrue();
             assertThat(RegisterReplay.replay("arch", log.read(), opened.blobs())).isEqualTo(applied.state());
@@ -377,7 +377,7 @@ class DecisionCoverageTest {
     @Test
     void aDecisionOnARegisterOfAnEarlierVersion_isRecordedWithTheStateItsLineReplaysTo() {
         InMemoryRegisterStore store = earlierRegister();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T3);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
             RegisterState state = RegisterReplay.replay("arch", log.read(), opened.blobs());
@@ -404,7 +404,7 @@ class DecisionCoverageTest {
             assertThat(new String(StateJson.write(state), StandardCharsets.UTF_8))
                     .as("the acceptance of the earlier version was made on MEDIUM")
                     .contains("\"kind\":\"ACCEPTED_RISK\",\"note\":\"known\",\"severity\":\"MEDIUM\"");
-            ChainReport report = RegisterVerifier.verify("arch", opened.events().readAll(), opened.blobs(),
+            ChainReport report = RegisterVerifier.verify("arch", null, opened.events().readAll(), opened.blobs(),
                     opened.state());
             assertThat(report.intact()).as(report.problems().toString()).isTrue();
             assertThat(RegisterReplay.replay("arch", log.read(), opened.blobs())).isEqualTo(state);
@@ -476,7 +476,7 @@ class DecisionCoverageTest {
     @Test
     void aReportAppliedWithASettingNobodyKnows_isRefused_likeAnUnknownEvent() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, () -> T1);
             new RegisterWriter(log, opened.blobs()).applied(empty, report(opened, "run-1", T1,
                     stated(Severity.LOW, "E1")), null, "head-1");
@@ -497,7 +497,7 @@ class DecisionCoverageTest {
     @Test
     void aRegisterThatRequiresWhatThisVersionDoesNotKnow_isRefused_andTheKnownRequirementIsFolded() {
         InMemoryRegisterStore store = new InMemoryRegisterStore();
-        try (RegisterStore.Opened opened = store.open("arch")) {
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
             assertThat(RegisterReplay.replay("arch", List.of(line(0, "register.requires",
                     "\"feature\":\"decision_severity\"")), opened.blobs()).namesDecidedSeverity()).isTrue();
             assertThatThrownBy(() -> RegisterReplay.replay("arch", List.of(line(0, "register.requires",

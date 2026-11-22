@@ -9,10 +9,13 @@ measure, with `--workspace` at the project.
 
 ```
 traceworks images build examples/mutation-testing
-traceworks run examples/mutation-testing --workspace ~/src/my-project \
+traceworks run examples/mutation-testing --workspace ~/src/my-project --project my-project \
     --input modules=core,service --input classes='com.example.*'
 traceworks findings mutation-testing
 ```
+
+`--project my-project` names what the run works on, in your word: the register `mutation-testing` is kept per
+project, so the findings and decisions of two projects stay apart. A run without a project is refused.
 
 A run without `modules` or `classes` stops in its first step, before anything is copied or fetched, and says what to
 pass.
@@ -30,7 +33,7 @@ pass.
 **How Traceworks runs it on itself,** from the root of its repository:
 
 ```
-traceworks run examples/mutation-testing \
+traceworks run examples/mutation-testing --project traceworks \
     --input modules=traceworks-cli,traceworks-adapters,traceworks-core --input classes='traceworks.*'
 ```
 

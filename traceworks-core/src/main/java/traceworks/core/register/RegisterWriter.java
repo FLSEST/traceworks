@@ -25,11 +25,15 @@ public final class RegisterWriter {
         this.blobs = blobs;
     }
 
-    /** The first line of a register: which workflow feeds it, in which category. */
-    public void created(String workflowId, String category) {
+    /**
+     * The first line of a register: which workflow feeds it, in which category, and which project it is of. The
+     * project in the log is what tells the register of one project from a copy of another's folder.
+     */
+    public void created(String workflowId, String category, String project) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("workflow_id", workflowId);
         fields.put("category", category);
+        fields.put("project", project);
         log.append(RegisterEvents.CREATED, fields);
     }
 

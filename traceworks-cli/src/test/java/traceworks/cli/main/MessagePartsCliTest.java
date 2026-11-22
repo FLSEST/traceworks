@@ -115,7 +115,8 @@ class MessagePartsCliTest {
         workflow.putArray("blocks").add(shell("report", "cat '" + report + "'"));
         Path folder = Files.createDirectories(temp.resolve(key));
         Files.writeString(folder.resolve("workflow.json"), JSON.writeValueAsString(workflow));
-        String ran = exec(null, "run", folder.toString(), "--allow-host-execution", "--no-input", "--quiet");
+        String ran = exec(null, "run", folder.toString(), "--project", "shop", "--allow-host-execution", "--no-input",
+                "--quiet");
         assertThat(ran).as(ran).contains("register " + key);
     }
 

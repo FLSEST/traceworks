@@ -11,8 +11,10 @@ import traceworks.core.model.StepResult;
 import traceworks.core.model.StepStatus;
 import traceworks.core.model.TriggerSource;
 import traceworks.core.model.WorkflowDefinition;
+import traceworks.core.port.CalledPackage;
 import traceworks.core.port.RunEvent.Checkpoint;
 import traceworks.core.port.RunEvent.ChildRunEvent;
+import traceworks.core.port.RunEvent.PackageCalled;
 import traceworks.core.port.RunEvent.RunFinished;
 import traceworks.core.port.RunEvent.RunParked;
 import traceworks.core.port.RunEvent.RunStatusChanged;
@@ -81,7 +83,8 @@ import java.util.concurrent.CancellationException;
  * {@link RunControl}, and its resolver is the one the parent's resolver gives for it
  * ({@link traceworks.core.port.WorkflowResolver#forChild}); its {@link RunAdmission} refuses a
  * {@code ./images/<name>} when it comes from another package than the run's. Its events go into the parent's sink,
- * each wrapped as a {@link ChildRunEvent} with the child's run id; a failed write there stops the parent too. A child
+ * each wrapped as a {@link ChildRunEvent} with the child's run id; a failed write there stops the parent too. The
+ * first of them names the child's package when that is another than the run's ({@link PackageCalled}). A child
  * reports no checkpoints: it is resumed with its parent's step.
  *
  * <p>A run and its child runs share one {@link OutputBudget} of {@link RunOptions#outputBudgetBytes}: the input and
@@ -278,17 +281,28 @@ public final class WorkflowEngine {
 
     /**
      * The child runs of a run with {@code parent} options: each one runs through this engine with its own run id, the
-     * parent's ports, working directory, control and secrets, and its events wrapped into the parent's sink. The
-     * admission of a child of another package than the run's refuses its {@code ./images/<name>}
-     * ({@link RunAdmission}). A child that ended by a thrown {@link EventLogException} stops the parent: the child's
-     * run is recorded as ended, then the failure is registered with the parent's guarded sink and thrown. (The
-     * alternative, throwing from {@code ended}, would skip recording the child's end.) The child shares the parent's
-     * output {@code budget}.
+     * parent's ports, working directory, control and secrets, and its events wrapped into the parent's sink. A
+     * child whose package is not what the run started with (another package, or the run's own with another digest)
+     * starts with a {@link PackageCalled} that names that package; the admission of a child of another package
+     * refuses its {@code ./images/<name>} ({@link RunAdmission}). A child that ended by a thrown
+     * {@link EventLogException} stops the parent: the child's run is recorded as ended, then the failure is
+     * registered with the parent's guarded sink and thrown. (The alternative, throwing from {@code ended}, would
+     * skip recording the child's end.) The child shares the parent's output {@code budget}.
      */
     private ChildRuns childRuns(RunOptions parent, GuardedEvents parentEvents, OutputBudget budget) {
         return (definition, inputs) -> {
             String childRunId = UUID.randomUUID().toString();
             boolean otherPackage = parent.workflowResolver().fromAnotherPackage(definition);
+            // Asked for every child: also the run's own package is named when what was loaded for this call is
+            // not what the run started with
+            CalledPackage called = parent.workflowResolver().calledPackage(definition);
+            if (called != null) {
+                // Before anything of the child: the run's package digest does not cover this package, so the
+                // record names it. A write that fails here throws, and the child does not start
+                parentEvents.emit(new ChildRunEvent(childRunId, new PackageCalled(definition.id(),
+                        definition.name(), called.reference(), called.directory(), called.digest(),
+                        called.workflowJson())));
+            }
             RunOptions child = parent.toBuilder()
                     .runId(childRunId)
                     .events(event -> parentEvents.emit(new ChildRunEvent(childRunId, event)))

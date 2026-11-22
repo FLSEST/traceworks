@@ -23,15 +23,39 @@ final class FileEventLog implements EventLog {
     private final Path file;
     private final BooleanSupplier holdsWriterLock;
     private final Runnable beforeAppend;
+    /**
+     * Whether a log is absent only when the file system says so: the log of a register. A log whose existence
+     * cannot be asked (its folder cannot be entered) then cannot be read, and is never a log without lines.
+     */
+    private final boolean absentOnlyWhenSaid;
     private FileOutputStream out;
 
     /**
      * @param beforeAppend runs before each line is appended: makes the blobs a line may name durable first
      */
     FileEventLog(Path file, BooleanSupplier holdsWriterLock, Runnable beforeAppend) {
+        this(file, holdsWriterLock, beforeAppend, false);
+    }
+
+    private FileEventLog(Path file, BooleanSupplier holdsWriterLock, Runnable beforeAppend,
+                         boolean absentOnlyWhenSaid) {
         this.file = file;
         this.holdsWriterLock = holdsWriterLock;
         this.beforeAppend = beforeAppend;
+        this.absentOnlyWhenSaid = absentOnlyWhenSaid;
+    }
+
+    /**
+     * The log of a register: it has no line only when the file system says that there is no such file. Read as
+     * empty where its folder cannot be entered, the log of a register that was fed and assigned would be that of
+     * one nobody had begun.
+     */
+    static FileEventLog ofRegister(Path file, BooleanSupplier holdsWriterLock, Runnable beforeAppend) {
+        return new FileEventLog(file, holdsWriterLock, beforeAppend, true);
+    }
+
+    private boolean absent() {
+        return absentOnlyWhenSaid ? Unreadable.absent(file) : !Files.exists(file);
     }
 
     @Override
@@ -70,7 +94,7 @@ final class FileEventLog implements EventLog {
     /** Reads up to the first line feed and no further. */
     @Override
     public synchronized java.util.Optional<byte[]> first() {
-        if (!Files.exists(file)) {
+        if (absent()) {
             return java.util.Optional.empty();
         }
         try (java.io.InputStream in = new java.io.BufferedInputStream(Files.newInputStream(file))) {
@@ -83,7 +107,7 @@ final class FileEventLog implements EventLog {
             }
             return java.util.Optional.empty();   // no complete line
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read " + file, e);
+            throw Unreadable.of(file, e);
         }
     }
 
@@ -130,11 +154,12 @@ final class FileEventLog implements EventLog {
         }
     }
 
+    /** The bytes of the log; none for a log that is absent. A log that cannot be read says why. */
     private byte[] readFile() {
         try {
-            return Files.exists(file) ? Files.readAllBytes(file) : new byte[0];
+            return absent() ? new byte[0] : Files.readAllBytes(file);
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read " + file, e);
+            throw Unreadable.of(file, e);
         }
     }
 

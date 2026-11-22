@@ -35,6 +35,15 @@ final class RunViewBuilder {
 
     /** Whether the start and every resume of the run say that they record a cut of an output; child runs share it. */
     private boolean recordsOutputCut;
+    /** Whether the start and every resume of the run say that they name the package a child run came from. */
+    private boolean recordsCalledPackages;
+    /** Whether the last start or resume of the run says that its manifest lists the packages it was resumed with. */
+    private boolean recordsResumedWith;
+    /**
+     * What each resume of the run went on with, in order: its package digest when it says that the package had
+     * changed, {@code null} for the package of the start.
+     */
+    private final List<String> wentOnWith = new ArrayList<>();
 
     static RunView build(List<RecordedEvent> events, boolean writerAlive) {
         if (events.isEmpty()) {
@@ -89,7 +98,9 @@ final class RunViewBuilder {
         StepAcc step = stepIndex == null ? null : run.steps.get(stepIndex);
         switch (e.type()) {
             case RecordTypes.RUN_STARTED -> {
-                recordsOutputCut = namesOutputCut(e);
+                recordsOutputCut = names(e, RunRecorder.OUTPUT_CUT);
+                recordsCalledPackages = names(e, RunRecorder.CALLED_PACKAGES);
+                recordsResumedWith = names(e, RunRecorder.RESUMED_WITH);
                 run.startedAt = e.at();
                 run.workflowId = text(e.fields().path("workflow"), "id");
                 run.workflowName = text(e.fields().path("workflow"), "name");
@@ -99,6 +110,11 @@ final class RunViewBuilder {
                 JsonNode dirty = e.fields().path("package").path("git_dirty");
                 run.packageDirty = dirty.isBoolean() ? dirty.asBoolean() : null;
                 run.actor = text(e.fields(), "actor");
+                if (e.parent() == null && text(e.fields(), "agent") != null) {
+                    // A start an agent asked for is something done to the run from outside its steps
+                    intervention(e, run.actor, text(e.fields(), "agent"), "started the run", null);
+                }
+                run.project = text(e.fields(), "project");
                 run.trigger = text(e.fields(), "trigger");
                 run.execution = text(e.fields(), "execution");
                 run.definition = e.blob("definition");
@@ -123,6 +139,10 @@ final class RunViewBuilder {
                 }
                 run.inputs = e.blob("inputs");
             }
+            case RecordTypes.RUN_PACKAGE -> run.packageCall = new PackageCall(text(e.fields().path("workflow"), "id"),
+                    text(e.fields().path("workflow"), "name"), text(e.fields(), "reference"),
+                    text(e.fields().path("package"), "dir"), text(e.fields().path("package"), "digest"),
+                    e.blob("definition"));
             case RecordTypes.STEP_STARTED -> {
                 StepAcc previous = run.steps.get(e.step());
                 StepAcc started = new StepAcc(e.step(), previous == null ? 1 : previous.attempts + 1);
@@ -253,14 +273,22 @@ final class RunViewBuilder {
             }
             case RecordTypes.RUN_RESUMED -> {
                 // A version that does not record a cut went on: from here the record cannot say
-                recordsOutputCut &= namesOutputCut(e);
+                recordsOutputCut &= names(e, RunRecorder.OUTPUT_CUT);
+                recordsCalledPackages &= names(e, RunRecorder.CALLED_PACKAGES);
+                // The version that resumed last is the one that writes the manifest, so its word counts alone;
+                // what a resume says of the package it went on with is read from a line of any version
+                recordsResumedWith = names(e, RunRecorder.RESUMED_WITH);
+                wentOnWith.add(e.fields().path("package_changed").asBoolean(false)
+                        ? String.valueOf(text(e.fields(), "package_digest")) : null);
                 run.resumedAfterPark = true;
-                intervention(e, text(e.fields(), "actor"), resumed(e.fields()), null);
+                intervention(e, text(e.fields(), "actor"), text(e.fields(), "agent"), resumed(e.fields()), null);
             }
-            case RecordTypes.RUN_PAUSE_REQUESTED -> intervention(e, text(e.fields(), "actor"), "requested a pause"
+            case RecordTypes.RUN_PAUSE_REQUESTED -> intervention(e, text(e.fields(), "actor"),
+                    text(e.fields(), "agent"), "requested a pause"
                     + (text(e.fields(), "request") == null ? "" : " (request " + text(e.fields(), "request") + ")"),
                     null);
-            case RecordTypes.RUN_CANCEL_REQUESTED -> intervention(e, text(e.fields(), "actor"), "requested a cancel"
+            case RecordTypes.RUN_CANCEL_REQUESTED -> intervention(e, text(e.fields(), "actor"),
+                    text(e.fields(), "agent"), "requested a cancel"
                     + (text(e.fields(), "request") == null ? "" : " (request " + text(e.fields(), "request") + ")"),
                     null);
             case RecordTypes.RUN_RECOVERED -> intervention(e, null, "a writer found a torn last line, set it aside"
@@ -416,7 +444,12 @@ final class RunViewBuilder {
     }
 
     private void intervention(RecordedEvent e, String actor, String description, BlobRef content) {
-        interventions.add(new RunView.Intervention(e.seq(), e.at(), e.type(), actor, description, content));
+        intervention(e, actor, null, description, content);
+    }
+
+    /** An intervention that {@code agent} made under {@code actor}; {@code null} for none. */
+    private void intervention(RecordedEvent e, String actor, String agent, String description, BlobRef content) {
+        interventions.add(new RunView.Intervention(e.seq(), e.at(), e.type(), actor, agent, description, content));
     }
 
     private void answered(RunAcc run, StepAcc step, RecordedEvent e) {
@@ -483,13 +516,41 @@ final class RunViewBuilder {
                 children, root ? eventCount : run.events, root ? head : null, root ? interventions : List.of(),
                 run.images, run.aiNetwork, run.aiHosts, status == RunStatus.PARKED ? run.parkedBy : null, run.seal,
                 run.modelChoices, run.register, root && run.ledgerStart, root ? run.runStarted : null,
-                recordsOutputCut);
+                recordsOutputCut, root ? run.project : null, recordsCalledPackages, root ? null : run.packageCall,
+                root ? resumedWith(run.packageDigest, wentOnWith) : List.of(), root && recordsResumedWith);
     }
 
-    /** Whether the writer of a {@code run.started} or {@code run.resumed} says that it records a cut of an output. */
-    private static boolean namesOutputCut(RecordedEvent e) {
+    /**
+     * The packages a run went on with, without repeats: it starts with the package of its start, and each resume
+     * goes on with its own package when that had changed, else with the start's. Of entries that follow each other
+     * and are equal one stays, and the start's own entry at the head is dropped. So how often a run was paused and
+     * resumed is no part of it: started with P1 and resumed twice with P2 is {@code [P2]}, and P1, P2, P1 is
+     * {@code [P2, P1]}.
+     *
+     * @param start      the package digest of {@code run.started}
+     * @param wentOnWith per resume, its package digest when it says the package had changed, else {@code null}
+     */
+    static List<String> resumedWith(String start, List<String> wentOnWith) {
+        String first = String.valueOf(start);
+        List<String> packages = new ArrayList<>();
+        String last = first;
+        for (String digest : wentOnWith) {
+            String now = digest == null ? first : digest;
+            if (!now.equals(last)) {
+                packages.add(now);
+                last = now;
+            }
+        }
+        return packages;
+    }
+
+    /**
+     * Whether the writer of a {@code run.started} or {@code run.resumed} says that it records {@code fact}: a name
+     * of {@link RunRecorder#RECORDS}.
+     */
+    private static boolean names(RecordedEvent e, String fact) {
         for (JsonNode name : e.fields().path("records")) {
-            if (RunRecorder.OUTPUT_CUT.equals(name.asText())) {
+            if (fact.equals(name.asText())) {
                 return true;
             }
         }
@@ -504,8 +565,8 @@ final class RunViewBuilder {
         List<RegisterHandover.File> files = new ArrayList<>();
         node.path("files").forEach(file -> files.add(new RegisterHandover.File(text(file, "name"),
                 text(file, "sha256"), file.path("size").asLong())));
-        return new RegisterHandover(text(node, "key"), node.path("seq").isInt() ? node.path("seq").asInt() : null,
-                text(node, "head"), files);
+        return new RegisterHandover(text(node, "key"), text(node, "project"),
+                node.path("seq").isInt() ? node.path("seq").asInt() : null, text(node, "head"), files);
     }
 
     /** The seal {@code run.started} records; {@code null} when it records none. */
@@ -547,6 +608,8 @@ final class RunViewBuilder {
     /** The fields the view reads without a fallback, by event type; every other field it reads may be absent. */
     private static final Map<String, List<Field>> REQUIRED = Map.ofEntries(
             Map.entry(RecordTypes.RUN_STARTED, List.of(new Field("workflow", Kind.OBJECT),
+                    new Field("package", Kind.OBJECT))),
+            Map.entry(RecordTypes.RUN_PACKAGE, List.of(new Field("workflow", Kind.OBJECT),
                     new Field("package", Kind.OBJECT))),
             Map.entry(RecordTypes.STEP_STARTED, List.of(int_("step"), int_("position"),
                     text_("block_type"))),
@@ -624,11 +687,14 @@ final class RunViewBuilder {
         RegisterHandover register;
         boolean ledgerStart;
         String runStarted;
+        /** The package a child run's workflow was loaded from; {@code null} without a {@code run.package} line. */
+        PackageCall packageCall;
         final List<ModelPick> modelChoices = new ArrayList<>();
         String packageCommit;
         final List<ImageFacts> images = new ArrayList<>();
         Boolean packageDirty;
         String actor;
+        String project;
         String trigger;
         String execution;
         BlobRef definition;

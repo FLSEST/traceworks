@@ -48,6 +48,13 @@ public final class InMemoryEventLog implements EventLog {
         }
     }
 
+    /** Removes the first {@code count} lines, as a person cutting the beginning of the log would. */
+    public synchronized void dropFirst(int count) {
+        for (int i = 0; i < count; i++) {
+            lines.removeFirst();
+        }
+    }
+
     /** Every append after the first {@code lines} lines fails, as a full disk would make it. */
     public synchronized void failAfter(int lines) {
         failAfter = lines;

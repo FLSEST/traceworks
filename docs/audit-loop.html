@@ -267,17 +267,19 @@ footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; 
 </section>
 
 <section id="register">
-  <h2>What the register keeps <small>registers/&lt;key&gt;/</small></h2>
+  <h2>What the register keeps <small>registers/&lt;key&gt;/&lt;project&gt;/</small></h2>
   <div class="cards">
     <div class="card"><h3>Findings, with their history</h3>
       <p>One identity per finding across runs: first seen, last seen, how often, resolved, reopened. A decision keeps who
-      made it, when, and why.</p></div>
+      made it, when, and why. A register is kept per audit and per project (<code>run --project</code>): two
+      repositories audited by one package keep their findings and decisions apart.</p></div>
     <div class="card"><h3>Items, with a digest</h3>
       <p>Per item the digest of what the last verdict saw, and the run it came from. The state is derived, never stored:
       <code>open</code>, <code>not judged</code>, <code>decided</code>, <code>clean</code>.</p></div>
     <div class="card"><h3>The chain</h3>
       <p>Each event names the hash of the one before it. A changed or missing event breaks the chain, and the register's
-      page says so. There is no database and no service.</p></div>
+      page says so. The ledger of the home, a git repository, holds the hash of the last event after every write, so a
+      cut end is found too. There is no database and no service.</p></div>
   </div>
   <pre><span class="c"># one line per register tells how far the audit is</span>
 $ traceworks findings

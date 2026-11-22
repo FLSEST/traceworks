@@ -77,10 +77,12 @@ final class RunPreparation {
      * @param secrets    where the values of secrets and AI credentials come from: asked at most once per start check,
      *                   and only for a run that declares a secret or uses an AI provider
      * @param hostRunner runs the commands of a host run that name no image, on the host
+     * @param ledger     the ledger, which says whether it anchors the register of an audit run
      */
     RunPreparation(ContainerSupport containers, PackageLoader packages, OperatorSettings settings, List<AiCli> aiClis,
-                   Supplier<SecretValues> secrets, CommandRunner hostRunner, Clock clock, RegisterStore registers) {
-        this.auditData = new AuditPlatformData(registers, clock);
+                   Supplier<SecretValues> secrets, CommandRunner hostRunner, Clock clock, RegisterStore registers,
+                   traceworks.core.port.Ledger ledger) {
+        this.auditData = new AuditPlatformData(registers, clock, ledger);
         this.containers = containers;
         this.packages = packages;
         this.settings = settings;
@@ -138,10 +140,13 @@ final class RunPreparation {
      *                  choices, so the check asks for the image and the credential of what was picked, not of every
      *                  option; {@code null} for none
      * @param what      what is refused, the start of the message: {@code The run is refused}
+     * @param project   the project of the run, whose register an audit workflow reads; {@code null} for none
+     * @param starts    whether a new run is checked, which needs a project when its workflow is an audit; a resume
+     *                  goes on with what its {@code run.started} names
      * @throws RunRefusedException naming every reason the check found
      */
     Prepared prepare(RunTarget target, ContainerRuntime runtime, LoadedPackage pkg, Path workspace,
-                     Map<String, ?> inputs, String what) {
+                     Map<String, ?> inputs, String what, String project, boolean starts) {
         Preflight preflight = new Preflight();
         WorkflowUses.Picks picks = WorkflowUses.Picks.of(pkg.definition(), inputs);
         List<ModelPick> modelPicks = checkModels(pkg.definition(), resolver(pkg), inputs, picks, preflight);
@@ -156,7 +161,7 @@ final class RunPreparation {
                 preflight.refuse(e.getMessage());
             }
         }
-        AuditPlatformData.Read register = auditData.platformData(pkg, preflight);
+        AuditPlatformData.Read register = auditData.platformData(pkg, project, starts, preflight);
         Map<String, String> platformData = register.placeholders();
         SecretSource values = new SecretSource(secrets);
         Map<String, String> runSecrets = Secrets.check(pkg.definition(), resolver(pkg), values, preflight);
@@ -614,7 +619,8 @@ final class RunPreparation {
                 folder == null ? () -> null : folder::problem);
     }
 
-    private WorkflowResolver resolver(LoadedPackage pkg) {
+    /** Finds the child workflows of a run of {@code pkg}: by path from its directory, by id on the package path. */
+    WorkflowResolver resolver(LoadedPackage pkg) {
         return new PackageWorkflowResolver(pkg, settings.packagePath(), packages);
     }
 }

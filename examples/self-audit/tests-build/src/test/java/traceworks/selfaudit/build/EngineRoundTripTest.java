@@ -124,7 +124,7 @@ class EngineRoundTripTest {
         // the check before a run refuses (absolute-home-path) wherever they lie below a home directory
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
-        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--workspace", work.toString(),
+        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--project", "shop", "--workspace", work.toString(),
                         "--home", home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"},
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8),
                 env, temp, null, RuntimeSource.NONE);

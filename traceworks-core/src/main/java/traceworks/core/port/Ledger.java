@@ -91,24 +91,91 @@ public interface Ledger {
     void acknowledge(String runId, byte[] line);
 
     /**
+     * The name the check of the whole home lists a register under, and under which a problem of it is acknowledged
+     * like one of a run: it has the form of a run id. No two registers share a name. A key and a project may both
+     * hold dots, so the name says how long the key is: {@code anchors.<length of the key>.<key>.<project>}. The
+     * anchors an earlier version wrote under a key alone are listed as {@code registers.<key>}, as they always
+     * were.
+     *
+     * <p>The name is the name of a file too (the acknowledgements of a register lie in {@code acks/<name>.jsonl}),
+     * and a key and a project may have 128 characters each. A name of more than {@value #REGISTER_NAME_MAX}
+     * characters is therefore written {@code anchors.sha256.<SHA-256 of key/project>}: no key is {@code sha256}
+     * where the other form has a number, and no key or project holds a {@code /}, so it is still the name of one
+     * register. The sentence of each problem names the key and the project.
+     *
+     * @param project the project the register is of; {@code null} for the register from before registers had
+     *                projects, and for the anchors an earlier version wrote of it
+     */
+    static String registerName(String key, String project) {
+        if (project == null) {
+            return "registers." + key;
+        }
+        String name = "anchors." + key.length() + "." + key + "." + project;
+        return name.length() <= REGISTER_NAME_MAX ? name : REGISTER_NAME_HASHED + BlobStore.sha256Hex((key + "/"
+                + project).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /**
+     * How the name of a register begins that does not say its key and its project, because they are too long for
+     * a file name; the SHA-256 of {@code <key>/<project>} follows.
+     */
+    String REGISTER_NAME_HASHED = "anchors.sha256.";
+
+    /** How long the name of a register may be and still be written out: with what a file name adds, it fits one. */
+    int REGISTER_NAME_MAX = 200;
+
+    /**
+     * A register the ledger holds anchors of.
+     *
+     * @param project the project the register is of; {@code null} for anchors an earlier version wrote under the
+     *                key alone, before registers had projects
+     */
+    record Anchored(String key, String project) {
+    }
+
+    /**
+     * Every register the ledger holds anchors of, so that a register whose folder is gone is still named here.
+     *
+     * @throws IllegalStateException with the reason when the ledger cannot be read
+     */
+    default List<Anchored> anchoredRegisters() {
+        return List.of();
+    }
+
+    /**
      * Anchors the head of a register after a write: the ledger keeps every anchor it was given, in order. The same
      * anchor as the last one is not added again.
      *
-     * @param key  the register's key
-     * @param seq  the sequence number of the last line of the register's log
-     * @param head the SHA-256 of that line
+     * @param key     the register's key
+     * @param project the project the register is of
+     * @param anchor  the sequence number and the SHA-256 of the last line of the register's log, and what was
+     *                written since the anchor before it ({@link RegisterAnchor#written}), which the ledger keeps
+     *                with them; an anchor that does not say it is not one this version writes
      * @throws IllegalStateException with the reason when the ledger cannot take it
      */
-    default void anchorRegister(String key, int seq, String head) {
+    default void anchorRegister(String key, String project, RegisterAnchor anchor) {
         throw new IllegalStateException("this ledger anchors no register");
     }
 
     /**
-     * Every anchor of the register {@code key}, oldest first; empty for a register the ledger has not anchored.
+     * Every anchor of the register of {@code key} and {@code project}, oldest first; empty for a register the ledger
+     * has not anchored.
      *
      * @throws IllegalStateException with the reason when the ledger cannot be read
      */
-    default List<RegisterAnchor> registerAnchors(String key) {
+    default List<RegisterAnchor> registerAnchors(String key, String project) {
+        return List.of();
+    }
+
+    /**
+     * The anchors an earlier version wrote of the register {@code key}, from before registers had projects, oldest
+     * first; empty when the ledger holds none. This version reads them and adds none: they stay what the ledger
+     * said of that register's log, and are the beginning of its anchors once it is assigned to a project
+     * (docs/registers.md, "The anchor").
+     *
+     * @throws IllegalStateException with the reason when the ledger cannot be read
+     */
+    default List<RegisterAnchor> earlierRegisterAnchors(String key) {
         return List.of();
     }
 }

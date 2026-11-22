@@ -37,8 +37,25 @@ final class FileBlobStore implements BlobStore {
     /** The blobs stored since the last {@link #sync}, whose content and name may not be durable yet. */
     private final Set<Path> unsynced = new LinkedHashSet<>();
 
+    /**
+     * Whether a blob is absent only when the file system says so, or a link stands in its place: the blobs of a
+     * register. A blob whose existence cannot be asked (its folder cannot be entered) then cannot be read, and is
+     * never a blob that was deleted.
+     */
+    private final boolean absentOnlyWhenSaid;
+
     FileBlobStore(Path dir) {
+        this(dir, false);
+    }
+
+    private FileBlobStore(Path dir, boolean absentOnlyWhenSaid) {
         this.dir = dir;
+        this.absentOnlyWhenSaid = absentOnlyWhenSaid;
+    }
+
+    /** The blobs of a register: one is absent only when the file system says that it is. */
+    static FileBlobStore ofRegister(Path dir) {
+        return new FileBlobStore(dir, true);
     }
 
     @Override
@@ -136,13 +153,25 @@ final class FileBlobStore implements BlobStore {
             Path file = dir.resolve(sha256);
             if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)
                     || !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                if (absentOnlyWhenSaid && !Files.isSymbolicLink(dir) && !Files.isSymbolicLink(file)
+                        && !Unreadable.absent(dir, LinkOption.NOFOLLOW_LINKS)
+                        && !Unreadable.absent(file, LinkOption.NOFOLLOW_LINKS)) {
+                    // Something that is no blob lies in its place
+                    throw new IOException(Files.isDirectory(file, LinkOption.NOFOLLOW_LINKS)
+                            ? "a folder is in its place" : "no regular file is in its place");
+                }
                 return Optional.empty();
             }
             try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                 return Optional.of(in.readAllBytes());
             }
+        } catch (UncheckedIOException e) {
+            // What the file system cannot say of the blob or of its folder
+            throw new UncheckedIOException("Cannot read blob " + sha256 + ": " + Unreadable.cause(dir.resolve(sha256),
+                    e.getCause()) + " (" + dir.resolve(sha256) + ")", e.getCause());
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot read blob " + sha256, e);
+            throw new UncheckedIOException("Cannot read blob " + sha256 + ": " + Unreadable.cause(dir.resolve(sha256),
+                    e) + " (" + dir.resolve(sha256) + ")", e);
         }
     }
 }

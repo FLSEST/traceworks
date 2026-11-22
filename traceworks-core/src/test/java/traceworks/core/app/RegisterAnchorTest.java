@@ -35,11 +35,12 @@ class RegisterAnchorTest {
     }
 
     private List<byte[]> lines() {
-        try (RegisterStore.Opened opened = fixture.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fixture.registers.open("hello", AppFixture.PROJECT)) {
             return opened.events().readAll();
         }
     }
 
+    /** The head of the log as an anchor names it; what the anchor says was written is RegisterAnchorWrittenTest's. */
     private RegisterAnchor headOfTheLog() {
         List<byte[]> lines = lines();
         return new RegisterAnchor(lines.size() - 1, EventChain.sha256Hex(lines.getLast()));
@@ -49,12 +50,14 @@ class RegisterAnchorTest {
     void aRun_anchorsTheHeadOfItsRegister_andSoDoesADecision() {
         fixture.services().start(request(AUDIT), null, null);
 
-        assertThat(fixture.ledger.registerAnchors("hello")).last().isEqualTo(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT)).last().usingRecursiveComparison().ignoringFields("written")
+                .isEqualTo(headOfTheLog());
 
         Findings findings = fixture.services().findings();
         findings.dismiss("hello", findings.state("hello").findings().getFirst().id(), "not ours");
 
-        assertThat(fixture.ledger.registerAnchors("hello")).hasSize(2).last().isEqualTo(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT)).hasSize(2).last().usingRecursiveComparison().ignoringFields("written")
+                .isEqualTo(headOfTheLog());
         assertThat(findings.unanchored()).isEmpty();
         Findings.Verified verified = findings.verified("hello");
         assertThat(verified.report().problems()).isEmpty();
@@ -104,7 +107,7 @@ class RegisterAnchorTest {
     @Test
     void aRegisterWithoutAnAnchor_verifies_saysSo_andTheNextWriteAnchorsIt() {
         fixture.services().start(request(AUDIT), null, null);
-        fixture.ledger.forgetAnchors("hello");
+        fixture.ledger.forgetAnchors("hello", AppFixture.PROJECT);
         Findings findings = fixture.services().findings();
 
         Findings.Verified verified = findings.verified("hello");
@@ -114,7 +117,8 @@ class RegisterAnchorTest {
 
         findings.dismiss("hello", findings.state("hello").findings().getFirst().id(), "not ours");
 
-        assertThat(fixture.ledger.registerAnchors("hello")).containsExactly(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT))
+                .usingRecursiveFieldByFieldElementComparatorIgnoringFields("written").containsExactly(headOfTheLog());
         assertThat(findings.verified("hello").anchor()).startsWith("ok");
     }
 
@@ -149,7 +153,8 @@ class RegisterAnchorTest {
         fixture.ledger.failAnchors(null);
         findings.render("hello");
         assertThat(findings.unanchored()).isEmpty();
-        assertThat(fixture.ledger.registerAnchors("hello")).last().isEqualTo(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT)).last().usingRecursiveComparison().ignoringFields("written")
+                .isEqualTo(headOfTheLog());
         assertThat(findings.verified("hello").anchor()).startsWith("ok (");
     }
 
@@ -161,7 +166,8 @@ class RegisterAnchorTest {
         RunResult result = fixture.services().start(request(AUDIT), null, null);
 
         assertThat(result.register().applied()).isFalse();
-        assertThat(fixture.ledger.registerAnchors("hello")).containsExactly(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT))
+                .usingRecursiveFieldByFieldElementComparatorIgnoringFields("written").containsExactly(headOfTheLog());
     }
 
     @Test
@@ -174,7 +180,8 @@ class RegisterAnchorTest {
         fixture.services().start(request(AUDIT), null, null);
 
         assertThat(new String(lines().getLast(), StandardCharsets.UTF_8)).contains(RegisterEvents.HOOK_RAN);
-        assertThat(fixture.ledger.registerAnchors("hello")).hasSize(2).last().isEqualTo(headOfTheLog());
+        assertThat(fixture.ledger.registerAnchors("hello", AppFixture.PROJECT)).hasSize(2).last().usingRecursiveComparison().ignoringFields("written")
+                .isEqualTo(headOfTheLog());
     }
 
     /** A ledger that cannot be read is not a register that holds: verify fails and names the reason. */
@@ -223,7 +230,7 @@ class RegisterAnchorTest {
             }
 
             @Override
-            public List<RegisterAnchor> registerAnchors(String key) {
+            public List<RegisterAnchor> registerAnchors(String key, String project) {
                 throw new IllegalStateException("git show failed: no git");
             }
         });
@@ -277,17 +284,17 @@ class RegisterAnchorTest {
             }
 
             @Override
-            public void anchorRegister(String key, int seq, String head) {
-                fixture.ledger.anchorRegister(key, seq, head);
+            public void anchorRegister(String key, String project, RegisterAnchor anchor) {
+                fixture.ledger.anchorRegister(key, project, anchor);
             }
 
             @Override
-            public List<RegisterAnchor> registerAnchors(String key) {
+            public List<RegisterAnchor> registerAnchors(String key, String project) {
                 if (!done[0]) {
                     done[0] = true;
                     writer.run();
                 }
-                return fixture.ledger.registerAnchors(key);
+                return fixture.ledger.registerAnchors(key, project);
             }
         };
     }

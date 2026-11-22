@@ -5,6 +5,7 @@ import traceworks.adapters.ai.PiCli;
 import traceworks.adapters.config.CredentialsFile;
 import traceworks.adapters.config.HomeLayout;
 import traceworks.adapters.config.OperatorConfigFile;
+import traceworks.adapters.config.Projects;
 import traceworks.adapters.container.RunDirectoryGuard;
 import traceworks.adapters.host.HostCommandRunner;
 import traceworks.adapters.host.HostHookRunner;
@@ -160,10 +161,33 @@ final class Wiring {
         }
     }
 
+    /** What a server of {@code home} may be started to change ({@code mcp.allow} in its {@code traceworks.json}). */
+    static Set<String> mcpAllowed(Path home) {
+        try {
+            return OperatorConfigFile.mcpAllowed(home);
+        } catch (IllegalArgumentException e) {
+            throw new RunRefusedException(Message.of(e));
+        }
+    }
+
     /** Where {@code home} keeps what Traceworks writes, as its {@code traceworks.json} sets it. */
     private static HomeLayout layout(Path home) {
         try {
             return HomeLayout.read(home);
+        } catch (IllegalArgumentException e) {
+            throw new RunRefusedException(Message.of(e));
+        }
+    }
+
+    /**
+     * The projects {@code home} declares ({@code projects} in its {@code traceworks.json}), for the one place of the
+     * command line that resolves a project ({@link ProjectOption}).
+     *
+     * @throws RunRefusedException for a {@code traceworks.json} that is refused, as every command that reads it does
+     */
+    static Projects projects(Path home) {
+        try {
+            return Projects.read(home);
         } catch (IllegalArgumentException e) {
             throw new RunRefusedException(Message.of(e));
         }

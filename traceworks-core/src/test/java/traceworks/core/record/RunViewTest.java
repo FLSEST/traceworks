@@ -888,7 +888,7 @@ class RunViewTest {
     @Test
     void aRecordSaysWhetherItNamesOutputCuts_inItsStart_andInEveryResume() {
         assertThat(fx.events().getFirst().fields().path("records")).extracting(n -> n.asText())
-                .containsExactly("output_cut", "answer_agent");
+                .containsExactly("output_cut", "answer_agent", "called_packages", "resumed_with", "request_agent");
         assertThat(view(false).recordsOutputCut()).isTrue();
 
         List<RecordedEvent> ofAnEarlierVersion = fx.events();
@@ -899,6 +899,139 @@ class RunViewTest {
         assertThat(view(false).recordsOutputCut()).as("resumed by this version").isTrue();
         fx.recorder.record("run.resumed", Map.of("actor", "operator@box"));
         assertThat(view(false).recordsOutputCut()).as("resumed by an earlier version").isFalse();
+    }
+
+    /**
+     * Whether a record names the package of a child of another package: its start says so ({@code records}), and
+     * so does every resume. In a record of an earlier version, or one an earlier version resumed, a child run
+     * without the line may still have come from another package.
+     */
+    @Test
+    void aRecordSaysWhetherItNamesCalledPackages_inItsStart_andInEveryResume() {
+        assertThat(view(false).recordsCalledPackages()).isTrue();
+
+        List<RecordedEvent> ofAnEarlierVersion = fx.events();
+        ((com.fasterxml.jackson.databind.node.ArrayNode) ofAnEarlierVersion.getFirst().fields().path("records"))
+                .remove(2);
+        assertThat(ofAnEarlierVersion.getFirst().fields().path("records")).extracting(n -> n.asText())
+                .containsExactly("output_cut", "answer_agent", "resumed_with", "request_agent");
+        assertThat(RunView.of(ofAnEarlierVersion, false).recordsCalledPackages()).isFalse();
+        assertThat(RunView.of(ofAnEarlierVersion, false).recordsOutputCut()).as("each fact by its own name").isTrue();
+
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "records", RunRecorder.RECORDS));
+        assertThat(view(false).recordsCalledPackages()).as("resumed by this version").isTrue();
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "records", List.of("output_cut")));
+        assertThat(view(false).recordsCalledPackages()).as("resumed by an earlier version").isFalse();
+    }
+
+    /**
+     * The packages a run was resumed with are read from its {@code run.resumed} lines, of any version; whether its
+     * manifest lists them is what the last start or resume says, since that version wrote the manifest.
+     */
+    @Test
+    void theViewNamesThePackagesARunWasResumedWith_andWhetherItsManifestListsThem() {
+        assertThat(view(false).resumedWith()).isEmpty();
+        assertThat(view(false).recordsResumedWith()).isTrue();
+
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "package_changed", false, "package_digest",
+                "a".repeat(64), "records", List.of("output_cut")));
+        assertThat(view(false).resumedWith()).as("resumed with the package it started with").isEmpty();
+        assertThat(view(false).recordsResumedWith()).as("a version that lists none resumed last").isFalse();
+
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "package_changed", true, "package_digest",
+                "b".repeat(64), "records", List.of("output_cut")));
+        assertThat(view(false).resumedWith()).as("read from a line of any version").containsExactly("b".repeat(64));
+        assertThat(view(false).recordsResumedWith()).isFalse();
+
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "package_changed", true, "package_digest",
+                "c".repeat(64), "records", RunRecorder.RECORDS));
+        assertThat(view(false).resumedWith()).containsExactly("b".repeat(64), "c".repeat(64));
+        assertThat(view(false).recordsResumedWith()).as("the version that resumed last lists them").isTrue();
+    }
+
+    /**
+     * Reproduced 2026-11-21: a run resumed twice with the same changed package recorded that package twice, and so
+     * differed from a run resumed once with it. The list is the packages the run went on with, without repeats:
+     * it starts with the package of the start, every resume goes on with its own package when that changed, else
+     * with the start's; of equal entries that follow each other one stays, and the start's own at the head is
+     * dropped.
+     */
+    @Test
+    void resumedWith_isThePackagesTheRunWentOnWith_andHowOftenItWasResumedIsNoPartOfIt() {
+        String start = view(false).packageDigest();
+        String other = "b".repeat(64);
+        assertThat(start).isNotNull().isNotEqualTo(other);
+
+        resumed(true, other);
+        resumed(true, other);
+        assertThat(view(false).resumedWith()).as("twice with the same package").containsExactly(other);
+
+        resumed(false, start);
+        resumed(false, start);
+        assertThat(view(false).resumedWith()).as("back with the package of the start").containsExactly(other, start);
+
+        resumed(true, other);
+        assertThat(view(false).resumedWith()).containsExactly(other, start, other);
+    }
+
+    @Test
+    void resumedWith_isEmpty_forARunThatOnlyWentOnWithThePackageOfItsStart() {
+        String start = view(false).packageDigest();
+
+        resumed(false, start);
+        resumed(false, start);
+        resumed(false, start);
+
+        assertThat(view(false).resumedWith()).isEmpty();
+    }
+
+    private void resumed(boolean changed, String digest) {
+        fx.recorder.record("run.resumed", Map.of("actor", "operator@box", "package_changed", changed, "package_digest",
+                digest, "records", RunRecorder.RECORDS));
+    }
+
+    /**
+     * A child run of another package starts with {@code run.package}: its view names the package, and the run's
+     * view lists the calls of its children at every depth, in log order. A child without the line has none.
+     */
+    @Test
+    void theViewOfAChildRun_namesThePackageItsWorkflowWasLoadedFrom() {
+        byte[] json = "{\"id\":\"wf-lib\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        fx.emit(new StepStarted(0, "call", "sub-workflow", 0, false),
+                new ChildRunEvent("child-1", new PackageCalled("wf-lib", "Lib", "../lib", "/pkgs/lib", "digest-lib",
+                        json)),
+                new ChildRunEvent("child-1", new StepStarted(0, "on", "sub-workflow", 0, false)),
+                new ChildRunEvent("child-1", new ChildRunEvent("grand-1", new PackageCalled("wf-deep", "Deep",
+                        "wf-deep", "/pkgs/deep", "digest-deep", json))),
+                new ChildRunEvent("child-1", new ChildRunEvent("grand-1",
+                        new RunFinished(RunStatus.COMPLETED, Map.of(), null))),
+                new ChildRunEvent("child-1", new RunFinished(RunStatus.COMPLETED, Map.of(), null)),
+                new ChildRunEvent("child-2", new RunFinished(RunStatus.COMPLETED, Map.of(), null)));
+
+        RunView view = view(false);
+        RunView child = view.children().get("child-1");
+
+        assertThat(view.packageCall()).as("the run itself").isNull();
+        assertThat(child.packageCall()).isEqualTo(new PackageCall("wf-lib", "Lib", "../lib", "/pkgs/lib",
+                "digest-lib", fx.events().get(2).blob("definition")));
+        assertThat(fx.blobs.get(child.packageCall().definition().sha256()).orElseThrow()).isEqualTo(json);
+        assertThat(view.steps().getFirst().childRunIds()).as("the line is the child's first: the step knows the run")
+                .containsExactly("child-1", "child-2");
+        assertThat(view.children().get("child-2").packageCall()).as("a child of the run's own package").isNull();
+        assertThat(view.packageCalls()).extracting(PackageCall::workflowId).containsExactly("wf-lib", "wf-deep");
+        assertThat(child.packageCalls()).extracting(PackageCall::packageDigest).containsExactly("digest-deep");
+    }
+
+    /** A {@code run.package} without its package is a damaged record, as a {@code run.started} without one is. */
+    @Test
+    void aPackageLineWithoutItsPackage_isADamagedRecord() {
+        fx.emit(new ChildRunEvent("child-1", new PackageCalled("wf-lib", "Lib", "../lib", "/pkgs/lib",
+                "digest-lib", new byte[0])));
+        List<RecordedEvent> events = fx.events();
+        events.getLast().fields().remove("package");
+
+        assertThatThrownBy(() -> RunView.of(events, false)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("run.package").hasMessageContaining("lacks the object field package");
     }
 
     /** The denied connections of a run count those of earlier attempts and of child runs too. */

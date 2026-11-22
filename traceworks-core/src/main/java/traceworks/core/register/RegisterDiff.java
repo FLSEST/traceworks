@@ -31,11 +31,16 @@ public final class RegisterDiff {
                 || c.kind() == Change.Kind.REOPENED || c.kind() == Change.Kind.REVIEW_DUE);
     }
 
-    public static byte[] of(String key, String workflowId, String runId, boolean reportValid, RegisterState before,
-                            RegisterState after, List<Change> changes) {
+    /**
+     * @param project the project the register is of: one audit workflow feeds a register per project, and a hook
+     *                that files a finding somewhere must know which project it is about
+     */
+    public static byte[] of(String key, String project, String workflowId, String runId, boolean reportValid,
+                            RegisterState before, RegisterState after, List<Change> changes) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", FORMAT);
         root.put("register", key);
+        root.put("project", project);
         root.put("workflow_id", workflowId);
         root.put("run_id", runId);
         root.put("report_valid", reportValid);

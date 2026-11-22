@@ -84,8 +84,9 @@ public final class RunControl {
 
     /**
      * Answers the human input the run waits for, with a value per field: a single input takes the value of its
-     * {@code variable_name}, a form one value per field (an absent field is empty). While a child run runs, its human
-     * input is the one answered.
+     * {@code variable_name}, a form one value per field (an absent field is empty). Each value must hold against the
+     * rules of its field ({@link ApprovalRequest#inputAnswer}); the step receives it in the field's format. While a
+     * child run runs, its human input is the one answered.
      *
      * <p>A caller holding this control answers in-process; a later version also takes answers as events in the run's
      * log.
@@ -93,8 +94,8 @@ public final class RunControl {
      * @param values the value per field, keyed by the field's variable name; values are passed on as text
      * @throws IllegalStateException    if no human input is waiting: the run waits for nothing, for an approval, or the
      *                                  input was answered, timed out or cancelled meanwhile
-     * @throws IllegalArgumentException if {@code values} names a field the input does not have, or a single input gets
-     *                                  no value; the input stays open
+     * @throws IllegalArgumentException if {@code values} names a field the input does not have, a single input gets
+     *                                  no value, or the rules of a field refuse its value; the input stays open
      */
     public void answerInput(Map<String, Object> values) {
         Objects.requireNonNull(values, "values");

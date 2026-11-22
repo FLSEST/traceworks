@@ -160,7 +160,7 @@ class ModelChoicePackageTest {
     }
 
     private String run(Map<String, String> credentials, List<String> input) {
-        List<String> args = new ArrayList<>(List.of("run", PACKAGE.toString(), "--home",
+        List<String> args = new ArrayList<>(List.of("run", PACKAGE.toString(), "--project", "shop", "--home",
                 temp.resolve("home-run").toString(), "--workspace", temp.toString(), "--no-input"));
         args.addAll(input);
         return cli(credentials, RuntimeSource.of(new NoImages()), args.toArray(String[]::new));

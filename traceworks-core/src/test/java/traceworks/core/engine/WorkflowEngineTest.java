@@ -11,10 +11,12 @@ import traceworks.core.model.StepResult;
 import traceworks.core.model.StepStatus;
 import traceworks.core.model.TriggerSource;
 import traceworks.core.model.WorkflowDefinition;
+import traceworks.core.port.CalledPackage;
 import traceworks.core.port.RunEvent;
 import traceworks.core.port.RunEvent.ChildRunEvent;
 import traceworks.core.port.RunEvent.GateReported;
 import traceworks.core.port.RunEvent.OutputRecorded;
+import traceworks.core.port.RunEvent.PackageCalled;
 import traceworks.core.port.RunEvent.RunFinished;
 import traceworks.core.port.RunEvent.RunStatusChanged;
 import traceworks.core.port.RunEvent.StepFinished;
@@ -845,6 +847,93 @@ class WorkflowEngineTest {
         assertThat(events.of(StepStarted.class)).as("only the parent's own step is unwrapped")
                 .containsExactly(new StepStarted(0, null, "starter", 0, false));
         assertThat(events.last()).isInstanceOf(RunFinished.class);
+    }
+
+    /** A resolver that knows one child, of another package than the run's, as it was called. */
+    private static WorkflowResolver ofAnotherPackage(WorkflowDefinition child, CalledPackage called) {
+        return new WorkflowResolver() {
+            @Override
+            public WorkflowDefinition resolve(String workflowRef) {
+                return child;
+            }
+
+            @Override
+            public boolean fromAnotherPackage(WorkflowDefinition workflow) {
+                return true;
+            }
+
+            @Override
+            public CalledPackage calledPackage(WorkflowDefinition workflow) {
+                return workflow == child ? called : null;
+            }
+        };
+    }
+
+    private BlockExecutor startsTheChild(WorkflowDefinition child) {
+        BlockExecutor starter = executorOf("starter");
+        when(starter.execute(any(BlockDefinition.class), any(ExecutionContext.class))).thenAnswer(inv -> {
+            ExecutionContext parent = inv.getArgument(1);
+            parent.getChildRuns().run(child, Map.of());
+            return completed(parent.nextStepIndex(), "started");
+        });
+        onlyBlock("starter", Map.of());
+        return starter;
+    }
+
+    /**
+     * The run's start names the run's own package only. A child of another package starts with the event that
+     * names that package, before any step of it; a child the resolver names no package for has none.
+     */
+    @Test
+    void run_childRunOfAnotherPackage_startsWithTheEventThatNamesItsPackage() {
+        BlockExecutor probe = executorOf("probe");
+        when(probe.execute(any(BlockDefinition.class), any(ExecutionContext.class))).thenAnswer(inv ->
+                completed(((ExecutionContext) inv.getArgument(1)).nextStepIndex(), "ok"));
+        WorkflowDefinition child = childWorkflow();
+        byte[] json = {'{', '}'};
+        BlockExecutor starter = startsTheChild(child);
+
+        newEngine(List.of(starter, probe)).run(workflow(), null, options()
+                .workflowResolver(ofAnotherPackage(child, new CalledPackage("../child", "/pkgs/child", "digest-c",
+                        json))).build());
+
+        List<RunEvent> wrapped = events.of(ChildRunEvent.class).stream().map(ChildRunEvent::event).toList();
+        assertThat(wrapped).first().isEqualTo(new PackageCalled("child-wf", "Child", "../child", "/pkgs/child",
+                "digest-c", json));
+        assertThat(wrapped.get(1)).isEqualTo(new StepStarted(0, "look", "probe", 0, false));
+        assertThat(wrapped).filteredOn(PackageCalled.class::isInstance).hasSize(1);
+        assertThat(events.of(ChildRunEvent.class)).extracting(ChildRunEvent::runId).as("all of the one child run")
+                .containsOnly(events.of(ChildRunEvent.class).getFirst().runId());
+
+        events.clear();
+        newEngine(List.of(starter, probe)).run(workflow(), null, options()
+                .workflowResolver(ofAnotherPackage(child, null)).build());
+        assertThat(events.of(ChildRunEvent.class)).extracting(ChildRunEvent::event).first()
+                .as("a resolver that knows no packages").isEqualTo(new StepStarted(0, "look", "probe", 0, false));
+    }
+
+    /** The package of a child that cannot be recorded is a child that does not start: the run fails closed. */
+    @Test
+    void run_childRunWhosePackageCannotBeRecorded_doesNotStart() {
+        BlockExecutor probe = executorOf("probe");
+        WorkflowDefinition child = childWorkflow();
+        BlockExecutor starter = startsTheChild(child);
+        RecordingRunEvents sink = new RecordingRunEvents();
+
+        RunOutcome outcome = newEngine(List.of(starter, probe)).run(workflow(), null, options()
+                .events(event -> {
+                    if (event instanceof ChildRunEvent(String id, PackageCalled called)) {
+                        throw new IllegalStateException("disk full");
+                    }
+                    sink.emit(event);
+                })
+                .workflowResolver(ofAnotherPackage(child, new CalledPackage("../child", "/pkgs/child", "digest-c",
+                        new byte[0]))).build());
+
+        assertThat(outcome.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(outcome.error()).isEqualTo("event log write failed: IllegalStateException: disk full");
+        assertThat(sink.of(ChildRunEvent.class)).as("nothing of the child").isEmpty();
+        verify(probe, never()).execute(any(BlockDefinition.class), any(ExecutionContext.class));
     }
 
     /** A child resolves its own references through what the parent's resolver gives it for that child. */

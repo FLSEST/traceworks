@@ -47,6 +47,12 @@ import java.util.function.Consumer;
  */
 public final class RunRecorder implements RunEvents {
 
+    /**
+     * In {@code run.started}, beside {@code ledger_start}: the entries of the ledger for this run, the start entry
+     * and the manifest, name the project of the run and who started it. {@code traceworks verify} then requires
+     * both of every such run; a record without the field is one of a version whose entries named neither.
+     */
+    public static final String LEDGER_STARTER = "ledger_starter";
     /** In {@link #RECORDS}: the end of a command names a cut of its output ({@code output_cut}). */
     public static final String OUTPUT_CUT = "output_cut";
     /**
@@ -55,11 +61,34 @@ public final class RunRecorder implements RunEvents {
      */
     public static final String ANSWER_AGENT = "answer_agent";
     /**
+     * In {@link #RECORDS}: a child run whose workflow was not loaded from the package the run started with
+     * (another package, or the run's own with another digest) starts with a line that names that package and its
+     * digest ({@code run.package}). A child run without the line, in a record that says this, is of the run's own
+     * package as it started, which the package digest of {@code run.started} covers.
+     */
+    public static final String CALLED_PACKAGES = "called_packages";
+    /**
+     * In {@link #RECORDS}: the manifest of the run lists the packages it went on with after its start, without
+     * repeats ({@code resumed_with}, {@link RunView#resumedWith}: from the {@code package_digest} of the
+     * {@code run.resumed} lines that say {@code package_changed}). The version that wrote the last {@code run.started}
+     * or {@code run.resumed} of a record wrote its manifest: where that line says this, a manifest without the
+     * field says that no resume went on with another package.
+     */
+    public static final String RESUMED_WITH = "resumed_with";
+    /**
+     * In {@link #RECORDS}: a start, a resume, a pause and a cancel name the agent that asked for them under the
+     * actor ({@code agent} in {@code run.started}, {@code run.resumed}, {@code run.pause_requested} and
+     * {@code run.cancel_requested}). Such a line without the field, in a record that says this, was claimed by no
+     * agent.
+     */
+    public static final String REQUEST_AGENT = "request_agent";
+    /**
      * What this version writes into a record only when it happened, so that its absence says that it did not:
      * {@code records} in {@code run.started} and {@code run.resumed}. A record of a version that did not write
      * a fact has no such name, and its silence about that fact means nothing.
      */
-    public static final List<String> RECORDS = List.of(OUTPUT_CUT, ANSWER_AGENT);
+    public static final List<String> RECORDS =
+            List.of(OUTPUT_CUT, ANSWER_AGENT, CALLED_PACKAGES, RESUMED_WITH, REQUEST_AGENT);
 
     private static final DateTimeFormatter AT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
@@ -187,6 +216,14 @@ public final class RunRecorder implements RunEvents {
         }
         f.put("trigger", start.trigger() == null ? null : start.trigger().name());
         f.put("actor", start.actor());
+        if (start.agent() != null) {
+            // Only when an agent said so: a record that names request_agent means "none" by leaving it out
+            f.put("agent", start.agent());
+        }
+        if (start.project() != null) {
+            // Only for a run that names a project: every other run.started keeps its bytes
+            f.put("project", start.project());
+        }
         f.put("version", start.version());
         f.put("execution", start.execution());
         if (start.containerRuntime() == null) {
@@ -242,6 +279,9 @@ public final class RunRecorder implements RunEvents {
             // Only for an audit workflow: every other run.started keeps its bytes
             ObjectNode register = f.putObject("register");
             register.put("key", start.register().key());
+            if (start.register().project() != null) {
+                register.put("project", start.register().project());
+            }
             register.put("seq", start.register().seq());
             register.put("head", start.register().head());
             ArrayNode files = register.putArray("files");
@@ -259,6 +299,9 @@ public final class RunRecorder implements RunEvents {
         }
         if (ledgerStart) {
             f.put("ledger_start", true);
+            // The start entry and the manifest of this run name its project and who started it: an entry without
+            // them is none of this run, whatever a version before this marker wrote
+            f.put(LEDGER_STARTER, true);
         }
         append(RecordTypes.RUN_STARTED, runId, null, f);
     }

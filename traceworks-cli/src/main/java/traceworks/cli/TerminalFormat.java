@@ -66,7 +66,10 @@ public final class TerminalFormat {
         String step = e.step() == null ? "" : "step " + e.step() + "  ";
         return switch (e.type()) {
             case "run.started" -> seq("run started: ", text(f.path("workflow").path("name")), " (run ",
-                    TerminalText.word(shortId(e.run())), ") by ", text(f.path("actor")), where(f, false));
+                    TerminalText.word(shortId(e.run())), ") by ", text(f.path("actor")), through(f), where(f, false));
+            case "run.package" -> seq("workflow ", text(f.path("workflow").path("name")), " (",
+                    text(f.path("workflow").path("id")), ") of the package ", text(f.path("package").path("dir")),
+                    ", digest ", text(f.path("package").path("digest")));
             case "step.started" -> seq(step, name(f), " [", word(f.path("block_type")),
                     f.path("mode").asText().equals("ai") ? ", ai" : "", "] started");
             case "step.waiting" -> step + (f.path("waiting").asBoolean() ? "waiting for an answer" : "going on");
@@ -95,11 +98,11 @@ public final class TerminalFormat {
                     ? "run parked: paused" + (f.path("step").isInt()
                     ? " inside the loop of step " + f.path("step").asInt() : " before the next step")
                     : seq("run parked at step ", word(f.path("step")), ": waiting for an answer");
-            case "run.resumed" -> seq("run resumed by ", text(f.path("actor")), where(f, true),
+            case "run.resumed" -> seq("run resumed by ", text(f.path("actor")), through(f), where(f, true),
                     f.path("rerun_step").isNumber() ? ", running step " + f.path("rerun_step").asInt() + " again"
                             : "");
-            case "run.cancel_requested" -> seq("cancel requested", by(f));
-            case "run.pause_requested" -> seq("pause requested", by(f),
+            case "run.cancel_requested" -> seq("cancel requested", by(f), through(f));
+            case "run.pause_requested" -> seq("pause requested", by(f), through(f),
                     ": the run parks after the step or the loop item in flight");
             case "run.recovered" -> "record recovered: a torn last line was set aside";
             case "run.finished" -> seq("run finished: ", word(f.path("status")),
@@ -160,7 +163,8 @@ public final class TerminalFormat {
     }
 
     /**
-     * The agent an answer names beside its actor, in the register's words; nothing for an answer without one. The
+     * The agent an answer, a start, a resume, a pause or a cancel names beside its actor, in the register's words;
+     * nothing for a line without one. The
      * name is bounded where it is given; a record that was edited can hold any, so it is made safe here.
      */
     private static Object through(JsonNode f) {

@@ -165,7 +165,7 @@ public final class RunServices {
         RunOutputs outputs = new RunOutputs(ledger, new Registers(registers, clock, hookRunner, settings.hooks(), ledger,
                 settings.decisionOnHigherSeverity()));
         RunPreparation preparation = new RunPreparation(containers, packages, settings, clis, secrets, hostRunner, clock,
-                registers);
+                registers, ledger);
         this.active = new ActiveRuns(actor, ids);
         Objects.requireNonNull(seals, "seals");
         this.sealAdmission = new SealAdmission(seals.store(), settings.seals(), settings.packagePath(), packages,
@@ -203,6 +203,7 @@ public final class RunServices {
      *                             entry
      */
     public RunResult start(StartRequest request, Consumer<RecordedEvent> listener, QuestionAsker asker) {
+        RunRecords.agent(request.agent());   // a name that is none refuses the run before anything is loaded
         return starting.start(load(request.packageLocation()), request, listener, asker);
     }
 
@@ -246,6 +247,7 @@ public final class RunServices {
     public RunResult resume(ResumeRequest request, Consumer<RecordedEvent> listener, QuestionAsker asker,
                             Consumer<String> warnings) {
         Objects.requireNonNull(warnings, "warnings");
+        RunRecords.agent(request.agent());
         try (StoredRun run = store.open(request.runRef())) {
             return resuming.resume(run, request, listener, asker, warnings);
         }
@@ -271,8 +273,21 @@ public final class RunServices {
      * @throws RunRefusedException if the run has finished
      */
     public RunResult cancel(String runRef) {
+        return cancel(runRef, null);
+    }
+
+    /**
+     * Cancels a run as {@link #cancel(String)} does, for an agent that asks under the actor:
+     * {@code run.cancel_requested} names it beside the actor ({@code agent}).
+     *
+     * @param agent the name the agent gave itself ({@link traceworks.core.register.DecisionAgent}); {@code null}
+     *              for none
+     * @throws RunRefusedException if the run has finished, or the name is none: nothing is asked of the run
+     */
+    public RunResult cancel(String runRef, String agent) {
+        String by = RunRecords.agent(agent);
         try (StoredRun run = store.open(runRef)) {
-            return cancelling.cancel(run);
+            return cancelling.cancel(run, by);
         }
     }
 
@@ -289,8 +304,21 @@ public final class RunServices {
      * @throws RequestQueuedException if the run's process has not recorded the request within the wait
      */
     public RunResult pause(String runRef) {
+        return pause(runRef, null);
+    }
+
+    /**
+     * Asks a run to pause as {@link #pause(String)} does, for an agent that asks under the actor:
+     * {@code run.pause_requested} names it beside the actor ({@code agent}).
+     *
+     * @param agent the name the agent gave itself ({@link traceworks.core.register.DecisionAgent}); {@code null}
+     *              for none
+     * @throws RunRefusedException if the name is none, besides what {@link #pause(String)} refuses
+     */
+    public RunResult pause(String runRef, String agent) {
+        String by = RunRecords.agent(agent);
         try (StoredRun run = store.open(runRef)) {
-            return pausing.pause(run);
+            return pausing.pause(run, by);
         }
     }
 
@@ -312,7 +340,8 @@ public final class RunServices {
 
     /**
      * The ledger against the runs folder of this home: the runs the ledger saw start that it never saw end, each with
-     * what its folder says, and the runs the ledger names whose folder is gone ({@link LedgerReport}). Read-only.
+     * what its folder says, and the runs the ledger names whose folder is gone; and every register of the home,
+     * against itself and against its anchors ({@link LedgerReport}). Read-only.
      *
      * @throws RecordDamagedException if the ledger exists and cannot be read
      */
@@ -323,10 +352,10 @@ public final class RunServices {
     /**
      * {@link #ledgerReport()}, with or without verifying the record of every ended run against its end entry.
      *
-     * @param records whether to read and verify every record and every blob of the home
+     * @param records whether to read and verify every record, every register and every blob of the home
      */
     public LedgerReport ledgerReport(boolean records) {
-        return LedgerReport.of(ledger, store, clock, records);
+        return LedgerReport.of(ledger, store, registers, clock, records);
     }
 
     /**
@@ -342,7 +371,7 @@ public final class RunServices {
      * @throws RecordDamagedException if the ledger cannot be read
      */
     public LedgerReport acknowledge(String runRef, String note) {
-        return LedgerReport.acknowledge(ledger, store, clock, actor, runRef, note);
+        return LedgerReport.acknowledge(ledger, store, registers, clock, actor, runRef, note);
     }
 
     /**
@@ -380,6 +409,16 @@ public final class RunServices {
     public Optional<byte[]> content(String runRef, String sha256) {
         try (StoredRun run = store.open(runRef)) {
             return run.blobs().getForDisplay(sha256);
+        }
+    }
+
+    /**
+     * Where a run lives: the folder of its record for the file store, for a front end that hands the files of a run
+     * out as they are (the MCP server's resources).
+     */
+    public String location(String runRef) {
+        try (StoredRun run = store.open(runRef)) {
+            return run.location();
         }
     }
 
@@ -542,6 +581,18 @@ public final class RunServices {
      */
     public void interruptActiveRuns() {
         active.interruptAll();
+    }
+
+    /**
+     * Leaves interrupted every run this process executes that waits for an answer in the process, at a question
+     * that does not park it; for a process that nobody can answer through any more and that must end. A pause would
+     * wait behind the question. Each such run is {@code INTERRUPTED} as after {@link #interruptActiveRuns}, and
+     * {@link #resume} asks its question again. The other runs go on.
+     *
+     * @return the ids of the runs it interrupted
+     */
+    public List<String> interruptRunsAtAQuestion() {
+        return active.interruptWaiting();
     }
 
     /**

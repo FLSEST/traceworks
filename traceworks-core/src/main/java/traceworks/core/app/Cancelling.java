@@ -62,15 +62,20 @@ final class Cancelling {
      *                             removed
      */
     RunResult cancel(StoredRun run) {
+        return cancel(run, null);
+    }
+
+    /** As {@link #cancel(StoredRun)}, for a cancel {@code agent} asked for under the actor; {@code null} for none. */
+    RunResult cancel(StoredRun run, String agent) {
         if (run.tryLockWriter()) {
-            return cancelStopped(run, ids.newRequestId());
+            return cancelStopped(run, ids.newRequestId(), agent);
         }
-        return cancelRunning(run);
+        return cancelRunning(run, agent);
     }
 
     /** No process runs the run, and this one holds its writer lock: the run is finished here. */
-    private RunResult cancelStopped(StoredRun run, String requestId) {
-        return finish(run, requestId, List.of());
+    private RunResult cancelStopped(StoredRun run, String requestId, String agent) {
+        return finish(run, requestId, List.of(), agent);
     }
 
     /**
@@ -87,6 +92,15 @@ final class Cancelling {
      *                             removed
      */
     RunResult finish(StoredRun run, String requestId, List<InboxRequest> taken) {
+        return finish(run, requestId, taken, null);
+    }
+
+    /**
+     * As {@link #finish(StoredRun, String, List)}.
+     *
+     * @param agent the agent that asked for this process's own cancel under the actor; {@code null} for none
+     */
+    private RunResult finish(StoredRun run, String requestId, List<InboxRequest> taken, String agent) {
         // Before anything is recorded: nobody runs the run now, and a container its dead process left can still write
         List<RecordedEvent> events = RunRecords.events(run);
         removeLeftovers.accept(run.runId(), events);
@@ -101,18 +115,24 @@ final class Cancelling {
         requests.addAll(run.inbox().take());
         List<InboxRequest> cancels = RunRecords.refuseStale(recorder, requests);
         if (requestId != null && notRecorded(events, requestId)) {
-            recorder.record(RecordTypes.RUN_CANCEL_REQUESTED, RunRecords.cancelRequested(actor, requestId));
+            recorder.record(RecordTypes.RUN_CANCEL_REQUESTED, RunRecords.cancelRequested(actor, requestId, agent));
         }
         for (InboxRequest cancel : cancels) {
             if (!cancel.id().equals(requestId) && notRecorded(events, cancel.id())) {
                 recorder.record(RecordTypes.RUN_CANCEL_REQUESTED,
-                        RunRecords.cancelRequested(cancel.actor(), cancel.id()));
+                        RunRecords.cancelRequested(cancel.actor(), cancel.id(), inboxAgent(cancel)));
             }
         }
         recorder.emit(new RunFinished(RunStatus.CANCELLED, gate, null));
         RunResult.KeptCheckout kept = checkouts.afterRun(run.runId(), events, RunStatus.CANCELLED);
         RegisterOutcome register = outputs.finish(run, null);
         return new RunResult(run.runId(), run.location(), RunStatus.CANCELLED, gate, null, List.of(), kept, register);
+    }
+
+    /** The agent a cancel from the inbox names, when it is a name; the inbox is a folder, so anything else is none. */
+    private static String inboxAgent(InboxRequest cancel) {
+        return cancel.agent() == null || traceworks.core.register.DecisionAgent.problem(cancel.agent()) != null
+                ? null : cancel.agent().strip();
     }
 
     /** Whether the record holds no {@code run.cancel_requested} of this request yet. */
@@ -143,10 +163,10 @@ final class Cancelling {
      * @throws RunRefusedException    if the record refuses this cancel
      * @throws RequestQueuedException if the run's process has not recorded the cancel within the wait
      */
-    private RunResult cancelRunning(StoredRun run) {
+    private RunResult cancelRunning(StoredRun run, String agent) {
         String requestId = ids.newRequestId();
         run.inbox().post(new InboxRequest(requestId, "cancel", null, null, null, null, Map.of(), null, actor,
-                clock.now()));
+                clock.now(), agent));
         long deadline = System.nanoTime() + wait.toNanos();
         boolean seen = false;
         while (System.nanoTime() < deadline) {
@@ -169,7 +189,7 @@ final class Cancelling {
                     return finishedResult(run, now);
                 }
                 refuseIfRefused(run, now, requestId);
-                return cancelStopped(run, requestId);
+                return cancelStopped(run, requestId, agent);
             }
         }
         if (!seen) {

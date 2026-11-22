@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 528" role="img" aria-labelledby="t d">
+  <title id="t">An example workflow in which the block types work together: list, judge, branch, approve and report</title>
+  <desc id="d">Five steps from left to right; the marks of a command and of a model carry a small box, since both run in a container, and the mark of a model is orange. list, a shell step, writes the release notes to /scratch/notes.txt. judge, a foreach in AI mode, takes one item per line of that file and asks a model one question per note; its output is a line per note, OK or CONCERN with the line the model relies on. branch, a conditional in shell mode, reads the verdicts as the variable VERDICTS and checks for a CONCERN: no gives No concerns., yes lists the concerns. publish-ok, an approval, asks a person whether to publish, with the output of branch in the question; without a terminal the run parks there and goes on after the answer. report, a shell step, reads the verdicts as VERDICTS again, counts them and prints the gate. A dashed line below the boxes carries the verdicts from judge to report. Below, what each step leaves in the record, from step.command to gate.reported and run.finished. At the foot: every command and every model call runs in a container, only the wait for a person does not.</desc>
+  <style>
+    text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, sans-serif; font-size: 12px; fill: #33454d; }
+    .mono, .t { font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+    .title { font-size: 19px; font-weight: 700; } .sub { font-size: 13px; } .h { font-size: 16px; font-weight: 650; }
+    .t { font-size: 14px; font-weight: 600; } .mk { font-weight: 500; } .foot { font-size: 13.5px; } .lead { font-weight: 700; }
+    .label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+    .ink { fill: #14232b; } .soft { fill: #33454d; } .muted { fill: #5a6a72; } .warm { fill: #a9570f; }
+    .card { fill: #ffffff; stroke: #14232b; stroke-width: 1.8; } .tint { fill: #e6f1f0; stroke: #14232b; stroke-width: 1.6; }
+    .chip { fill: #eef2f3; stroke: #c5d0d3; stroke-width: 1; } .band { fill: #eef2f3; }
+    .mark { fill: #ffffff; stroke: #14232b; stroke-width: 1.3; } .mark.ai { stroke: #c96f1e; } .opt { stroke-dasharray: 4 3; }
+    .ct { fill: none; stroke: #14232b; stroke-width: 1.3; } .ci { fill: #14232b; } .ct.ai { stroke: #c96f1e; } .ci.ai { fill: #c96f1e; }
+    .line { fill: none; stroke: #14232b; stroke-width: 1.8; } .dline { fill: none; stroke: #5a6a72; stroke-width: 1.6; stroke-dasharray: 5 5; }
+    @media (prefers-color-scheme: dark) {
+      text, .soft { fill: #b9c7cc; } .ink { fill: #e9f0f1; } .muted { fill: #94a5ac; } .warm { fill: #f2a655; }
+      .card { fill: #152126; stroke: #b9c7cc; } .tint { fill: #1b2d33; stroke: #b9c7cc; }
+      .chip { fill: #1f2e34; stroke: #3a4d54; } .band { fill: #1b272c; }
+      .mark { fill: #152126; stroke: #b9c7cc; } .mark.ai { stroke: #f2a655; }
+      .ct { stroke: #e9f0f1; } .ci { fill: #e9f0f1; } .ct.ai { stroke: #f2a655; } .ci.ai { fill: #f2a655; }
+      .line { stroke: #e9f0f1; } .dline { stroke: #94a5ac; }
+    }
+  </style>
+  <text class="title ink" x="20" y="34">An example workflow: list, judge, branch, approve and report</text>
+  <text class="sub muted" x="20" y="54">A script finds the items, a model judges each one, a script decides from the verdicts, a person approves, and a script writes the report and its gate.</text>
+
+  <!-- the five steps -->
+  <rect class="card" x="20" y="104" width="166" height="176" rx="10"/>
+  <text class="t ink" x="34" y="130">list</text>
+  <text class="mono muted" x="34" y="148">shell</text>
+  <text x="34" y="170">finds the notes and</text>
+  <text x="34" y="186">writes one per line to</text>
+  <text class="mono ink" x="34" y="202">/scratch/notes.txt</text>
+  <rect class="mark" x="34" y="246" width="92" height="22" rx="11"/>
+  <rect class="ct" x="43" y="252" width="10" height="10" rx="2"/><rect class="ci" x="46" y="255" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="87" y="261.5" text-anchor="middle">command</text>
+  <rect class="card" x="216" y="104" width="232" height="176" rx="10"/>
+  <text class="t ink" x="230" y="130">judge</text>
+  <text class="mono muted" x="230" y="148">foreach · execution_mode ai</text>
+  <text x="230" y="170">one question to a model per note</text>
+  <rect class="chip" x="230" y="180" width="204" height="22" rx="6"/>
+  <text class="mono ink" x="238" y="195.5">01-export.md</text>
+  <text class="mono ink" x="426" y="195.5" text-anchor="end">OK</text>
+  <rect class="chip" x="230" y="206" width="204" height="22" rx="6"/>
+  <text class="mono ink" x="238" y="221.5">02-legacy.md</text>
+  <text class="mono ink" x="426" y="221.5" text-anchor="end">CONCERN …</text>
+  <rect class="mark" x="230" y="246" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="256" y="261.5" text-anchor="middle">holds</text>
+  <rect class="mark ai" x="288" y="246" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="297" y="252" width="10" height="10" rx="2"/><rect class="ci ai" x="300" y="255" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="330" y="261.5" text-anchor="middle">model</text>
+  <rect class="card" x="478" y="104" width="172" height="176" rx="10"/>
+  <text class="t ink" x="492" y="130">branch</text>
+  <text class="mono muted" x="492" y="148">conditional · shell</text>
+  <text x="492" y="170">any CONCERN in</text>
+  <text class="mono ink" x="492" y="186">$VERDICTS?</text>
+  <text x="492" y="202">no: No concerns.</text>
+  <text x="492" y="218">yes: lists them</text>
+  <rect class="mark" x="492" y="246" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="518" y="261.5" text-anchor="middle">holds</text>
+  <rect class="mark" x="550" y="246" width="92" height="22" rx="11"/>
+  <rect class="ct" x="559" y="252" width="10" height="10" rx="2"/><rect class="ci" x="562" y="255" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="603" y="261.5" text-anchor="middle">command</text>
+  <rect class="card" x="680" y="104" width="172" height="176" rx="10"/>
+  <text class="t ink" x="694" y="130">publish-ok</text>
+  <text class="mono muted" x="694" y="148">approval</text>
+  <text x="694" y="170">Publish the release?</text>
+  <text x="694" y="186">Yes or No</text>
+  <text x="694" y="202">without a terminal,</text>
+  <text x="694" y="218">the run parks here</text>
+  <rect class="mark" x="694" y="246" width="60" height="22" rx="11"/>
+  <text class="mk ink" x="724" y="261.5" text-anchor="middle">person</text>
+  <rect class="card" x="882" y="104" width="178" height="176" rx="10"/>
+  <text class="t ink" x="896" y="130">report</text>
+  <text class="mono muted" x="896" y="148">shell</text>
+  <text x="896" y="170">counts the verdicts</text>
+  <text x="896" y="186">and prints the gate:</text>
+  <text class="mono ink" x="896" y="202">gate_status: YELLOW</text>
+  <rect class="mark" x="896" y="246" width="92" height="22" rx="11"/>
+  <rect class="ct" x="905" y="252" width="10" height="10" rx="2"/><rect class="ci" x="908" y="255" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="949" y="261.5" text-anchor="middle">command</text>
+
+  <!-- the flow from step to step -->
+  <path class="line" d="M186 125H214"/>
+  <path class="ink" d="M216 125L205 119.5L205 130.5z"/>
+  <text x="201" y="94" text-anchor="middle">notes.txt</text>
+  <path class="line" d="M448 125H476"/>
+  <path class="ink" d="M478 125L467 119.5L467 130.5z"/>
+  <text x="463" y="94" text-anchor="middle">$VERDICTS</text>
+  <path class="line" d="M650 125H678"/>
+  <path class="ink" d="M680 125L669 119.5L669 130.5z"/>
+  <text x="665" y="94" text-anchor="middle">its output</text>
+  <path class="line" d="M852 125H880"/>
+  <path class="ink" d="M882 125L871 119.5L871 130.5z"/>
+  <text x="867" y="94" text-anchor="middle">Yes</text>
+  <path class="dline" d="M336 280V314H971V291"/>
+  <path class="muted" d="M971 280L976.5 291L965.5 291z"/>
+  <text x="653.5" y="306" text-anchor="middle">the verdicts again, as $VERDICTS in values: a model's text reaches a shell line only this way</text>
+
+  <!-- what each step leaves in the record -->
+  <text class="label muted" x="20" y="338">IN THE RECORD</text>
+  <rect class="chip" x="20" y="348" width="166" height="24" rx="6"/>
+  <text class="mono ink" x="30" y="364.5">step.command</text>
+  <rect class="chip" x="20" y="378" width="166" height="24" rx="6"/>
+  <text class="mono ink" x="30" y="394.5">step.output</text>
+  <rect class="chip" x="20" y="408" width="166" height="24" rx="6"/>
+  <text class="mono ink" x="30" y="424.5">step.files</text>
+  <rect class="chip" x="216" y="348" width="232" height="24" rx="6"/>
+  <text class="mono ink" x="226" y="364.5">foreach.item.started</text>
+  <rect class="chip" x="216" y="378" width="232" height="24" rx="6"/>
+  <text class="mono ink" x="226" y="394.5">ai.request … ai.response</text>
+  <rect class="chip" x="216" y="408" width="232" height="24" rx="6"/>
+  <text class="mono ink" x="226" y="424.5">foreach.item.finished</text>
+  <rect class="chip" x="478" y="348" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="488" y="364.5">step.command × 2</text>
+  <rect class="chip" x="478" y="378" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="488" y="394.5">step.output</text>
+  <rect class="chip" x="478" y="408" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="488" y="424.5">step.finished</text>
+  <rect class="chip" x="680" y="348" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="690" y="364.5">approval.requested</text>
+  <rect class="chip" x="680" y="378" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="690" y="394.5">run.parked, resumed</text>
+  <rect class="chip" x="680" y="408" width="172" height="24" rx="6"/>
+  <text class="mono ink" x="690" y="424.5">approval.answered</text>
+  <rect class="chip" x="882" y="348" width="178" height="24" rx="6"/>
+  <text class="mono ink" x="892" y="364.5">step.output</text>
+  <rect class="chip" x="882" y="378" width="178" height="24" rx="6"/>
+  <text class="mono ink" x="892" y="394.5">gate.reported</text>
+  <rect class="chip" x="882" y="408" width="178" height="24" rx="6"/>
+  <text class="mono ink" x="892" y="424.5">run.finished: YELLOW</text>
+
+  <!-- the foot -->
+  <rect class="band" x="20" y="454" width="1040" height="58" rx="12"/>
+  <rect class="ct" x="36" y="469" width="10" height="10" rx="2"/><rect class="ci" x="39" y="472" width="4" height="4" rx="0.5"/>
+  <text class="foot ink" x="54" y="479"><tspan class="lead">Runs in a container:</tspan><tspan dx="7">every command and every model call. Only the wait for a person does not.</tspan></text>
+  <text class="foot ink" x="36" y="498">docs/blocks.md holds the workflow as JSON.</text>
+</svg>

@@ -110,7 +110,7 @@ class ConsoleAskerTest {
         QuestionView form = new QuestionView(4, 1, "human-input", "b", new BlobRef("q", 6), List.of(), List.of(), null,
                 null, true, null, null,
                 List.of(Map.of("variable_name", "who", "label", "Who?" + " ".repeat(76) + FORGED,
-                        "options", List.of("a", "b" + " ".repeat(70) + FORGED))),
+                        "input_type", "select", "options", List.of("a", "b" + " ".repeat(70) + FORGED))),
                 false, false, null);
 
         assertThat(asker.ask(form)).contains("{\"who\":\"a\"}");
@@ -265,13 +265,56 @@ class ConsoleAskerTest {
         assertThat(shown()).contains("Who?", "Where?");
     }
 
+    /**
+     * A pattern the check cannot decide in time holds no value: the run would refuse it, so the console says why
+     * and asks again rather than hand on what nobody checked. A pattern given up once is not tried again in the
+     * process, so no later value passes it either.
+     */
     @Test
-    void aPatternThatCostsTooMuch_isGivenUpAtTheTimeLimit_andTheValueIsTakenAsItIs() throws Exception {
+    void aPatternThatCostsTooMuch_isGivenUpAtTheTimeLimit_andNoValuePassesIt() throws Exception {
         // A back reference keeps the JDK from remembering failed positions: the match time doubles with every letter
         String typed = "a".repeat(60);
-        type(typed + "\n");
+        type(typed + "\n123\n");
+        this.typed.close();
 
-        assertThat(asker.ask(input(null, "((a+)\\2?)+b|\\d+"))).contains(typed);
-        assertThat(shown()).contains("could not be checked against the pattern in time, so it is taken as it is");
+        assertThat(asker.ask(input(null, "((a+)\\2?)+b|\\d+"))).isEmpty();
+        assertThat(Unbroken.of(shown())).contains("could not be checked within 2 seconds", "is not tried again")
+                .doesNotContain("taken as it is");
+    }
+
+    private static QuestionView ofType(String inputType, List<String> options) {
+        return new QuestionView(4, 1, "human-input", "b", new BlobRef("q", 6), options, List.of(), inputType,
+                null, true, null, "n", null, false, false, null);
+    }
+
+    /** The console checks a value as the run checks every answer: its input type too, and asks again. */
+    @Test
+    void aValueOfTheWrongType_isAskedAgain_untilItIsOneTheRunTakes() throws Exception {
+        type("many\n42\n30.11.2026\n2026-11-30\nmaybe\nyes\n");
+
+        assertThat(asker.ask(ofType("number", List.of()))).contains("42");
+        assertThat(asker.ask(ofType("date", List.of()))).contains("2026-11-30");
+        assertThat(asker.ask(ofType("checkbox", List.of()))).contains("true");
+        assertThat(shown()).contains("'many' is not a number", "is not a date in the form YYYY-MM-DD",
+                "'maybe' is neither true nor false");
+    }
+
+    /** A select takes its options without regard to case, as the run does, and answers in the option's spelling. */
+    @Test
+    void aSelect_takesAnOptionInAnyCase_inItsSpelling() throws Exception {
+        type("Nightly\nBETA\n");
+
+        assertThat(asker.ask(ofType("select", List.of("stable", "beta")))).contains("beta");
+        assertThat(shown()).contains("one of: stable / beta", "not one of:");
+    }
+
+    /** A pattern that is no regular expression holds no value: nothing passes a guard nobody can read. */
+    @Test
+    void aBrokenPattern_takesNoValue() throws Exception {
+        type("a\n");
+        typed.close();
+
+        assertThat(asker.ask(input(null, "[a-"))).isEmpty();
+        assertThat(shown()).contains("validation_pattern is not a valid regular expression");
     }
 }

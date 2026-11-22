@@ -75,7 +75,7 @@ class RegistersTest {
     }
 
     private RegisterState state() {
-        try (RegisterStore.Opened opened = fixture.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fixture.registers.open("hello", AppFixture.PROJECT)) {
             return traceworks.core.register.RegisterReplay.replay("hello",
                     new traceworks.core.register.RegisterLog(opened, fixture.clock).read(),
                     opened.blobs());
@@ -83,7 +83,7 @@ class RegistersTest {
     }
 
     private List<RegisterEvent> events() {
-        try (RegisterStore.Opened opened = fixture.registers.open("hello")) {
+        try (RegisterStore.Opened opened = fixture.registers.open("hello", AppFixture.PROJECT)) {
             return new traceworks.core.register.RegisterLog(opened, fixture.clock).read();
         }
     }
@@ -341,7 +341,7 @@ class RegistersTest {
     @Test
     void aDamagedRegister_refusesTheRun_beforeItExists() {
         fixture.services().start(request(AUDIT), null, null);
-        try (RegisterStore.Opened opened = fixture.registers.openForWrite("hello")) {
+        try (RegisterStore.Opened opened = fixture.registers.openForWrite("hello", AppFixture.PROJECT)) {
             opened.events().append("{\"seq\":9,\"garbage\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
 
@@ -426,7 +426,7 @@ class RegistersTest {
         String id = state().findings().getFirst().id();
         String sha = events().get(2).text("findings_blob");
         Runnable change = () -> {
-            try (RegisterStore.Opened opened = fixture.registers.open("hello")) {
+            try (RegisterStore.Opened opened = fixture.registers.open("hello", AppFixture.PROJECT)) {
                 ((traceworks.core.testing.InMemoryBlobStore) opened.blobs()).putRaw(sha,
                         "[]".getBytes(java.nio.charset.StandardCharsets.UTF_8));
             }
@@ -509,7 +509,7 @@ class RegistersTest {
     void theRegistersPage_isWrittenAfterEveryReport_andAfterADecision() {
         fixture.services().start(request(AUDIT), null, null);
         String afterRun = new String(fixture.registers.viewFile("hello"), java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(afterRun).contains("<title>Register hello</title>", "<h2>OPEN (2)</h2>");
+        assertThat(afterRun).contains("<title>Register hello of shop</title>", "<h2>OPEN (2)</h2>");
 
         String id = state().findings().getFirst().id();
         fixture.services().findings().accept("hello", id, "fine", null);
@@ -572,9 +572,9 @@ class RegistersTest {
 
         assertThat(fixture.hooks.calls()).singleElement().satisfies(call -> {
             assertThat(call.argv()).containsExactly("/opt/hooks/todos.sh", "--x");
-            assertThat(call.payload()).contains("\"register\":\"hello\"", "\"new\":[", "A.java", "B.java",
-                    "\"report_valid\":true");
-            assertThat(call.workingDirectory()).isEqualTo("memory:hello");
+            assertThat(call.payload()).contains("\"register\":\"hello\"", "\"project\":\"shop\"", "\"new\":[",
+                    "A.java", "B.java", "\"report_valid\":true");
+            assertThat(call.workingDirectory()).isEqualTo("memory:hello/shop");
             assertThat(call.timeout()).isEqualTo(java.time.Duration.ofSeconds(7));
         });
         RegisterEvent ran = events().getLast();

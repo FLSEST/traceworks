@@ -84,6 +84,10 @@ public final class ShowCommand implements Command {
                 view.workflowId() == null ? "" : TerminalText.seq(" (", TerminalText.safe(view.workflowId()), ")"));
         out.println("Status    " + view.status());
         out.println("Actor     ", TerminalText.safe(view.actor()));
+        if (view.project() != null) {
+            // The operator's word for what the run worked on; a run that named none has no such line
+            out.println("Project   ", TerminalText.safe(view.project()));
+        }
         out.println("Started   " + time(view.startedAt()));
         if (view.finishedAt() != null) {
             out.println("Finished  " + time(view.finishedAt()));
@@ -93,6 +97,9 @@ public final class ShowCommand implements Command {
             out.println("Commit    ", TerminalText.safe(view.packageCommit()),
                     Boolean.TRUE.equals(view.packageDirty()) ? " (with uncommitted changes)" : "");
         }
+        // The packages the run's child runs were loaded from: the run's own package digest does not cover them
+        view.distinctPackageCalls().forEach(call -> out.println("Calls     ", TerminalText.safe(call.workflowId()),
+                "  ", TerminalText.safe(call.packageDigest()), "  ", TerminalText.safe(call.packageDir())));
         out.println("Seal      ", view.seal() == null ? "unsealed" : TerminalText.safe(view.seal().summary()));
         // The option the run picked of each model choice its workflow opens: what its steps ran with
         view.modelChoices().forEach(pick -> out.println("Model     ", TerminalText.safe(pick.summary())));

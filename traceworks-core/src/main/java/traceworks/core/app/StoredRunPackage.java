@@ -1,5 +1,6 @@
 package traceworks.core.app;
 
+import traceworks.core.engine.ChildWorkflows;
 import traceworks.core.model.WorkflowDefinition;
 import traceworks.core.port.LoadedPackage;
 import traceworks.core.port.PackageLoader;
@@ -90,6 +91,88 @@ final class StoredRunPackage {
                         + " package as it was at the start (digest " + view.packageDigest() + ") to resume the run");
             }
         }
+    }
+
+    /**
+     * Refuses to resume, with a changed package, a run that calls its own package as a child. The run's own steps
+     * are those of the definition recorded at the start, but a child workflow is loaded from its package as it is
+     * when its block runs: the run would go on with two versions of one package, and the record could not say which
+     * step ran which. No flag allows it.
+     *
+     * <p>What the run calls is read from the definition recorded at the start: every block that runs a child, at
+     * the top level and in the cases of a {@code switch}, whether it ran already or is reached later. A reference
+     * is followed as the engine follows it, through the packages as they are now, so a child of another package
+     * that calls the run's package is found too. A reference with a placeholder names its workflow only when its
+     * block runs, and may name the run's own package: it refuses the resume as well. A reference that names no
+     * workflow is not followed; its block fails when it runs.
+     *
+     * @param pkg the changed package, with the definition recorded at the start
+     * @throws RunRefusedException naming the block and how to go on; nothing was written
+     */
+    void refuseAChildOfTheChangedPackage(String runId, RunView view, LoadedPackage pkg) {
+        Message why = ownPackageChild(pkg.definition(), preparation.resolver(pkg), true, new java.util.HashSet<>(), 0);
+        if (why != null) {
+            throw new RunRefusedException(Message.of("Run ", Message.quoted(runId), " cannot resume with its changed"
+                    + " package: ", why, ". A child workflow is loaded from its package as it is when its block"
+                    + " runs, so the run would go on with two versions of one package: its own steps from the"
+                    + " definition recorded at the start, the child from the package as it is now, and"
+                    + " --allow-changed-package does not change that. Restore the package as it was at the start"
+                    + " (digest " + view.packageDigest() + ", now " + pkg.digest() + ") to resume the run, or start"
+                    + " a new run"));
+        }
+    }
+
+    /** How deep the walk follows children of children, as the start check does. */
+    private static final int MAX_DEPTH = 16;
+
+    /**
+     * Which block of {@code definition}, or of a workflow it reaches, runs the run's own package as a child, or may;
+     * {@code null} when none does.
+     *
+     * @param own whether {@code definition} is the run's own, for the words of the answer
+     */
+    private static Message ownPackageChild(WorkflowDefinition definition, traceworks.core.port.WorkflowResolver children,
+                                           boolean own, java.util.Set<WorkflowDefinition> seen, int depth) {
+        java.util.List<traceworks.core.engine.NestedBlocks.Nested> blocks = new java.util.ArrayList<>();
+        for (traceworks.core.model.BlockDefinition block : definition.blocks()) {
+            if (block == null) {
+                continue;
+            }
+            blocks.add(new traceworks.core.engine.NestedBlocks.Nested(block.getName(), block.getType(),
+                    block.getConfig(), "", java.util.Set.of()));
+            traceworks.core.engine.NestedBlocks.visit(block.getConfig(), blocks::add);
+        }
+        for (traceworks.core.engine.NestedBlocks.Nested block : blocks) {
+            if (!ChildWorkflows.runsAChild(block.type(), block.config())) {
+                continue;
+            }
+            Message where = own ? Message.of("its block '", Message.quoted(block.name()), "'")
+                    : Message.of("the block '", Message.quoted(block.name()), "' of the workflow ",
+                    Message.quoted(definition.id()), ", which the run reaches,");
+            String ref = ChildWorkflows.literalRef(block.type(), block.config());
+            if (ref == null) {
+                return Message.of(where, " names its child workflow with a placeholder (workflow_id '",
+                        Message.quoted(String.valueOf(block.config().get("workflow_id"))), "'), which may name the"
+                        + " run's own package");
+            }
+            WorkflowDefinition child;
+            try {
+                child = children.resolve(ref);
+            } catch (RuntimeException e) {
+                continue;   // a reference that names no workflow fails when its block runs
+            }
+            if (!children.fromAnotherPackage(child)) {
+                return Message.of(where, " runs the run's own package as a child workflow (workflow_id '",
+                        Message.quoted(ref), "')");
+            }
+            if (depth < MAX_DEPTH && seen.add(child)) {
+                Message deeper = ownPackageChild(child, children.forChild(child), false, seen, depth + 1);
+                if (deeper != null) {
+                    return deeper;
+                }
+            }
+        }
+        return null;
     }
 
     /**

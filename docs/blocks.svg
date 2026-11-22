@@ -1,0 +1,196 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 796" role="img" aria-labelledby="t d">
+  <title id="t">The thirteen block types of Traceworks in five groups, with what each one does its work with</title>
+  <desc id="d">Five groups of boxes, one box per block type, each with marks for what does its work: a command, a model, a person, or blocks, a command or a workflow it holds. The marks of a command and of a model carry a small box: both run in a container; the mark of a model is orange. A dashed mark depends on a setting. Executing: shell (a command), simple (a model), agentic (a model, and a person with require_approval). A person: approval and human-input (a person, or a model with actor ai or shadow). Control flow: retry, conditional, while and foreach hold a command that runs as a shell line or asks a model as their execution_mode says, in a container either way, and foreach can hold a workflow instead; switch holds shell and simple blocks. Composing: sub-workflow holds a workflow. Condensing: compress works in the Traceworks process without a container or a model, compress-ai asks a model, in a container. A legend at the bottom right explains the marks, and a line at the foot says that every command and every model call runs in a container.</desc>
+  <style>
+    text { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, sans-serif; font-size: 12px; fill: #33454d; }
+    .mono, .t { font-family: ui-monospace, "SF Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+    .title { font-size: 19px; font-weight: 700; } .sub { font-size: 13px; } .h { font-size: 16px; font-weight: 650; }
+    .t { font-size: 14px; font-weight: 600; } .mk { font-weight: 500; } .foot { font-size: 13.5px; } .lead { font-weight: 700; }
+    .label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; }
+    .ink { fill: #14232b; } .soft { fill: #33454d; } .muted { fill: #5a6a72; } .warm { fill: #a9570f; }
+    .card { fill: #ffffff; stroke: #14232b; stroke-width: 1.8; } .tint { fill: #e6f1f0; stroke: #14232b; stroke-width: 1.6; }
+    .chip { fill: #eef2f3; stroke: #c5d0d3; stroke-width: 1; } .band { fill: #eef2f3; }
+    .mark { fill: #ffffff; stroke: #14232b; stroke-width: 1.3; } .mark.ai { stroke: #c96f1e; } .opt { stroke-dasharray: 4 3; }
+    .ct { fill: none; stroke: #14232b; stroke-width: 1.3; } .ci { fill: #14232b; } .ct.ai { stroke: #c96f1e; } .ci.ai { fill: #c96f1e; }
+    @media (prefers-color-scheme: dark) {
+      text, .soft { fill: #b9c7cc; } .ink { fill: #e9f0f1; } .muted { fill: #94a5ac; } .warm { fill: #f2a655; }
+      .card { fill: #152126; stroke: #b9c7cc; } .tint { fill: #1b2d33; stroke: #b9c7cc; }
+      .chip { fill: #1f2e34; stroke: #3a4d54; } .band { fill: #1b272c; }
+      .mark { fill: #152126; stroke: #b9c7cc; } .mark.ai { stroke: #f2a655; }
+      .ct { stroke: #e9f0f1; } .ci { fill: #e9f0f1; } .ct.ai { stroke: #f2a655; } .ci.ai { fill: #f2a655; }
+    }
+  </style>
+  <text class="title ink" x="20" y="34">The thirteen block types, in five groups</text>
+  <text class="sub muted" x="20" y="54">The marks say what does the work of a step. A small box in a mark: it runs in a container. Orange: a model. Dashed: only with a setting.</text>
+
+  <!-- executing -->
+  <rect class="card" x="20" y="72" width="608" height="182" rx="14"/>
+  <text x="36" y="100"><tspan class="h ink">Executing</tspan><tspan class="muted" dx="10">a step that does the work itself</tspan></text>
+  <rect class="tint" x="36" y="116" width="184" height="122" rx="10"/>
+  <text class="t ink" x="50" y="142">shell</text>
+  <text x="50" y="162">runs one command in a</text>
+  <text x="50" y="177">container, or a tool image</text>
+  <rect class="mark" x="50" y="204" width="92" height="22" rx="11"/>
+  <rect class="ct" x="59" y="210" width="10" height="10" rx="2"/><rect class="ci" x="62" y="213" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="103" y="219.5" text-anchor="middle">command</text>
+  <rect class="tint" x="232" y="116" width="184" height="122" rx="10"/>
+  <text class="t ink" x="246" y="142">simple</text>
+  <text x="246" y="162">asks a model once;</text>
+  <text x="246" y="177">command is the prompt</text>
+  <rect class="mark ai" x="246" y="204" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="255" y="210" width="10" height="10" rx="2"/><rect class="ci ai" x="258" y="213" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="288" y="219.5" text-anchor="middle">model</text>
+  <rect class="tint" x="428" y="116" width="184" height="122" rx="10"/>
+  <text class="t ink" x="442" y="142">agentic</text>
+  <text x="442" y="162">plans, acts and observes</text>
+  <text x="442" y="177">in a loop towards a goal</text>
+  <rect class="mark ai" x="442" y="204" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="451" y="210" width="10" height="10" rx="2"/><rect class="ci ai" x="454" y="213" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="484" y="219.5" text-anchor="middle">model</text>
+  <rect class="mark opt" x="518" y="204" width="60" height="22" rx="11"/>
+  <text class="mk ink" x="548" y="219.5" text-anchor="middle">person</text>
+
+  <!-- a person -->
+  <rect class="card" x="648" y="72" width="412" height="182" rx="14"/>
+  <text x="664" y="100"><tspan class="h ink">A person</tspan><tspan class="muted" dx="10">a step that waits for an answer</tspan></text>
+  <rect class="tint" x="664" y="116" width="184" height="122" rx="10"/>
+  <text class="t ink" x="678" y="142">approval</text>
+  <text x="678" y="162">a person answers a</text>
+  <text x="678" y="177">question with one of</text>
+  <text x="678" y="192">its options</text>
+  <rect class="mark" x="678" y="204" width="60" height="22" rx="11"/>
+  <text class="mk ink" x="708" y="219.5" text-anchor="middle">person</text>
+  <rect class="mark ai opt" x="744" y="204" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="753" y="210" width="10" height="10" rx="2"/><rect class="ci ai" x="756" y="213" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="786" y="219.5" text-anchor="middle">model</text>
+  <rect class="tint" x="860" y="116" width="184" height="122" rx="10"/>
+  <text class="t ink" x="874" y="142">human-input</text>
+  <text x="874" y="162">a person gives a value</text>
+  <text x="874" y="177">or fills a form</text>
+  <rect class="mark" x="874" y="204" width="60" height="22" rx="11"/>
+  <text class="mk ink" x="904" y="219.5" text-anchor="middle">person</text>
+  <rect class="mark ai opt" x="940" y="204" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="949" y="210" width="10" height="10" rx="2"/><rect class="ci ai" x="952" y="213" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="982" y="219.5" text-anchor="middle">model</text>
+
+  <!-- control flow -->
+  <rect class="card" x="20" y="274" width="1040" height="210" rx="14"/>
+  <text x="36" y="302"><tspan class="h ink">Control flow</tspan><tspan class="muted" dx="10">a step that holds a command or blocks; execution_mode says how it runs</tspan></text>
+  <rect class="tint" x="36" y="318" width="192" height="150" rx="10"/>
+  <text class="t ink" x="50" y="344">retry</text>
+  <text x="50" y="364">runs its command until an</text>
+  <text x="50" y="379">attempt completes</text>
+  <rect class="mark" x="50" y="406" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="76" y="421.5" text-anchor="middle">holds</text>
+  <rect class="mark opt" x="50" y="434" width="92" height="22" rx="11"/>
+  <rect class="ct" x="59" y="440" width="10" height="10" rx="2"/><rect class="ci" x="62" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="103" y="449.5" text-anchor="middle">command</text>
+  <rect class="mark ai opt" x="148" y="434" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="157" y="440" width="10" height="10" rx="2"/><rect class="ci ai" x="160" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="190" y="449.5" text-anchor="middle">model</text>
+  <rect class="tint" x="240" y="318" width="192" height="150" rx="10"/>
+  <text class="t ink" x="254" y="344">conditional</text>
+  <text x="254" y="364">runs then_command or</text>
+  <text x="254" y="379">else_command by a</text>
+  <text x="254" y="394">condition</text>
+  <rect class="mark" x="254" y="406" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="280" y="421.5" text-anchor="middle">holds</text>
+  <rect class="mark opt" x="254" y="434" width="92" height="22" rx="11"/>
+  <rect class="ct" x="263" y="440" width="10" height="10" rx="2"/><rect class="ci" x="266" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="307" y="449.5" text-anchor="middle">command</text>
+  <rect class="mark ai opt" x="352" y="434" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="361" y="440" width="10" height="10" rx="2"/><rect class="ci ai" x="364" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="394" y="449.5" text-anchor="middle">model</text>
+  <rect class="tint" x="444" y="318" width="192" height="150" rx="10"/>
+  <text class="t ink" x="458" y="344">while</text>
+  <text x="458" y="364">runs its command as long</text>
+  <text x="458" y="379">as a condition holds</text>
+  <rect class="mark" x="458" y="406" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="484" y="421.5" text-anchor="middle">holds</text>
+  <rect class="mark opt" x="458" y="434" width="92" height="22" rx="11"/>
+  <rect class="ct" x="467" y="440" width="10" height="10" rx="2"/><rect class="ci" x="470" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="511" y="449.5" text-anchor="middle">command</text>
+  <rect class="mark ai opt" x="556" y="434" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="565" y="440" width="10" height="10" rx="2"/><rect class="ci ai" x="568" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="598" y="449.5" text-anchor="middle">model</text>
+  <rect class="tint" x="648" y="318" width="192" height="150" rx="10"/>
+  <text class="t ink" x="662" y="344">foreach</text>
+  <text x="662" y="364">runs a command, or a</text>
+  <text x="662" y="379">workflow, once per item</text>
+  <rect class="mark" x="662" y="406" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="688" y="421.5" text-anchor="middle">holds</text>
+  <rect class="mark opt" x="662" y="434" width="92" height="22" rx="11"/>
+  <rect class="ct" x="671" y="440" width="10" height="10" rx="2"/><rect class="ci" x="674" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="715" y="449.5" text-anchor="middle">command</text>
+  <rect class="mark ai opt" x="760" y="434" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="769" y="440" width="10" height="10" rx="2"/><rect class="ci ai" x="772" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="802" y="449.5" text-anchor="middle">model</text>
+  <rect class="tint" x="852" y="318" width="192" height="150" rx="10"/>
+  <text class="t ink" x="866" y="344">switch</text>
+  <text x="866" y="364">runs the shell and simple</text>
+  <text x="866" y="379">blocks of the matching</text>
+  <text x="866" y="394">case</text>
+  <rect class="mark" x="866" y="406" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="892" y="421.5" text-anchor="middle">holds</text>
+  <rect class="mark opt" x="866" y="434" width="92" height="22" rx="11"/>
+  <rect class="ct" x="875" y="440" width="10" height="10" rx="2"/><rect class="ci" x="878" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="919" y="449.5" text-anchor="middle">command</text>
+  <rect class="mark ai opt" x="964" y="434" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="973" y="440" width="10" height="10" rx="2"/><rect class="ci ai" x="976" y="443" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="1006" y="449.5" text-anchor="middle">model</text>
+
+  <!-- composing -->
+  <rect class="card" x="20" y="504" width="216" height="210" rx="14"/>
+  <text class="h ink" x="36" y="532">Composing</text>
+  <rect class="tint" x="36" y="548" width="184" height="150" rx="10"/>
+  <text class="t ink" x="50" y="574">sub-workflow</text>
+  <text x="50" y="594">runs another workflow</text>
+  <text x="50" y="609">as one step: a child run</text>
+  <rect class="mark" x="50" y="664" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="76" y="679.5" text-anchor="middle">holds</text>
+
+  <!-- condensing -->
+  <rect class="card" x="256" y="504" width="412" height="210" rx="14"/>
+  <text x="272" y="532"><tspan class="h ink">Condensing</tspan><tspan class="muted" dx="10">shortens an earlier output</tspan></text>
+  <rect class="tint" x="272" y="548" width="184" height="150" rx="10"/>
+  <text class="t ink" x="286" y="574">compress</text>
+  <text x="286" y="594">by fixed stages, in the</text>
+  <text x="286" y="609">Traceworks process</text>
+  <text class="muted" x="286" y="679.5">no container, no model</text>
+  <rect class="tint" x="468" y="548" width="184" height="150" rx="10"/>
+  <text class="t ink" x="482" y="574">compress-ai</text>
+  <text x="482" y="594">with one model call</text>
+  <text x="482" y="609">that has no tools</text>
+  <rect class="mark ai" x="482" y="664" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="491" y="670" width="10" height="10" rx="2"/><rect class="ci ai" x="494" y="673" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="524" y="679.5" text-anchor="middle">model</text>
+
+  <!-- legend -->
+  <rect class="card" x="688" y="504" width="372" height="210" rx="14"/>
+  <text class="h ink" x="704" y="532">What does the work</text>
+  <rect class="mark" x="704" y="548" width="92" height="22" rx="11"/>
+  <rect class="ct" x="713" y="554" width="10" height="10" rx="2"/><rect class="ci" x="716" y="557" width="4" height="4" rx="0.5"/>
+  <text class="mk ink" x="757" y="563.5" text-anchor="middle">command</text>
+  <text class="ink" x="808" y="563.5">runs a command, in a container</text>
+  <rect class="mark ai" x="704" y="574" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="713" y="580" width="10" height="10" rx="2"/><rect class="ci ai" x="716" y="583" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="746" y="589.5" text-anchor="middle">model</text>
+  <text class="ink" x="808" y="589.5">calls a model, in a container</text>
+  <rect class="mark" x="704" y="600" width="60" height="22" rx="11"/>
+  <text class="mk ink" x="734" y="615.5" text-anchor="middle">person</text>
+  <text class="ink" x="808" y="615.5">waits for a person</text>
+  <rect class="mark" x="704" y="626" width="52" height="22" rx="11"/>
+  <text class="mk ink" x="730" y="641.5" text-anchor="middle">holds</text>
+  <text class="ink" x="808" y="641.5">holds blocks, a command, a workflow</text>
+  <rect class="mark ai opt" x="704" y="652" width="70" height="22" rx="11"/>
+  <rect class="ct ai" x="713" y="658" width="10" height="10" rx="2"/><rect class="ci ai" x="716" y="661" width="4" height="4" rx="0.5"/>
+  <text class="mk warm" x="746" y="667.5" text-anchor="middle">model</text>
+  <text class="ink" x="808" y="667.5">dashed: only with a setting</text>
+  <text class="muted" x="808" y="683">execution_mode, actor,</text>
+  <text class="muted" x="808" y="698">require_approval, a case block's type</text>
+
+  <!-- the foot -->
+  <rect class="band" x="20" y="730" width="1040" height="50" rx="12"/>
+  <rect class="ct" x="36" y="750" width="10" height="10" rx="2"/><rect class="ci" x="39" y="753" width="4" height="4" rx="0.5"/>
+  <text class="foot ink" x="54" y="760"><tspan class="lead">Runs in a container:</tspan><tspan dx="7">every command, and every model call (its provider's CLI, with a network that reaches only that provider).</tspan></text>
+</svg>

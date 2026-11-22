@@ -725,9 +725,12 @@ public class ExecutionContext {
 
     /**
      * Answers {@code question} if it is still the one this run waits on; an answer meant for a question that was
-     * answered, timed out or cancelled meanwhile never reaches the next one.
+     * answered, timed out or cancelled meanwhile never reaches the next one. The block receives the answer as the
+     * question takes it ({@link ApprovalRequest#acceptedAnswer}).
      *
      * @return whether the answer reached the waiting block
+     * @throws IllegalArgumentException if the question does not take the answer (an approval's option it does not
+     *                                  offer, a human input's value the rules of its fields refuse); it stays open
      */
     public boolean resolveApproval(ApprovalRequest question, String answer) {
         return approvals.resolve(question, answer);

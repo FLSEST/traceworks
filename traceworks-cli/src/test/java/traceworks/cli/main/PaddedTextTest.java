@@ -57,7 +57,8 @@ class PaddedTextTest {
     }
 
     private String run(Path pkg, String... more) {
-        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--allow-host-execution", "--no-input"));
+        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--project", "shop",
+                "--allow-host-execution", "--no-input"));
         args.addAll(List.of(more));
         return exec(null, args.toArray(String[]::new));
     }

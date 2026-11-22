@@ -21,26 +21,34 @@ import java.io.PrintStream;
  * holds.
  *
  * <p>{@code traceworks verify} without a run checks the ledger against the runs folder of the home: which runs the
- * ledger saw start and never end, with what the folder of each says, and which runs it names whose folder is gone.
+ * ledger saw start and never end, with what the folder of each says, and which runs it names whose folder is gone;
+ * and every register of the home, as {@code traceworks findings <key> verify} checks one.
  */
 public final class VerifyCommand implements Command {
 
     private static final Spec SPEC = Spec.of("verify", "Verifies the record of a run. Exits 8 when it does not hold.",
                     "[<run>]")
             .positionals(0, 1)
-            .option("acknowledge", "RUN", "without a run: record that one problem the check reports of RUN has an"
-                    + " honest cause; needs --note, is kept in the ledger and listed for good")
+            .option("acknowledge", "NAME", "without a run: record that what the check reports under NAME has an"
+                    + " honest cause. NAME is the name a problem is listed under (a run id, or the name of a"
+                    + " register such as anchors.5.hello.shop); needs --note, is kept in the ledger and listed"
+                    + " for good")
             .option("note", "TEXT", "with --acknowledge: why (required)")
             .flag("json", "print the result as one JSON object: the verdict, and for the check of the home the"
                     + " counts and every run of every class; the exit codes are the same")
             .flag("quick", "without a run: do not verify the record of every ended run against its end entry"
-                    + " (its chain, its blobs, the manifest it gives), which reads every record of the home;"
-                    + " only the first line and the manifest of each are read then")
+                    + " (its chain, its blobs, the manifest it gives) nor any register, which reads every record"
+                    + " and every register of the home; only the first line and the manifest of each run are"
+                    + " read then")
             .note("Without a run: checks the ledger against the runs folder of the home, both ways. Lists the runs"
                     + " the ledger saw start and never end, with what the folder of each says (RUNNING, PARKED,"
                     + " INTERRUPTED, GONE, UNREADABLE, OTHER RECORD), the runs it names whose folder is gone, the"
-                    + " run folders the ledger should know and does not, and what was acknowledged. Exits 8 when"
-                    + " something does not hold that nobody acknowledged.");
+                    + " run folders the ledger should know and does not, and what was acknowledged. Checks every"
+                    + " register too, by key and project: its chain, its blobs, the project its log names and its"
+                    + " log against its anchors, as 'traceworks findings <key> verify --project KEY' does; a"
+                    + " register the ledger anchors that is gone is a problem, and each problem of a register is"
+                    + " listed under the name of the register. Exits 8 when something does not hold that nobody"
+                    + " acknowledged.");
 
     @Override
     public Spec spec() {
@@ -55,7 +63,8 @@ public final class VerifyCommand implements Command {
                 throw new UsageException(Message.of("--acknowledge names its run itself; give no other run"));
             }
             if (args.option("note") == null || args.option("note").isBlank()) {
-                throw new UsageException(Message.of("--acknowledge needs --note \"...\": why this run is no lost run"));
+                throw new UsageException(Message.of("--acknowledge needs --note \"...\": the honest cause of what the check"
+                        + " reports under that name"));
             }
             LedgerReport after = context.services().acknowledge(acknowledge, args.option("note"));
             return args.has("json") ? json(context, after) : ledger(context, after);
@@ -135,14 +144,16 @@ public final class VerifyCommand implements Command {
                 "  ", TerminalText.safe(problem.text())));
         if (!report.records()) {
             out.println("records   not verified (--quick): only traceworks verify <run> checks the record of a run");
+            out.println("registers not verified (--quick): only traceworks findings <key> verify checks a register");
         }
         if (report.ok()) {
             out.println("verified");
             return ExitCodes.OK;
         }
+        // A problem of a register is listed under the name of the register, which is what is acknowledged
         out.println("verification FAILED: " + count(report.problems().size(), "problem")
-                + "; acknowledge one that has an honest cause with traceworks verify --acknowledge <run> --note"
-                + " \"...\"");
+                + "; acknowledge one that has an honest cause with traceworks verify --acknowledge <name> --note"
+                + " \"...\", where <name> is what the problem is listed under: a run id, or the name of a register");
         return ExitCodes.VERIFY_FAILED;
     }
 

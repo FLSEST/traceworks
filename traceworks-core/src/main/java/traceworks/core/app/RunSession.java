@@ -49,9 +49,13 @@ final class RunSession implements AutoCloseable {
     /** The question the run waits for in the process; {@code null} when none. */
     private volatile OpenQuestion open;
     private volatile boolean closed;
+    private volatile boolean interrupted;
 
-    /** Where a question waits: the run of the record that asks it, its step, and the seq it was asked at. */
-    private record OpenQuestion(String run, int step, int seq) {}
+    /**
+     * Where a question waits: the run of the record that asks it, its step, the seq it was asked at, and whether it
+     * parks the run instead of waiting in the process.
+     */
+    private record OpenQuestion(String run, int step, int seq, boolean parks) {}
 
     /**
      * @param actor    who runs the run here; answers on the terminal are attributed to them
@@ -96,7 +100,12 @@ final class RunSession implements AutoCloseable {
 
     /** Asks the run to stop, in the name of {@code by}: {@code run.cancel_requested} first, then the cancel. */
     void requestCancel(String by, String requestId) {
-        if (recorder.record(RecordTypes.RUN_CANCEL_REQUESTED, RunRecords.cancelRequested(by, requestId))) {
+        requestCancel(by, requestId, null);
+    }
+
+    /** As {@link #requestCancel(String, String)}, for a cancel {@code agent} asked for under {@code by}. */
+    void requestCancel(String by, String requestId, String agent) {
+        if (recorder.record(RecordTypes.RUN_CANCEL_REQUESTED, RunRecords.cancelRequested(by, requestId, agent))) {
             control.cancel();
         }
     }
@@ -107,8 +116,19 @@ final class RunSession implements AutoCloseable {
      * recorded, no cancel either, so the run is left {@code INTERRUPTED} and a resume goes on with it.
      */
     void interrupt() {
+        interrupted = true;
         recorder.stop();
         control.cancel();
+    }
+
+    /**
+     * Whether the run waits now for an answer in this process: at a question that does not park it (one inside
+     * another block or in a child run, or any question of a run that asks on a terminal). A pause waits behind such
+     * a question, so a process that must end cannot wait for the run to park.
+     */
+    boolean waitsAtAQuestion() {
+        OpenQuestion question = open;
+        return question != null && !question.parks() && !interrupted;
     }
 
     /**
@@ -116,8 +136,13 @@ final class RunSession implements AutoCloseable {
      * parks the run after the step or the loop item in flight. A run that is already asked records nothing more.
      */
     void requestPause(String by, String requestId) {
-        if (!control.isPaused()
-                && recorder.record(RecordTypes.RUN_PAUSE_REQUESTED, RunRecords.cancelRequested(by, requestId))) {
+        requestPause(by, requestId, null);
+    }
+
+    /** As {@link #requestPause(String, String)}, for a pause {@code agent} asked for under {@code by}. */
+    void requestPause(String by, String requestId, String agent) {
+        if (!control.isPaused() && recorder.record(RecordTypes.RUN_PAUSE_REQUESTED,
+                RunRecords.cancelRequested(by, requestId, agent))) {
             control.pause();
         }
     }
@@ -159,7 +184,8 @@ final class RunSession implements AutoCloseable {
             case RecordTypes.APPROVAL_REQUESTED -> {
                 // The step a resume replays asks its question again only to take the recorded answer
                 if (!delivery.isReplayed(event) && event.step() != null) {
-                    OpenQuestion question = new OpenQuestion(event.run(), event.step(), event.seq());
+                    OpenQuestion question = new OpenQuestion(event.run(), event.step(), event.seq(),
+                            event.fields().path("parks").asBoolean());
                     open = question;
                     // The question the run waits on now is the one this line records: from here on it has its name
                     control.nameWaiting(new RunControl.Question(event.run(), event.step(), event.seq()));
@@ -258,30 +284,33 @@ final class RunSession implements AutoCloseable {
 
     private void handle(InboxRequest request) {
         String kind = request.kind();
-        if ("cancel".equals(kind)) {
-            requestCancel(request.actor(), request.id());
-            return;
-        }
-        if (Pausing.KIND.equals(kind)) {
-            if (control.isPaused()) {
-                RunRecords.refuse(recorder, request, "the run is already asked to pause");
-            } else {
-                requestPause(request.actor(), request.id());
-            }
-            return;
-        }
-        if (!"approval".equals(kind) && !"human-input".equals(kind)) {
+        boolean cancel = "cancel".equals(kind);
+        boolean pause = Pausing.KIND.equals(kind);
+        if (!cancel && !pause && !"approval".equals(kind) && !"human-input".equals(kind)) {
             RunRecords.refuse(recorder, request, "unknown request kind '" + kind + "'");
             return;
         }
         // The inbox is a folder: the name of an agent in a request is checked here as the command checks it, and a
-        // request with a name that is none is refused whole rather than recorded as a person's answer
+        // request with a name that is none is refused whole rather than recorded as a person's
         String agentProblem = request.agent() == null ? null : DecisionAgent.problem(request.agent());
         if (agentProblem != null) {
-            RunRecords.refuse(recorder, request, "the agent of the answer " + agentProblem);
+            RunRecords.refuse(recorder, request, "the agent of the " + (cancel || pause ? "request " : "answer ")
+                    + agentProblem);
             return;
         }
         String agent = request.agent() == null ? null : request.agent().strip();
+        if (cancel) {
+            requestCancel(request.actor(), request.id(), agent);
+            return;
+        }
+        if (pause) {
+            if (control.isPaused()) {
+                RunRecords.refuse(recorder, request, "the run is already asked to pause");
+            } else {
+                requestPause(request.actor(), request.id(), agent);
+            }
+            return;
+        }
         try {
             delivery.deliver(new Attribution(request.actor(), "inbox", request.id(), request.comment(), agent),
                     () -> requireQuestion(request), (control, attribute) -> give(control, request, attribute));

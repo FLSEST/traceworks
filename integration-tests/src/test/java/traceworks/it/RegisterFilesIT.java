@@ -31,7 +31,7 @@ class RegisterFilesIT extends IntegrationTest {
         Result first = traceworks.run("register-files");
 
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("register register-files: 2 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(first.out()).contains("register register-files of it: 2 new, 0 resolved, 0 reopened, 2 open now");
         RunFolder firstFolder = traceworks.folder(first);
         assertThat(firstFolder.output("known")).as("nothing known yet: every file is there and empty")
                 .contains("files: findings.jsonl items.jsonl previous-report.md resolved.jsonl", "findings: 0",
@@ -46,7 +46,7 @@ class RegisterFilesIT extends IntegrationTest {
         Result second = traceworks.run("register-files");
 
         assertThat(second.code()).as(second.describe()).isZero();
-        assertThat(second.out()).contains("register register-files: 0 new, 1 resolved, 0 reopened, 1 open now");
+        assertThat(second.out()).contains("register register-files of it: 0 new, 1 resolved, 0 reopened, 1 open now");
         RunFolder folder = traceworks.folder(second);
         String known = folder.output("known");
         assertThat(known).contains("findings: 2", "resolved: 0");
@@ -91,10 +91,11 @@ class RegisterFilesIT extends IntegrationTest {
         assertThat(Files.readString(register.resolve("findings.jsonl")).lines()).hasSize(2);
         Result verify = traceworks.exec("verify", folder.id());
         assertThat(verify.code()).as(verify.describe()).isZero();
-        assertThat(verify.out()).containsPattern("register  ok \\(4 files of the register register-files at seq \\d+\\)");
+        assertThat(verify.out())
+                .containsPattern("register  ok \\(4 files of the register register-files of it at seq \\d+\\)");
         Result show = traceworks.exec("show", folder.id());
-        assertThat(show.out()).containsPattern("Register  register-files at seq \\d+ \\(head [0-9a-f]{12}\\), 4 files"
-                + " handed to the steps");
+        assertThat(show.out()).containsPattern("Register  register-files of it at seq \\d+ \\(head [0-9a-f]{12}\\), 4"
+                + " files handed to the steps");
 
         Result third = traceworks.run("register-files");
 
@@ -154,7 +155,7 @@ class RegisterFilesIT extends IntegrationTest {
 
         // Exit 0: the two steps that try to write the folder fail with on_failure: continue
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("register combo-register: 2 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(first.out()).contains("register combo-register of it: 2 new, 0 resolved, 0 reopened, 2 open now");
         RunFolder before = traceworks.folder(first);
         assertThat(before.output("per_file")).as("nothing known yet, per item of the loop")
                 .isEqualTo("[a.txt]: known: 0\n[b.txt]: known: 0");
@@ -164,7 +165,7 @@ class RegisterFilesIT extends IntegrationTest {
         Result second = traceworks.run("combo-register");
 
         assertThat(second.code()).as(second.describe()).isZero();
-        assertThat(second.out()).contains("register combo-register: 0 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(second.out()).contains("register combo-register of it: 0 new, 0 resolved, 0 reopened, 2 open now");
         RunFolder folder = traceworks.folder(second);
         // What the first run reported, in the loop and in the child: a child that got no folder, or an empty one of
         // its own, would count 0 again (or fail its step: "this run has none")

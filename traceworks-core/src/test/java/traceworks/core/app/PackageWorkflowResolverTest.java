@@ -172,4 +172,39 @@ class PackageWorkflowResolverTest {
         assertThat(resolver.fromAnotherPackage(self)).as("the run's own package").isFalse();
         assertThat(resolver.forChild(child).fromAnotherPackage(back)).as("back in the run's package").isFalse();
     }
+
+    /**
+     * What a run's record names of a child of another package: the reference as asked for and the package as loaded
+     * for that call. A child of the run's own package has none: the run's package digest covers it.
+     */
+    @Test
+    void calledPackage_namesTheReferenceAndThePackageOfAChildOfAnotherPackage() throws IOException {
+        Path lib = Files.createDirectories(tmp.resolve("lib"));
+        Path childDir = pkg(root, "child", "child-id");
+        Path sharedDir = pkg(lib, "shared", "shared-id");
+        PackageWorkflowResolver resolver = resolverAt(root, lib);
+
+        WorkflowDefinition child = resolver.resolve("./child");
+        WorkflowDefinition again = resolver.resolve("child/../child");
+        WorkflowDefinition byId = resolver.resolve("shared-id");
+        WorkflowDefinition self = resolver.resolve(".");
+        WorkflowDefinition back = resolver.forChild(child).resolve("..");
+        WorkflowDefinition deeper = resolver.forChild(child).resolve("../../lib/shared");
+
+        assertThat(resolver.calledPackage(child).reference()).isEqualTo("./child");
+        assertThat(resolver.calledPackage(child).directory()).isEqualTo(childDir.toString());
+        assertThat(resolver.calledPackage(child).digest()).isEqualTo(resolver.packageOf(child).digest());
+        assertThat(resolver.calledPackage(child).workflowJson()).isSameAs(resolver.packageOf(child).workflowJson());
+        assertThat(resolver.calledPackage(again).reference()).as("each call by its own reference")
+                .isEqualTo("child/../child");
+        assertThat(resolver.calledPackage(byId).reference()).isEqualTo("shared-id");
+        assertThat(resolver.calledPackage(byId).directory()).isEqualTo(sharedDir.toString());
+        assertThat(resolver.calledPackage(self)).as("the run's own package").isNull();
+        assertThat(resolver.forChild(child).calledPackage(back)).as("back in the run's package").isNull();
+        assertThat(resolver.calledPackage(deeper).reference()).as("known to the resolver of every run of the tree")
+                .isEqualTo("../../lib/shared");
+        WorkflowDefinition foreign = new WorkflowDefinition("x", "x", null, List.of(), null, null, null, null,
+                null, null, null, null, null);
+        assertThatThrownBy(() -> resolver.calledPackage(foreign)).isInstanceOf(IllegalArgumentException.class);
+    }
 }

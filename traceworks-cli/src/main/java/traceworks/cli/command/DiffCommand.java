@@ -45,11 +45,12 @@ public final class DiffCommand implements Command {
                     + " when run B did not reproduce run A.", "<runA> <runB>")
             .positionals(2, 2)
             .flag("outputs", "add a line diff of the step outputs that differ")
-            .note("Exits 0 when the package digest, the inputs, the status and output of every deterministic step and"
-                    + " the setup of\nevery AI call are equal, and " + ExitCodes.DIFFERS + " otherwise. The answer of"
-                    + " an AI call may differ. A run that has not\nfinished (exit 6), cannot be read or does not"
-                    + " verify (exit 8) is an error, not a difference.\nSteps are matched by block name. See"
-                    + " docs/cli.md, \"diff\".");
+            .note("Exits 0 when the package digest, the digests of the packages the runs called and of those they"
+                    + " were\nresumed with (--allow-changed-package), the inputs, the status and output of every"
+                    + " deterministic\nstep and the setup of every AI call are equal, and "
+                    + ExitCodes.DIFFERS + " otherwise. The answer of an AI call may\ndiffer. A run that has not"
+                    + " finished (exit 6), cannot be read or does not verify (exit 8) is an\nerror, not a"
+                    + " difference. Steps are matched by block name. See docs/cli.md, \"diff\".");
 
     @Override
     public Spec spec() {
@@ -74,8 +75,8 @@ public final class DiffCommand implements Command {
         findings(out, comparison.findings());
         out.println();
         if (comparison.reproduced()) {
-            out.println("same: run B reproduced run A (package digest, inputs, every deterministic step and every AI"
-                    + " setup are equal)");
+            out.println("same: run B reproduced run A (package digest, called packages, inputs, the package at every"
+                    + " resume, every deterministic step and every AI setup are equal)");
             return ExitCodes.OK;
         }
         out.println("differs: run B did not reproduce run A");

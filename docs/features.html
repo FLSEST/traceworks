@@ -231,7 +231,8 @@ $ traceworks describe examples/hello
 $ traceworks check examples/hello</pre>
       The digest that <code>describe</code> prints is the one a run of the unchanged package records in
       <code>run.started</code> and in its manifest.</dd></div>
-    <div class="limit"><dt>The limit</dt><dd>A package composes the block types the tool has; it cannot add one. What
+    <div class="limit"><dt>The limit</dt><dd>A package composes the block types the tool has; it cannot add one
+      (<a href="blocks.md">docs/blocks.md</a> describes each of them). What
       the operator decides is not in the package: <code>traceworks.json</code> holds the network of the AI steps, the
       output limits and the hooks, and no workflow can set them. And a package is code you run: the containers
       bound what its steps can do, but run only packages you trust.</dd></div>
@@ -250,21 +251,24 @@ $ traceworks check examples/hello</pre>
       another one, as a <code>sub-workflow</code> block. The self-audits are packages shipped with the repository,
       under <code>examples/self-audit/</code>: <code>security</code>, <code>security-changes</code>,
       <code>architecture</code> and <code>build</code>.</dd></div>
-    <div><dt>Where you see it</dt><dd><pre><span class="c"># the same package on two directories</span>
-$ traceworks run examples/audit-hello --workspace /some/dir
-$ traceworks run examples/audit-hello --workspace /another/dir
+    <div><dt>Where you see it</dt><dd><pre><span class="c"># the same package on two directories; an audit names the project of each, and keeps a register per project</span>
+$ traceworks run examples/audit-hello --workspace /some/dir --project some-dir
+$ traceworks run examples/audit-hello --workspace /another/dir --project another-dir
 <span class="c"># or on a checkout of a repository, at one branch, tag or commit</span>
-$ traceworks run examples/audit-hello --source &lt;path|url&gt; --ref &lt;ref&gt;
+$ traceworks run examples/audit-hello --source &lt;path|url&gt; --ref &lt;ref&gt; --project &lt;key&gt;
 <span class="c"># the inputs of an earlier run again</span>
-$ traceworks run examples/audit-hello --inputs-from &lt;run&gt;</pre>
+$ traceworks run examples/audit-hello --inputs-from &lt;run&gt; --project &lt;key&gt;</pre>
       <code>traceworks runs --long</code> adds the first 8 characters of the package digest to each run, so you see which
       version of the workflow ran.</dd></div>
     <div class="limit"><dt>The limit</dt><dd>Reusable means the package, not its results: what is kept of earlier
       verdicts and decisions is the register's part (feature 13). The self-audit packages are written for the
       Traceworks sources; their rule files and prompts describe this repository, so for other code they are examples
-      to copy, not checks that fit as they are. A register is found by its key in the Traceworks home (<code>~/.traceworks</code>), not by the repository: two
-      repositories audited by one package under one home would share a register, so give each its own home
-      (<code>--home</code>).</dd></div>
+      to copy, not checks that fit as they are. A register is found by its key and its project in the Traceworks home
+      (<code>~/.traceworks</code>): two repositories audited by one package under one home have two registers, as long
+      as each run names its own project (<code>--project</code>), or the home binds each repository's folder to a key
+      (<code>projects</code> in <code>traceworks.json</code>), which also refuses a run with the key of another
+      folder. The project key is the operator's word and nothing compares it with what the repository holds, so a
+      wrong key or a wrong setting mixes two projects.</dd></div>
   </dl>
 </section>
 
@@ -274,13 +278,16 @@ $ traceworks run examples/audit-hello --inputs-from &lt;run&gt;</pre>
     <div><dt>Without it</dt><dd>"It passed last week" cannot be checked. Nobody can say whether the workflow, the
       inputs or the model changed in between, or only the answer.</dd></div>
     <div><dt>What it does</dt><dd>The same workflow with the same inputs follows the same path. A run records what it
-      ran with: the digest of the package, the digest of its inputs, the ID of every image a container started from,
+      ran with: the digest of the package, the digest of every other package a block of it called (a child workflow
+      of the run's own package is covered by the package digest and gets no entry of its own, unless the package
+      changed while the run ran), the digest of the package at a resume that went on with a changed one, the digest
+      of its inputs, the ID of every image a container started from,
       and for each AI call the provider, the model, the tools and the prompt. <code>traceworks diff</code> compares two
       finished runs from their records and says whether the second reproduced the first.
       <div class="scroll"><table>
         <thead><tr><th>Counts for "reproduced"</th><th>Reported, but does not count</th></tr></thead>
         <tbody>
-          <tr><td>the package digest and the inputs</td><td>the answer of an AI call</td></tr>
+          <tr><td>the package digest, the digests of the packages the run called, the package at every resume, and the inputs</td><td>the answer of an AI call</td></tr>
           <tr><td>every deterministic step: its status and its output</td><td>the output and status of an AI step</td></tr>
           <tr><td>the setup of every AI call: provider, model, effort, tools, web mode, prompts</td><td>the Traceworks version, the images, the gate, the status</td></tr>
         </tbody>
@@ -499,8 +506,8 @@ verified
 "tools": "read"
 
 <span class="c"># the default judges, or the option the run picks</span>
-traceworks run examples/self-audit/security
-traceworks run examples/self-audit/security --input judge=astra</pre>
+traceworks run examples/self-audit/security --project traceworks
+traceworks run examples/self-audit/security --project traceworks --input judge=astra</pre>
       <code>traceworks describe</code> lists the choice with its options and the blocks that use it,
       <code>traceworks show</code> names the option a run picked, <code>traceworks runs --long</code> lists the models
       each run used, and <code>traceworks diff</code> counts a different pick or a different model as a different
@@ -702,12 +709,15 @@ $ traceworks resume &lt;run&gt; --no-input        <span class="c"># finishes, ex
 
 <section id="register" class="feature" data-side="frame">
   <h2><span class="num">13</span>The register <span class="tag frame">the frame</span>
-    <small>registers/&lt;key&gt;/</small></h2>
+    <small>registers/&lt;key&gt;/&lt;project&gt;/</small></h2>
   <dl class="pattern">
     <div><dt>Without it</dt><dd>An audit that runs a second time starts from zero. It reports other things in other
       words, has forgotten what was decided, and nobody can say how far it is.</dd></div>
     <div><dt>What it does</dt><dd>A workflow that declares itself an audit (<code>metadata.audit</code>, with a key)
-      feeds a register at the end of every run. The register is what the audit knows across its runs, kept with the
+      feeds a register at the end of every run: the register of its key and of the project the run names
+      (<code>--project</code>, or the folder the run works in where the home declares its <code>projects</code>),
+      so one audit run on two projects keeps two registers, and a run sees only its own.
+      The register is what the audit knows across its runs on that project, kept with the
       means of a run: an append-only, hash-chained log in plain files. It has seven functions, each below with where
       you see it and its limit. Here "reused" means verdicts and decisions; that the package can be used again is
       feature 2. The page <a href="audit-loop.html">An audit that knows when it is done</a> shows the loop round by
@@ -716,10 +726,11 @@ $ traceworks resume &lt;run&gt; --no-input        <span class="c"># finishes, ex
   <div class="cards">
     <div class="card"><h3>Memory across runs</h3>
       <p>A finding has an identity: the register's key, the rule and the subject. So a report
-      is compared with what is known, and each finding is new, seen again, resolved or reopened, with first seen, last
-      seen and how often.</p>
-      <p class="see">See: <code>traceworks findings &lt;key&gt; list</code>, and the last line of an audit run, such as
-      <code>register hello: 1 new, 1 resolved, 0 reopened, 1 open now</code>.</p>
+      is compared with what the register of the run's project knows, and each finding is new, seen again, resolved or
+      reopened, with first seen, last seen and how often.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; list</code> (with <code>--project &lt;key&gt;</code>
+      where a key has several projects), and the last line of an audit run, such as
+      <code>register hello of shop: 1 new, 1 resolved, 0 reopened, 1 open now</code>.</p>
       <p class="see">Limit: nothing is normalised. A reworded subject is a new finding.</p></div>
     <div class="card"><h3>Decisions kept</h3>
       <p>A person accepts a finding as a risk, dismisses it or reopens it. The log keeps who decided, when and why.
@@ -740,10 +751,15 @@ $ traceworks resume &lt;run&gt; --no-input        <span class="c"># finishes, ex
     <div class="card"><h3>Proof</h3>
       <p>Every report and every decision is a line of the register's log, chained like the log of a run. The state is
       not stored but folded from the log, so a state edited by hand differs from it.</p>
-      <p class="see">See: <code>traceworks findings &lt;key&gt; verify</code> checks the chain, the blobs and
-      <code>state.json</code>; exit 8 when one does not hold.</p>
-      <p class="see">Limit: the head of a register is not anchored outside its folder yet. A changed last line or a
-      cut end can go unnoticed, so protect the folder as you protect the ledger.</p></div>
+      <p>After every write the ledger gets an anchor: the hash of the register's last line, and what was written
+      since the anchor before (how many lines of which kind, the run, who decided which finding). So a changed last
+      line and a cut end are found too.</p>
+      <p class="see">See: <code>traceworks findings &lt;key&gt; verify</code> checks the chain, the blobs,
+      <code>state.json</code> and the log against its anchors in the ledger; exit 8 when one does not hold.
+      <code>traceworks verify</code> without a run does it for every register of the home.</p>
+      <p class="see">Limit: lines appended after the last anchor are accepted and named as unproven, and an anchor
+      is derived and unsigned: whoever can write the register's folder and the ledger can add a forged decision with
+      a well-formed anchor. Rewriting what the register held is found; adding to it is not.</p></div>
     <div class="card"><h3>Progress that can reach its goal</h3>
       <p>The number of findings grows with attention and has no goal. The number of settled items has one: an item is
       settled when it is clean or every finding of it is decided. The self-audits let their gate follow it: red while
@@ -800,16 +816,18 @@ $ traceworks resume &lt;run&gt; --no-input        <span class="c"># finishes, ex
   </figure>
   <dl class="pattern">
     <div><dt>Where you see it</dt><dd><pre><span class="c"># the smallest audit: three shell steps, no AI</span>
-$ traceworks run examples/audit-hello --workspace /some/dir
-$ traceworks findings              <span class="c"># the registers, with counts by status</span>
+$ traceworks run examples/audit-hello --workspace /some/dir --project some-dir
+$ traceworks findings              <span class="c"># the registers, each with its key, its project and its counts by status</span>
 $ traceworks findings hello list
 $ traceworks findings hello verify</pre>
-      The files are in <code>~/.traceworks/registers/&lt;key&gt;/</code> (the Traceworks home): <code>events.jsonl</code>, <code>blobs/</code>,
-      <code>state.json</code> and <code>report.html</code>.</dd></div>
+      The files are in <code>~/.traceworks/registers/&lt;key&gt;/&lt;project&gt;/</code> (the Traceworks home):
+      <code>events.jsonl</code>, <code>blobs/</code>, <code>state.json</code> and <code>report.html</code>.</dd></div>
     <div class="limit"><dt>The limit</dt><dd>The register keeps what a report stated: the rule, the subject, the
       severity and the evidence. What is wrong and how to fix it are often a model's words; they stay in the record of
-      the run, and <code>findings &lt;key&gt; show</code> reads them from there. A register belongs to one workflow, and
-      a run of another workflow with the same key is refused. Triage is nobody's workflow: someone has to check a new
+      the run, and <code>findings &lt;key&gt; show</code> reads them from there. A register key belongs to one workflow
+      across all its projects, and a run of another workflow with the same key is refused. The project is the
+      operator's word: a run without one is refused, and one started with the key of another project feeds that
+      project's register. Triage is nobody's workflow: someone has to check a new
       finding against the code.</dd></div>
   </dl>
 </section>
@@ -828,8 +846,8 @@ $ traceworks findings hello verify</pre>
   traceworks.json              <span class="c"># the operator's settings (optional)</span>
   credentials.json             <span class="c"># the values of secrets (optional)</span>
   runs/&lt;yyyy-mm-dd&gt;/&lt;run-id&gt;/  <span class="c"># one folder per run</span>
-  ledger/                      <span class="c"># a git repository, one commit per finished run</span>
-  registers/&lt;key&gt;/             <span class="c"># one folder per register</span></pre>
+  ledger/                      <span class="c"># the one git repository: a commit per started run, per finished run and per write of a register</span>
+  registers/&lt;key&gt;/&lt;project&gt;/   <span class="c"># one folder per register: per audit key and project</span></pre>
       The written reason of each dependency is in <code>docs/architecture.md</code>, "Dependencies".</dd></div>
     <div class="limit"><dt>The limit</dt><dd>There is no scheduler and no web page to click in: a run starts when a
       person, a cron entry or a CI job starts it. The files live on one machine, so copies and backups are yours to
@@ -843,10 +861,13 @@ $ traceworks findings hello verify</pre>
     <li><strong>Signatures of the record.</strong> Manifests and a person's decisions in a register carry
       <code>signature: null</code>, and an approval in a run is not signed either. The record is tamper-evident, not
       signed. Only a package can be signed, by its seal (feature 4).</li>
-    <li><strong>An anchor for a register.</strong> The head of a register's log is not yet named in the ledger, as the
-      head of a run is.</li>
-    <li><strong>Other front ends.</strong> There is no server for MCP clients and no export of a workflow to
-      BPMN; the command line, <code>describe</code> and <code>run.html</code> are what exists.</li>
+    <li><strong>Other front ends.</strong> Beside the command line, <code>describe</code> and
+      <code>run.html</code> there is one more: <code>traceworks mcp</code> serves MCP clients on its standard input
+      and output (<code>docs/cli.md</code>, "mcp"). Without a switch it only reads; the operator opens runs, answers
+      and decisions one by one, and a client chooses no project: its runs and the registers it reaches are those of
+      the project the operator bound to the folder the server works in. It is
+      verified with the tests of the repository in the client's place: no MCP client of a vendor was connected.
+      There is no export of a workflow to BPMN.</li>
     <li><strong>Podman.</strong> The code supports it; nothing about it is verified.</li>
   </ul>
 </section>

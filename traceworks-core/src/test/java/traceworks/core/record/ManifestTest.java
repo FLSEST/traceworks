@@ -59,7 +59,8 @@ class ManifestTest {
         Iterator<String> it = json().fieldNames();
         it.forEachRemaining(names::add);
 
-        assertThat(names).containsExactly("run_id", "workflow", "package_digest", "seal", "inputs_digest",
+        assertThat(names).containsExactly("run_id", "workflow", "project", "actor", "package_digest", "seal",
+                "inputs_digest",
                 "execution", "images", "models", "tool_versions", "events", "head", "run_started", "status", "gate", "started_at",
                 "finished_at", "traceworks_version", "signature");
     }
@@ -88,6 +89,51 @@ class ManifestTest {
         assertThat(m.get("traceworks_version").asText()).isEqualTo("0.1.0");
         assertThat(m.get("started_at").asText()).matches("2026-11-03T12:00:00\\.\\d{3}Z");
         assertThat(m.get("finished_at").asText()).matches("2026-11-03T12:00:\\d\\d\\.\\d{3}Z");
+    }
+
+    private static PackageCalled called(String workflowId, String digest) {
+        return new PackageCalled(workflowId, "Name", "../" + workflowId, "/pkgs/" + workflowId, digest,
+                "{}".getBytes(StandardCharsets.UTF_8));
+    }
+
+    /**
+     * The package digest covers the run's own package only: the manifest lists the package of every child run of
+     * another package, at every depth, each workflow id and digest once, sorted, right after the package digest.
+     */
+    @Test
+    void calledPackages_areCollectedFromTheChildRuns_eachOnce_sorted() throws Exception {
+        fx.emit(new StepStarted(0, "p", "foreach", 0, false),
+                new ChildRunEvent("c1", called("wf-tools", "digest-b")),
+                new ChildRunEvent("c1", new ChildRunEvent("g1", called("wf-deep", "digest-z"))),
+                new ChildRunEvent("c2", called("wf-tools", "digest-b")),
+                new ChildRunEvent("c3", called("wf-tools", "digest-a")),
+                new ChildRunEvent("c4", new RunFinished(RunStatus.COMPLETED, Map.of(), null)),
+                new RunFinished(RunStatus.COMPLETED, Map.of(), null));
+
+        assertThat(manifest().calledPackages()).containsExactly(
+                new Manifest.CalledPackage("wf-deep", "digest-z"), new Manifest.CalledPackage("wf-tools", "digest-a"),
+                new Manifest.CalledPackage("wf-tools", "digest-b"));
+        assertThat(json().get("called_packages").toString()).isEqualTo(
+                "[{\"workflow_id\":\"wf-deep\",\"package_digest\":\"digest-z\"},"
+                        + "{\"workflow_id\":\"wf-tools\",\"package_digest\":\"digest-a\"},"
+                        + "{\"workflow_id\":\"wf-tools\",\"package_digest\":\"digest-b\"}]");
+        List<String> names = new ArrayList<>();
+        json().fieldNames().forEachRemaining(names::add);
+        assertThat(names).containsSubsequence("package_digest", "called_packages", "seal");
+        assertThat(manifest().withModels(List.of("m")).calledPackages()).hasSize(3);
+        assertThat(manifest().withoutRunStarted().calledPackages()).hasSize(3);
+        assertThat(manifest().withoutStarter().calledPackages()).hasSize(3);
+    }
+
+    /** A run whose children are all of its own package has no such field: its manifest keeps its shape. */
+    @Test
+    void aRunThatCalledNoOtherPackage_hasNoCalledPackagesField() throws Exception {
+        fx.emit(new StepStarted(0, "p", "sub-workflow", 0, false),
+                new ChildRunEvent("c", new RunFinished(RunStatus.COMPLETED, Map.of(), null)),
+                new RunFinished(RunStatus.COMPLETED, Map.of(), null));
+
+        assertThat(manifest().calledPackages()).isEmpty();
+        assertThat(json().has("called_packages")).isFalse();
     }
 
     @Test

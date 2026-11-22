@@ -74,7 +74,7 @@ class FindingsCommandTest {
     }
 
     private Result run(Path pkg) {
-        return exec("run", pkg.toString(), "--allow-host-execution", "--no-input", "--quiet");
+        return exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input", "--quiet");
     }
 
     @Test
@@ -83,8 +83,8 @@ class FindingsCommandTest {
         Result second = run(auditPackage("B.java", "C.java"));
 
         assertThat(first.code()).as(first.err()).isZero();
-        assertThat(first.out()).contains("  register hello: 2 new, 0 resolved, 0 reopened, 2 open now");
-        assertThat(second.out()).contains("  register hello: 1 new, 1 resolved, 0 reopened, 2 open now");
+        assertThat(first.out()).contains("  register hello of shop: 2 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(second.out()).contains("  register hello of shop: 1 new, 1 resolved, 0 reopened, 2 open now");
         Result list = exec("findings", "hello", "list");
         assertThat(list.code()).as(list.err()).isZero();
         assertThat(list.out().lines()).hasSize(2).allSatisfy(line -> assertThat(line).matches(
@@ -106,7 +106,7 @@ class FindingsCommandTest {
         Result show = exec("findings", "hello", "show", id);
 
         assertThat(show.code()).as(show.err()).isZero();
-        assertThat(show.out()).contains("Finding   " + id, "Register  hello", "Status    OPEN", "Severity  MEDIUM",
+        assertThat(show.out()).contains("Finding   " + id, "Register  hello of shop", "Status    OPEN", "Severity  MEDIUM",
                 "Rule      size", "Subject   A.java", "Title     Big A.java", "First     run ", "Last      run ",
                 "Occurrences 1", "Regressions 0");
         assertThat(show.out()).as("a finding without them has no such lines")
@@ -271,7 +271,7 @@ class FindingsCommandTest {
         var array = mapper.readTree(open.out());
         assertThat(array.isArray()).isTrue();
         assertThat(array).hasSize(1);
-        var state = mapper.readTree(Files.readString(home.resolve("registers").resolve("hello").resolve("state.json")));
+        var state = mapper.readTree(Files.readString(home.resolve("registers").resolve("hello").resolve("shop").resolve("state.json")));
         var inState = java.util.stream.StreamSupport.stream(state.get("findings").spliterator(), false)
                 .filter(f -> f.get("subject").asText().equals("B.java")).findFirst().orElseThrow();
         assertThat(array.get(0)).isEqualTo(inState);
@@ -288,7 +288,7 @@ class FindingsCommandTest {
     void theDetail_neverEntersAuditFindings_norAFileOfTheRegister() throws IOException {
         Path pkg = auditPackageWithDetail();
         run(pkg);
-        Result second = exec("run", pkg.toString(), "--allow-host-execution", "--no-input");
+        Result second = exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input");
         assertThat(second.code()).as(second.err()).isZero();
         String id = exec("findings", "hello", "list").out().substring(0, 8);
         exec("findings", "hello", "show", id);
@@ -340,9 +340,9 @@ class FindingsCommandTest {
         Result first = run(judgedPackage(List.of("A.java", "B.java", "C.java"), List.of()));
         Result second = run(judgedPackage(List.of("C.java"), List.of("A.java")));
 
-        assertThat(first.out()).contains("  register hello: 3 new, 0 resolved, 0 reopened, 3 open now");
+        assertThat(first.out()).contains("  register hello of shop: 3 new, 0 resolved, 0 reopened, 3 open now");
         assertThat(second.code()).as(second.err()).isZero();
-        assertThat(second.out()).contains("  register hello: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them not"
+        assertThat(second.out()).contains("  register hello of shop: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them not"
                 + " mentioned by this report");
         Result list = exec("findings", "hello", "list", "--all");
         assertThat(list.out().lines()).hasSize(3)
@@ -365,14 +365,14 @@ class FindingsCommandTest {
 
         run(auditPackage("A.java"));
         Result keys = exec("findings");
-        assertThat(keys.out()).contains("hello  example  OPEN 1");
+        assertThat(keys.out()).contains("hello  shop  example  OPEN 1");
     }
 
     @Test
     void verify_exits8OnATamperedLog_andAnUnknownKeyExits2() throws IOException {
         run(auditPackage("A.java"));
         assertThat(exec("findings", "hello", "verify").code()).isZero();
-        Path log = home.resolve("registers").resolve("hello").resolve("events.jsonl");
+        Path log = home.resolve("registers").resolve("hello").resolve("shop").resolve("events.jsonl");
         Files.writeString(log, Files.readString(log).replace("\"category\":\"example\"", "\"category\":\"other\""));
 
         Result verify = exec("findings", "hello", "verify");
@@ -387,7 +387,7 @@ class FindingsCommandTest {
     @Test
     void list_readsTheLog_notTheStateFile() throws IOException {
         run(auditPackage("A.java"));
-        Files.writeString(home.resolve("registers").resolve("hello").resolve("state.json"),
+        Files.writeString(home.resolve("registers").resolve("hello").resolve("shop").resolve("state.json"),
                 "{\"format\":1,\"key\":\"hello\",\"findings\":[]}\n");
 
         assertThat(exec("findings", "hello", "list").out().lines()).hasSize(1);
@@ -470,17 +470,17 @@ class FindingsCommandTest {
     }
 
     @Test
-    void render_writesThePageAgain_andPrintsItsPath() throws IOException {
+    void render_writesThePageAgain_andPrintsItsRegisterAndItsPath() throws IOException {
         run(auditPackage("A.java"));
-        Path page = home.resolve("registers").resolve("hello").resolve("report.html");
+        Path page = home.resolve("registers").resolve("hello").resolve("shop").resolve("report.html");
         assertThat(page).exists();
         Files.delete(page);
 
         Result render = exec("findings", "hello", "render");
 
         assertThat(render.code()).as(render.err()).isZero();
-        assertThat(render.out().strip()).isEqualTo(page.toString());
-        assertThat(Files.readString(page)).contains("<title>Register hello</title>");
+        assertThat(render.out().strip()).isEqualTo("rendered the register hello of shop: " + page);
+        assertThat(Files.readString(page)).contains("<title>Register hello of shop</title>");
     }
 
     // ---- a decision covers the severity it was made on (docs/registers.md, "Decisions")
@@ -497,7 +497,8 @@ class FindingsCommandTest {
         String id = exec("findings", "hello", "list").out().substring(0, 8);
         exec("findings", "hello", "dismiss", id, "--note", "false positive");
 
-        Result second = exec("run", sized("CRITICAL", "900 lines").toString(), "--allow-host-execution", "--no-input");
+        Result second = exec("run", sized("CRITICAL", "900 lines").toString(), "--project", "shop",
+                "--allow-host-execution", "--no-input");
 
         assertThat(second.out() + second.err()).contains("0 new, 0 resolved, 1 reopened, 1 open now");
         assertThat(exec("findings", "hello", "list").out()).contains(id + "  OPEN       CRITICAL")
@@ -537,7 +538,8 @@ class FindingsCommandTest {
         String id = exec("findings", "hello", "list").out().substring(0, 8);
         exec("findings", "hello", "dismiss", id, "--note", "false positive");
 
-        Result second = exec("run", sized("CRITICAL", "900 lines").toString(), "--allow-host-execution", "--no-input");
+        Result second = exec("run", sized("CRITICAL", "900 lines").toString(), "--project", "shop",
+                "--allow-host-execution", "--no-input");
 
         assertThat(second.out() + second.err()).contains("0 new, 0 resolved, 0 reopened");
         assertThat(exec("findings", "hello", "list").out()).contains(id + "  DISMISSED  CRITICAL")
@@ -545,9 +547,9 @@ class FindingsCommandTest {
         assertThat(exec("findings", "hello", "show", id).out()).contains("Status    DISMISSED", "Severity  CRITICAL",
                         ", made on severity LOW, not on the CRITICAL the finding has now\n", "Made on   evidence: 310 lines")
                 .doesNotContain("not in force");
-        assertThat(Files.readString(home.resolve("registers/hello/report.html")))
+        assertThat(Files.readString(home.resolve("registers/hello/shop/report.html")))
                 .contains(", made on severity LOW, not on the CRITICAL the finding has now: false positive");
-        assertThat(Files.readString(home.resolve("registers/hello/state.json")))
+        assertThat(Files.readString(home.resolve("registers/hello/shop/state.json")))
                 .contains("\"note\":\"false positive\",\"severity\":\"LOW\"");
         assertThat(exec("findings", "hello", "verify").code()).isZero();
     }
@@ -555,7 +557,7 @@ class FindingsCommandTest {
     // ---- who decided: the actor, and the agent that acted under the actor (docs/registers.md, "Who decided")
 
     private List<String> logLines() throws IOException {
-        return Files.readAllLines(home.resolve("registers").resolve("hello").resolve("events.jsonl"));
+        return Files.readAllLines(home.resolve("registers").resolve("hello").resolve("shop").resolve("events.jsonl"));
     }
 
     /** The findings the runs of this home got of their register: the lines of every run's register folder. */
@@ -579,8 +581,11 @@ class FindingsCommandTest {
         Result accept = exec("findings", "hello", "accept", ids.get(1), "--note", "bounded", "--until", "2027-01-31");
 
         assertThat(dismiss.code()).as(dismiss.err()).isZero();
-        assertThat(dismiss.out()).isEqualTo("dismissed " + ids.get(0) + " through the agent claude-code\n");
-        assertThat(accept.out()).isEqualTo("accepted " + ids.get(1) + " as a risk, review by 2027-01-31\n");
+        assertThat(dismiss.out()).as("the line names the register it acted on")
+                .isEqualTo("dismissed " + ids.get(0) + " in the register hello of shop through the agent"
+                        + " claude-code\n");
+        assertThat(accept.out()).isEqualTo("accepted " + ids.get(1) + " as a risk in the register hello of shop,"
+                + " review by 2027-01-31\n");
         // list: the row of the agent's decision says so, the row of the person's is the row it always was
         List<String> rows = exec("findings", "hello", "list").out().lines().toList();
         assertThat(rows).filteredOn(r -> r.startsWith(ids.get(0))).singleElement().asString()
@@ -595,7 +600,7 @@ class FindingsCommandTest {
         // list --json, state.json and report.html
         var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         for (String json : List.of(exec("findings", "hello", "list", "--json").out(), mapper.readTree(
-                Files.readString(home.resolve("registers/hello/state.json"))).get("findings").toString())) {
+                Files.readString(home.resolve("registers/hello/shop/state.json"))).get("findings").toString())) {
             for (var finding : mapper.readTree(json)) {
                 var disposition = finding.get("disposition");
                 assertThat(disposition.get("actor").asText()).isEqualTo("tester");
@@ -606,7 +611,7 @@ class FindingsCommandTest {
                 }
             }
         }
-        assertThat(Files.readString(home.resolve("registers/hello/report.html")))
+        assertThat(Files.readString(home.resolve("registers/hello/shop/report.html")))
                 .contains("dismissed by tester through the agent claude-code at ")
                 .contains("accepted by tester at ");
         // the log: the agent beside the actor, after the one line that says the register holds such a decision
@@ -636,8 +641,10 @@ class FindingsCommandTest {
                 "--agent", "claude-code");
 
         assertThat(byVariable.code()).as(byVariable.err()).isZero();
-        assertThat(byVariable.out()).isEqualTo("dismissed " + ids.get(0) + " through the agent harness 2.1\n");
-        assertThat(byOption.out()).isEqualTo("dismissed " + ids.get(1) + " through the agent claude-code\n");
+        assertThat(byVariable.out()).isEqualTo("dismissed " + ids.get(0) + " in the register hello of shop through"
+                + " the agent harness 2.1\n");
+        assertThat(byOption.out()).isEqualTo("dismissed " + ids.get(1) + " in the register hello of shop through"
+                + " the agent claude-code\n");
         assertThat(exec("findings", "hello", "show", ids.get(0)).out())
                 .contains("Decision  DISMISSED by tester through the agent harness 2.1 at ");
         assertThat(exec("findings", "hello", "show", ids.get(1)).out())
@@ -647,13 +654,14 @@ class FindingsCommandTest {
 
         Result reopen = execAs("harness 2.1", "findings", "hello", "reopen", ids.get(0));
 
-        assertThat(reopen.out()).isEqualTo("reopened " + ids.get(0) + " through the agent harness 2.1\n");
+        assertThat(reopen.out()).isEqualTo("reopened " + ids.get(0) + " in the register hello of shop through the"
+                + " agent harness 2.1\n");
         assertThat(logLines().getLast()).contains("\"type\":\"finding.reopened\"")
                 .contains("\"actor\":\"tester\",\"agent\":\"harness 2.1\"").contains("\"reason\":\"manual\"");
         Result accept = execAs("harness 2.1", "findings", "hello", "accept", ids.get(0), "--note", "bounded",
                 "--until", "2027-01-31");
-        assertThat(accept.out()).isEqualTo("accepted " + ids.get(0) + " as a risk through the agent harness 2.1,"
-                + " review by 2027-01-31\n");
+        assertThat(accept.out()).isEqualTo("accepted " + ids.get(0) + " as a risk in the register hello of shop"
+                + " through the agent harness 2.1, review by 2027-01-31\n");
         assertThat(exec("findings", "hello", "verify").code()).isZero();
     }
 
@@ -747,9 +755,9 @@ class FindingsCommandTest {
         run(auditPackage("A.java"));
         Result fed = run(auditPackageWith("testing", WITH_ITEMS));
 
-        assertThat(fed.out()).contains("  register testing: 1 new, 0 resolved, 0 reopened, 1 open now; "
+        assertThat(fed.out()).contains("  register testing of shop: 1 new, 0 resolved, 0 reopened, 1 open now; "
                 + "items 2 of 4 settled, 3 judged in this run");
-        assertThat(exec("findings").out()).isEqualTo("hello  example  OPEN 1\ntesting  example  OPEN 1\n"
+        assertThat(exec("findings").out()).isEqualTo("hello  shop  example  OPEN 1\ntesting  shop  example  OPEN 1\n"
                 + "  items 2 of 4 settled: 2 clean, 0 decided; 1 open, 1 not judged\n");
     }
 
@@ -802,7 +810,7 @@ class FindingsCommandTest {
     }
 
     private Path registerLog() {
-        return home.resolve("registers").resolve("hello").resolve("events.jsonl");
+        return home.resolve("registers").resolve("hello").resolve("shop").resolve("events.jsonl");
     }
 
     private String firstId() {
@@ -866,7 +874,10 @@ class FindingsCommandTest {
         assertThat(exec("findings", "hello", "verify").out()).contains("anchor    ok (seq 4");
     }
 
-    /** The decision is kept when the ledger cannot take its anchor; the command says so and verify names the line. */
+    /**
+     * The decision is kept when the ledger cannot take its anchor; the command says so, does not end as one that
+     * did all it was for (exit 6), and verify names the line.
+     */
     @Test
     void aDecisionTheLedgerCannotAnchor_isKept_andSaysSo() throws IOException {
         run(auditPackage("A.java"));
@@ -875,11 +886,18 @@ class FindingsCommandTest {
         Files.move(ledger, home.resolve("ledger-away"));
         Files.writeString(ledger, "a file where the ledger was");
 
-        Result dismissed = exec("findings", "hello", "dismiss", id, "--note", "not ours");
+        // A ledger that cannot be listed does not say which projects the key has, so the command names its own
+        Result unnamed = exec("findings", "hello", "dismiss", id, "--note", "not ours");
+        Result dismissed = exec("findings", "hello", "dismiss", id, "--note", "not ours", "--project", "shop");
 
-        assertThat(dismissed.code()).as(dismissed.err()).isZero();
+        assertThat(unnamed.code()).as(unnamed.out() + unnamed.err()).isEqualTo(6);
+        assertThat(unnamed.err()).contains("The ledger cannot say which projects the register 'hello' has (")
+                .contains("name the project with --project KEY");
+        assertThat(unnamed.out()).as("nothing was decided").isEmpty();
+        assertThat(dismissed.code()).as(dismissed.err()).isEqualTo(6);
         assertThat(dismissed.out()).contains("dismissed " + id);
-        assertThat(dismissed.err()).contains("is not anchored in the ledger").contains("findings hello render");
+        assertThat(dismissed.err()).contains("the decision is recorded, but it is not anchored in the ledger")
+                .contains("findings hello render");
         Files.delete(ledger);
         Files.move(home.resolve("ledger-away"), ledger);
         Result verify = exec("findings", "hello", "verify");
@@ -906,14 +924,19 @@ class FindingsCommandTest {
         String good = Files.readString(head);
         Files.writeString(head, "garbage\n");
 
-        Result verify = exec("findings", "hello", "verify");
-        Result dismissed = exec("findings", "hello", "dismiss", id, "--note", "not ours");
+        // A ledger that cannot be listed does not say which projects the key has, so each command names its own
+        Result unnamed = exec("findings", "hello", "verify");
+        Result verify = exec("findings", "hello", "verify", "--project", "shop");
+        Result dismissed = exec("findings", "hello", "dismiss", id, "--note", "not ours", "--project", "shop");
 
+        assertThat(unnamed.code()).as(unnamed.out() + unnamed.err()).isEqualTo(6);
+        assertThat(unnamed.err()).contains("The ledger cannot say which projects the register 'hello' has (")
+                .contains("name the project with --project KEY");
         assertThat(verify.code()).as(verify.out()).isEqualTo(8);
         assertThat(verify.out()).contains("chain     ok").contains("anchor    NOT checked")
                 .contains("the ledger could not be read").doesNotContain("anchor    none");
-        assertThat(dismissed.code()).as(dismissed.err()).isZero();
-        assertThat(dismissed.err()).contains("is not anchored in the ledger");
+        assertThat(dismissed.code()).as(dismissed.err()).isEqualTo(6);
+        assertThat(dismissed.err()).contains("the decision is recorded, but it is not anchored in the ledger");
         Files.writeString(head, good);
         assertThat(exec("findings", "hello", "verify").out()).contains("anchor    ok up to seq 3; seq 4 is not anchored");
     }
@@ -959,7 +982,7 @@ class FindingsCommandTest {
                 + "\"blocks\":[{\"type\":\"shell\",\"name\":\"report\",\"config\":{\"command\":"
                 + new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(command) + "}}]}");
         assertThat(run(dir).code()).isZero();
-        Path log = home.resolve("registers/ledger/events.jsonl");
+        Path log = home.resolve("registers/ledger/shop/events.jsonl");
         List<String> lines = Files.readAllLines(log);
         lines.set(lines.size() - 1, lines.getLast().replace("\"register\":\"ledger\"", "\"register\":\"other\""));
         Files.writeString(log, String.join("\n", lines) + "\n");

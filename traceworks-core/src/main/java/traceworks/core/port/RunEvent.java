@@ -16,7 +16,8 @@ import java.util.Objects;
  * of a step and of the run status; a later version adds the events of the run record. The engine emits only top-level
  * steps; a {@code foreach} step reports its items in between ({@link ForEachItemStarted}, {@link ForEachItemFinished}),
  * an {@code agentic} step its loop ({@link AgenticProgress}), and a child run started by a step arrives as
- * {@link ChildRunEvent}s. A run with checkpoints reports its state between two top-level blocks ({@link Checkpoint}).
+ * {@link ChildRunEvent}s, the first of them a {@link PackageCalled} when its workflow is of another package. A
+ * run with checkpoints reports its state between two top-level blocks ({@link Checkpoint}).
  * A run's last event is {@link RunFinished}, or {@link RunParked} for a run that parked at a question or by a pause.
  */
 public sealed interface RunEvent {
@@ -123,6 +124,22 @@ public sealed interface RunEvent {
             Objects.requireNonNull(event, "event");
         }
     }
+
+    /**
+     * A child run starts a workflow of another package than the run's: the first event of that child run, wrapped
+     * in its {@link ChildRunEvent}. The run's start names the package the run was started with only, and the
+     * workflow of another package decides what the child does, so the record names that package for the child. A
+     * child of the run's own package has no such event.
+     *
+     * @param workflowId    the {@code id} of the child's workflow
+     * @param workflowName  its {@code name}
+     * @param reference     the reference the calling block resolved to: a package-relative path or a workflow id
+     * @param packageDir    the directory the package was loaded from
+     * @param packageDigest the digest of the package as loaded for this call
+     * @param workflowJson  the bytes of the package's {@code workflow.json} as read
+     */
+    record PackageCalled(String workflowId, String workflowName, String reference, String packageDir,
+                         String packageDigest, byte[] workflowJson) implements RunEvent {}
 
     /** The output a step produced. */
     record OutputRecorded(int stepIndex, String blockName, String output) implements RunEvent {}

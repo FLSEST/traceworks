@@ -37,7 +37,7 @@ public final class RegisterHtml {
         out.append("<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">\n")
                 .append("<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'\">\n")
                 .append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
-                .append("<title>Register ").append(Html.line(state.key())).append("</title>\n<style>").append(RunHtml.CSS)
+                .append("<title>Register ").append(Html.line(name(state))).append("</title>\n<style>").append(RunHtml.CSS)
                 .append(".unverified{color:var(--yellow)}.finding{border:1px solid var(--line);border-left-width:4px;"
                         + "background:var(--card);padding:.5rem 1rem;margin:.5rem 0;border-radius:4px}"
                         + ".finding.open{border-left-color:var(--red)}.finding.awaiting_verification{border-left-color:var(--yellow)}"
@@ -53,12 +53,18 @@ public final class RegisterHtml {
         return out.toString();
     }
 
+    /** The register by its key and its project: {@code hello of shop}; the key alone for one from before projects. */
+    private static String name(RegisterState state) {
+        return state.project() == null ? state.key() : state.key() + " of " + state.project();
+    }
+
     private static void header(StringBuilder out, RegisterState state, String version) {
-        out.append("<h1>").append(Html.line(state.key()));
+        out.append("<h1>").append(Html.line(name(state)));
         if (state.category() != null) {
             out.append(" <small>").append(Html.line(state.category())).append("</small>");
         }
         out.append("</h1>\n<table>\n");
+        row(out, "project", state.project());   // only for a register that names one
         row(out, "workflow", state.workflowId());
         if (state.lastReport() != null) {
             row(out, "last report", "run " + state.lastReport().runId() + (state.lastReport().finishedAt() == null ? ""

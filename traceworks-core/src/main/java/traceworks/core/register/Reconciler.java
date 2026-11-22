@@ -239,7 +239,8 @@ public final class Reconciler {
         RegisterState after = new RegisterState(state.format(), state.key(), state.workflowId(), state.category(),
                 new RegisterState.LastReport(report.runId(), report.finishedAt(), report.reportBlob(), true),
                 new ArrayList<>(known.values()), state.validReports() + 1, items(state.items(), report, sighting),
-                state.namesDecidedSeverity() || higherSeverity != DecisionOnHigherSeverity.UNCHECKED);
+                state.namesDecidedSeverity() || higherSeverity != DecisionOnHigherSeverity.UNCHECKED,
+                state.project());
         return new Applied(after, changes);
     }
 

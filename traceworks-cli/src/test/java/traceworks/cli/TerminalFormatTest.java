@@ -49,6 +49,15 @@ class TerminalFormatTest {
                 .isEqualTo("12:34:56 run started: Deploy (run 11111111) by operator@box");
     }
 
+    /** The first line of a child run of another package: which workflow it runs, from where, with which digest. */
+    @Test
+    void aCalledPackage_isALineOfTheChildRun() {
+        String digest = "ab".repeat(32);
+        assertThat(line(event("run.package", RUN, "\"workflow\":{\"id\":\"wf-lib\",\"name\":\"Lib\"},"
+                + "\"reference\":\"../lib\",\"package\":{\"dir\":\"/pkgs/lib\",\"digest\":\"" + digest + "\"}")))
+                .isEqualTo("12:34:56   workflow Lib (wf-lib) of the package /pkgs/lib, digest " + digest);
+    }
+
     /**
      * The usual start line is wider than a terminal, and is one line all the same: what Traceworks wrote into the
      * record itself (the runtime, its version, the id) is not broken. The workflow's name is: a padded one never
@@ -95,6 +104,19 @@ class TerminalFormatTest {
         assertThat(line(event("run.resumed", "\"actor\":\"operator@box\",\"rerun_step\":null,\"execution\":\"host\","
                 + "\"container_runtime\":null")))
                 .isEqualTo("12:34:56 run resumed by operator@box on the host (no container runtime works)");
+    }
+
+    /** A start, a resume, a pause and a cancel an agent asked for name it behind the actor, as an answer does. */
+    @Test
+    void requestsOfAnAgent_nameItBehindTheActor() {
+        assertThat(line(event("run.started", "\"workflow\":{\"id\":\"w\",\"name\":\"Deploy\"},\"actor\":\"operator@box\","
+                + "\"agent\":\"claude-code\""))).contains(" by operator@box through the agent claude-code");
+        assertThat(line(event("run.resumed", "\"actor\":\"operator@box\",\"agent\":\"claude-code\",\"rerun_step\":null")))
+                .isEqualTo("12:34:56 run resumed by operator@box through the agent claude-code");
+        assertThat(line(event("run.cancel_requested", "\"actor\":\"operator@box\",\"agent\":\"claude-code\"")))
+                .isEqualTo("12:34:56 cancel requested by operator@box through the agent claude-code");
+        assertThat(line(event("run.pause_requested", "\"actor\":\"operator@box\",\"agent\":\"claude-code\"")))
+                .startsWith("12:34:56 pause requested by operator@box through the agent claude-code:");
     }
 
     @Test

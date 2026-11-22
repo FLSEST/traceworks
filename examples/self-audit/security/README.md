@@ -43,9 +43,9 @@ From the root of a Traceworks checkout, which is the workspace the audit reads:
 ```bash
 traceworks images build examples/self-audit/security    # once: the shell, claude, pi, egress and areas images
 traceworks check examples/self-audit/security
-traceworks run examples/self-audit/security                       # judged by Claude Fable 5.2, the default
-traceworks run examples/self-audit/security --input judge=opus    # judged by Claude Opus 5.5
-traceworks run examples/self-audit/security --input judge=astra   # judged by Astra 6, through Pi
+traceworks run examples/self-audit/security --project traceworks                       # judged by Claude Fable 5.2, the default
+traceworks run examples/self-audit/security --project traceworks --input judge=opus    # judged by Claude Opus 5.5
+traceworks run examples/self-audit/security --project traceworks --input judge=astra   # judged by Astra 6, through Pi
 ```
 
 **It makes one call per area**, one after the other: 110 calls on Traceworks in November 2026, for a first run. Each
@@ -97,7 +97,7 @@ For a second opinion on everything, give the second judge a register of its own,
 
 ```bash
 traceworks credentials set OPENAI_API_KEY --home ~/.traceworks-astra          # a home has its own credentials.json
-traceworks run examples/self-audit/security --input judge=astra --home ~/.traceworks-astra
+traceworks run examples/self-audit/security --project traceworks --input judge=astra --home ~/.traceworks-astra
 traceworks findings security list --home ~/.traceworks-astra                  # next to: traceworks findings security list
 ```
 
@@ -151,7 +151,7 @@ guarantees and not the limits, so it reported what the documents already say, an
 that out.
 
 **The stated limits** are in `rules/security.limits`, and the instructions carry them as a numbered list of one
-line each, under the document and the heading they come from (`L1` to `L62`). The judge is told how to use them:
+line each, under the document and the heading they come from (`L1` to `L76`). The judge is told how to use them:
 
 - A behaviour that a limit states is not a finding. An open finding of an earlier run that describes only such a
   behaviour is answered `gone` with `"limit": "L<number>"`.
@@ -216,10 +216,10 @@ a finding off. The file belongs to the package, and a seal covers it and the ins
 `--verdict-version` (below): the question changed. That was done on 2026-11-17, from 1 to 2. The `areas` step reads
 the file too (`--limits`), only to hand the report the line of each limit by its number.
 
-**What the instructions cost.** They are about 19 KB (`security-changes`: 19.6 KB), of which the limits are 14.5 KB:
-about 4 800 input tokens per call, 3 600 of them the limits. Every call sends them, so after the version raise the
-next full run (every area judged again: 141 calls on the sources of November 2026) sends about 680 000 instruction
-tokens, 510 000 of them the limits; the instructions are the same in every call, so a provider that caches a prompt
+**What the instructions cost.** They are about 24.5 KB (`security-changes`: 25.1 KB), of which the limits are 18.9 KB:
+about 6 100 input tokens per call, 4 700 of them the limits. Every call sends them, so after the version raise the
+next full run (every area judged again: 141 calls on the sources of November 2026) sends about 860 000 instruction
+tokens, 660 000 of them the limits; the instructions are the same in every call, so a provider that caches a prompt
 prefix reads most of them from its cache. That is more than the code of an area in most calls, and less than what a
 model with `tools: read` reads of the workspace in many. A later run asks only about the open, changed and
 unjudged areas, at the same cost per call.
@@ -227,7 +227,7 @@ unjudged areas, at the same cost per call.
 ## The register
 
 The workflow is an audit (`metadata.audit`, key `security`): the `report` step ends its output with the audit
-result envelope, and the register `security` under the home keeps the findings across runs
+result envelope, and the register `security` of the run's project, under the home, keeps the findings across runs
 ([docs/registers.md](../../../docs/registers.md)). The envelope carries the verified findings. Those of one area and
 one rule are one finding, because a register counts a rule and a subject once per report: the rule key is the rule
 of the rule file (or `other`), the subject is the area's file and member, the severity the highest of them, and the
@@ -253,8 +253,8 @@ is left out:
 | `not judged`, or unknown, or the digest differs: the code of the area changed | judges it |
 | `open` and the digest is the same, or the register holds an open finding of the area | asks about its findings again, in the places the areas above leave (`--max-areas`) |
 
-So the 110 calls of a first run become the handful of areas that changed since. `traceworks findings security`
-shows how many items are settled, and `traceworks findings security items` lists them. Raise `--verdict-version`
+So the 110 calls of a first run become the handful of areas that changed since. `traceworks findings`
+shows how many items of each register are settled, and `traceworks findings security items` lists them. Raise `--verdict-version`
 in `workflow.json` when the prompt or the instructions change what counts as a finding, and every area is judged
 again; it is 2 since the judge gets the stated limits. The subject
 of a finding is still the area's file and all its members; an area whose members change keeps its item name as

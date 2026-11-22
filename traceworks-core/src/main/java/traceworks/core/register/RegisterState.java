@@ -25,10 +25,12 @@ import java.util.Objects;
  *                     writes before its first line that needs it, and never off again: the
  *                     states an earlier version recorded did not name it, and the fold of its lines has to give
  *                     their bytes. Not a key of {@code state.json} itself
+ * @param project      the project the register is of, as its log names it; {@code null} for a register from before
+ *                     registers had projects, whose {@code state.json} then has no such key
  */
 public record RegisterState(int format, String key, String workflowId, String category, LastReport lastReport,
                             List<Finding> findings, int validReports, List<Item> items,
-                            boolean namesDecidedSeverity) {
+                            boolean namesDecidedSeverity, String project) {
 
     /** The format of {@code state.json}. */
     public static final int FORMAT = 1;
@@ -41,6 +43,14 @@ public record RegisterState(int format, String key, String workflowId, String ca
         List<Item> byName = new ArrayList<>(items == null ? List.of() : items);
         byName.sort(Comparator.comparing(Item::name));
         items = List.copyOf(byName);
+    }
+
+    /** A register whose log names no project: as a version before registers had projects wrote it. */
+    public RegisterState(int format, String key, String workflowId, String category, LastReport lastReport,
+                         List<Finding> findings, int validReports, List<Item> items,
+                         boolean namesDecidedSeverity) {
+        this(format, key, workflowId, category, lastReport, findings, validReports, items, namesDecidedSeverity,
+                null);
     }
 
     /** A register whose state does not name the severity of a decision: as an earlier version wrote it. */
@@ -72,25 +82,31 @@ public record RegisterState(int format, String key, String workflowId, String ca
     /** The same register with these findings. */
     public RegisterState with(List<Finding> newFindings) {
         return new RegisterState(format, key, workflowId, category, lastReport, newFindings, validReports, items,
-                namesDecidedSeverity);
+                namesDecidedSeverity, project);
     }
 
     /** The same register, fed by this workflow in this category. */
     public RegisterState ownedBy(String newWorkflowId, String newCategory) {
         return new RegisterState(format, key, newWorkflowId, newCategory, lastReport, findings, validReports, items,
-                namesDecidedSeverity);
+                namesDecidedSeverity, project);
+    }
+
+    /** The same register, of this project. */
+    public RegisterState ofProject(String newProject) {
+        return new RegisterState(format, key, workflowId, category, lastReport, findings, validReports, items,
+                namesDecidedSeverity, newProject);
     }
 
     /** The same register after a report that changed nothing but the last report. */
     public RegisterState withLastReport(LastReport report) {
         return new RegisterState(format, key, workflowId, category, report, findings, validReports, items,
-                namesDecidedSeverity);
+                namesDecidedSeverity, project);
     }
 
     /** The same register, whose state names the severity a decision was made on from now on. */
     public RegisterState namingDecidedSeverity() {
         return namesDecidedSeverity ? this : new RegisterState(format, key, workflowId, category, lastReport,
-                findings, validReports, items, true);
+                findings, validReports, items, true, project);
     }
 
     /** How many items are in each state; every state has an entry. */

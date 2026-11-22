@@ -90,7 +90,8 @@ class RegisterFolderCliTest {
             + "ls {{ register_dir }}";
 
     private String run(int expectedCode, Path pkg) {
-        Result result = exec("run", pkg.toString(), "--allow-host-execution", "--no-input", "--quiet");
+        Result result = exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input",
+                "--quiet");
         assertThat(result.code()).as(result.out() + result.err()).isEqualTo(expectedCode);
         Matcher m = RUN_ID.matcher(result.out());
         assertThat(m.find()).as(result.out()).isTrue();
@@ -110,28 +111,30 @@ class RegisterFolderCliTest {
 
         Result firstShown = exec("show", first, "--outputs");
         assertThat(firstShown.out()).as("nothing known yet: the files are there and empty").contains("known: 0")
-                .contains("Register  hello before its first line, 4 files handed to the steps");
+                .contains("Register  hello of shop before its first line, 4 files handed to the steps");
         Result shown = exec("show", second, "--outputs");
         assertThat(shown.code()).as(shown.err()).isZero();
         assertThat(shown.out()).contains("known: 3", "# Report", "three files are big", "findings.jsonl",
                 "items.jsonl", "previous-report.md", "resolved.jsonl").doesNotContain("audit-result:v1 {");
-        assertThat(shown.out()).containsPattern("Register  hello at seq \\d+ \\(head [0-9a-f]{12}\\), 4 files handed"
-                + " to the steps");
+        assertThat(shown.out()).containsPattern("Register  hello of shop at seq \\d+ \\(head [0-9a-f]{12}\\), 4 files"
+                + " handed to the steps");
         Path folder = runFolder(second).resolve("register");
         assertThat(Files.readString(folder.resolve("findings.jsonl"))).contains("\"description\":\"Split A.java in"
                 + " two\"", "\"run_id\":\"" + first + "\"");
         assertThat(Files.isWritable(folder.resolve("findings.jsonl"))).isFalse();
         assertThat(Files.readString(runFolder(second).resolve("run.html")))
-                .containsPattern("<th>register</th><td>hello at seq \\d+ \\(head [0-9a-f]{12}\\), 4 files handed to"
-                        + " the steps; head [0-9a-f]{64}</td>");
+                .containsPattern("<th>register</th><td>hello of shop at seq \\d+ \\(head [0-9a-f]{12}\\), 4 files"
+                        + " handed to the steps; head [0-9a-f]{64}</td>");
 
         Result verified = exec("verify", second);
         assertThat(verified.code()).as(verified.out()).isZero();
-        assertThat(verified.out()).containsPattern("register  ok \\(4 files of the register hello at seq \\d+\\)");
+        assertThat(verified.out())
+                .containsPattern("register  ok \\(4 files of the register hello of shop at seq \\d+\\)");
 
         Result diff = exec("diff", first, second);
         assertThat(diff.out()).as("the two runs started from another head of the register")
-                .containsPattern("register hello +A before its first line\\n +B at seq \\d+, head [0-9a-f]{64}\\n");
+                .containsPattern("register hello of shop +A before its first line\\n +B at seq \\d+, head"
+                        + " [0-9a-f]{64}\\n");
     }
 
     /**
@@ -143,13 +146,13 @@ class RegisterFolderCliTest {
         run(0, audit(READ, "A.java"));
         String forging = "chmod u+w {{ register_dir }}/findings.jsonl && : > {{ register_dir }}/findings.jsonl";
 
-        Result result = exec("run", audit(forging, "A.java").toString(), "--allow-host-execution", "--no-input",
-                "--quiet");
+        Result result = exec("run", audit(forging, "A.java").toString(), "--project", "shop",
+                "--allow-host-execution", "--no-input", "--quiet");
 
         Matcher m = RUN_ID.matcher(result.out());
         assertThat(m.find()).as(result.out()).isTrue();
         String id = m.group(1);
-        assertThat(result.out()).contains("register hello: not applied");
+        assertThat(result.out()).contains("register hello of shop: not applied");
         Result shown = exec("show", id, "--outputs");
         assertThat(shown.out()).contains("findings.jsonl is not the file the run started with");
         Result verified = exec("verify", id);

@@ -3,23 +3,20 @@ package traceworks.core.blocks;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import traceworks.core.compat.GermanWords;
-import traceworks.core.util.TimedRegex;
+import traceworks.core.context.InputRules;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * What an AI actor has to deliver for a {@code human-input} block: the task text that describes the input or form,
  * and the check that turns its answer into what a person's answer would be, a single value in the field's format or
- * a JSON object with one value per form field. The checks mirror a form dialog (required fields, select options) plus
- * the field formats the block documents (number, checkbox, date, {@code validation_pattern}); an answer that fails
- * them fails the step. A checkbox also accepts the German "yes" and "no" an AI actor may give
+ * a JSON object with one value per form field. The check of each value is the one every answer passes
+ * ({@link InputRules}: required fields, select options, the field formats number, checkbox and date, and
+ * {@code validation_pattern}), after the blanks around the model's answer are taken off; an answer that fails it
+ * fails the step. A checkbox also accepts the German "yes" and "no" an AI actor may give
  * ({@link GermanWords#CHECKBOX_YES}).
  */
 final class HumanInputAnswers {
@@ -27,9 +24,6 @@ final class HumanInputAnswers {
     private HumanInputAnswers() {}
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final Pattern DATE = Pattern.compile("\\d{4}-\\d{2}-\\d{2}");
-    /** How long checking one value against a workflow's {@code validation_pattern} may take. */
-    static final Duration PATTERN_TIME_LIMIT = Duration.ofSeconds(2);
 
     /** The normalized answer, or the reason it is unusable ({@code error} set, {@code answer} null). */
     record Validated(String answer, String error) {
@@ -134,62 +128,15 @@ final class HumanInputAnswers {
                 : human.equals(proposal);
     }
 
+    /** One value against the rules of its input ({@link InputRules}), with the field named in a form's refusal. */
     private static Validated validateValue(String value, String inputType, List<String> options, boolean required,
                                            String pattern, String fieldName) {
-        String where = fieldName == null ? "" : "field '" + fieldName + "': ";
-        String type = inputType == null ? "text" : inputType;
-        if (value.isBlank()) {
-            return required ? Validated.bad(where + "a value is required") : Validated.ok("");
+        InputRules.Checked checked = InputRules.check(value, new InputRules.Rules(inputType, options, required,
+                pattern));
+        if (checked.ok()) {
+            return Validated.ok(checked.value());
         }
-        switch (type) {
-            case "select" -> {
-                String picked = options.stream().filter(o -> o.strip().equalsIgnoreCase(value)).findFirst().orElse(null);
-                if (picked == null) {
-                    return Validated.bad(where + "'" + value + "' is none of the options " + options);
-                }
-                return Validated.ok(picked);
-            }
-            case "checkbox" -> {
-                return switch (value.toLowerCase(Locale.ROOT)) {
-                    case "true", "yes", GermanWords.CHECKBOX_YES -> Validated.ok("true");
-                    case "false", "no", GermanWords.CHECKBOX_NO -> Validated.ok("false");
-                    default -> Validated.bad(where + "'" + value + "' is neither true nor false");
-                };
-            }
-            case "number" -> {
-                try {
-                    Double.parseDouble(value);
-                } catch (NumberFormatException e) {
-                    return Validated.bad(where + "'" + value + "' is not a number");
-                }
-            }
-            case "date" -> {
-                if (!DATE.matcher(value).matches()) {
-                    return Validated.bad(where + "'" + value + "' is not a date in the form YYYY-MM-DD");
-                }
-            }
-            default -> { }
-        }
-        if (pattern != null && !pattern.isBlank()) {
-            String problem = TimedRegex.repetitionProblem(pattern);
-            if (problem != null) {
-                // Such a pattern repeats without reading a character, so the time limit would never end the check
-                return Validated.bad(where + "validation_pattern cannot be used: " + problem);
-            }
-            try {
-                if (!TimedRegex.matches(Pattern.compile(pattern), value, PATTERN_TIME_LIMIT)) {
-                    return Validated.bad(where + "'" + value + "' does not match the pattern " + pattern);
-                }
-            } catch (TimedRegex.TimedOut e) {
-                // The pattern is the workflow's and the answer may be a model's: neither may keep the run busy
-                return Validated.bad(where + "the answer could not be checked within "
-                        + PATTERN_TIME_LIMIT.toSeconds() + " seconds against validation_pattern " + pattern
-                        + " (" + e.getMessage() + ")");
-            } catch (PatternSyntaxException e) {
-                return Validated.bad(where + "validation_pattern is not a valid regular expression: " + e.getDescription());
-            }
-        }
-        return Validated.ok(value);
+        return Validated.bad((fieldName == null ? "" : "field '" + fieldName + "': ") + checked.problem());
     }
 
     private static String describe(String inputType, List<String> options, boolean required, String pattern) {

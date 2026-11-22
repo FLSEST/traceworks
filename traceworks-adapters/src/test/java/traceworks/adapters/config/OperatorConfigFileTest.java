@@ -131,6 +131,24 @@ class OperatorConfigFileTest {
                 .hasMessageContaining("'workspace_git_writable'");
     }
 
+    /** The projects of the home ({@link Projects}): every reader of the file knows the key and refuses a wrong one. */
+    @Test
+    void projects_isAKey_andAWrongSettingIsRefusedByEveryReader() throws IOException {
+        config("{\"projects\": {\"shop\": \"/srv/shop\", \"traceworks\": \"~/Entwicklung/traceworks\"}}");
+        assertThat(OperatorConfigFile.read(home)).isEqualTo(OperatorSettings.defaults());
+        assertThat(HomeLayout.read(home)).isEqualTo(HomeLayout.of(home));
+
+        for (String bad : List.of("{\"Shop\": \"/srv/shop\"}", "{\"shop\": \"srv/shop\"}", "{\"shop\": \"/\"}",
+                "{\"shop\": \"/srv/shop\", \"web\": \"/srv/shop\"}",
+                "{\"shop\": \"/srv/shop\", \"web\": \"/srv/shop/web\"}",
+                "{\"shop\": \"/srv/shop\", \"shop\": \"/srv/other\"}", "[]")) {
+            config("{\"projects\": " + bad + "}");
+            assertThatThrownBy(() -> OperatorConfigFile.read(home)).as(bad)
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("'projects'")
+                    .hasMessageContaining(home.resolve("traceworks.json").toString());
+        }
+    }
+
     @Test
     void unknownKey_isRefused_andNamed() throws IOException {
         config("{\"allow_host_exec\": true}");
@@ -564,6 +582,46 @@ class OperatorConfigFileTest {
                         .isInstanceOf(IllegalArgumentException.class)
                         .hasMessage("'" + key + "' in " + file + " must be the path of a file");
             }
+        }
+    }
+
+    @Test
+    void mcp_withoutTheSetting_opensNothing() throws IOException {
+        assertThat(OperatorConfigFile.mcpAllowed(home)).isEmpty();
+        config("{\"actor\": \"operator\"}");
+        assertThat(OperatorConfigFile.mcpAllowed(home)).isEmpty();
+        config("{\"mcp\": null}");
+        assertThat(OperatorConfigFile.mcpAllowed(home)).isEmpty();
+        config("{\"mcp\": {}}");
+        assertThat(OperatorConfigFile.mcpAllowed(home)).isEmpty();
+    }
+
+    @Test
+    void mcp_allow_namesWhatAServerOfThisHomeMayChange() throws IOException {
+        config("{\"mcp\": {\"allow\": [\"run\", \"decide\"]}}");
+
+        assertThat(OperatorConfigFile.mcpAllowed(home)).containsExactlyInAnyOrder("run", "decide");
+        // The other settings read past it
+        assertThat(OperatorConfigFile.read(home)).isEqualTo(OperatorSettings.defaults());
+    }
+
+    @Test
+    void mcp_anythingElseThanTheThreeNames_isRefused_soThatNoTypoOpensOrClosesByTheWay() throws IOException {
+        Path file = home.resolve("traceworks.json");
+        config("{\"mcp\": {\"allow\": [\"run\", \"read\"]}}");
+        assertThatThrownBy(() -> OperatorConfigFile.mcpAllowed(home)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("'read' in allow of mcp in " + file + " is none of answer, decide, run");
+        config("{\"mcp\": {\"alow\": [\"run\"]}}");
+        assertThatThrownBy(() -> OperatorConfigFile.mcpAllowed(home)).isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Unknown key 'alow' in mcp of " + file + "; the key is allow");
+        for (String bad : List.of("true", "\"run\"", "[\"run\"]", "{\"allow\": \"run\"}", "{\"allow\": true}",
+                "{\"allow\": [1]}", "{\"allow\": [\"Run\"]}")) {
+            config("{\"mcp\": " + bad + "}");
+            assertThatThrownBy(() -> OperatorConfigFile.mcpAllowed(home)).as(bad)
+                    .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("mcp");
+            // A home whose setting cannot be read runs nothing either
+            assertThatThrownBy(() -> OperatorConfigFile.read(home)).as(bad)
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 }

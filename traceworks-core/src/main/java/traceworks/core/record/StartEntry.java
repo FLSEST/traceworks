@@ -22,19 +22,29 @@ import java.util.Optional;
  * @param register      for the run of an audit workflow, the register and the head of its log the run read;
  *                      {@code null} otherwise
  * @param version       the Traceworks version that started the run
+ * @param starter       the project of the run and who started it; {@code null} for an entry of a version that
+ *                      named neither, which then has no such fields
  */
 public record StartEntry(String runId, String startedAt, String runStarted, String workflowId, String packageDigest,
-                         Register register, String version) {
+                         Register register, String version, RunStarter starter) {
+
+    /** An entry that names neither the project nor who started the run, as an earlier version wrote it. */
+    public StartEntry(String runId, String startedAt, String runStarted, String workflowId, String packageDigest,
+                      Register register, String version) {
+        this(runId, startedAt, runStarted, workflowId, packageDigest, register, version, null);
+    }
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * The register an audit run read at its start.
      *
+     * @param project the project the register is of; {@code null} in an entry of a version before registers had
+     *                projects, which then has no such field
      * @param seq  the sequence number of the last line of the register's log; {@code null} when it did not exist yet
      * @param head the SHA-256 of that line; {@code null} when the register did not exist yet
      */
-    public record Register(String key, Integer seq, String head) {
+    public record Register(String key, String project, Integer seq, String head) {
     }
 
     /**
@@ -56,7 +66,8 @@ public record StartEntry(String runId, String startedAt, String runStarted, Stri
         JsonNode fields = started.fields();
         return new StartEntry(started.run(), raw.path("at").asText(null), EventChain.sha256Hex(line),
                 fields.path("workflow").path("id").asText(null), fields.path("package").path("digest").asText(null),
-                register(fields.path("register")), fields.path("version").asText(null));
+                register(fields.path("register")), fields.path("version").asText(null),
+                new RunStarter(fields.path("project").asText(null), fields.path("actor").asText(null)));
     }
 
     /** The entry as pretty-printed JSON in a fixed field order, ending with a line feed. */
@@ -67,10 +78,19 @@ public record StartEntry(String runId, String startedAt, String runStarted, Stri
         root.put("run_started", runStarted);
         root.put("workflow_id", workflowId);
         root.put("package_digest", packageDigest);
+        if (starter != null) {
+            // Always both, the project as null for a run that names none: an entry without them is one of a
+            // version that named neither
+            root.put("project", starter.project());
+            root.put("actor", starter.actor());
+        }
         if (register != null) {
             // Only for the run of an audit workflow
             ObjectNode node = root.putObject("register");
             node.put("key", register.key());
+            if (register.project() != null) {
+                node.put("project", register.project());
+            }
             node.put("seq", register.seq());
             node.put("head", register.head());
         }
@@ -93,7 +113,9 @@ public record StartEntry(String runId, String startedAt, String runStarted, Stri
             return Optional.of(new StartEntry(root.path("run_id").textValue(), root.path("started_at").asText(null),
                     root.path("run_started").textValue(), root.path("workflow_id").asText(null),
                     root.path("package_digest").asText(null), register(root.path("register")),
-                    root.path("traceworks_version").asText(null)));
+                    root.path("traceworks_version").asText(null),
+                    root.has("project") || root.has("actor") ? new RunStarter(root.path("project").asText(null),
+                            root.path("actor").asText(null)) : null));
         } catch (IOException e) {
             return Optional.empty();
         }
@@ -101,6 +123,7 @@ public record StartEntry(String runId, String startedAt, String runStarted, Stri
 
     private static Register register(JsonNode node) {
         return !node.isObject() ? null : new Register(node.path("key").asText(null),
-                node.path("seq").isInt() ? node.path("seq").intValue() : null, node.path("head").asText(null));
+                node.path("project").asText(null), node.path("seq").isInt() ? node.path("seq").intValue() : null,
+                node.path("head").asText(null));
     }
 }

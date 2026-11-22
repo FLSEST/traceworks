@@ -51,6 +51,17 @@ class RegisterHtmlTest {
                 "1.2.3");
     }
 
+    /** A register is that of a key and a project: its page names both, and the page of one from before only its key. */
+    @Test
+    void page_namesTheProjectOfTheRegister() {
+        String page = RegisterHtml.render(state().ofProject("shop"), List.of(), blobs,
+                new ChainReport(true, 0, "h".repeat(64), List.of(), List.of()), "1.2.3");
+
+        assertThat(page).contains("<title>Register arch of shop</title>",
+                "<h1>arch of shop <small>architecture</small></h1>", "<th>project</th><td>shop</td>");
+        assertThat(render()).doesNotContain("<th>project</th>");
+    }
+
     @Test
     void page_isDeterministic_andNamesTheRegister() {
         String page = render();

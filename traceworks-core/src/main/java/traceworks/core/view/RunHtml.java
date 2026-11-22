@@ -86,12 +86,16 @@ public final class RunHtml {
             out.append("</td></tr>\n");
         }
         row(out, "actor", view.actor());
+        row(out, "project", view.project());   // only for a run that names one
         row(out, "trigger", view.trigger());
         row(out, "started", view.startedAt() == null ? null : view.startedAt().toString());
         row(out, "finished", view.finishedAt() == null ? null : view.finishedAt().toString());
         row(out, "execution", view.execution());
         aiNetwork(out, view);
         row(out, "package", view.packageDigest());
+        // The digest above is of the package the run was started with: the packages its child runs came from
+        view.distinctPackageCalls().forEach(call -> row(out, "calls",
+                call.workflowId() + " " + call.packageDigest()));
         row(out, "renderer", version);
         out.append("</table>\n");
     }
@@ -147,6 +151,8 @@ public final class RunHtml {
                     + (Boolean.TRUE.equals(view.packageDirty()) ? " (with uncommitted changes)" : ""));
         }
         row(out, "digest", view.packageDigest());
+        view.distinctPackageCalls().forEach(call -> row(out, "calls", call.workflowId() + ", digest "
+                + call.packageDigest() + ", package " + call.packageDir()));
         row(out, "seal", view.seal() == null ? "unsealed" : view.seal().summary());
         view.modelChoices().forEach(pick -> row(out, "model choice " + pick.choice(), pick.picked()));
         row(out, "ledger", view.ledgerStartLine());

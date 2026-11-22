@@ -47,17 +47,24 @@ import java.util.TreeMap;
  * and {@code writable_mounts} (a list of directories, each absolute or starting with {@code ~/}: the folders in or
  * below which a package may mount a host path writable; missing or null is none) and
  * {@code workspace_git_writable} (boolean: whether a step that may write its workspace may write the workspace's
- * {@code .git} too; missing or null is false), are read by {@link HomeLayout}.
+ * {@code .git} too; missing or null is false), are read by {@link HomeLayout}, and {@code projects} (an object of
+ * project key to folder: a run whose workspace lies in or below that folder is of that project; missing or null is
+ * none) by {@link Projects}. The key {@code mcp} (an object with {@code allow}: a list of {@code run},
+ * {@code answer} and {@code decide}, what a server of this home may be started to change; missing or null is
+ * nothing) is read by {@link #mcpAllowed(Path)}.
  * An unknown key or a value of the wrong type is an error that names the key.
  */
 public final class OperatorConfigFile {
 
     static final String FILE = "traceworks.json";
+    private static final String MCP = "mcp";
+    /** What {@code allow} of {@code mcp} may name, sorted as a refusal lists it. */
+    private static final List<String> MCP_CHANGES = List.of("answer", "decide", "run");
     private static final Set<String> KEYS = Set.of("allow_host_execution", "actor", "package_path", "secret_names", "hooks",
             "container_runtime", "container_limits", "output_limit_mib", "run_output_budget_mib", "ai_images", "ai_network",
             "ai_hosts", "allowed_models", LocalModels.SETTING, "decision_on_higher_severity", "require_seal", "seal_immutable", "signing_key", "allowed_signers", HomeLayout.RUNS_KEY,
             HomeLayout.LEDGER_KEY, HomeLayout.REGISTERS_KEY, HomeLayout.WRITABLE_MOUNTS,
-            HomeLayout.WORKSPACE_GIT_WRITABLE);
+            HomeLayout.WORKSPACE_GIT_WRITABLE, Projects.SETTING, MCP);
     private static final Set<String> LIMIT_KEYS = Set.of("memory", "pids", "cpus");
     private static final Set<String> RUNTIMES = Set.of("podman", "docker");
 
@@ -69,9 +76,13 @@ public final class OperatorConfigFile {
         Path file = home.resolve(FILE);
         JsonNode root = root(file);
         if (root == null) return OperatorSettings.defaults();
+        // Read by the server alone, checked here: a home whose setting cannot be read runs nothing either
+        mcpAllowed(file, root.get(MCP));
         // The places of the runs, the ledger and the registers are the layout's: checked here, so that every reader
         // of the file refuses a wrong one
         HomeLayout.from(home, file, root);
+        // The projects of the home are read by the command line: checked here for the same reason
+        Projects.checked(file, root);
         boolean allowHost = false;
         if (root.has("allow_host_execution")) {
             JsonNode value = root.get("allow_host_execution");
@@ -475,6 +486,43 @@ public final class OperatorConfigFile {
             }
         }
         return new OperatorSettings.Hooks(argv, timeout);
+    }
+
+    /**
+     * What a server of {@code home} may be started to change ({@code mcp.allow}): any of {@code run},
+     * {@code answer} and {@code decide}. Without the setting it is nothing, and the server only reads: the home
+     * opens a change, and a switch of the server asks for it.
+     *
+     * @throws IllegalArgumentException for a file that cannot be read as settings, another key in {@code mcp}, or
+     *                                  a name that is none of the three
+     */
+    public static Set<String> mcpAllowed(Path home) {
+        Path file = home.resolve(FILE);
+        JsonNode root = root(file);
+        return root == null ? Set.of() : mcpAllowed(file, root.get(MCP));
+    }
+
+    private static Set<String> mcpAllowed(Path file, JsonNode value) {
+        if (value == null || value.isNull()) return Set.of();
+        if (!value.isObject()) throw wrongType(file, MCP, "an object with the key allow");
+        for (String key : (Iterable<String>) value::fieldNames) {
+            if (!key.equals("allow")) {
+                throw new IllegalArgumentException("Unknown key '" + key + "' in mcp of " + file
+                        + "; the key is allow");
+            }
+        }
+        JsonNode allow = value.get("allow");
+        if (allow == null || allow.isNull()) return Set.of();
+        if (!allow.isArray()) throw wrongType(file, "allow of mcp", "a list of " + String.join(", ", MCP_CHANGES));
+        Set<String> allowed = new java.util.TreeSet<>();
+        for (JsonNode entry : allow) {
+            if (!entry.isTextual() || !MCP_CHANGES.contains(entry.textValue())) {
+                throw new IllegalArgumentException("'" + entry.asText() + "' in allow of mcp in " + file
+                        + " is none of " + String.join(", ", MCP_CHANGES));
+            }
+            allowed.add(entry.textValue());
+        }
+        return Set.copyOf(allowed);
     }
 
     private static IllegalArgumentException wrongType(Path file, String key, String expected) {

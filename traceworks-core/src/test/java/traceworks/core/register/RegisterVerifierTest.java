@@ -26,12 +26,12 @@ class RegisterVerifierTest {
 
     @BeforeEach
     void aRegisterWithOneReport() {
-        try (RegisterStore.Opened opened = store.openForWrite("arch")) {
+        try (RegisterStore.Opened opened = store.openForWrite("arch", "shop")) {
             RegisterLog log = new RegisterLog(opened, clock);
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
-            writer.created("wf-1", "c");
+            writer.created("wf-1", "c", "shop");
             String reportBlob = opened.blobs().put("# report".getBytes(StandardCharsets.UTF_8)).sha256();
-            Reconciler.Applied applied = writer.applied(RegisterState.empty("arch", "wf-1", "c"),
+            Reconciler.Applied applied = writer.applied(RegisterState.empty("arch", "wf-1", "c").ofProject("shop"),
                     new Reconciler.Report("run-1", T1, reportBlob, List.of(new ReportedFinding("r", "s", Severity.LOW,
                             "t", null, null, List.of())), Set.of()), null, "head-1");
             opened.writeState(StateJson.write(applied.state()));
@@ -40,8 +40,8 @@ class RegisterVerifierTest {
     }
 
     private ChainReport verify(List<byte[]> lines) {
-        try (RegisterStore.Opened opened = store.open("arch")) {
-            return RegisterVerifier.verify("arch", lines, opened.blobs(), opened.state());
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
+            return RegisterVerifier.verify("arch", "shop", lines, opened.blobs(), opened.state());
         }
     }
 
@@ -113,7 +113,7 @@ class RegisterVerifierTest {
      */
     @Test
     void aRecordedStateThatIsNotTheFoldOfTheLog_isFound() {
-        String other = store.blobs("arch").put(StateJson.write(RegisterState.empty("arch", "wf-1", "c"))).sha256();
+        String other = store.blobs("arch").put(StateJson.write(RegisterState.empty("arch", "wf-1", "c").ofProject("shop"))).sha256();
         String recorded = RegisterEvent.parse(lines.get(2)).text("state_blob");
         List<byte[]> tampered = new ArrayList<>(lines);
         tampered.set(2, new String(lines.get(2), StandardCharsets.UTF_8).replace(recorded, other)
@@ -137,15 +137,15 @@ class RegisterVerifierTest {
 
     @Test
     void aMissingState_isNoProblem_butAMissingBlobIs() {
-        try (RegisterStore.Opened opened = store.open("arch")) {
-            assertThat(RegisterVerifier.verify("arch", lines, opened.blobs(), Optional.empty()).intact()).isTrue();
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
+            assertThat(RegisterVerifier.verify("arch", "shop", lines, opened.blobs(), Optional.empty()).intact()).isTrue();
         }
-        try (RegisterStore.Opened opened = store.open("arch")) {
+        try (RegisterStore.Opened opened = store.open("arch", "shop")) {
             RegisterEvent applied = RegisterEvent.parse(lines.get(2));
             String findingsBlob = applied.fields().path("findings_blob").asText();
             ((traceworks.core.testing.InMemoryBlobStore) opened.blobs()).delete(findingsBlob);
 
-            ChainReport report = RegisterVerifier.verify("arch", lines, opened.blobs(), Optional.empty());
+            ChainReport report = RegisterVerifier.verify("arch", "shop", lines, opened.blobs(), Optional.empty());
 
             assertThat(report.deletedBlobs()).containsExactly(findingsBlob);
             assertThat(report.intact()).isFalse();

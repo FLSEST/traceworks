@@ -255,6 +255,26 @@ class HumanInputBlockExecutorTest {
         assertThat(context.getVariable("val")).isNull();
     }
 
+    /**
+     * The resume of a parked run hands the step the answer given meanwhile: one the field's rules refuse fails the
+     * step with the reason, and no variable is set, so no later shell step receives it.
+     */
+    @Test
+    void execute_aPresetTheFieldsPatternRefuses_failsWithTheReason_andSetsNoVariable() {
+        var block = BlockDefinition.builder().type("human-input").config(new HashMap<>(Map.of(
+                "prompt", "How many?", "variable_name", "n", "validation_pattern", "[0-9]+"))).build();
+        var context = buildContext();
+        context.presetAnswer(0, "human-input", "How many?", "abc; rm -rf x");
+
+        var result = executor.execute(block, context);
+
+        assertThat(result.getStatus()).isEqualTo(StepStatus.FAILED);
+        assertThat(result.getOutput()).isEqualTo("the answer given while the run was parked is refused: The human"
+                + " input refuses the value for 'n' (validation_pattern): 'abc; rm -rf x' does not match the pattern"
+                + " [0-9]+");
+        assertThat(context.getVariable("n")).isNull();
+    }
+
     /** A question answered while the run was parked is announced as preset, so nobody is asked for it again. */
     @Test
     void execute_withAPresetAnswer_announcesTheRequestAsPreset_andTakesTheAnswer() {

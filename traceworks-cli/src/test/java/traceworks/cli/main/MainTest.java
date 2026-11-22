@@ -885,6 +885,76 @@ class MainTest {
                 .startsWith("traceworks: Answer 'Maybe' is not one of the offered options [Yes, No]");
     }
 
+    /** A human input whose pattern guards the shell step that uses its value. */
+    private Path guardedPackage() throws IOException {
+        return pkg("guarded", """
+                {"type":"human-input","name":"count","config":{"prompt":"How many?","variable_name":"n",
+                 "validation_pattern":"[0-9]+"}},
+                {"type":"shell","name":"say","config":{"command":"echo got {{ n }}"}}""");
+    }
+
+    /**
+     * The defect of TODO 342a71a5, as it was reproduced: {@code traceworks answer} took a value the field's
+     * validation_pattern refuses, and the shell step after it got the value filled in unchanged.
+     */
+    @Test
+    void answer_toAParkedHumanInput_withAValueItsPatternRefuses_exits6_recordsNothing_andAValidOneGoesOn()
+            throws IOException {
+        String id = idOf(runHost(guardedPackage()));
+
+        Result refused = exec("answer", id, "--value", "abc; rm -rf x");
+        Result answered = exec("answer", id, "--value", "42");
+        Result resumed = exec("resume", id, "--allow-host-execution", "--no-input");
+
+        assertThat(refused.code()).as(refused.out() + refused.err()).isEqualTo(6);
+        assertThat(refused.err()).contains("the answer is refused", "The human input refuses the value for 'n'"
+                + " (validation_pattern): 'abc; rm -rf x' does not match the pattern [0-9]+");
+        assertThat(refused.out()).doesNotContain("is recorded");
+        assertThat(answered.code()).as(answered.out() + answered.err()).isZero();
+        assertThat(resumed.code()).as(resumed.out() + resumed.err()).isZero();
+        assertThat(resumed.out()).contains("output: got 42").doesNotContain("rm -rf");
+        assertThat(Files.readAllLines(runFolder(id).resolve("events.jsonl")))
+                .filteredOn(line -> line.contains("\"type\":\"approval.answered\"")).as("the answer and its resume")
+                .hasSize(2);
+    }
+
+    /** A form given with --field: each field against its own rules. */
+    @Test
+    void answer_toAParkedForm_withAFieldItsRulesRefuse_exits6() throws IOException {
+        String id = idOf(runHost(pkg("form", """
+                {"type":"human-input","name":"release","config":{"prompt":"Release","fields":[
+                  {"variable_name":"version","validation_pattern":"[0-9]+\\\\.[0-9]+"},
+                  {"variable_name":"channel","input_type":"select","options":["stable","beta"]}]}},
+                {"type":"shell","name":"say","config":{"command":"echo {{ version }} {{ channel }}"}}""")));
+
+        Result badVersion = exec("answer", id, "--field", "version=1.4; id", "--field", "channel=beta");
+        Result badChannel = exec("answer", id, "--field", "version=1.4", "--field", "channel=nightly");
+        Result answered = exec("answer", id, "--field", "version=1.4", "--field", "channel=Beta");
+        Result resumed = exec("resume", id, "--allow-host-execution", "--no-input");
+
+        assertThat(badVersion.code()).isEqualTo(6);
+        assertThat(badVersion.err()).contains("'version' (validation_pattern)");
+        assertThat(badChannel.code()).isEqualTo(6);
+        assertThat(badChannel.err()).contains("'channel' (options)", "'nightly' is none of the options");
+        assertThat(answered.code()).as(answered.out() + answered.err()).isZero();
+        assertThat(resumed.out()).as("a select in its option's spelling").contains("output: 1.4 beta");
+    }
+
+    /** At the prompt of a run in the foreground the console checks a value as the run does, and asks again. */
+    @Test
+    void run_onATerminal_asksAgainForAValueTheRulesOfItsInputRefuse() throws IOException {
+        Path pkg = pkg("count", """
+                {"type":"human-input","name":"count","config":{"prompt":"How many?","variable_name":"n",
+                 "input_type":"number"}},
+                {"type":"shell","name":"say","config":{"command":"echo got {{ n }}"}}""");
+
+        Result r = execWithConsole("many\n42\n", "run", pkg.toString(), "--allow-host-execution");
+
+        assertThat(r.code()).as(r.out() + r.err()).isZero();
+        assertThat(r.out()).contains("How many?", "'many' is not a number", "output: got 42")
+                .doesNotContain("got many");
+    }
+
     @Test
     void run_parks_exits5_andPrintsHowToAnswer() throws IOException {
         Result r = runHost(approvalPackage());

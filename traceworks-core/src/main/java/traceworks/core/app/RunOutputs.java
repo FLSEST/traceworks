@@ -105,7 +105,8 @@ final class RunOutputs {
                     + RecordDamagedException.seeVerify(id));
         }
         for (Optional<byte[]> written : List.of(manifest, copy)) {
-            if (written.isPresent() && !Verification.matches(written.get(), view, run.blobs())) {
+            if (written.isPresent() && !Verification.matches(written.get(), view, run.blobs(),
+                    Verification.namesStarter(lines))) {
                 throw new RecordDamagedException("The " + (written == manifest ? "manifest" : "ledger entry")
                         + " of run " + id + " does not match its record" + RecordDamagedException.seeVerify(id));
             }

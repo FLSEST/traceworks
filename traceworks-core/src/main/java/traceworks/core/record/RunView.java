@@ -12,7 +12,8 @@ import java.util.Map;
 /**
  * What the events of a run say about the run: the projection that {@code show}, {@code watch}, {@code run.html} and
  * resume read. A child run's view has no workflow, package, actor or trigger fields, because the child's events do
- * not carry them.
+ * not carry them; what a child was loaded from, when that is not the package the run started with, is its
+ * {@code packageCall}.
  *
  * @param packageCommit the commit of the package's repository when the run started; {@code null} when there is none
  * @param packageDirty  whether that repository had uncommitted changes; {@code null} without a commit
@@ -55,6 +56,29 @@ import java.util.Map;
  * @param recordsOutputCut whether the record can name a cut of an output ({@code output_cut}): its
  *                        {@code run.started} and every {@code run.resumed} say so in {@code records}. Not for a
  *                        record an earlier version wrote or resumed, whose silence about a cut says nothing
+ * @param project         the key of the project the run works on, as {@code run.started} recorded it; {@code null}
+ *                        for a run that named none, a record of an earlier version and a child's view
+ * @param recordsCalledPackages whether the record names the package of every child run that was not loaded
+ *                        from the package the run started with ({@code run.package}): its {@code run.started} and every
+ *                        {@code run.resumed} say so in {@code records}. Not for a record an earlier version wrote
+ *                        or resumed, whose silence about a called package says nothing
+ * @param packageCall     in a child's view: the package the child's workflow was loaded from, when that is
+ *                        not what the run started with (another package, or the run's own with another digest);
+ *                        {@code null} for the run itself, for a child of the run's own package as it started and
+ *                        in a record of an earlier version
+ * @param resumedWith     the packages the run went on with after its start, without repeats: each
+ *                        {@code run.resumed} goes on with its {@code package_digest} when it says
+ *                        {@code package_changed}, else with the package of the start; of entries that follow each
+ *                        other and are equal one stays, and the start's own at the head is dropped. So a run
+ *                        resumed twice with one changed package names it once, and one that went back to the
+ *                        package of its start names that after the other. Empty for a run that only ever went on
+ *                        with the package of its start, and in a child's view. The two fields of
+ *                        {@code run.resumed} are older than the manifest's list, so this is read from a record
+ *                        of any version
+ * @param recordsResumedWith whether the version that wrote the run's last {@code run.started} or
+ *                        {@code run.resumed}, which is the one that wrote its manifest, lists {@code resumedWith}
+ *                        in the manifest ({@code resumed_with} in {@code records}). A manifest of a version that
+ *                        did not has no such field, whatever the record's resumes say
  */
 public record RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
                       String packageCommit, Boolean packageDirty,
@@ -65,7 +89,63 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
                       List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
                       Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
                       List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
-                      String runStarted, boolean recordsOutputCut) {
+                      String runStarted, boolean recordsOutputCut, String project,
+                      boolean recordsCalledPackages, PackageCall packageCall, List<String> resumedWith,
+                      boolean recordsResumedWith) {
+
+    /** A view of a run that was resumed with no other package than the one it started with. */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                   String runStarted, boolean recordsOutputCut, String project,
+                   boolean recordsCalledPackages, PackageCall packageCall) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, register, ledgerStart, runStarted, recordsOutputCut, project,
+                recordsCalledPackages, packageCall, List.of(), false);
+    }
+
+    /** A view of a run whose record names no called package, as an earlier version wrote it. */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                   String runStarted, boolean recordsOutputCut, String project) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, register, ledgerStart, runStarted, recordsOutputCut, project,
+                false, null);
+    }
+
+    /** A view of a run that names no project. */
+    public RunView(String runId, String workflowId, String workflowName, String packageDir, String packageDigest,
+                   String packageCommit, Boolean packageDirty,
+                   String actor, String trigger, String execution, Instant startedAt, Instant finishedAt,
+                   RunStatus status, BlobRef error, GateView gate, List<StepView> steps, QuestionView pendingQuestion,
+                   QuestionView.Answer parkedAnswer, Checkpoint lastCheckpoint, BlobRef definition,
+                   BlobRef inputs, Map<String, RunView> children, int eventCount, String head,
+                   List<Intervention> interventions, List<ImageFacts> images, String aiNetwork,
+                   Map<String, List<String>> aiHosts, String parkedBy, SealView seal,
+                   List<ModelPick> modelChoices, RegisterHandover register, boolean ledgerStart,
+                   String runStarted, boolean recordsOutputCut) {
+        this(runId, workflowId, workflowName, packageDir, packageDigest, packageCommit, packageDirty, actor, trigger,
+                execution, startedAt, finishedAt, status, error, gate, steps, pendingQuestion, parkedAnswer,
+                lastCheckpoint, definition, inputs, children, eventCount, head, interventions, images, aiNetwork,
+                aiHosts, parkedBy, seal, modelChoices, register, ledgerStart, runStarted, recordsOutputCut, null);
+    }
 
     /**
      * A view of a run whose record does not say that the ledger noted its start, nor whether it names a cut of an
@@ -159,6 +239,7 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
     }
 
     public RunView {
+        resumedWith = List.copyOf(resumedWith);
         aiHosts = aiHosts == null ? Map.of() : java.util.Collections.unmodifiableMap(new java.util.TreeMap<>(aiHosts));
         steps = List.copyOf(steps);
         children = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(children));
@@ -235,6 +316,36 @@ public record RunView(String runId, String workflowId, String workflowName, Stri
             cuts += cuts(step.commands());
         }
         return cuts;
+    }
+
+    /**
+     * The packages the child runs of this run were loaded from, at every depth, in the order the record names
+     * them: one per child run that was not loaded from the package the run started with, so a package called
+     * twice is here twice.
+     */
+    public List<PackageCall> packageCalls() {
+        List<PackageCall> calls = new java.util.ArrayList<>();
+        for (RunView child : children.values()) {
+            if (child.packageCall() != null) {
+                calls.add(child.packageCall());
+            }
+            calls.addAll(child.packageCalls());
+        }
+        return calls;
+    }
+
+    /**
+     * {@link #packageCalls()} with each package once, for a view that names them: a loop that runs the workflow of
+     * one package per item is one line. Calls are the same when workflow, digest and directory are; a package that
+     * changed between two calls is there with each digest.
+     */
+    public List<PackageCall> distinctPackageCalls() {
+        Map<List<String>, PackageCall> distinct = new java.util.LinkedHashMap<>();
+        for (PackageCall call : packageCalls()) {
+            distinct.putIfAbsent(java.util.Arrays.asList(call.workflowId(), call.packageDigest(), call.packageDir()),
+                    call);
+        }
+        return List.copyOf(distinct.values());
     }
 
     /** The egress of the whole run. */

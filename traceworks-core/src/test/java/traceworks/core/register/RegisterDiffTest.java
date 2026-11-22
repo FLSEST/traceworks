@@ -29,8 +29,8 @@ class RegisterDiffTest {
         Reconciler.Applied second = Reconciler.apply(first.state(), new Reconciler.Report("run-2", T2, "b2",
                 List.of(finding("B"), finding("C")), Set.of()), null);
 
-        byte[] json = RegisterDiff.of("arch", "wf-1", "run-2", true, first.state(), second.state(), second.changes());
-        byte[] again = RegisterDiff.of("arch", "wf-1", "run-2", true, first.state(), second.state(), second.changes());
+        byte[] json = RegisterDiff.of("arch", "shop", "wf-1", "run-2", true, first.state(), second.state(), second.changes());
+        byte[] again = RegisterDiff.of("arch", "shop", "wf-1", "run-2", true, first.state(), second.state(), second.changes());
 
         assertThat(json).isEqualTo(again);
         JsonNode root = new ObjectMapper().readTree(json);
@@ -60,7 +60,7 @@ class RegisterDiffTest {
     void aRejectedReport_hasNoChanges_butSaysSo() throws Exception {
         RegisterState state = RegisterState.empty("arch", "wf-1", "c");
 
-        JsonNode root = new ObjectMapper().readTree(RegisterDiff.of("arch", "wf-1", "run-9", false, state, state,
+        JsonNode root = new ObjectMapper().readTree(RegisterDiff.of("arch", "shop", "wf-1", "run-9", false, state, state,
                 List.of()));
 
         assertThat(root.path("report_valid").asBoolean()).isFalse();

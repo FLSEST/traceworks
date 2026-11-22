@@ -215,6 +215,26 @@ class LedgerStartCommandTest {
         assertThat(one.out()).contains("start     missing:");
     }
 
+    /**
+     * A problem of a register is listed under the name of the register, not under a run id, and is acknowledged by
+     * that name: the last line of the check and the help say what {@code --acknowledge} takes.
+     */
+    @Test
+    void theLastLineOfTheCheck_andTheHelp_sayThatAcknowledgeTakesTheNameAProblemIsListedUnder() throws Exception {
+        String id = idOf(exec("run", asking().toString(), "--allow-host-execution", "--no-input"));
+        delete(folderOf(id));
+
+        Result failed = exec("verify");
+        Result help = exec("verify", "--help");
+
+        assertThat(failed.code()).isEqualTo(8);
+        assertThat(failed.out()).endsWith("verification FAILED: 1 problem; acknowledge one that has an honest cause"
+                + " with traceworks verify --acknowledge <name> --note \"...\", where <name> is what the problem is"
+                + " listed under: a run id, or the name of a register\n");
+        assertThat(help.out()).contains("--acknowledge NAME").contains("the name a problem is listed under (a run"
+                + " id, or the name of a register such as anchors.5.hello.shop)");
+    }
+
     /** An honest cause is settled on the record: who, when and a note, kept in the ledger and listed for good. */
     @Test
     void aLostRun_isAcknowledgedWithANote_andStaysListed() throws Exception {
@@ -224,9 +244,12 @@ class LedgerStartCommandTest {
 
         Result silent = exec("verify", "--acknowledge", id);
         assertThat(silent.code()).as(silent.err()).isEqualTo(2);
-        assertThat(silent.err()).contains("--note");
+        assertThat(silent.err()).contains("--note")
+                .as("the name may be that of a register, so the sentence speaks of no run")
+                .contains("the honest cause of what the check reports under that name").doesNotContain("lost run");
         Result unknown = exec("verify", "--acknowledge", "ffffffff", "--note", "why not");
         assertThat(unknown.code()).as(unknown.err()).isEqualTo(6);
+        assertThat(unknown.err()).contains("reports nothing under the name ffffffff").doesNotContain("of a run");
         assertThat(exec("verify").code()).isEqualTo(8);
 
         Result ack = exec("verify", "--acknowledge", id.substring(0, 8), "--note", "deleted by hand, the disk was full");
@@ -264,6 +287,45 @@ class LedgerStartCommandTest {
         Result all = exec("verify");
         assertThat(all.code()).as(all.out()).isEqualTo(8);
         assertThat(all.out()).contains("problems (2)", "  " + id + "  starts/" + id + ".json is not what commit ");
+    }
+
+    /**
+     * The ledger is one for all runs of a home: its start entry and its end entry name the project a run worked on
+     * and who started it, and a start entry that names another project or another actor than the record is found.
+     */
+    @Test
+    void theEntriesOfARun_nameItsProjectAndWhoStartedIt_andVerifyFindsAChangedOne() throws Exception {
+        String id = idOf(exec("run", steps().toString(), "--project", "shop", "--allow-host-execution",
+                "--no-input"));
+        String plain = idOf(exec("run", steps().toString(), "--allow-host-execution", "--no-input"));
+        Path entry = home.resolve("ledger/starts/" + id + ".json");
+
+        assertThat(Files.readString(entry)).contains("\"project\" : \"shop\"", "\"actor\" : \"tester\"");
+        assertThat(Files.readString(home.resolve("ledger/runs/" + id + ".json")))
+                .contains("\"project\" : \"shop\"", "\"actor\" : \"tester\"")
+                .isEqualTo(Files.readString(folderOf(id).resolve("manifest.json")));
+        assertThat(Files.readString(home.resolve("ledger/starts/" + plain + ".json")))
+                .as("a run that names no project").contains("\"project\" : null", "\"actor\" : \"tester\"");
+        assertThat(Files.readString(home.resolve("ledger/runs/" + plain + ".json")))
+                .contains("\"project\" : null", "\"actor\" : \"tester\"");
+        assertThat(exec("verify", id).code()).isZero();
+        assertThat(exec("verify", plain).code()).isZero();
+
+        String original = Files.readString(entry);
+        Files.writeString(entry, original.replace("\"project\" : \"shop\"", "\"project\" : \"web\""));
+        git("commit", "-q", "-m", BY_HAND, "--", "starts/" + id + ".json");
+        Result project = exec("verify", id);
+        Files.writeString(entry, original.replace("\"actor\" : \"tester\"", "\"actor\" : \"mallory\""));
+        git("commit", "-q", "-m", "run by-hand-2 ACKNOWLEDGED sha256:" + "0".repeat(64), "--",
+                "starts/" + id + ".json");
+        Result actor = exec("verify", id);
+
+        assertThat(project.code()).as(project.out()).isEqualTo(8);
+        assertThat(project.out()).contains("start     mismatch: the start entry of the ledger names the project web,"
+                + " and run.started names the project shop");
+        assertThat(actor.code()).as(actor.out()).isEqualTo(8);
+        assertThat(actor.out()).contains("start     mismatch: the start entry of the ledger says that mallory started"
+                + " the run, and run.started names the actor tester");
     }
 
     /** The rule for the ledger's own git settings holds at the start too: no run starts that could not be checked. */

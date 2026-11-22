@@ -42,6 +42,17 @@ import java.util.TreeSet;
  * <p><b>What fails the check</b> ({@link RunComparison#differences()}):
  * <ul>
  *   <li>another package digest, or other inputs (another inputs digest);</li>
+ *   <li>other packages that the runs went on with after their start ({@link RunView#resumedWith}: from the
+ *       {@code package_digest} of the {@code run.resumed} lines that say {@code package_changed}, in order and
+ *       without repeats, so how often a run was paused and resumed is no difference). Both fields are in the
+ *       record of any version that resumes, so this needs no word in {@code records};</li>
+ *   <li>a called package that differs: a package a child run was loaded from ({@code run.package}) with another
+ *       digest, or one that only one run called; and, call by call, a child run whose package digest is not that
+ *       of the same child in the other run, also when both runs called the same set of digests. That holds only
+ *       when both records name their called packages (the
+ *       {@code records} of their {@code run.started} and of every {@code run.resumed}); a record of an earlier
+ *       version does not say which packages its child runs came from, so then they are not compared, and a note
+ *       says so when either run names one or the silent run has a child run;</li>
  *   <li>another picked option of a model choice ({@code run.started.model_choices});</li>
  *   <li>a deterministic step whose status or output differs, or that only one run has, and a {@code foreach} item of
  *       such a step likewise. So does a deterministic step of which other commands had their output cut
@@ -70,6 +81,8 @@ public final class RunComparer {
     private final List<String> notes = new ArrayList<>();
     /** Whether an AI output differed in what was compared so far, in the order of run A's steps. */
     private boolean aiOutputDiffered;
+    /** Whether both records name the packages their child runs were loaded from, so that they can be compared. */
+    private boolean calledPackagesRecorded;
 
     private RunComparer() {
     }
@@ -87,6 +100,14 @@ public final class RunComparer {
                 }
             }
         }
+        boolean called = !a.manifest().calledPackages().isEmpty() || !b.manifest().calledPackages().isEmpty();
+        for (RunFacts facts : List.of(a, b)) {
+            if (!facts.view().recordsCalledPackages() && (called || !facts.view().children().isEmpty())) {
+                notes.add("run " + facts.view().runId() + " is of a version that does not record the packages a"
+                        + " run calls: the called packages of the two runs are not compared");
+            }
+        }
+        comparer.calledPackagesRecorded = a.view().recordsCalledPackages() && b.view().recordsCalledPackages();
         comparer.steps("", a.view(), b.view());
         notes.addAll(comparer.notes);
         return new RunComparison(a.view().runId(), b.view().runId(), header, inputs, comparer.steps,
@@ -103,6 +124,14 @@ public final class RunComparer {
         fields.add(new Field("workflow name", va.workflowName(), vb.workflowName()));
         fields.add(new Field("package digest", va.packageDigest(), vb.packageDigest()));
         fields.add(new Field("package commit", commit(va), commit(vb)));
+        // The package a run was resumed with, when that was not the one it started with: of the weight of the
+        // package digest. Read from the run.resumed lines, which name it in a record of any version
+        String resumedA = resumedWith(va);
+        String resumedB = resumedWith(vb);
+        if (resumedA != null || resumedB != null) {
+            fields.add(new Field("resumed with", resumedA, resumedB));
+        }
+        List<String> calledThatDiffer = calledPackages(a, b, fields);
         fields.add(new Field("inputs digest", ma.inputsDigest(), mb.inputsDigest()));
         fields.add(new Field("Traceworks version", ma.version(), mb.version()));
         fields.add(new Field("execution", va.execution(), vb.execution()));
@@ -120,11 +149,55 @@ public final class RunComparer {
         if (!Objects.equals(va.packageDigest(), vb.packageDigest())) {
             differences.add("the package digest differs");
         }
+        if (!Objects.equals(resumedA, resumedB)) {
+            differences.add("the package changed at a resume: run A went on with " + resumedShown(resumedA)
+                    + ", run B with " + resumedShown(resumedB));
+        }
+        if (!calledThatDiffer.isEmpty()) {
+            differences.add("a called package differs: " + String.join(", ", calledThatDiffer));
+        }
         if (!Objects.equals(ma.inputsDigest(), mb.inputsDigest())) {
             differences.add("the inputs differ");
         }
         differences.addAll(picksThatDiffer);
         return fields;
+    }
+
+    /** The packages a run went on with after its start, in order and without repeats; {@code null} for none. */
+    private static String resumedWith(RunView view) {
+        return view.resumedWith().isEmpty() ? null : String.join(", ", view.resumedWith());
+    }
+
+    private static String resumedShown(String resumedWith) {
+        return resumedWith == null ? "the package it started with" : resumedWith;
+    }
+
+    /**
+     * The digests of the packages each run called, one field per workflow id, and the ids whose digests differ: a
+     * difference of the weight of the package digest, since the workflow of a called package decides what its
+     * child run does. Only between two records that name their called packages: one that does not is silent about
+     * them, so nothing is listed and nothing differs ({@link #compare} adds the note).
+     */
+    private static List<String> calledPackages(RunFacts a, RunFacts b, List<Field> fields) {
+        if (!a.view().recordsCalledPackages() || !b.view().recordsCalledPackages()) {
+            return List.of();
+        }
+        Map<String, String> calledA = calledDigests(a.manifest());
+        Map<String, String> calledB = calledDigests(b.manifest());
+        byKey("called package ", calledA, calledB, fields);
+        Set<String> ids = new TreeSet<>(calledA.keySet());
+        ids.addAll(calledB.keySet());
+        return ids.stream().filter(id -> !Objects.equals(calledA.get(id), calledB.get(id))).toList();
+    }
+
+    /** The package digests by workflow id; a workflow that ran from several digests has them all, sorted. */
+    private static Map<String, String> calledDigests(Manifest manifest) {
+        Map<String, Set<String>> digests = new TreeMap<>();
+        manifest.calledPackages().forEach(called -> digests.computeIfAbsent(String.valueOf(called.workflowId()),
+                k -> new TreeSet<>()).add(String.valueOf(called.packageDigest())));
+        Map<String, String> joined = new TreeMap<>();
+        digests.forEach((id, set) -> joined.put(id, String.join(", ", set)));
+        return joined;
     }
 
     /**
@@ -151,7 +224,7 @@ public final class RunComparer {
 
     /** The head of the register's log a run started from, by the register's key; empty for a run of no audit. */
     private static Map<String, String> registerHead(RunView view) {
-        return view.register() == null ? Map.of() : Map.of(view.register().key(), view.register().position()
+        return view.register() == null ? Map.of() : Map.of(view.register().name(), view.register().position()
                 + (view.register().head() == null ? "" : ", head " + view.register().head()));
     }
 
@@ -473,10 +546,26 @@ public final class RunComparer {
         for (String key : keys) {
             RunView childA = childrenA.containsKey(key) ? runA.children().get(childrenA.get(key)) : null;
             RunView childB = childrenB.containsKey(key) ? runB.children().get(childrenB.get(key)) : null;
+            if (childA != null && childB != null && calledPackagesRecorded
+                    && !Objects.equals(calledDigest(childA), calledDigest(childB))) {
+                // Call by call, not by the list of the header alone: two runs can call the same set of digests
+                // and still run another package in the same call
+                differences.add("step " + label + key + ": the called package differs (" + calledShown(childA)
+                        + " in run A, " + calledShown(childB) + " in run B)");
+            }
             if (childA != null || childB != null) {
                 steps(label + key + " > ", childA, childB);
             }
         }
+    }
+
+    /** The digest of the package a child run was loaded from; {@code null} for the package its run started with. */
+    private static String calledDigest(RunView child) {
+        return child.packageCall() == null ? null : String.valueOf(child.packageCall().packageDigest());
+    }
+
+    private static String calledShown(RunView child) {
+        return child.packageCall() == null ? "the package the run started with" : calledDigest(child);
     }
 
     /** The ids of the step's child runs by what they are matched by: {@code [item n]}, or their order. */

@@ -25,7 +25,7 @@ record RegisterFolder(StoredRun run, RegisterHandover recorded) {
         List<RegisterHandover.File> files = new ArrayList<>();
         handed.files().forEach((name, content) -> files.add(new RegisterHandover.File(name,
                 EventChain.sha256Hex(content), content.length)));
-        return new RegisterHandover(handed.key(), handed.seq(), handed.head(), files);
+        return new RegisterHandover(handed.key(), handed.project(), handed.seq(), handed.head(), files);
     }
 
     /**
@@ -41,7 +41,7 @@ record RegisterFolder(StoredRun run, RegisterHandover recorded) {
         }
         if (found.isEmpty()) {
             return "the register folder of the run is missing: run.started names " + recorded.files().size()
-                    + " files of the register " + recorded.key() + " in it";
+                    + " files of the register " + recorded.name() + " in it";
         }
         Map<String, String> present = new TreeMap<>(found.get());
         List<String> problems = new ArrayList<>();

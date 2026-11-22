@@ -178,6 +178,23 @@ class RunControlTest {
         assertThat(pending.get()).isEqualTo("main");
     }
 
+    /** The terminal and the inbox answer through the control: a value its field's rules refuse leaves it open. */
+    @Test
+    void answerInput_aValueTheFieldsRulesRefuse_isRefused_andTheInputStaysOpen() throws Exception {
+        ExecutionContext context = contextOf(control);
+        control.attach(context);
+        CompletableFuture<String> pending = context.requestApproval(ApprovalRequest.builder()
+                .blockId("human-input-0").type("human-input").question("How many?").variableName("n")
+                .inputType("text").required(true).validationPattern("[0-9]+").build());
+
+        assertThatThrownBy(() -> control.answerInput(Map.of("n", "abc; rm -rf x")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("'n' (validation_pattern)");
+        assertThat(pending).isNotDone();
+        control.answerInput(Map.of("n", "42"));
+        assertThat(pending.get()).isEqualTo("42");
+    }
+
     @Test
     void answerInput_toAnApproval_isRefused() {
         ExecutionContext context = contextOf(control);

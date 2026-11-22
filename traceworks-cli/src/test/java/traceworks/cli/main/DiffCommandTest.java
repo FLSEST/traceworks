@@ -83,8 +83,8 @@ class DiffCommandTest {
     }
 
     private String run(int expectedCode, Path pkg, String... more) {
-        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--allow-host-execution", "--no-input",
-                "--quiet"));
+        List<String> args = new ArrayList<>(List.of("run", pkg.toString(), "--project", "shop",
+                "--allow-host-execution", "--no-input", "--quiet"));
         args.addAll(List.of(more));
         Result result = exec(args.toArray(String[]::new));
         assertThat(result.code()).as(result.out() + result.err()).isEqualTo(expectedCode);
@@ -114,7 +114,8 @@ class DiffCommandTest {
                 .contains("  same: name")
                 .containsPattern("(?m)^\\| greet +COMPLETED +same output$")
                 .containsPattern("(?m)^\\| fixed +COMPLETED +same output$")
-                .contains("same: run B reproduced run A");
+                .contains("same: run B reproduced run A (package digest, called packages, inputs, the package at"
+                        + " every resume, every deterministic step and every AI setup are equal)");
         assertThat(diff.out()).doesNotContain("differs").doesNotContain("Anna");
         assertThat(diff.out().lines().count()).isLessThan(16);
         assertThat(diff.err()).isEmpty();
@@ -234,6 +235,51 @@ class DiffCommandTest {
         assertThat(diff.out()).containsPattern("(?m)^  package digest +A [0-9a-f]{64}\\R +B [0-9a-f]{64}$")
                 .containsPattern("(?m)^\\| two +only in run B \\(COMPLETED\\)$")
                 .contains("| the package digest differs", "| step two: only in run B");
+    }
+
+    /**
+     * Reproduced 2026-11-21: two parked runs of one package; before the second resume the last step's command was
+     * changed ({@code --allow-changed-package}). Both manifests named the package digest of the start alone, and
+     * {@code diff} said "same", exit 0. The manifest names the digest the run was resumed with, and diff compares it.
+     */
+    @Test
+    void aRunResumedWithAChangedPackage_exits11_andTheManifestNamesTheDigest() throws IOException {
+        String blocks = """
+                {"type":"shell","name":"greet","config":{"command":"echo hi"}},
+                {"type":"approval","name":"publish","config":{"question":"Go on?","options":["Yes","No"]}},
+                {"type":"shell","name":"done","config":{"command":"echo same-output # v1"}}""";
+        Path pkg = pkg("parked", blocks);
+        String a = run(5, pkg);
+        String b = run(5, pkg);
+        assertThat(exec("approve", a, "--answer", "Yes").code()).isZero();
+        assertThat(exec("approve", b, "--answer", "Yes").code()).isZero();
+        Result resumedA = exec("resume", a, "--allow-host-execution", "--quiet");
+        pkg("parked", blocks.replace("# v1", "# v2"));
+        Result refused = exec("resume", b, "--allow-host-execution", "--quiet");
+        Result resumedB = exec("resume", b, "--allow-host-execution", "--allow-changed-package", "--quiet");
+        assertThat(resumedA.code()).as(resumedA.out() + resumedA.err()).isZero();
+        assertThat(refused.code()).as("a changed package is resumed only when asked for").isEqualTo(6);
+        assertThat(resumedB.code()).as(resumedB.out() + resumedB.err()).isZero();
+
+        Result diff = exec("diff", a, b);
+        Result same = exec("diff", a, a);
+
+        String manifestA = Files.readString(runFolder(a).resolve("manifest.json"));
+        String manifestB = Files.readString(runFolder(b).resolve("manifest.json"));
+        Matcher resumedWith = Pattern.compile("\"resumed_with\" : \\[ \"([0-9a-f]{64})\" \\]").matcher(manifestB);
+        assertThat(resumedWith.find()).as(manifestB).isTrue();
+        assertThat(manifestA).doesNotContain("resumed_with");
+        assertThat(Files.readString(home.resolve("ledger/runs/" + b + ".json"))).as("the end entry of the ledger")
+                .isEqualTo(manifestB);
+        assertThat(diff.code()).as(diff.out() + diff.err()).isEqualTo(DIFFERS);
+        assertThat(diff.out()).contains("the package changed at a resume: run A went on with the package it started"
+                + " with, run B with " + resumedWith.group(1)).contains("resumed with");
+        assertThat(same.code()).isZero();
+        assertThat(exec("verify", a).code()).isZero();
+        assertThat(exec("verify", b).code()).isZero();
+        Files.writeString(runFolder(b).resolve("manifest.json"), manifestB.replaceFirst(
+                "  \"resumed_with\" : \\[.*?\\],\\R", ""));
+        assertThat(exec("verify", b).code()).as("a manifest that lost the field does not verify").isEqualTo(8);
     }
 
     @Test

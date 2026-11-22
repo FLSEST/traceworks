@@ -46,6 +46,8 @@ final class AppFixture {
     static final String ACTOR = "operator@box";
     static final Duration WAIT = Duration.ofSeconds(10);
     static final Path WORKSPACE = Path.of("/work");
+    /** The project every run of the fixture names: an audit run needs one, and its register is that project's. */
+    static final String PROJECT = "shop";
 
     /** Two shell steps around an approval; the first has a {@code run_if}. */
     static final Path DEPLOY = Path.of("/pkg/deploy");
@@ -57,6 +59,10 @@ final class AppFixture {
     static final Path GATE = Path.of("/pkg/gate");
     /** A human input, then a shell step that uses the answer. */
     static final Path WHO = Path.of("/pkg/who");
+    /** A human input whose {@code validation_pattern} guards the shell step that uses its value. */
+    static final Path GUARDED = Path.of("/pkg/guarded");
+    /** A form whose fields have a pattern and the options of a select. */
+    static final Path RELEASE = Path.of("/pkg/release");
     /** Two approvals back to back, then a shell step. */
     static final Path TWICE = Path.of("/pkg/twice");
     /** A top-level approval at step 0, then a sub-workflow whose child asks at its own step 0. */
@@ -236,6 +242,19 @@ final class AppFixture {
                   {"type": "human-input", "name": "who", "config": {"prompt": "Who deploys?", "variable_name": "who"}},
                   {"type": "shell", "name": "say", "config": {"command": "echo {{ who }}"}}
                 ]}""");
+        packages.put(GUARDED, """
+                {"id": "wf-guarded", "name": "Guarded", "blocks": [
+                  {"type": "human-input", "name": "count",
+                   "config": {"prompt": "How many?", "variable_name": "n", "validation_pattern": "[0-9]+"}},
+                  {"type": "shell", "name": "say", "config": {"command": "echo {{ n }}"}}
+                ]}""");
+        packages.put(RELEASE, """
+                {"id": "wf-release", "name": "Release", "blocks": [
+                  {"type": "human-input", "name": "release", "config": {"prompt": "Release details", "fields": [
+                    {"variable_name": "version", "validation_pattern": "[0-9]+\\\\.[0-9]+\\\\.[0-9]+"},
+                    {"variable_name": "channel", "input_type": "select", "options": ["stable", "beta"]}]}},
+                  {"type": "shell", "name": "say", "config": {"command": "echo {{ version }} {{ channel }}"}}
+                ]}""");
         packages.put(SHADOW, """
                 {"id": "wf-shadow", "name": "Shadow", "blocks": [
                   {"type": "approval", "name": "publish",
@@ -308,14 +327,17 @@ final class AppFixture {
                 environmentAllowed);
     }
 
-    /** A run of the package without the flag: a host run while the settings allow host execution. */
+    /**
+     * A run of the package on the project {@link #PROJECT}, without the flag: a host run while the settings allow
+     * host execution.
+     */
     static StartRequest request(Path pkg) {
-        return new StartRequest(pkg, Map.of("version", "1.2"), WORKSPACE, false, false);
+        return new StartRequest(pkg, Map.of("version", "1.2"), WORKSPACE, false, false).inProject(PROJECT);
     }
 
     /** A run of the package in a checkout of {@code source} at {@code ref}, without the flag. */
     static StartRequest sourced(Path pkg, String source, String ref) {
-        return new StartRequest(pkg, Map.of("version", "1.2"), null, false, false, source, ref);
+        return new StartRequest(pkg, Map.of("version", "1.2"), null, false, false, source, ref).inProject(PROJECT);
     }
 
     /** A resume of the run without the flag: a host run's resume needs the settings to allow host execution. */

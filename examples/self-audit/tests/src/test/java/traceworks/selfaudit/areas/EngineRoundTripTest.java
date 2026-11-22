@@ -72,7 +72,7 @@ class EngineRoundTripTest {
         // the check before a run refuses (absolute-home-path) wherever they lie below a home directory
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
-        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        traceworks.cli.main.Main.run(new String[] {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                         home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"},
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8),
                 env, temp, null, RuntimeSource.NONE);
@@ -141,7 +141,7 @@ class EngineRoundTripTest {
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
 
-        String run = cli(env, "run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String run = cli(env, "run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check");
         String findings = cli(env, "findings", "roundtrip", "--home", home.toString());
 
@@ -198,7 +198,7 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         String found = "{\"rule\":\"process_start\",\"severity\":\"medium\",\"line\":3,"
                 + "\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"The model's words.\",\"fix\":\"More.\"}";
@@ -209,7 +209,7 @@ class EngineRoundTripTest {
                     "{\"area\":\"" + id + "\",\"findings\":[" + found + "]}");
         }
         String first = cli(env, run);
-        assertThat(first).contains("register roundtrip: 3 new, 0 resolved, 0 reopened, 3 open now");
+        assertThat(first).contains("register roundtrip of shop: 3 new, 0 resolved, 0 reopened, 3 open now");
 
         // The second run: A001 still holds, A002 is gone, and the answer for A003 says nothing about its finding
         Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[],\"known\":[{\"id\":\"K1\","
@@ -219,7 +219,7 @@ class EngineRoundTripTest {
         Files.writeString(pkg.resolve("answer-A003.json"), "{\"area\":\"A003\",\"findings\":[]}");
         String second = cli(env, run);
 
-        assertThat(second).as(first).contains("register roundtrip: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them"
+        assertThat(second).as(first).contains("register roundtrip of shop: 0 new, 1 resolved, 0 reopened, 2 open now, 1 of them"
                 + " not mentioned by this report");
         List<String> list = cli(env, "findings", "roundtrip", "list", "--all", "--home", home.toString()).lines().toList();
         assertThat(list).hasSize(3)
@@ -302,14 +302,14 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-items"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] start = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] start = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         String itemA = "app/src/main/java/p/A.java#A.run(String)";
         String itemB = "app/src/main/java/p/B.java#B.f()";
 
         String first = cli(env, start);
         assertThat(Files.readAllLines(asked)).as(first).containsExactly(itemA, itemB);
-        assertThat(first).contains("register items: 0 new, 0 resolved, 0 reopened, 0 open now; items 2 of 2 settled, "
+        assertThat(first).contains("register items of shop: 0 new, 0 resolved, 0 reopened, 0 open now; items 2 of 2 settled, "
                 + "2 judged in this run");
         Files.delete(asked);
 
@@ -323,7 +323,7 @@ class EngineRoundTripTest {
         String third = cli(env, start);
         assertThat(Files.readAllLines(asked)).containsExactly(itemA);
         assertThat(third).as("the call failed: one area not judged, and the report is applied")
-                .contains("register items: 0 new, 0 resolved, 0 reopened, 0 open now; items 1 of 2 settled, "
+                .contains("register items of shop: 0 new, 0 resolved, 0 reopened, 0 open now; items 1 of 2 settled, "
                         + "0 judged in this run");
         assertThat(cli(env, "findings", "items", "items", "--home", home.toString()))
                 .matches("not judged  [0-9a-f]{16}  " + java.util.regex.Pattern.quote(itemA) + "\n"
@@ -386,20 +386,20 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-held"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
 
         Files.writeString(pkg.resolve("answer.json"), "{\"area\":\"A001\",\"findings\":[{\"rule\":\"process_start\","
                 + "\"severity\":\"medium\",\"line\":3,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\","
                 + "\"fix\":\"f\"}]}");
-        assertThat(cli(env, run)).contains("register held: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(cli(env, run)).contains("register held of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
 
         Files.writeString(pkg.resolve("answer.json"), "{\"area\":\"A001\",\"findings\":[{\"rule\":\"path_check\","
                 + "\"severity\":\"medium\",\"line\":3,\"quote\":\"this is not in the line\",\"issue\":\"i\",\"fix\":\"f\"}],"
                 + "\"known\":[{\"id\":\"K1\",\"status\":\"gone\",\"reason\":\"fixed\"}]}");
         String second = cli(env, run);
 
-        assertThat(second).contains("register held: 0 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(second).contains("register held of shop: 0 new, 0 resolved, 0 reopened, 1 open now");
         Path report;
         try (Stream<Path> walk = Files.walk(home.resolve("runs"))) {
             report = walk.filter(p -> p.getFileName().toString().equals("security-report.md"))
@@ -488,7 +488,7 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-judges"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         String itemA = "app/src/main/java/p/A.java#A.run(String)";
         String itemB = "app/src/main/java/p/B.java#B.f()";
@@ -504,7 +504,7 @@ class EngineRoundTripTest {
         withAstra[run.length + 1] = "judge=astra";
         String first = cli(env, withAstra);
 
-        assertThat(first).contains("register security: 1 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(first).contains("register security of shop: 1 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(Files.readAllLines(asked)).as("the step was started with the picked option, for every area")
                 .containsExactly("astra PI openai/gpt-6-astra " + itemA, "astra PI openai/gpt-6-astra " + itemB);
         assertThat(Files.readString(newest(home, "security-report.md"))).contains("**Judged by:** provider `PI`, model"
@@ -527,7 +527,7 @@ class EngineRoundTripTest {
         Files.delete(pkg.resolve("answer-A002.json"));
         String second = cli(env, run);
 
-        assertThat(second).as(first).contains("register security: 0 new, 0 resolved, 0 reopened, 1 open now");
+        assertThat(second).as(first).contains("register security of shop: 0 new, 0 resolved, 0 reopened, 1 open now");
         assertThat(Files.readAllLines(asked)).as("the area the first judge found clean is settled for the second")
                 .containsExactly("fable CLAUDE claude-fable-5-2 " + itemA);
         assertThat(Files.readString(newest(home, "security-report.md"))).contains("**Judged by:** provider `CLAUDE`,"
@@ -576,7 +576,7 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-gone"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         String found = "{\"rule\":\"process_start\",\"severity\":\"medium\",\"line\":3,"
                 + "\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"The model's words.\",\"fix\":\"More.\"}";
@@ -586,7 +586,7 @@ class EngineRoundTripTest {
         Files.writeString(pkg.resolve("answer-A002.json"), "{\"area\":\"A002\",\"findings\":[]}");
         Files.writeString(pkg.resolve("answer-A003.json"), "{\"area\":\"A003\",\"findings\":[" + found + "]}");
         String first = cli(env, run);
-        assertThat(first).contains("register security: 2 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(first).contains("register security of shop: 2 new, 0 resolved, 0 reopened, 2 open now");
         String subjects = cli(env, "findings", "security", "list", "--json", "--home", home.toString());
         String stale = "app/src/main/java/io/github/old/traceworks/p/A.java#A.aMethodWithAVeryLongNameNumber1(String, String)";
         assertThat(subjects).contains(stale + ", A.aMethodWithAVeryLongNameNumber2(String, String)",
@@ -601,7 +601,7 @@ class EngineRoundTripTest {
         Files.delete(pkg.resolve("answer-A001.json"));
         String second = cli(env, run);
 
-        assertThat(second).as(first).contains("register security: 1 new, 2 resolved, 0 reopened, 1 open now")
+        assertThat(second).as(first).contains("register security of shop: 1 new, 2 resolved, 0 reopened, 1 open now")
                 .doesNotContain("not mentioned by this report");
         assertThat(Files.readAllLines(asked)).as("the renamed method and the moved class are judged in the same run")
                 .containsExactly("fable CLAUDE claude-fable-5-2 app/src/main/java/p/C.java#C.renamed(String)",
@@ -646,14 +646,14 @@ class EngineRoundTripTest {
         Path home = Files.createDirectories(temp.resolve("home-rule"));
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
-        String[] run = {"run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String[] run = {"run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--quiet", "--no-check"};
         Files.writeString(pkg.resolve("answer-A001.json"), "{\"area\":\"A001\",\"findings\":[{\"rule\":\"process_start\","
                 + "\"severity\":\"high\",\"line\":3,\"quote\":\"new ProcessBuilder(c).start();\",\"issue\":\"i\","
                 + "\"fix\":\"f\"}]}");
         Files.writeString(pkg.resolve("answer-A002.json"), Files.readString(pkg.resolve("answer-A001.json"))
                 .replace("A001", "A002"));
-        assertThat(cli(env, run)).contains("register security: 2 new, 0 resolved, 0 reopened, 2 open now");
+        assertThat(cli(env, run)).contains("register security of shop: 2 new, 0 resolved, 0 reopened, 2 open now");
         String listedFirst = cli(env, "findings", "security", "list", "--home", home.toString());
         String idOfC = listedFirst.lines().filter(l -> l.contains("C.java")).findFirst().orElseThrow().substring(0, 8);
         assertThat(cli(env, "findings", "security", "dismiss", idOfC, "--note", "not ours", "--home", home.toString()))
@@ -671,7 +671,7 @@ class EngineRoundTripTest {
 
         assertThat(Files.readString(newest(home, "areas.jsonl"))).as("the run was not shown the finding")
                 .contains("\"known\":[]").doesNotContain("process_start");
-        assertThat(second).contains("register security: 0 new, 2 resolved, 0 reopened, 0 open now")
+        assertThat(second).contains("register security of shop: 0 new, 2 resolved, 0 reopened, 0 open now")
                 .doesNotContain("not mentioned by this report");
         assertThat(cli(env, "findings", "security", "list", "--all", "--home", home.toString()).lines().toList())
                 .hasSize(2).allSatisfy(line -> assertThat(line).contains("RESOLVED", "process_start"));
@@ -700,7 +700,7 @@ class EngineRoundTripTest {
         Map<String, String> env = new HashMap<>(System.getenv());
         env.put("TRACEWORKS_ACTOR", "tester");
 
-        String output = cli(env, "run", pkg.toString(), "--workspace", temp.resolve("work").toString(), "--home",
+        String output = cli(env, "run", pkg.toString(), "--project", "shop", "--workspace", temp.resolve("work").toString(), "--home",
                 home.toString(), "--no-input", "--allow-host-execution", "--no-check", "--input", "judge=sonnet");
 
         assertThat(output).contains("The run is refused: the model choice \"judge\" has no option \"sonnet\": the"

@@ -104,7 +104,8 @@ repository:
 
 | File | What it holds |
 |---|---|
-| `docs/cli.md` | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals |
+| `docs/blocks.md` | the block types: what each does, its settings and an example |
+| `docs/cli.md` | every command, flag and exit code; the home and `traceworks.json`; AI steps, secrets, images, seals, the server for MCP clients |
 | `docs/workflow-format.md` | the workflow format: every key and every rule, each with its reason |
 | `docs/events.md` | the run record: the run folder, the hash chain, every event type, the manifest, the ledger |
 | `docs/registers.md` | registers: audit workflows, findings across runs, items, decisions, hooks |

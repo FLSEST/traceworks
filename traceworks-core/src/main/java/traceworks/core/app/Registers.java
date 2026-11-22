@@ -40,8 +40,9 @@ import java.util.Set;
 /**
  * Feeds a register from a finished run: the use case behind the end of every audit run. Only a run that ended
  * {@code COMPLETED} or {@code COMPLETED_WITH_ERRORS}, whose chain verifies and whose report step completed, applies
- * its report; everything else is recorded as rejected and changes no finding. A run is applied once. A failure of
- * the register is returned, never thrown: the run's exit code is the run's.
+ * its report; everything else is recorded as rejected and changes no finding. A run is applied once. A register
+ * the ledger anchors whose log is gone takes no report: it is not begun anew ({@link RegisterWrites#logGone}). A
+ * failure of the register is returned, never thrown: the run's exit code is the run's.
  */
 public final class Registers {
 
@@ -87,7 +88,10 @@ public final class Registers {
     }
 
     /**
-     * Feeds the register the run's definition names, if any.
+     * Feeds the register the run's definition names, if any: the register of the run's project, as its
+     * {@code run.started} names it. A run that names no project (a run of a version before registers had projects
+     * that is ended now: cancelled, or completed where only its finalisation was missing) feeds nothing, and no
+     * register is written; a resume that would run its steps is refused before that.
      *
      * @param runHead     the head of the run's record
      * @param catalogJson the package's {@code catalog.json}; {@code null} for none
@@ -105,12 +109,66 @@ public final class Registers {
         if (config == null) {
             return Optional.empty();
         }
+        String project = view.project();
+        if (project == null) {
+            return Optional.of(new RegisterOutcome(config.key(), false, "the run names no project, and a register"
+                    + " is kept per project: it was started before registers had projects, so it feeds none",
+                    Map.of()));
+        }
         try {
-            Fed fed = feed(config, definition, run, view, runHead, catalogJson);
-            return Optional.of(hook(config, definition, run, fed));
+            Fed fed = feed(config, project, definition, run, view, runHead, catalogJson);
+            return Optional.of(hook(config, project, definition, run, fed).ofProject(project));
         } catch (RuntimeException e) {
-            return Optional.of(new RegisterOutcome(config.key(), false, "the register " + config.key()
-                    + " could not be written: " + e.getMessage(), Map.of()));
+            return Optional.of(new RegisterOutcome(config.key(), false, "the register "
+                    + RegisterOutcome.named(config.key(), project) + " could not be written: " + e.getMessage(),
+                    Map.of()).ofProject(project));
+        }
+    }
+
+    /**
+     * The workflow another project's register of {@code key} belongs to, when that is not {@code workflowId}: a key
+     * belongs to one workflow across all its projects.
+     *
+     * @return why the key is not the workflow's, for a refusal; {@code null} when every register of the key is its
+     *         own
+     */
+    static String ownerOtherThan(RegisterStore store, Clock clock, String key, String workflowId) {
+        for (String project : store.projects(key)) {
+            String owner = owner(store, key, project);
+            if (owner != null && !owner.equals(workflowId)) {
+                return "the register " + key + " belongs to the workflow " + owner + ", not to " + workflowId
+                        + ": a key belongs to one workflow across all its projects, and " + owner
+                        + " feeds its register of " + project;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The workflow the register of {@code key} and {@code project} says it belongs to, from the line it begins with
+     * ({@code register.created}); {@code null} when it says none. Only as much of the log is read as it takes to
+     * find that line. A log that does not begin with it, whose first line is no line, or that cannot be opened or
+     * read makes no claim: a damaged register of one project must not stop the runs of another, nor put its
+     * trouble into their messages. Its own runs are refused by their start check, by its own name.
+     */
+    private static String owner(RegisterStore store, String key, String project) {
+        try (RegisterStore.Opened opened = store.open(key, project)) {
+            byte[] first = opened.events().first().orElse(null);
+            if (first == null) {
+                return null;
+            }
+            RegisterEvent begins = RegisterEvent.parse(first);
+            if (RegisterReplay.note(begins.type())) {
+                // A writer that was cut off left its note before the first line: the line the log begins with
+                // comes after it
+                begins = opened.events().readAll().stream().map(RegisterEvent::parse)
+                        .filter(event -> !RegisterReplay.note(event.type())).findFirst().orElse(null);
+            }
+            // Lines of a register with none before them that says whose make no claim
+            return begins == null || !RegisterEvents.CREATED.equals(begins.type()) ? null
+                    : begins.text("workflow_id");
+        } catch (RuntimeException e) {
+            return null;   // a line that is none (IllegalArgumentException), a file that cannot be read
         }
     }
 
@@ -123,22 +181,23 @@ public final class Registers {
      * Runs the operator's hook after the lock is released, when the report changed something or was rejected, and
      * records how it ended under the lock afterwards; a run the register took in before gets no hook again.
      */
-    private RegisterOutcome hook(AuditConfig config, WorkflowDefinition definition, StoredRun run, Fed fed) {
+    private RegisterOutcome hook(AuditConfig config, String project, WorkflowDefinition definition, StoredRun run,
+                                 Fed fed) {
         if (hookRunner == null || !hooks.onRegisterChanged() || fed.earlier()
                 || (fed.outcome().applied() && !RegisterDiff.changesAnything(fed.changes()))) {
             return fed.outcome();
         }
-        byte[] payload = RegisterDiff.of(config.key(), definition.id(), run.runId(), fed.outcome().applied(),
-                fed.before(), fed.after(), fed.changes());
+        byte[] payload = RegisterDiff.of(config.key(), project, definition.id(), run.runId(),
+                fed.outcome().applied(), fed.before(), fed.after(), fed.changes());
         String location;
-        try (RegisterStore.Opened opened = store.open(config.key())) {
+        try (RegisterStore.Opened opened = store.open(config.key(), project)) {
             location = opened.location();
         }
         HookRunner.Outcome ran = hookRunner.run(hooks.registerChanged(), payload, location,
                 java.time.Duration.ofSeconds(hooks.timeoutSeconds()));
         String unanchored;
         String found;
-        try (RegisterStore.Opened opened = store.openForWrite(config.key())) {
+        try (RegisterStore.Opened opened = store.openForWrite(config.key(), project)) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             // Not after a report whose own anchor just failed: its lines are the ones without an anchor, and that
             // was reported with the report
@@ -149,15 +208,37 @@ public final class Registers {
             fields.put("duration_ms", ran.durationMs());
             fields.put("stderr_tail", ran.stderrTail());
             log.append(RegisterEvents.HOOK_RAN, fields);
-            RegisterWrites.writeDerived(opened, log, RegisterReplay.replay(config.key(), log.read(), opened.blobs()));
+            RegisterWrites.writeDerived(opened, log, RegisterReplay.replay(config.key(), project, log.read(),
+                    opened.blobs()));
             unanchored = RegisterWrites.anchor(ledger, opened, log);
         }
         return fed.outcome().withHook(ran.exitCode()).withUnanchored(unanchored).withAnchorNote(found);
     }
 
-    private Fed feed(AuditConfig config, WorkflowDefinition definition, StoredRun run, RunView view,
+    private Fed feed(AuditConfig config, String project, WorkflowDefinition definition, StoredRun run, RunView view,
                      String runHead, byte[] catalogJson) {
-        try (RegisterStore.Opened opened = store.openForWrite(config.key())) {
+        if (store.keys().contains(config.key()) && store.unassigned(config.key())) {
+            // A register from before projects lies at the key: nothing is fed until someone assigns it
+            return new Fed(new RegisterOutcome(config.key(), false, RegisterWrites.fromBefore(config.key()),
+                    Map.of()), null, null, List.of(), true);
+        }
+        String gone = RegisterWrites.logGone(ledger, store, config.key(), project);
+        if (gone != null) {
+            // The log the ledger anchors went while the run ran: its report begins no new one in its place, and
+            // nothing is written, so there is nothing to tell a hook
+            return new Fed(new RegisterOutcome(config.key(), false, gone, Map.of()), null, null, List.of(), true);
+        }
+        if (!store.projects(config.key()).contains(project)) {
+            // The first report of this project: the key may have been taken for another project while the run
+            // ran, by another workflow. Then this project gets no register, not one with a rejection in it
+            String foreign = ownerOtherThan(store, clock, config.key(), definition.id());
+            if (foreign != null) {
+                // Nothing was written, so there is nothing to tell a hook: as for a run taken in before
+                return new Fed(new RegisterOutcome(config.key(), false, foreign, Map.of()), null, null, List.of(),
+                        true);
+            }
+        }
+        try (RegisterStore.Opened opened = store.openForWrite(config.key(), project)) {
             RegisterLog log = RegisterLog.forWriting(opened, clock);
             List<RegisterEvent> events = log.read();
             RegisterWriter writer = new RegisterWriter(log, opened.blobs());
@@ -165,12 +246,14 @@ public final class Registers {
             if (earlier.isPresent()) {
                 return new Fed(earlier.get(), null, null, List.of(), true);
             }
-            RegisterState state = RegisterReplay.replay(config.key(), events, opened.blobs());
+            RegisterState state = RegisterReplay.replay(config.key(), project, events, opened.blobs());
             // After the replay, so a register that cannot be read gets no line; the line itself changes no state
             String found = RegisterWrites.anchorsBefore(ledger, opened, log);
-            if (events.isEmpty()) {
-                writer.created(definition.id(), config.category());
-                state = RegisterState.empty(config.key(), definition.id(), config.category());
+            if (!RegisterReplay.begun(events)) {
+                // Also after the note of a writer that was cut off in this very line: the register must say whose
+                // it is
+                writer.created(definition.id(), config.category(), project);
+                state = RegisterState.empty(config.key(), definition.id(), config.category()).ofProject(project);
             }
             String rejection = rejection(state, definition, view, config);
             Report report = rejection == null ? report(run, view, config, catalogJson, opened) : null;
@@ -180,7 +263,7 @@ public final class Registers {
             if (rejection != null) {
                 writer.rejected(run.runId(), rejection, report == null || report.errors == null ? List.of()
                         : report.errors);
-                RegisterState after = RegisterReplay.replay(config.key(), log.read(), opened.blobs());
+                RegisterState after = RegisterReplay.replay(config.key(), project, log.read(), opened.blobs());
                 RegisterWrites.writeDerived(opened, log, after);
                 return new Fed(new RegisterOutcome(config.key(), false, rejection, Map.of())
                         .withUnanchored(RegisterWrites.anchor(ledger, opened, log)).withAnchorNote(found), state, after,

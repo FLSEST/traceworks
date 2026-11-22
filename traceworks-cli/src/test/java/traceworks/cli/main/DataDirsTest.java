@@ -72,7 +72,7 @@ class DataDirsTest {
     }
 
     private Result runHost(Path pkg) {
-        return exec("run", pkg.toString(), "--allow-host-execution", "--no-input");
+        return exec("run", pkg.toString(), "--project", "shop", "--allow-host-execution", "--no-input");
     }
 
     private void config(String json) throws IOException {
@@ -134,7 +134,7 @@ class DataDirsTest {
         assertThat(runFolder(home.resolve("runs"), id).resolve("events.jsonl")).isRegularFile();
         assertThat(home.resolve("ledger/runs/" + id + ".json")).isRegularFile();
         assertThat(home.resolve("ledger.lock")).isRegularFile();
-        assertThat(home.resolve("registers/hello/state.json")).isRegularFile();
+        assertThat(home.resolve("registers/hello/shop/state.json")).isRegularFile();
     }
 
     @Test
@@ -150,8 +150,8 @@ class DataDirsTest {
         assertThat(home.resolve("audit/ledger/.git")).isDirectory();
         assertThat(home.resolve("audit/ledger/ledger.lock")).as("the lock lies in a placed ledger").isRegularFile();
         assertThat(home.resolve("audit/ledger.lock")).doesNotExist();
-        assertThat(disk.resolve("registers/hello/state.json")).isRegularFile();
-        assertThat(disk.resolve("registers/hello/report.html")).isRegularFile();
+        assertThat(disk.resolve("registers/hello/shop/state.json")).isRegularFile();
+        assertThat(disk.resolve("registers/hello/shop/report.html")).isRegularFile();
         for (String fixed : List.of("runs", "ledger", "ledger.lock", "registers")) {
             assertThat(home.resolve(fixed)).as("nothing is written to the fixed " + fixed).doesNotExist();
         }
@@ -189,7 +189,7 @@ class DataDirsTest {
         assertThat(detail.out()).as("the run that reported it is found").contains("Last      run " + other);
         assertThat(exec("findings", "hello", "verify").code()).isZero();
         assertThat(exec("findings", "hello", "render").out())
-                .contains(disk.resolve("registers/hello") + "/report.html");
+                .contains(disk.resolve("registers/hello/shop") + "/report.html");
     }
 
     @Test
@@ -226,7 +226,7 @@ class DataDirsTest {
         Result run = runHost(auditPackage());
 
         assertThat(run.code()).as(run.all()).isZero();
-        assertThat(Files.readString(seen)).startsWith(disk.resolve("registers/hello").toRealPath() + "\n")
+        assertThat(Files.readString(seen)).startsWith(disk.resolve("registers/hello/shop").toRealPath() + "\n")
                 .contains(idOf(run));
     }
 
@@ -302,7 +302,7 @@ class DataDirsTest {
             assertThat(noLedger.code()).as(noLedger.all()).isEqualTo(6);
             assertThat(noLedger.err()).contains("The ledger cannot take an entry", locked.resolve("ledger").toString());
             assertThat(noRegister.code()).as(noRegister.all()).isZero();
-            assertThat(noRegister.out()).contains("register hello: not applied",
+            assertThat(noRegister.out()).contains("register hello of shop: not applied",
                     locked.resolve("registers").toString());
         } finally {
             Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
@@ -588,7 +588,7 @@ class DataDirsTest {
 
         assertThat(run.code()).as(run.all()).isZero();
         assertThat(run.out()).doesNotContain("not anchored");
-        Path anchors = home.resolve("audit/ledger/registers/hello.jsonl");
+        Path anchors = home.resolve("audit/ledger/anchors/hello/shop.jsonl");
         assertThat(anchors).isRegularFile();
         assertThat(Files.readAllLines(anchors)).hasSize(1).first().asString().startsWith("{\"seq\":3,\"head\":\"");
         assertThat(home.resolve("audit/ledger/ledger.lock")).isRegularFile();
@@ -604,7 +604,7 @@ class DataDirsTest {
         assertThat(Files.readAllLines(anchors)).hasSize(2);
 
         // A changed last line of the register in its configured folder is found against the configured ledger
-        Path log = disk.resolve("registers/hello/events.jsonl");
+        Path log = disk.resolve("registers/hello/shop/events.jsonl");
         Files.writeString(log, Files.readString(log).replace("\"note\":\"not ours\"", "\"note\":\"not mine\""));
         Result tampered = exec("findings", "hello", "verify");
         assertThat(tampered.code()).isEqualTo(8);

@@ -324,9 +324,37 @@ final class RunRecords {
 
     /** The fields of {@code run.cancel_requested}. */
     static Map<String, Object> cancelRequested(String actor, String requestId) {
+        return cancelRequested(actor, requestId, null);
+    }
+
+    /**
+     * The fields of {@code run.cancel_requested} and {@code run.pause_requested}, for a request an agent made under
+     * the actor: {@code agent} beside {@code actor}, and no such key for a request without one.
+     */
+    static Map<String, Object> cancelRequested(String actor, String requestId, String agent) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("actor", actor);
+        if (agent != null) {
+            fields.put("agent", agent);
+        }
         fields.put("request", requestId);
         return fields;
+    }
+
+    /**
+     * The agent of a request as the record takes it: the checked name without the white space around it.
+     *
+     * @return the name; {@code null} for none
+     * @throws RunRefusedException if it is blank or no name: the request must not be recorded as a person's
+     */
+    static String agent(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String problem = traceworks.core.register.DecisionAgent.problem(raw);
+        if (problem != null) {
+            throw new RunRefusedException(Message.of("The agent of the request " + problem));
+        }
+        return raw.strip();
     }
 }

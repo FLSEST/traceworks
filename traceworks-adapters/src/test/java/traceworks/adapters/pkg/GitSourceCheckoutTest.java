@@ -242,6 +242,32 @@ class GitSourceCheckoutTest {
     }
 
     /**
+     * The folder of this machine a source names, for the projects of the home: a path, and the path of a
+     * {@code file://} URL as git reads it. A source elsewhere names none, and neither does one the checkout
+     * refuses.
+     */
+    @Test
+    void theRepositoryOnThisMachineASourceNames_isAPath_orThePathOfAFileUrl() {
+        assertThat(GitSourceCheckout.localRepository("/srv/shop/repo")).contains(Path.of("/srv/shop/repo"));
+        assertThat(GitSourceCheckout.localRepository("file:///srv/shop/repo")).contains(Path.of("/srv/shop/repo"));
+        assertThat(GitSourceCheckout.localRepository("file://localhost/srv/shop/repo"))
+                .contains(Path.of("/srv/shop/repo"));
+        assertThat(GitSourceCheckout.localRepository("file://user:s3cr3t@localhost/srv/shop/repo"))
+                .contains(Path.of("/srv/shop/repo"));
+        assertThat(GitSourceCheckout.localRepository("file:///srv/my%20shop/repo"))
+                .as("decoded as git decodes it").contains(Path.of("/srv/my shop/repo"));
+
+        for (String elsewhere : List.of("https://example.invalid/shop.git", "ssh://git@example.invalid/shop.git",
+                "git@example.invalid:shop.git")) {
+            assertThat(GitSourceCheckout.localRepository(elsewhere)).as(elsewhere).isEmpty();
+        }
+        for (String refused : List.of("file://otherhost/srv/shop/repo", "file:///srv/shop/repo?x=1", "-oX=/srv/x",
+                "relative/repo", "git://example.invalid/shop.git", "")) {
+            assertThat(GitSourceCheckout.localRepository(refused)).as("the start refuses it: " + refused).isEmpty();
+        }
+    }
+
+    /**
      * Nothing of the source runs, and nothing of the operator's configuration that would run a program for it: the
      * source's own {@code post-checkout} hook, the operator's hooks and init template, a filter driver the operator
      * defines for an attribute the source names (required, so a skipped one would fail), an fsmonitor, and a

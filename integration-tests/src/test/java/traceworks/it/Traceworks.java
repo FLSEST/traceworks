@@ -44,6 +44,12 @@ final class Traceworks {
     /** The actor every command of the suite records. */
     static final String ACTOR = "it-tester";
 
+    /**
+     * The project every run of an audit workflow names unless the test names one: an audit run needs a project,
+     * since its register is kept per project.
+     */
+    static final String PROJECT = "it";
+
     /** How long one command may take unless the test says otherwise. */
     static final long TIMEOUT_SECONDS = 300;
 
@@ -234,7 +240,25 @@ final class Traceworks {
         List<String> args = new ArrayList<>(List.of("run", dir.toString(), "--workspace", workspace.toString(),
                 "--no-input"));
         args.addAll(Arrays.asList(more));
+        args.addAll(projectOf(dir, more));
         return exec(args.toArray(String[]::new));
+    }
+
+    /**
+     * {@code --project} {@link #PROJECT} for the run of an audit workflow whose test names no project; nothing for
+     * any other run, which stays as its test wrote it.
+     */
+    List<String> projectOf(Path dir, String... more) {
+        if (Arrays.asList(more).contains("--project")) {
+            return List.of();
+        }
+        try {
+            boolean audit = JSON.readTree(dir.resolve("workflow.json").toFile()).path("metadata").path("audit")
+                    .path("enabled").asBoolean(false);
+            return audit ? List.of("--project", PROJECT) : List.of();
+        } catch (IOException e) {
+            return List.of();   // a package the command will refuse by itself
+        }
     }
 
     /** {@code traceworks <args>}, with the default time limit. */
@@ -280,22 +304,33 @@ final class Traceworks {
         List<String> args = new ArrayList<>(List.of("run", packageDir(packageName).toString(), "--workspace",
                 workspace.toString(), "--no-input"));
         args.addAll(Arrays.asList(more));
+        args.addAll(projectOf(packageDir(packageName), more));
         return start(List.of("setsid", "env", "--default-signal=INT", "--default-signal=TERM"),
                 new File("/dev/null"), args.toArray(String[]::new));
     }
 
     /** Starts {@code <launcher> java -Duser.home=<user home> -jar traceworks.jar <args>} in the workspace. */
     private Running start(List<String> launcher, File standardInput, String... args) {
+        int n = commands.incrementAndGet();
+        Path out = logs.resolve(n + ".out");
+        Path err = logs.resolve(n + ".err");
+        ProcessBuilder builder = command(launcher, args)
+                .redirectInput(ProcessBuilder.Redirect.from(standardInput))
+                .redirectOutput(out.toFile()).redirectError(err.toFile());
+        try {
+            return new Running(builder.start(), Arrays.asList(args), out, err);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** The command of {@link #start} in the workspace, with the environment of the sandbox and nothing else of it. */
+    private ProcessBuilder command(List<String> launcher, String... args) {
         List<String> command = new ArrayList<>(launcher);
         command.addAll(List.of(environment.java().toString(), "-Duser.home=" + userHome, "-jar",
                 environment.jar().toString()));
         command.addAll(Arrays.asList(args));
-        int n = commands.incrementAndGet();
-        Path out = logs.resolve(n + ".out");
-        Path err = logs.resolve(n + ".err");
-        ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile())
-                .redirectInput(ProcessBuilder.Redirect.from(standardInput))
-                .redirectOutput(out.toFile()).redirectError(err.toFile());
+        ProcessBuilder builder = new ProcessBuilder(command).directory(workspace.toFile());
         Map<String, String> env = builder.environment();
         env.keySet().removeIf(name -> name.startsWith("TRACEWORKS_") || credentialLike(name));
         env.put("TRACEWORKS_HOME", home.toString());
@@ -303,8 +338,20 @@ final class Traceworks {
         env.put("LANG", "C.UTF-8");
         env.put("LC_ALL", "C.UTF-8");
         env.putAll(extraEnvironment);
+        return builder;
+    }
+
+    /**
+     * Starts {@code traceworks mcp <options>} as an MCP client starts it: its standard input and output are pipes
+     * to the test, which is the client.
+     */
+    McpClient mcp(String... options) {
+        List<String> args = new ArrayList<>(List.of("mcp"));
+        args.addAll(Arrays.asList(options));
+        Path err = logs.resolve(commands.incrementAndGet() + ".err");
         try {
-            return new Running(builder.start(), Arrays.asList(args), out, err);
+            return new McpClient(command(List.of(), args.toArray(String[]::new)).redirectError(err.toFile())
+                    .start(), err);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

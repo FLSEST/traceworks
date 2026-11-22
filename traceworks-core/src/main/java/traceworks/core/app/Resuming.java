@@ -161,6 +161,10 @@ final class Resuming {
         LoadedPackage pkg = resolved.runs();
         // The seal before the question of a changed package: a seal that does not hold is no matter of a flag
         checkSeal(runId, view, resolved.current(), request.attended(), form.get());
+        if (!java.util.Objects.equals(pkg.digest(), view.packageDigest())) {
+            // Before the question of the flag: no flag lets a run go on beside a changed child of its own package
+            storedPackage.refuseAChildOfTheChangedPackage(runId, view, pkg);
+        }
         boolean changed = StoredRunPackage.packageChanged(runId, view, pkg, request.allowChangedPackage());
         if (changed) {
             storedPackage.refuseARedactedDefinition(runId, view, pkg);
@@ -188,8 +192,9 @@ final class Resuming {
         view.modelChoices().forEach(pick -> recordedPicks.put(pick.choice(), pick.option()));
         Map<String, Object> pickInputs = new LinkedHashMap<>(snapshot.inputContext());
         pickInputs.putAll(recordedPicks);
+        // The register a resumed audit run reads and feeds is that of the project its run.started names
         RunPreparation.Prepared prepared = preparation.prepare(target, runtime, pkg, workspace, pickInputs,
-                "Run " + runId + " cannot resume");
+                "Run " + runId + " cannot resume", view.project(), false);
         // The register folder is the one the run started with, whatever the register holds now: a file that is no
         // longer the one run.started recorded stops the resume, before anything is recorded
         RegisterFolder folder = view.register() == null ? null : new RegisterFolder(run, view.register());
@@ -220,6 +225,10 @@ final class Resuming {
                 RunRecords.refuseStale(recorder, waiting);
                 Map<String, Object> resumed = new LinkedHashMap<>();
                 resumed.put("actor", actor);
+                if (request.agent() != null) {
+                    // Only when an agent said so, as in run.started
+                    resumed.put("agent", request.agent().strip());
+                }
                 resumed.put("from_checkpoint", checkpoint.seq());
                 resumed.put("next_position", checkpoint.nextPosition());
                 resumed.put("rerun_step", rerunStep(events, checkpoint));

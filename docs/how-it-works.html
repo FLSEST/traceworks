@@ -212,15 +212,16 @@ footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
   <p>Moving drawings for a reader who knows containers and git and wants the idea without reading the code. Each
   one loops; with reduced motion set in the system, each shows one still frame.</p>
   <p>The key features, each explained the same way: <a href="features.html">features.html</a>. The register, round by
-  round: <a href="audit-loop.html">audit-loop.html</a>.</p>
+  round: <a href="audit-loop.html">audit-loop.html</a>. The block types a workflow is made of:
+  <a href="blocks.md">blocks.md</a>.</p>
   <div class="bar"><button id="toggle" type="button">Pause</button></div>
 </header>
 
 <section class="scene">
   <div class="head"><h2>One run, in six stages</h2><p>A small audit with three steps, followed from the package to
   the register. The loop takes 18 seconds.</p></div>
-  <div class="tile big"><svg id="run" viewBox="0 0 960 492" role="img" aria-label="One run through Traceworks in six stages: the package on the left, a container in the middle, and on the right the home with the record of the run, the register and the ledger" aria-describedby="run-desc" style="--still:-16.9s">
-  <desc id="run-desc">Stage by stage: the package is checked; the run starts, the register's files are handed to the run, the record gets its first line and the ledger notes the start; the first step measures in a container without network; the second step asks a model through a proxy that reaches only the provider; the third step checks the answer and sets the gate; the record ends, the ledger notes the end, and only then the register takes the report and the ledger anchors its head.</desc>
+  <div class="tile big"><svg id="run" viewBox="0 0 960 492" role="img" aria-label="One run through Traceworks in six stages: the package on the left, a container in the middle, and on the right the home with the record of the run, the register of the run's project and the one ledger of the home" aria-describedby="run-desc" style="--still:-16.9s">
+  <desc id="run-desc">Stage by stage: the package is checked; the run starts, the files of the register of the run's project are handed to the run, the record gets its first line and the ledger notes the start; the first step measures in a container without network; the second step asks a model through a proxy that reaches only the provider; the third step checks the answer and sets the gate; the record ends, the ledger notes the end, and only then the register takes the report and the ledger anchors its head.</desc>
 
   <!-- the package -->
   <rect class="card" x="16" y="16" width="250" height="354" rx="12"/>
@@ -265,12 +266,12 @@ footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
   <text class="muted" x="620" y="218" font-size="11">each line holds the hash of the line before</text>
   <rect class="tint" x="606" y="236" width="322" height="58" rx="9"/><rect class="hl" x="606" y="236" width="322" height="58" rx="9" style="animation: r-st6 18s linear infinite"/><rect class="hl" x="606" y="236" width="322" height="58" rx="9" style="animation: r-st2 18s linear infinite"/>
   <text class="ink" x="620" y="259" font-size="13.5" font-weight="700">Register</text>
-  <text class="soft" x="620" y="279" font-size="12">findings, items, decisions</text>
+  <text class="soft" x="620" y="279" font-size="12">of this project: findings, items, decisions</text>
   <text class="teal a" x="914" y="259" font-size="12.5" font-weight="700" text-anchor="end" style="animation: r-reg 18s linear infinite">written: 2 new · 1 resolved</text>
   <text class="teal a" x="914" y="259" font-size="12.5" font-weight="700" text-anchor="end" style="animation: r-st2 18s linear infinite">handed to the run as files</text>
   <rect class="deep" x="606" y="304" width="322" height="56" rx="9"/>
   <text class="ondeep" x="620" y="326" font-size="13.5" font-weight="700">Ledger</text>
-  <text class="ondeep2" x="914" y="326" font-size="11.5" text-anchor="end">git, outside the run folders</text>
+  <text class="ondeep2" x="914" y="326" font-size="11.5" text-anchor="end">git, one for the whole home</text>
   <text class="ondeep2 a" x="620" y="348" font-size="12" style="animation: r-led1 18s linear infinite">start noted</text>
   <text class="ondeep2 a" x="700" y="348" font-size="12" style="animation: r-led2 18s linear infinite">· end noted</text>
   <text class="ondeep2 a" x="782" y="348" font-size="12" style="animation: r-led3 18s linear infinite">· register anchored</text>
@@ -282,7 +283,7 @@ footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
     <text class="ink" x="34" y="434" font-size="15">The package is read and checked, and nothing runs yet.</text>
     <text class="ink" x="34" y="458" font-size="15">By default a package that <tspan class="mono15">traceworks check</tspan> reports with an error starts no run at all.</text></g>
   <g class="a" style="animation: r-st2 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">2 OF 6 · START</text>
-    <text class="ink" x="34" y="434" font-size="15">What the register knows is written into the run folder as files, read-only in the containers.</text>
+    <text class="ink" x="34" y="434" font-size="15">What the register of the run's project knows is written into the run folder as files, read-only in the containers.</text>
     <text class="ink" x="34" y="458" font-size="15">The record gets its first line, <tspan class="mono15">run.started</tspan>, and the ledger notes the start before any step runs.</text></g>
   <g class="a" style="animation: r-st3 18s linear infinite"><text class="teal" x="34" y="408" font-size="13" font-weight="700">3 OF 6 · A DETERMINISTIC STEP</text>
     <text class="ink" x="34" y="434" font-size="15">Step 1 measures in a container without network. What it finds is the list that is judged.</text>
@@ -302,9 +303,11 @@ footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
   <ol class="steps">
     <li><b>Check</b><span>The package is read and checked, and nothing runs yet. By default a package that
     <code>traceworks check</code> reports with an error starts no run at all.</span></li>
-    <li><b>Start</b><span>What the register knows is written into the run folder as files (<code>register/</code>),
-    read-only in the containers. The record gets its first line, <code>run.started</code>, which names the digest of
-    each file, and the ledger notes the start before any step runs.</span></li>
+    <li><b>Start</b><span>An audit run names its project (<code>--project</code>). What the register of that
+    project knows is written into the run folder as files (<code>register/</code>),
+    read-only in the containers. The record gets its first line, <code>run.started</code>, which names the project
+    and the digest of each file, and the ledger notes the start, with the project and who started the run, before
+    any step runs.</span></li>
     <li><b>A deterministic step</b><span>Step 1 measures in a container without network. What it finds is the list
     that is judged. It writes only to the run's scratch folder; the workspace and the package are read-only.</span></li>
     <li class="ai"><b>A model is asked</b><span>Step 2 asks a model. By default its container reaches only the
@@ -315,8 +318,8 @@ footer { color: var(--soft); font-size: 13px; max-width: 80ch; }
     the report and sets the gate (<code>gate.reported</code>). The answer reaches this shell step only as a named
     variable, never inside its command line.</span></li>
     <li><b>The register</b><span>The record ends with <code>run.finished</code>, and the ledger notes the end. Only
-    then does the register take the report: new, seen, resolved. During the run it was only read. The ledger anchors the
-    register's new head.</span></li>
+    then does the register of the run's project take the report: new, seen, resolved. During the run it was only
+    read. The ledger anchors the register's new head.</span></li>
   </ol>
 </section>
 

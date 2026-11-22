@@ -19,22 +19,25 @@ repo="${1:-${GH_REPO:-}}"
 
 diff="$(cat)"
 register="$(jq -r '.register' <<<"$diff")"
+# A register is kept per key and project: the diff names both, and every command about a finding needs the project
+project="$(jq -r '.project // ""' <<<"$diff")"
+name="$register${project:+ of $project}"
 if [ "$(jq -r '.report_valid' <<<"$diff")" != "true" ]; then
-    echo "register $register: the report of run $(jq -r '.run_id' <<<"$diff") was rejected; no issue was created" >&2
+    echo "register $name: the report of run $(jq -r '.run_id' <<<"$diff") was rejected; no issue was created" >&2
     exit 0
 fi
 
 jq -c '.new[], .reopened[]' <<<"$diff" | while read -r finding; do
     title="$(jq -r '"[\(.severity)] \(.rule_key): \(.subject)"' <<<"$finding")"
-    body="$(jq -r --arg register "$register" --arg run "$(jq -r '.run_id' <<<"$diff")" '
-        "Register `\($register)`, finding `\(.id)`, run `\($run)`\(if .reason then ", reopened: \(.reason)" else "" end).",
+    body="$(jq -r --arg register "$register" --arg project "$project" --arg run "$(jq -r '.run_id' <<<"$diff")" '
+        "Register `\($register)`\(if $project != "" then " of `\($project)`" else "" end), finding `\(.id)`, run `\($run)`\(if .reason then ", reopened: \(.reason)" else "" end).",
         "", .title, "", (.description // "" | select(. != "") | ., ""), "Evidence: \(.evidence // "(none)")", "",
-        "Details: `traceworks findings \($register) show \(.id)`"' <<<"$finding")"
+        "Details: `traceworks findings \($register) show \(.id)\(if $project != "" then " --project \($project)" else "" end)`"' <<<"$finding")"
     gh issue create --repo "$repo" --title "$title" --body "$body" >/dev/null
     echo "opened an issue in $repo: $title" >&2
 done
 
 count="$(jq -r '.resolved | length' <<<"$diff")"
 if [ "$count" != "0" ]; then
-    echo "register $register: $count finding(s) resolved; close their issues by hand" >&2
+    echo "register $name: $count finding(s) resolved; close their issues by hand" >&2
 fi

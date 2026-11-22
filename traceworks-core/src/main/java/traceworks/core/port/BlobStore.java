@@ -77,10 +77,38 @@ public interface BlobStore {
         private final String sha256;
 
         public ChangedBlobException(String sha256, String actual) {
-            super("The blob " + sha256 + " holds other content than its name says (its content has the SHA-256 "
-                    + actual + "), so it is not what the line that names it pointed to; check the record or the"
-                    + " register with traceworks verify or traceworks findings <key> verify");
+            super(what(sha256, actual) + "; check the record or the"
+                    + " register with traceworks verify or traceworks findings <key> verify --project <project>");
             this.sha256 = sha256;
+            this.actual = actual;
+        }
+
+        private ChangedBlobException(String sha256, String actual, String check) {
+            super(what(sha256, actual) + "; " + check);
+            this.sha256 = sha256;
+            this.actual = actual;
+        }
+
+        private final String actual;
+
+        private static String what(String sha256, String actual) {
+            return "The blob " + sha256 + " holds other content than its name says (its content has the SHA-256 "
+                    + actual + "), so it is not what the line that names it pointed to";
+        }
+
+        /**
+         * The same, for a blob of a register: the message ends with the command that checks that register, with
+         * its key and its project, in a form that works as it stands.
+         *
+         * @param project the project the register is of; {@code null} for a register from before registers had
+         *                projects
+         */
+        public ChangedBlobException ofRegister(String key, String project) {
+            ChangedBlobException named = new ChangedBlobException(sha256, actual, "check the register with"
+                    + " 'traceworks findings " + key + " verify" + (project == null ? "" : " --project " + project)
+                    + "'");
+            named.setStackTrace(getStackTrace());
+            return named;
         }
 
         /** The name of the blob. */

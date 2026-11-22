@@ -29,7 +29,7 @@ class RunPreparationRedactedNamesTest {
         fx.settings = OperatorSettings.defaults().withLocalModels(local);
         // the Claude CLI first: the loop must skip a CLI that is not the step's provider
         return new RunPreparation(fx.containerSupport(), fx.packages, fx.settings, List.of(claude, pi), null, null,
-                fx.clock, fx.registers);
+                fx.clock, fx.registers, fx.ledger);
     }
 
     private static WorkflowDefinition definition(String provider, String secrets, String block) throws Exception {

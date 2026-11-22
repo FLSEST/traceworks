@@ -2,12 +2,13 @@
 
 A hook is the operator's own program that Traceworks runs on the host when a register changed
 (`hooks.register_changed` in `traceworks.json`, docs/cli.md). It gets the diff of the register as JSON on its
-standard input: the new, resolved, reopened and still open findings, and whether the report was valid
-([docs/registers.md](../../docs/registers.md), "Hooks"). Its exit code, its duration and the tail of its standard
+standard input: the register by its key and its project (`register`, `project`), the new, resolved, reopened and
+still open findings, and whether the report was valid ([docs/registers.md](../../docs/registers.md), "Hooks"). Its exit code, its duration and the tail of its standard
 error go into the register's log as `hook.ran`; a failing hook never changes the exit code of the run.
 
 `github-issues.sh` opens one GitHub issue per new or reopened finding, with the GitHub CLI (`gh issue create`), and
-says on standard error how many findings were resolved; it closes no issue. It needs `gh` and `jq`, and `gh` logged
+says on standard error how many findings were resolved; it closes no issue. An issue names the register and its
+project, and the command that shows the finding (`traceworks findings <key> show <id> --project <project>`). It needs `gh` and `jq`, and `gh` logged
 in (`gh auth login`, or `GH_TOKEN` in the environment). The hook runs in the register's folder, which is no clone,
 so name the repository, as its argument or as `GH_REPO`:
 

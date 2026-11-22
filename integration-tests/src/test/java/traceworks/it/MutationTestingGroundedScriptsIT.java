@@ -187,7 +187,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
         Result first = run(dir);
 
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("RED (testing)").contains("register it.grounded: 4 new, 0 resolved, "
+        assertThat(first.out()).contains("RED (testing)").contains("register it.grounded of it: 4 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 1 of 5 settled, 5 judged in this run");
         assertThat(traceworks.folder(first).output("findings")).contains("FACT mutants: 6\n")
                 .contains("FACT survived: 4\n").contains("FACT not_covered: 1\n")
@@ -213,7 +213,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
         Result second = run(dir, "--input", "answers=other");
 
         assertThat(second.code()).as(second.describe()).isZero();
-        assertThat(second.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
+        assertThat(second.out()).contains("RED (testing)").contains("register it.grounded of it: 0 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 1 of 5 settled, 0 judged in this run");
         assertThat(traceworks.folder(second).output("findings")).contains("FACT methods_to_rate: 0 of 5\n");
         assertThat(traceworks.folder(second).output("report"))
@@ -253,7 +253,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                         + "on with a flow that should have ended\n");
         // The lowered method left the findings and the register resolved it; the new method is a finding. Its reason
         // holds the end and the start of an HTML comment: the register applied the report all the same
-        assertThat(third.out()).contains("RED (testing)").contains("register it.grounded: 1 new, 1 resolved, "
+        assertThat(third.out()).contains("RED (testing)").contains("register it.grounded of it: 1 new, 1 resolved, "
                 + "0 reopened, 4 open now; items 2 of 6 settled, 5 judged in this run");
         assertThat(list()).contains("HIGH      undetected-mutants  demo.Flow#stop")
                 .contains("MEDIUM    undetected-mutants  demo.Guard#allow")
@@ -297,7 +297,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                         + "not call or reference stop\n")
                 .contains("5 methods are rated above low. A person decided on 0 of them; 5 are left to decide, 1 of "
                         + "them high:");
-        assertThat(fourth.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
+        assertThat(fourth.out()).contains("RED (testing)").contains("register it.grounded of it: 0 new, 0 resolved, "
                 + "1 reopened, 5 open now; items 1 of 6 settled, 3 judged in this run");
         assertThat(list()).contains("MEDIUM    undetected-mutants  demo.Flow#step")
                 .contains("MEDIUM    undetected-mutants  demo.Guard#check");
@@ -318,7 +318,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                         + "before, 1 kept their rating, 0 changes were taken")
                 .contains("5 methods are rated above low. A person decided on 1 of them; 4 are left to decide, 1 of "
                         + "them high:");
-        assertThat(fifth.out()).contains("register it.grounded: 0 new, 0 resolved, 0 reopened, 4 open now; "
+        assertThat(fifth.out()).contains("register it.grounded of it: 0 new, 0 resolved, 0 reopened, 4 open now; "
                 + "items 2 of 6 settled, 1 judged in this run");
 
         // Nothing changed: nothing is asked, and the decision still covers the method
@@ -330,7 +330,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                 .contains("6 methods kept their rating without being asked")
                 .contains("A person decided on 1 of them; 4 are left to decide, 1 of them high:\n\n"
                         + "- `demo.Flow#stop`: the caller goes on with a flow that should have ended\n");
-        assertThat(sixth.out()).contains("RED (testing)").contains("register it.grounded: 0 new, 0 resolved, "
+        assertThat(sixth.out()).contains("RED (testing)").contains("register it.grounded of it: 0 new, 0 resolved, "
                 + "0 reopened, 4 open now; items 2 of 6 settled, 0 judged in this run");
 
         // The dismissed method changed and is lowered on a test: it leaves the findings of the report
@@ -371,7 +371,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
         Path dir = audit();
         Result first = run(dir, "--input", "result=calc-first", "--input", "answers=calc-first");
         assertThat(first.code()).as(first.describe()).isZero();
-        assertThat(first.out()).contains("register it.grounded: 20 new, 0 resolved, 0 reopened, 20 open now; "
+        assertThat(first.out()).contains("register it.grounded of it: 20 new, 0 resolved, 0 reopened, 20 open now; "
                 + "items 0 of 20 settled, 20 judged in this run");
 
         Result second = run(dir, "--input", "result=calc-second", "--input", "answers=calc-second");
@@ -426,7 +426,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                         + "<path>:<line> of the place that breaks, not on a test\n")
                 .contains("17 methods are rated above low. A person decided on 0 of them; 17 are left to decide, 1 of "
                         + "them high:\n\n- `demo.Calc#up`: w\n");
-        assertThat(second.out()).contains("register it.grounded: 0 new, 3 resolved, 0 reopened, 17 open now; "
+        assertThat(second.out()).contains("register it.grounded of it: 0 new, 3 resolved, 0 reopened, 17 open now; "
                 + "items 3 of 20 settled, 16 judged in this run");
 
         // The three raises that were not taken and the method without an answer are asked about again, with what
@@ -443,7 +443,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
                 .contains("16 methods kept their rating without being asked")
                 .contains("A model was asked about 4: 0 that were never rated, and 4 rated before.")
                 .contains("4 methods got no answer.");
-        assertThat(third.out()).contains("register it.grounded: 0 new, 0 resolved, 0 reopened, 17 open now; "
+        assertThat(third.out()).contains("register it.grounded of it: 0 new, 0 resolved, 0 reopened, 17 open now; "
                 + "items 3 of 20 settled, 0 judged in this run");
     }
 
@@ -612,7 +612,7 @@ class MutationTestingGroundedScriptsIT extends IntegrationTest {
 
     private Result run(Path dir, String... more) {
         String[] args = Stream.concat(Stream.of("run", dir.toString(), "--workspace", traceworks.workspace().toString(),
-                "--no-input"), Stream.of(more)).toArray(String[]::new);
+                "--no-input", "--project", Traceworks.PROJECT), Stream.of(more)).toArray(String[]::new);
         return traceworks.exec(args);
     }
 

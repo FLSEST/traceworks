@@ -40,7 +40,7 @@ final class Pausing {
      * @throws RunRefusedException    if no process runs the run, or the run refused the request
      * @throws RequestQueuedException if the run's process has not recorded the request within the wait
      */
-    RunResult pause(StoredRun run) {
+    RunResult pause(StoredRun run, String agent) {
         String runId = run.runId();
         if (run.tryLockWriter()) {
             // Nobody runs the run; this process holds it until the caller closes it, and writes nothing
@@ -52,7 +52,7 @@ final class Pausing {
         }
         String requestId = ids.newRequestId();
         run.inbox().post(new InboxRequest(requestId, KIND, null, null, null, null, Map.of(), null, actor,
-                clock.now()));
+                clock.now(), agent));
         long deadline = System.nanoTime() + wait.toNanos();
         while (System.nanoTime() < deadline) {
             try {

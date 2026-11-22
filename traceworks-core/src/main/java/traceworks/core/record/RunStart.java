@@ -46,6 +46,11 @@ import java.util.Map;
  *                           {@code run.started} then has no such field
  * @param localModels        the model servers of the operator's own ({@code local_models}); empty for a home
  *                           without one, whose {@code run.started} then has no such field
+ * @param project            the key of the project the run works on, the operator's word; {@code null} for a run
+ *                           that names none, whose {@code run.started} then has no such field
+ * @param agent              the agent that asked for the start under the actor, by the name it gave itself;
+ *                           {@code null} for a start no agent claims, whose {@code run.started} then has no such
+ *                           field
  */
 public record RunStart(String workflowId, String workflowName, String packageDir, String packageDigest,
                        String gitCommit, Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs,
@@ -53,7 +58,43 @@ public record RunStart(String workflowId, String workflowName, String packageDir
                        Runtime containerRuntime, int outputLimitMib, Map<String, String> aiImages, String workspace,
                        String workspaceSource, String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom,
                        List<ImageFacts> images, AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices,
-                       RegisterHandover register, LocalModels localModels) {
+                       RegisterHandover register, LocalModels localModels, String project, String agent) {
+
+    /** The start of a run that no agent asked for. */
+    public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
+                    Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs, TriggerSource trigger,
+                    String actor, String version, String execution, Runtime containerRuntime, int outputLimitMib,
+                    Map<String, String> aiImages, String workspace, String workspaceSource,
+                    String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom, List<ImageFacts> images,
+                    AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices, RegisterHandover register,
+                    LocalModels localModels, String project) {
+        this(workflowId, workflowName, packageDir, packageDigest, gitCommit, gitDirty, workflowJson, inputs, trigger,
+                actor, version, execution, containerRuntime, outputLimitMib, aiImages, workspace, workspaceSource,
+                workspaceSourceSha, runOutputBudgetMib, inputsFrom, images, aiNetwork, seal, modelChoices, register,
+                localModels, project, null);
+    }
+
+    /** The start of a run that names no project. */
+    public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
+                    Boolean gitDirty, byte[] workflowJson, Map<String, Object> inputs, TriggerSource trigger,
+                    String actor, String version, String execution, Runtime containerRuntime, int outputLimitMib,
+                    Map<String, String> aiImages, String workspace, String workspaceSource,
+                    String workspaceSourceSha, int runOutputBudgetMib, String inputsFrom, List<ImageFacts> images,
+                    AiNetwork aiNetwork, SealView seal, List<ModelPick> modelChoices, RegisterHandover register,
+                    LocalModels localModels) {
+        this(workflowId, workflowName, packageDir, packageDigest, gitCommit, gitDirty, workflowJson, inputs, trigger,
+                actor, version, execution, containerRuntime, outputLimitMib, aiImages, workspace, workspaceSource,
+                workspaceSourceSha, runOutputBudgetMib, inputsFrom, images, aiNetwork, seal, modelChoices, register,
+                localModels, null);
+    }
+
+    /** This start, asked for by {@code agent} under the actor; {@code null} for none. */
+    public RunStart by(String agent) {
+        return new RunStart(workflowId, workflowName, packageDir, packageDigest, gitCommit, gitDirty, workflowJson,
+                inputs, trigger, actor, version, execution, containerRuntime, outputLimitMib, aiImages, workspace,
+                workspaceSource, workspaceSourceSha, runOutputBudgetMib, inputsFrom, images, aiNetwork, seal,
+                modelChoices, register, localModels, project, agent);
+    }
 
     /** The start of a run in a home without a model server of the operator's. */
     public RunStart(String workflowId, String workflowName, String packageDir, String packageDigest, String gitCommit,
