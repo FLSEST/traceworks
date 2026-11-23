@@ -6,20 +6,22 @@ Repeatable, traceable workflows – deterministic steps, optional AI with any mo
 
 <p><img src="docs/logo/traceworks-scheme.svg" alt="How a run is built: a line of deterministic steps, each in a container; AI joins one step where a workflow asks for it; below, the record of every event, hash-chained; at the end, the result and its gate." width="560"></p>
 
-Traceworks is a command line tool that runs workflows. A workflow is a package: a directory of plain files with a
-`workflow.json`, its scripts, its rule files and its images. Its steps are deterministic, and a model is asked only
-where a step says so. Every step runs in its own container. A run leaves a hash-chained record in plain files that
-anyone can check afterwards. There is no database and no service: the tool runs a workflow, writes what happened,
-and exits.
+Traceworks runs the checks you would otherwise repeat by hand, the same way every time, and keeps the proof. A
+workflow is a line of steps: scripts and tools, and a model where a step asks for one. What a model claims can be
+checked by a later step: a quoted line is looked up in the file it names, and a claim without evidence is no
+finding. Every step runs in its own container, and every run leaves a hash-chained record that anyone can verify
+afterwards.
+
+Across runs, a register remembers what was found and what you decided, so the next run can ask only about what
+changed. A few packages that fit your stack turn the work after each change (the security of what changed, the
+documents against the code, the gaps in the tests) into something you start and read.
 
 It is for work that has to be done the same way again and shown afterwards: checks, audits and reviews of a
 repository, with or without a model, where "what ran, with which inputs, and who decided what" needs an answer.
 
-**What it does not do:** it does not make a result right. Traceworks makes the work of a model or a script
-checkable: what was asked, what was answered, what was measured and who decided are on record, so a second reader,
-a person or another model, can go over what a run found. A workflow that asks the wrong question repeats the wrong
-answer, run after run. Whether a result is worth anything is decided by how well the workflow is built for the
-question, and by someone who reads what it found.
+Traceworks is a command line tool. A workflow is a package: a directory of plain files with a `workflow.json`, its
+scripts, its rule files and its images. There is no database and no service: the tool runs a workflow, writes what
+happened, and exits.
 
 ## The idea
 
@@ -48,6 +50,12 @@ Three pages explain it with drawings:
 
 The links lead to the pages as a browser shows them. All three are self-contained files in `docs/` that load nothing
 from the network, so they open from a checkout as well.
+
+**What it does not do:** it does not make a result right. Traceworks makes the work of a model or a script
+checkable: what was asked, what was answered, what was measured and who decided are on record, so a second reader,
+a person or another model, can go over what a run found. A workflow that asks the wrong question repeats the wrong
+answer, run after run. Whether a result is worth anything is decided by how well the workflow is built for the
+question, and by someone who reads what it found.
 
 ## Quick start
 
