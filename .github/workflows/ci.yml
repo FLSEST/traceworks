@@ -42,7 +42,8 @@ jobs:
             git --no-banner --redact -c /repo/.gitleaks.toml /repo 2>&1 | tee gitleaks.log
           grep -Eq '[1-9][0-9]* commits scanned' gitleaks.log
 
-  build:
+  unit-tests:
+    name: unit tests (Java ${{ matrix.java }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -58,11 +59,16 @@ jobs:
           distribution: temurin
           java-version: ${{ matrix.java }}
           cache: maven
-      - name: Build and test
+      - name: Unit tests
         run: mvn -B verify
+      # The numbers on the page of the run, also after a failure
+      - name: Test summary
+        if: always()
+        run: bash scripts/ci/test-summary.sh "Unit tests on Java ${{ matrix.java }}" >> "$GITHUB_STEP_SUMMARY"
 
   integration:
-    needs: build
+    needs: unit-tests
+    name: integration tests (${{ matrix.runtime }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -96,3 +102,6 @@ jobs:
           fi
       - name: Container tests and integration tests
         run: mvn -B -Pit verify
+      - name: Test summary
+        if: always()
+        run: bash scripts/ci/test-summary.sh "Unit, container and integration tests with ${{ matrix.runtime }}" >> "$GITHUB_STEP_SUMMARY"
