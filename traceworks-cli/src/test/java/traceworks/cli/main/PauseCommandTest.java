@@ -105,10 +105,14 @@ class PauseCommandTest {
 
     @Test
     void pause_withoutARun_takesTheOneThatRuns_andTheRunParksAfterItsStep() throws Exception {
+        Path inFlight = temp.resolve("wait.started");
         start(pkg("steps", """
-                {"type":"shell","name":"wait","config":{"command":"while [ ! -f '%s' ]; do sleep 0.05; done"}},
+                {"type":"shell","name":"wait","config":{"command":"touch '%s'; while [ ! -f '%s' ]; do sleep 0.05; done"}},
                 {"type":"shell","name":"after","config":{"command":"echo after >> '%s'"}}"""
-                .formatted(gate, temp.resolve("after.txt"))));
+                .formatted(inFlight, gate, temp.resolve("after.txt"))));
+        // A run is RUNNING from its first event on, before its first step: a pause that came then would park it at
+        // once, and the pause command would say PARKED. This case is about a step in flight
+        awaitFile(inFlight);
 
         Result pause = exec("pause");
 
