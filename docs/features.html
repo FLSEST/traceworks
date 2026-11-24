@@ -604,7 +604,7 @@ traceworks run examples/self-audit/security --project traceworks --input judge=a
       connect anywhere, and the operator can open the network of the AI steps (<code>ai_network: "open"</code>); then
       no connection is recorded. On a machine where no container runtime works, a run can go to the host with the
       operator's consent (<code>--allow-host-execution</code>), and a shell command there can do what you can do.
-      Verified with Docker 29.1.3 only; Podman is supported by the code and untested.</dd></div>
+      Verified with Docker 29.1.3 and, as far as the integration tests ask, with rootless Podman 4.9.3 and 5.7.0.</dd></div>
   </dl>
 </section>
 
@@ -868,7 +868,9 @@ $ traceworks findings hello verify</pre>
       the project the operator bound to the folder the server works in. It is
       verified with the tests of the repository in the client's place: no MCP client of a vendor was connected.
       There is no export of a workflow to BPMN.</li>
-    <li><strong>Podman.</strong> The code supports it; nothing about it is verified.</li>
+    <li><strong>Podman.</strong> The whole suite of integration tests passes with rootless Podman 4.9.3 and
+      5.7.0, and it runs with Podman on every push. Nothing beyond what those tests ask is verified with Podman,
+      and rootful Podman was not run.</li>
   </ul>
 </section>
 

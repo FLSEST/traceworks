@@ -8,8 +8,8 @@
 # of the branch have passed, and never before. So two settings of the repository are needed, and without them this
 # job does nothing or the wrong thing:
 #   - Settings, General: "Allow auto-merge" is on.
-#   - Settings, Branches: a rule for main requires the checks secrets, build and integration (docker). Without
-#     required checks GitHub merges at once.
+#   - Settings, Branches: a rule for main requires the checks secrets, unit tests (Java 21, 25 and 27) and
+#     integration tests (docker). Without required checks GitHub merges at once.
 # A pull request this job cannot place (no group, a major update) is left alone.
 name: Dependabot auto-merge
 

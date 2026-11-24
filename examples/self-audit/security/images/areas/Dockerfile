@@ -2,7 +2,7 @@
 # It needs the JDK, not a runtime: it parses and attributes the audited sources with the JDK's compiler, against the
 # platform classes of every module they use. The base is pinned by digest, so the same Dockerfile always starts from
 # the same bytes.
-FROM docker.io/library/sapmachine:21-jdk-ubuntu-noble@sha256:701a9f10d16130748b91ec48cbfbf6a48fbe2d0e1de510cb38af8f9e1435856c
+FROM docker.io/library/sapmachine:21-jdk-ubuntu-noble@sha256:8e5324772ff5a5a95ca4c1f056a89e70894af9abc97c88dc5b23bf8cfb3aa070
 LABEL org.opencontainers.image.description="the security area finder and report tool compiled from src/ on JDK 21, which parses the audited sources with javac"
 
 COPY src /opt/areas/src

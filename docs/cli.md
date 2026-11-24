@@ -2361,7 +2361,7 @@ names the key, and every command that reads the home refuses with it (exit 6).
 | `ledger_dir` | directory or `null` | the ledger, a git repository; `null` or missing (the default) is `<home>/ledger`. Its lock file lies in it: `<ledger_dir>/ledger.lock`, which is never committed |
 | `registers_dir` | directory or `null` | where the registers lie, `<registers_dir>/<key>/<project>/`; `null` or missing (the default) is `<home>/registers` |
 | `projects` | object or `null` | the projects of the home: `{"<project key>": "<folder>", ...}`. A run that works in such a folder, or below it, is of that project without `--project`, and a run there with the key of another project is refused. A key matches `[a-z0-9][a-z0-9._-]{0,127}` and stands once; a folder is an absolute path or starts with `~/`. Missing, `null` and `{}` declare none. No workflow, workspace or package can set it, and no command writes it (see "The projects of a home") |
-| `container_runtime` | `"podman"`, `"docker"` or `null` | the container runtime; `null` (the default) takes the first of `docker` and `podman` on `PATH` that answers `version`. Docker comes first because this release is tested with it (29.1.3); Podman is supported by the code but untested |
+| `container_runtime` | `"podman"`, `"docker"` or `null` | the container runtime; `null` (the default) takes the first of `docker` and `podman` on `PATH` that answers `version`. Docker comes first; the suite of integration tests passes with both (Docker 29.1.3, rootless Podman 4.9.3 and 5.7.0) |
 | `hooks` | object or `null` | the operator's hooks: `register_changed`, the program and its arguments as a list (never a shell line) that gets the diff of a register after an audit run on its standard input, and `timeout_seconds` (default 60), after which the hook is ended. See "Hooks" and `examples/hooks/` |
 | `secret_names` | list of names or `null` | the secrets a run may take from the environment of Traceworks. `null` or missing (the default) and `[]` allow none; a list allows those names. Values from `credentials.json` and the AI providers' credentials are not affected. Each name must match `[A-Z_][A-Z0-9_]*`, else the file is refused (see "Secrets") |
 | `writable_mounts` | list of directories or `null` | the folders in or below which a package may mount a host path writable (`:rw` in `mounts`). `null` or missing (the default) and `[]` allow none: every writable mount is refused. Each entry is an absolute path, or starts with `~/` for a folder below your home directory; `/`, your home directory, a folder that holds it and a relative path are refused. No workflow can set it (see "Writable mounts") |
@@ -2703,8 +2703,9 @@ record names every connection it asked for. It needs no configuration.
   reach <hosts>`. `run.started` and `run.resumed` record both settings.
 - **The runtime.** Docker needs version 25 or newer, the first whose `run` takes a container onto two networks at
   once (as its release notes say; not tried with an older one). From version 28 the host itself has no address on
-  the step's network. Verified with Docker 29.1.3 only. Podman gets both networks as one list (`--network a,b`);
-  nothing about Podman is verified. A run with AI steps holds two networks, `traceworks-<run id>-net` and
+  the step's network. Verified with Docker 29.1.3. Podman gets both networks as one list (`--network a,b`);
+  the integration tests of the AI network pass with rootless Podman 4.9.3 and 5.7.0, and nothing beyond what they
+  ask is verified with it. A run with AI steps holds two networks, `traceworks-<run id>-net` and
   `-out`, from its first AI call until it ends in its process (also when it parks or pauses), whatever the number
   of its AI calls: so many runs with AI steps at the same time can use up the runtime's address pools, and a call
   is then refused with the runtime's message. Two AI calls of a run never run at the same time, so they never share
