@@ -17,16 +17,8 @@ What each block type does, with every setting of its `config`, is in [docs/block
 
 A key of two words is written with an underscore, at the top of the file as in a block's `config`:
 `format_version`, `default_context`, `model_choices`, and in `metadata.audit` `report_block` and `schema_version`.
-A key of one word (`format`, `id`, `name`, `blocks`, `metadata`, `requires`, ...) has one spelling.
-
-Those five keys had camel-case names first (`formatVersion`, `defaultContext`, `modelChoices`, `reportBlock`,
-`schemaVersion`), and Traceworks still reads them: a workflow written with them means exactly the same and needs no
-change. Everything Traceworks prints names a key with its underscore, whichever spelling the file has. A definition
-must not use both spellings of one key: it would not say which value counts, so the package is not loaded
-(`duplicate-key-spelling`, naming every such key), and `check`, `describe`, `run`, `resume` and `seal` refuse it
-with exit 6. A child workflow with both fails the step that calls it, like a child with a key Traceworks does not
-know: `check` on the parent reports no child it cannot read. The package digest and a seal are over the file as it
-is, so respelling a key of a sealed package changes the package: seal it again.
+A key of one word (`format`, `id`, `name`, `blocks`, `metadata`, `requires`, ...) has one spelling. Traceworks reads
+a second spelling of those five keys too: see "The camel-case spelling" at the end of this page.
 
 ## Rules
 
@@ -131,3 +123,14 @@ is, so respelling a key of a sealed package changes the package: seal it again.
 | An envelope with `snapshotComplete: false` is not applied: it is `report.rejected`, nothing changes in the register, and the run's exit code is the run's | A partial snapshot would resolve findings the audit never checked |
 | A resumed `foreach` takes over the items its record holds as finished (completed, the same text at the same index, the output whole and not redacted) and runs only the others; the step's output is the one of a single pass, and each taken-over item is recorded again with `resumed_from` (docs/cli.md, "resume"). A loop that runs a workflow per item runs every item again | A stopped loop of long steps, AI calls say, must not cost its finished items again; the record already holds what they produced |
 | In a run of the command line a pause parks the run to disk: it finishes the step in flight, or the item in flight of a top-level `foreach`, ends `PARKED` (`run.parked` with the kind `pause`, exit 5), and `traceworks resume` goes on from the last checkpoint, in another process (docs/cli.md, "pause"). A child run does not wait either: it runs to its end and the parent parks. The engine waits in the process only for a caller that asks for no parking (`RunOptions.parkOnPause` off) | Traceworks has no service that could hold a paused run: the process that pauses must be free to end, and a pause must survive it |
+
+## The camel-case spelling
+
+Each of the five keys of two words also has a camel-case spelling that Traceworks reads (`formatVersion`,
+`defaultContext`, `modelChoices`, `reportBlock`, `schemaVersion`); it means exactly the same. Everything Traceworks
+prints names a key with its underscore, whichever spelling the file has.
+
+A definition must not use both spellings of one key: it would not say which value counts, so the package is not
+loaded (`duplicate-key-spelling`, naming every such key), and `check`, `describe`, `run`, `resume` and `seal` refuse
+it with exit 6. A child workflow with both fails the step that calls it. The package digest and a seal are over the
+file as it is, so respelling a key of a sealed package changes the package: seal it again.

@@ -4,6 +4,8 @@
 
 Repeatable, traceable workflows – deterministic steps, optional AI with any model, tools in containers.
 
+[![CI](https://github.com/FLSEST/traceworks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FLSEST/traceworks/actions/workflows/ci.yml?query=branch%3Amain)
+
 <p><img src="docs/logo/traceworks-scheme.svg" alt="How a run is built: a line of deterministic steps, each in a container; AI joins one step where a workflow asks for it; below, the record of every event, hash-chained; at the end, the result and its gate." width="560"></p>
 
 Traceworks runs the checks you would otherwise repeat by hand, the same way every time, and keeps the proof. A
@@ -22,6 +24,9 @@ repository, with or without a model, where "what ran, with which inputs, and who
 Traceworks is a command line tool. A workflow is a package: a directory of plain files with a `workflow.json`, its
 scripts, its rule files and its images. There is no database and no service: the tool runs a workflow, writes what
 happened, and exits.
+
+Every push runs more than 6,300 unit tests on Java 21, 25 and 27, and more than 250 integration tests that start
+real containers, once with Docker and once with rootless Podman. The badge above is the state of `main`.
 
 ## The idea
 
